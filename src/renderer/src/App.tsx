@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import type { RecoveryInfo } from '@shared/ipc'
 import type { OutlineFormat } from '@shared/outline'
 import { activeRoot, findParent, findTopic } from '@shared/model/tree'
+import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
 import { parseMarkdownOutline } from '@shared/import/markdown'
 import { parseOpmlOutline } from '@shared/import/opml'
 import Canvas from './components/Canvas'
@@ -29,6 +30,8 @@ function fileNameOf(path: string | null): string | null {
 export default function App(): ReactElement {
   const filePath = useEditor((s) => s.filePath)
   const dirty = useEditor((s) => s.dirty)
+  // 只订阅「中心主题的文字」这一个字符串：标题栏与默认文件名都跟着它变，又不至于每次改动都重渲染
+  const rootTitle = useEditor((s) => activeRoot(s.workbook).title)
 
   const [toast, setToast] = useState<string | null>(null)
   const [recovery, setRecovery] = useState<RecoveryInfo | null>(null)
@@ -72,7 +75,8 @@ export default function App(): ReactElement {
       const state = useEditor.getState()
       try {
         if (!state.filePath || forceSaveAs) {
-          const suggested = state.filePath ?? '未命名导图.xmind'
+          // 默认文件名用中心主题的名字（空标题才退回「未命名导图」）
+          const suggested = state.filePath ?? defaultFileName(state.workbook, 'xmind')
           const result = await window.api.saveAs(state.workbook, suggested)
           if (!result) return false
           useEditor.getState().markSaved(result.path)
@@ -372,9 +376,13 @@ export default function App(): ReactElement {
   /* ------------------------------------------------------------------ */
 
   useEffect(() => {
-    const name = fileNameOf(filePath) ?? '未命名导图'
+    // 未保存过的新文件，标题也用中心主题的名字，和保存时的默认文件名保持一致
+    const name = filePath
+      ? (fileNameOf(filePath) ?? '未命名导图')
+      : defaultDocumentName(useEditor.getState().workbook)
     window.api.setTitle(`${dirty ? '● ' : ''}${name} - 思维导图`)
-  }, [filePath, dirty])
+    // rootTitle 参与依赖：改名后标题栏要立刻跟着变
+  }, [filePath, dirty, rootTitle])
 
   /* ------------------------------------------------------------------ */
   /* 键盘快捷键                                                          */

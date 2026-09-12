@@ -12,6 +12,7 @@ import { layoutSheet } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import type { Topic, Workbook } from '@shared/model/types'
 import { activeSheet, walk } from '@shared/model/tree'
+import { defaultDocumentName } from '@shared/model/naming'
 import { buildImagePdf } from '@shared/export/pdf'
 import {
   IMAGE_EXPORT_FORMATS,
@@ -182,7 +183,7 @@ export async function exportActiveSheet(workbook: Workbook, options: ExportOptio
     background
   })
 
-  const safeName = (sheet.title || '思维导图').replace(/[\\/:*?"<>|]/g, '_')
+  const safeName = defaultDocumentName(workbook)
 
   if (options.format === 'svg') {
     return { data: drawingToSvg(drawing), fileName: `${safeName}.svg`, ext: 'svg' }
@@ -202,7 +203,7 @@ export async function exportActiveSheet(workbook: Workbook, options: ExportOptio
     rgb,
     compressed,
     rasterScale: effectiveScale,
-    title: sheet.title || '思维导图'
+    title: safeName
   })
   return { data: pdf, fileName: `${safeName}.pdf`, ext: 'pdf' }
 }

@@ -62,6 +62,7 @@ import {
 } from '../src/shared/ai'
 import { parseMarkdownOutline } from '../src/shared/import/markdown'
 import { parseOpmlOutline } from '../src/shared/import/opml'
+import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
 import {
   IMAGE_FALLBACK,
   IMAGE_MAX_HEIGHT,
@@ -3210,6 +3211,65 @@ function testImport(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.13 默认文件名：优先用中心主题的名字                               */
+/* ------------------------------------------------------------------ */
+
+function testNaming(): void {
+  group('默认文件名取中心主题')
+
+  reset()
+  store().setTitle(root().id, '产品规划')
+  eq('用中心主题的文字', defaultDocumentName(store().workbook), '产品规划')
+  eq('带扩展名', defaultFileName(store().workbook, 'xmind'), '产品规划.xmind')
+  eq('扩展名重复带点也正常', defaultFileName(store().workbook, '.png'), '产品规划.png')
+
+  store().setTitle(root().id, '   周末计划   ')
+  eq('去掉首尾空格', defaultDocumentName(store().workbook), '周末计划')
+
+  store().setTitle(root().id, '')
+  eq('中心主题为空时退回画布名', defaultDocumentName(store().workbook), '画布 1')
+
+  store().renameSheet(sheet().id, '我的画布')
+  eq('画布名也参与兜底', defaultDocumentName(store().workbook), '我的画布')
+
+  store().renameSheet(sheet().id, '   ')
+  eq('画布名也没有时用未命名导图', defaultDocumentName(store().workbook), '未命名导图')
+
+  group('默认文件名：非法字符与保留名')
+
+  reset()
+  store().setTitle(root().id, 'a/b\\c:d*e?f"g<h>i|j')
+  eq('非法字符换成下划线', defaultDocumentName(store().workbook), 'a_b_c_d_e_f_g_h_i_j')
+
+  store().setTitle(root().id, '报告.')
+  eq('结尾的点被去掉（Windows 会吃掉）', defaultDocumentName(store().workbook), '报告')
+
+  store().setTitle(root().id, '项目：季度复盘')
+  eq('中文全角符号不受影响', defaultDocumentName(store().workbook), '项目：季度复盘')
+
+  store().setTitle(root().id, 'CON')
+  eq('Windows 保留名加下划线', defaultDocumentName(store().workbook), 'CON_')
+
+  store().setTitle(root().id, 'x'.repeat(120))
+  eq('超长名字被截断', defaultDocumentName(store().workbook).length, 60)
+
+  eq('纯空白的名字返回空串', sanitizeFileName('   '), '')
+  eq('有内容的正常通过', sanitizeFileName('正常名字'), '正常名字')
+
+  group('默认文件名：多画布时取当前画布')
+
+  reset()
+  const firstSheetId = sheet().id
+  store().setTitle(root().id, '第一张')
+  const secondId = store().addSheet()
+  eq('新画布用的是新画布的中心主题', defaultDocumentName(store().workbook), '中心主题')
+  store().renameSheet(secondId, '第二张画布')
+  eq('改画布名不影响取名（仍看中心主题）', defaultDocumentName(store().workbook), '中心主题')
+  store().setActiveSheet(firstSheetId)
+  eq('切回第一张后跟着变', defaultDocumentName(store().workbook), '第一张')
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -3239,6 +3299,7 @@ async function main(): Promise<void> {
   testExportFormats()
   testAi()
   testImport()
+  testNaming()
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()

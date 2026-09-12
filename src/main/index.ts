@@ -38,6 +38,7 @@ import {
 import { parseXmind } from '@shared/xmind/parse'
 import { serializeXmind } from '@shared/xmind/serialize'
 import { activeSheetOf, buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
+import { defaultFileName } from '@shared/model/naming'
 import { imageExportFormatDef, type ImageExportFormat } from '@shared/export/types'
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
 import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '@shared/recovery'
@@ -568,12 +569,12 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.exportOutline, async (_e, workbook: Workbook, format: OutlineFormat): Promise<string | null> => {
     const def = outlineFormatDef(format)
-    const sheet = activeSheetOf(workbook)
     const content = buildOutline(workbook, format)
 
     const result = await dialog.showSaveDialog(mainWindow!, {
       title: def.dialogTitle,
-      defaultPath: `${sheet?.title || '大纲'}.${def.ext}`,
+      // 默认文件名用中心主题的名字
+      defaultPath: defaultFileName(workbook, def.ext),
       filters: [
         { name: def.label, extensions: [def.ext] },
         { name: '所有文件', extensions: ['*'] }
