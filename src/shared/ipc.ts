@@ -13,6 +13,25 @@ export interface SaveResult {
   path: string
 }
 
+/** 插入图片后返回的元信息（字节已经存进包里，模型只记路径与尺寸） */
+export interface PickedImage {
+  /** 包内相对路径，如 resources/img-xxx-photo.png */
+  path: string
+  name: string
+  width: number
+  height: number
+  size: number
+}
+
+/** 插入附件后返回的元信息 */
+export interface PickedAttachment {
+  id: string
+  path: string
+  name: string
+  size: number
+  mime: string
+}
+
 export interface RecoveryInfo {
   /** 自动保存时对应的原始文件路径，全新未保存的文件为 null */
   originalPath: string | null
@@ -41,7 +60,12 @@ export const IPC = {
   themesSave: 'themes:save',
   themesDelete: 'themes:delete',
   themesImport: 'themes:import',
-  themesExport: 'themes:export'
+  themesExport: 'themes:export',
+  /* ---- 图片与附件（P4） ---- */
+  pickImage: 'resource:pick-image',
+  pickAttachment: 'resource:pick-attachment',
+  openAttachment: 'resource:open-attachment',
+  saveAttachmentAs: 'resource:save-attachment-as'
 } as const
 
 export type MenuCommand =
@@ -94,4 +118,14 @@ export interface MindApi {
   themesImport(): Promise<ThemeDefinition | null>
   /** 导出主题到 .json，取消或失败返回 false */
   themesExport(theme: ThemeDefinition): Promise<boolean>
+
+  /* ---- 图片与附件（P4） ---- */
+  /** 选择一张图片并读进当前文档的资源里，取消返回 null */
+  pickImage(): Promise<PickedImage | null>
+  /** 选择一个文件作为附件，取消返回 null */
+  pickAttachment(): Promise<PickedAttachment | null>
+  /** 用系统默认程序打开附件（name 用于生成可读的临时文件名），失败返回 false */
+  openAttachment(path: string, name: string): Promise<boolean>
+  /** 把附件另存到用户选择的位置，取消或失败返回 false */
+  saveAttachmentAs(path: string, suggestedName: string): Promise<boolean>
 }

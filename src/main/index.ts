@@ -1,8 +1,25 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
+import { createHash } from 'node:crypto'
 import { promises as fs, existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { IPC, type OpenResult, type RecoveryInfo, type SaveResult } from '@shared/ipc'
+import { basename, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import {
+  IPC,
+  type OpenResult,
+  type PickedAttachment,
+  type PickedImage,
+  type RecoveryInfo,
+  type SaveResult
+} from '@shared/ipc'
 import type { Workbook } from '@shared/model/types'
+import { createId } from '@shared/model/factory'
+import {
+  IMAGE_EXTENSIONS,
+  mimeOfPath,
+  pruneSessionResources,
+  resourcePathFor,
+  safeResourceName
+} from '@shared/model/resources'
 import { parseXmind } from '@shared/xmind/parse'
 import { serializeXmind } from '@shared/xmind/serialize'
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
@@ -15,6 +32,18 @@ let mainWindow: BrowserWindow | null = null
 let allowClose = false
 /** 本次关闭源于「退出应用」而不是关闭窗口 */
 let quitRequested = false
+
+/**
+ * 图片/附件通过自定义协议喂给渲染进程，而不是把二进制塞进 IPC 或 data URL。
+ * 必须在 app ready 之前登记，否则 scheme 不会被当作「标准且安全」的来源。
+ */
+const RESOURCE_SCHEME = 'mind-resource'
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: RESOURCE_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
 
 /* ------------------------------------------------------------------ */
 /* 自动保存路径                                                        */
@@ -43,11 +72,31 @@ async function readAutosaveMeta(): Promise<RecoveryMeta | null> {
  */
 let loadedResources: Record<string, Uint8Array> = {}
 
+/**
+ * 本次会话新插入的资源路径。
+ * 保存时只清理「新插入过、后来又被删掉」的资源，
+ * 文件里原本带着的资源一律不动（可能有本软件尚未建模的引用）。
+ */
+let sessionResources = new Set<string>()
+
+function resetResources(): void {
+  loadedResources = {}
+  sessionResources.clear()
+}
+
+function pruneForSave(workbook: Workbook): void {
+  const { resources, removed } = pruneSessionResources(loadedResources, sessionResources, workbook)
+  if (removed.length === 0) return
+  loadedResources = resources
+  for (const path of removed) sessionResources.delete(path)
+}
+
 async function readDocument(path: string): Promise<OpenResult> {
   const buf = await fs.readFile(path)
   const parsed = await parseXmind(new Uint8Array(buf))
   // 关键：资源必须留着，否则「打开带图的文件 → 另存」会把图片丢掉
   loadedResources = parsed.resources
+  sessionResources.clear()
   return {
     path,
     workbook: parsed.workbook,
@@ -57,6 +106,7 @@ async function readDocument(path: string): Promise<OpenResult> {
 }
 
 async function writeDocument(path: string, workbook: Workbook): Promise<SaveResult> {
+  pruneForSave(workbook)
   const bytes = await serializeXmind({ workbook, resources: loadedResources })
   await fs.writeFile(path, Buffer.from(bytes))
   return { path }
@@ -164,6 +214,27 @@ function createWindow(): void {
 /* IPC                                                                 */
 /* ------------------------------------------------------------------ */
 
+/** 把包内资源（resources/…）通过自定义协议暴露给画布上的 <img> */
+function registerResourceProtocol(): void {
+  protocol.handle(RESOURCE_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url)
+      const path = decodeURIComponent(url.pathname.replace(/^\//, ''))
+      const bytes = loadedResources[path]
+      if (!bytes) return new Response('', { status: 404 })
+      return new Response(bytes as unknown as BodyInit, {
+        headers: {
+          'content-type': mimeOfPath(path),
+          // 图片可能在同一次会话里被替换，不做缓存最省心
+          'cache-control': 'no-store'
+        }
+      })
+    } catch {
+      return new Response('', { status: 400 })
+    }
+  })
+}
+
 function registerIpc(): void {
   ipcMain.handle(IPC.openDialog, async (): Promise<OpenResult | null> => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -198,6 +269,7 @@ function registerIpc(): void {
     IPC.autosave,
     async (_e, workbook: Workbook, originalPath: string | null, title: string): Promise<void> => {
       await fs.mkdir(autosaveDir(), { recursive: true })
+      pruneForSave(workbook)
       const bytes = await serializeXmind({ workbook, resources: loadedResources })
       await fs.writeFile(autosaveFile(), Buffer.from(bytes))
       const meta: RecoveryMeta = {
@@ -214,7 +286,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.documentReset, async (): Promise<void> => {
-    loadedResources = {}
+    resetResources()
     await fs.rm(autosaveDir(), { recursive: true, force: true })
   })
 
@@ -240,11 +312,14 @@ function registerIpc(): void {
     const meta = await readAutosaveMeta()
     const buf = await fs.readFile(autosaveFile())
     const parsed = await parseXmind(new Uint8Array(buf))
+    // 存档里同样带着图片/附件：不还原资源的话，恢复后一保存就全丢了
+    loadedResources = parsed.resources
+    sessionResources.clear()
     return {
       path: meta?.originalPath ?? '',
       workbook: parsed.workbook,
       warnings: parsed.warnings,
-      resourceCount: 0
+      resourceCount: Object.keys(parsed.resources).length
     }
   })
 
@@ -300,6 +375,88 @@ function registerIpc(): void {
     return true
   })
 
+  /* ---- 图片与附件（P4） ---- */
+
+  ipcMain.handle(IPC.pickImage, async (): Promise<PickedImage | null> => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '插入图片',
+      filters: [{ name: '图片', extensions: IMAGE_EXTENSIONS }],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+
+    const file = result.filePaths[0]
+    const buf = await fs.readFile(file)
+    if (buf.byteLength === 0) throw new Error('这张图片是空文件，无法插入')
+
+    const path = resourcePathFor(createId('img'), file)
+    loadedResources[path] = new Uint8Array(buf)
+    sessionResources.add(path)
+
+    // 用 Electron 自带的解码器拿真实像素尺寸，节点才能按原始宽高比显示
+    let width = 0
+    let height = 0
+    try {
+      const size = nativeImage.createFromBuffer(buf).getSize()
+      width = size.width
+      height = size.height
+    } catch {
+      width = 0
+      height = 0
+    }
+
+    return { path, name: safeResourceName(file), width, height, size: buf.byteLength }
+  })
+
+  ipcMain.handle(IPC.pickAttachment, async (): Promise<PickedAttachment | null> => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '添加附件',
+      filters: [{ name: '所有文件', extensions: ['*'] }],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+
+    const file = result.filePaths[0]
+    const buf = await fs.readFile(file)
+    const path = resourcePathFor(createId('att'), file)
+    loadedResources[path] = new Uint8Array(buf)
+    sessionResources.add(path)
+
+    return {
+      id: createId('att'),
+      path,
+      name: basename(file),
+      size: buf.byteLength,
+      mime: mimeOfPath(file)
+    }
+  })
+
+  ipcMain.handle(IPC.openAttachment, async (_e, path: string, name: string): Promise<boolean> => {
+    const bytes = loadedResources[path]
+    if (!bytes) return false
+    // 附件是包内资源，得先落到临时文件才能交给系统程序打开。
+    // 文件名带上路径哈希：同名附件互不覆盖，同一附件重复打开复用同一个临时文件。
+    const dir = join(tmpdir(), 'mind-attachments')
+    await fs.mkdir(dir, { recursive: true })
+    const token = createHash('sha1').update(path).digest('hex').slice(0, 10)
+    const target = join(dir, `${token}-${safeResourceName(name || path)}`)
+    await fs.writeFile(target, Buffer.from(bytes))
+    const message = await shell.openPath(target)
+    return message.length === 0
+  })
+
+  ipcMain.handle(IPC.saveAttachmentAs, async (_e, path: string, suggestedName: string): Promise<boolean> => {
+    const bytes = loadedResources[path]
+    if (!bytes) return false
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: '导出附件',
+      defaultPath: suggestedName || safeResourceName(path)
+    })
+    if (result.canceled || !result.filePath) return false
+    await fs.writeFile(result.filePath, Buffer.from(bytes))
+    return true
+  })
+
   ipcMain.on(IPC.confirmClose, () => {
     allowClose = true
     if (quitRequested) app.quit()
@@ -341,6 +498,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    registerResourceProtocol()
     registerIpc()
     buildAppMenu()
     createWindow()

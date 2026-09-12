@@ -24,6 +24,14 @@ function themeToRaw(theme: Theme | undefined): Raw | undefined {
 
 type Raw = Record<string, unknown>
 
+/**
+ * 包内资源引用统一带 `xap:` 前缀（Xmind 的写法）。
+ * 已经是 URL（http:/file: 等）的路径保持原样，不硬加前缀。
+ */
+function toXap(path: string): string {
+  return /^[a-z][a-z0-9+.-]*:/i.test(path) ? path : `xap:${path}`
+}
+
 function compact<T extends Raw>(obj: T): T {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) {
@@ -68,7 +76,7 @@ function topicToRaw(topic: Topic): Raw {
 
   const image = topic.image
     ? compact({
-        src: `xap:${topic.image.path}`,
+        src: toXap(topic.image.path),
         width: topic.image.width,
         height: topic.image.height
       })
@@ -85,7 +93,9 @@ function topicToRaw(topic: Topic): Raw {
     notes,
     href: topic.href,
     image,
-    attachments: topic.attachments.map((a) => compact({ id: a.id, path: a.path, name: a.name, size: a.size, mime: a.mime })),
+    attachments: topic.attachments.map((a) =>
+      compact({ id: a.id, path: toXap(a.path), name: a.name, size: a.size, mime: a.mime })
+    ),
     style: topic.style,
     branch: topic.collapsed ? 'folded' : undefined,
     position: topic.position ? { x: topic.position.x, y: topic.position.y } : undefined,

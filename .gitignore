@@ -7,6 +7,7 @@ release
 .vite
 tsconfig.tsbuildinfo
 .tmp-check
+.npm-cache
 dev.log
 dev.err.log
 .dsh-meow

@@ -8,7 +8,9 @@ import type {
   StyledSegment
 } from '@shared/layout/types'
 import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/model/types'
+import { BLOCK_GAP, imageBoxSize, type Size } from '@shared/layout/accessory'
 import { richFromPlain } from '@shared/richtext'
+import { formulaSize } from './formula'
 
 export const FONT_FAMILY =
   '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", system-ui, sans-serif'
@@ -55,7 +57,12 @@ function rowCount(widths: number[], gap: number, maxWidth: number): number {
   return rows
 }
 
-/** 顶部图标行：标记图标 + 备注/链接/附件/公式/图片的指示图标 */
+/**
+ * 顶部图标行：标记图标 + 备注/链接/附件的指示图标。
+ *
+ * 图片与公式不再放指示图标 —— 它们现在会直接在节点里画出来，
+ * 再加一个「有图片 / 有公式」的图标就重复了。
+ */
 function accessoryOf(topic: Topic): AccessoryRow {
   const items: AccessoryItem[] = []
 
@@ -66,8 +73,6 @@ function accessoryOf(topic: Topic): AccessoryRow {
   if (topic.notes && topic.notes.length > 0) items.push({ kind: 'notes', width: ICON_SIZE })
   if (topic.href) items.push({ kind: 'link', width: ICON_SIZE })
   if ((topic.attachments?.length ?? 0) > 0) items.push({ kind: 'attachment', width: ICON_SIZE })
-  if (topic.formula) items.push({ kind: 'formula', width: ICON_SIZE })
-  if (topic.image) items.push({ kind: 'image', width: ICON_SIZE })
 
   if (items.length === 0) return { items, height: 0, width: 0 }
 
@@ -150,8 +155,9 @@ function accessoryKey(topic: Topic): string {
     (topic.labels ?? []).join('\u0001'),
     topic.notes ? 'n' : '',
     topic.href ? 'h' : '',
-    topic.formula ? 'f' : '',
-    topic.image ? 'i' : '',
+    // 公式与图片会直接影响节点尺寸，必须把内容本身写进缓存键
+    topic.formula ?? '',
+    topic.image ? `${topic.image.path}:${topic.image.width ?? ''}x${topic.image.height ?? ''}` : '',
     (topic.attachments?.length ?? 0) > 0 ? 'a' : ''
   ].join('|')
 }
@@ -384,14 +390,20 @@ function compute(topic: Topic, depth: number): MeasureResult {
   const accessory = accessoryOf(topic)
   const labelRow = labelsOf(topic)
 
+  // 图片块与公式块：尺寸规则与渲染层共用（图片用纯函数算，公式量 KaTeX 的真实排版结果）
+  const imageBox: Size = imageBoxSize(topic.image)
+  const formulaBox: Size = topic.formula ? formulaSize(topic.formula, base.fontSize) : { width: 0, height: 0 }
+  const imageBlock = imageBox.height > 0 ? imageBox.height + BLOCK_GAP : 0
+  const formulaBlock = formulaBox.height > 0 ? formulaBox.height + BLOCK_GAP : 0
+
   let maxLineWidth = 0
   for (const line of lines) if (line.width > maxLineWidth) maxLineWidth = line.width
 
-  // 图标行 / 标签行可能比文字宽，节点宽度取三者最大值
-  const contentWidth = Math.max(maxLineWidth, accessory.width, labelRow.width)
+  // 图标行 / 标签行 / 图片 / 公式都可能比文字宽，节点宽度取它们的最大值
+  const contentWidth = Math.max(maxLineWidth, accessory.width, labelRow.width, imageBox.width, formulaBox.width)
   const width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2, base.minWidth)
 
-  let height = base.paddingY * 2 + accessory.height + labelRow.height
+  let height = base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + labelRow.height
   for (const line of lines) height += line.height
 
   return {
@@ -403,7 +415,9 @@ function compute(topic: Topic, depth: number): MeasureResult {
     paddingX: base.paddingX,
     paddingY: base.paddingY,
     accessory,
-    labelRow
+    labelRow,
+    imageBox,
+    formulaBox
   }
 }
 
@@ -415,6 +429,19 @@ const plainCache = new Map<string, MeasureResult>()
 const PLAIN_CACHE_LIMIT = 20000
 /** 富文本用对象身份做键：immer 每次修改都会产生新对象，天然就是版本号 */
 const richCache = new WeakMap<RichText, Map<string, MeasureResult>>()
+
+/**
+ * 测量代次。
+ * 公式的真实尺寸依赖「字体是否已经加载」，字体就绪后必须让旧结果失效；
+ * WeakMap 没法清空，所以用一个代次号参与缓存键。
+ */
+let epoch = 0
+
+/** 字体等外部排版条件变化后调用，让所有测量结果重新计算 */
+export function bumpMeasureEpoch(): void {
+  epoch += 1
+  plainCache.clear()
+}
 
 /**
  * 测量节点尺寸。
@@ -432,7 +459,7 @@ export function measureTopic(topic: Topic, depth: number): MeasureResult {
       byKey = new Map<string, MeasureResult>()
       richCache.set(rich, byKey)
     }
-    const key = `${depth}\u0000${extra}`
+    const key = `${epoch}\u0000${depth}\u0000${extra}`
     const hit = byKey.get(key)
     if (hit) return hit
     const result = compute(topic, depth)
@@ -440,7 +467,7 @@ export function measureTopic(topic: Topic, depth: number): MeasureResult {
     return result
   }
 
-  const key = `${depth}\u0000${topic.title}\u0000${extra}`
+  const key = `${epoch}\u0000${depth}\u0000${topic.title}\u0000${extra}`
   const cached = plainCache.get(key)
   if (cached) return cached
   const result = compute(topic, depth)

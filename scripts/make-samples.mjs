@@ -8,6 +8,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { deflateSync } from 'node:zlib'
 import JSZip from 'jszip'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -26,6 +27,12 @@ function topic(title, options = {}) {
   if (options.href) node.href = options.href
   if (options.branch === 'folded') node.branch = 'folded'
   if (options.position) node.position = options.position
+  if (options.image) node.image = options.image
+  if (options.attachments) node.attachments = options.attachments
+  // 公式是本软件自己的扩展字段（Xmind 会忽略，但不影响往返保真）
+  if (options.formula) {
+    node.extensions = [{ provider: 'com.mindmap.local', content: { formula: options.formula } }]
+  }
 
   const attached = (options.children ?? []).map((child) => child.raw ?? child)
   if (attached.length > 0) {
@@ -61,27 +68,109 @@ const TINY_PNG = Buffer.from(
   'base64'
 )
 
-async function writeXmind(fileName, sheets, activeSheetId) {
+/* ------------------------------------------------------------------ */
+/* 真实 PNG 生成（不依赖任何图像库，用来给样本做一张看得见的插图）        */
+/* ------------------------------------------------------------------ */
+
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256)
+  for (let n = 0; n < 256; n += 1) {
+    let c = n
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    table[n] = c
+  }
+  return table
+})()
+
+function crc32(buf) {
+  let c = -1
+  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
+  return (c ^ -1) >>> 0
+}
+
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(data.length, 0)
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+  const crc = Buffer.alloc(4)
+  crc.writeUInt32BE(crc32(body), 0)
+  return Buffer.concat([len, body, crc])
+}
+
+/** 生成一张带边框与斜条纹的 RGB PNG，肉眼可见，便于验证图片渲染 */
+function makePng(width, height) {
+  const raw = Buffer.alloc((width * 3 + 1) * height)
+  let offset = 0
+  for (let y = 0; y < height; y += 1) {
+    raw[offset] = 0 // 每行的过滤器类型
+    offset += 1
+    for (let x = 0; x < width; x += 1) {
+      const border = x < 3 || y < 3 || x >= width - 3 || y >= height - 3
+      const stripe = (x + y) % 28 < 12
+      const r = border ? 34 : stripe ? 96 : 214
+      const g = border ? 40 : stripe ? 150 : 226
+      const b = border ? 48 : stripe ? 214 : 236
+      raw[offset] = r
+      raw[offset + 1] = g
+      raw[offset + 2] = b
+      offset += 3
+    }
+  }
+
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr[8] = 8 // 位深
+  ihdr[9] = 2 // 颜色类型：真彩色
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw, { level: 9 })),
+    pngChunk('IEND', Buffer.alloc(0))
+  ])
+}
+
+/**
+ * 为了让样本可复现（重复生成得到完全相同的字节），zip 条目用固定的时间戳。
+ * JSZip 默认写入当前时间，而且会自动为目录建条目（目录条目同样带当前时间），
+ * 所以这里同时固定 date 并关掉 createFolders。
+ */
+const FIXED_DATE = new Date('2026-01-01T00:00:00Z')
+const FILE_OPTIONS = { date: FIXED_DATE, createFolders: false }
+
+async function writeXmind(fileName, sheets, activeSheetId, resources = {}) {
   const zip = new JSZip()
-  zip.file('content.json', JSON.stringify(sheets))
+  zip.file('content.json', JSON.stringify(sheets), FILE_OPTIONS)
   zip.file(
     'metadata.json',
     JSON.stringify({
       creator: { name: 'MindMap Samples', version: '0.1.0' },
       activeSheetId: activeSheetId ?? sheets[0].id
-    })
+    }),
+    FILE_OPTIONS
   )
-  zip.file('Thumbnails/thumbnail.png', TINY_PNG)
-  zip.file(
-    'manifest.json',
-    JSON.stringify({
-      'file-entries': {
-        'content.json': {},
-        'metadata.json': {},
-        'Thumbnails/thumbnail.png': {}
-      }
-    })
-  )
+  zip.file('Thumbnails/thumbnail.png', TINY_PNG, FILE_OPTIONS)
+
+  const entries = {
+    'content.json': {},
+    'metadata.json': {},
+    'Thumbnails/thumbnail.png': {}
+  }
+  for (const [path, bytes] of Object.entries(resources)) {
+    zip.file(path, bytes, FILE_OPTIONS)
+    entries[path] = {}
+  }
+  zip.file('manifest.json', JSON.stringify({ 'file-entries': entries }), FILE_OPTIONS)
+
+  // 真实 Xmind 包里带目录条目，这里显式补上（同样用固定时间，保持可复现）
+  const dirs = new Set()
+  for (const path of Object.keys(entries)) {
+    const parts = path.split('/')
+    for (let i = 1; i < parts.length; i += 1) dirs.add(parts.slice(0, i).join('/') + '/')
+  }
+  for (const dir of dirs) {
+    zip.file(dir, null, { dir: true, date: FIXED_DATE })
+  }
 
   const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
   const target = join(outDir, fileName)
@@ -325,6 +414,53 @@ async function structureSamples() {
   }
 }
 
+/** 20：图片 / 附件 / 公式（P4 收口后的新增能力，打开就能看到效果） */
+async function sample20() {
+  const png = makePng(240, 160)
+  const csv = Buffer.from('季度,收入,同比\nQ1,120,12%\nQ2,180,25%\nQ3,210,31%\n', 'utf8')
+
+  const root = topic('图片 / 附件 / 公式演示', {
+    structureClass: 'org.xmind.ui.map.unbalanced',
+    children: [
+      topic('节点内图片', {
+        image: { src: 'xap:resources/demo-chart.png', width: 240, height: 160 },
+        notes: '这张图是脚本按 PNG 规范生成的，用来验证图片的插入、渲染与打包。'
+      }),
+      topic('LaTeX 公式', {
+        formula: '\\sum_{i=1}^{n} \\frac{x_i^2}{\\sigma} = \\sqrt[3]{y}',
+        notes: '公式渲染成节点里的一块内容，尺寸参与布局测量。'
+      }),
+      topic('附件', {
+        attachments: [
+          {
+            id: 'att-demo-0001',
+            path: 'xap:resources/demo-data.csv',
+            name: 'demo-data.csv',
+            size: csv.length,
+            mime: 'text/csv'
+          }
+        ],
+        notes: '附件随 .xmind 一起打包，可以在节点属性面板里打开或导出。'
+      }),
+      topic('图片 + 公式同时存在', {
+        image: { src: 'xap:resources/demo-chart.png', width: 240, height: 160 },
+        formula: 'E = mc^2',
+        labels: ['组合']
+      })
+    ]
+  })
+
+  await writeXmind(
+    '20-图片公式附件.xmind',
+    [sheet({ title: '媒体元素', root, topicPositioning: 'fixed' })],
+    undefined,
+    {
+      'resources/demo-chart.png': png,
+      'resources/demo-data.csv': csv
+    }
+  )
+}
+
 async function main() {
   await mkdir(outDir, { recursive: true })
   await sample1()
@@ -333,6 +469,7 @@ async function main() {
   await sample4()
   await sample5()
   await structureSamples()
+  await sample20()
   console.log(`\n样本已写入：${outDir}`)
 }
 

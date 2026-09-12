@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } from 'immer'
-import type { RichText, Sheet, ThemeColors, Topic, Workbook } from '@shared/model/types'
+import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
 import { createId, createTopic, createWorkbook } from '@shared/model/factory'
 import { hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
 import { DEFAULT_THEME, getThemeColors } from '@shared/theme'
@@ -118,6 +118,12 @@ export interface EditorState {
   removeLabel(id: string, label: string): void
   setNotes(id: string, notes: string): void
   setHref(id: string, href: string): void
+  /** 设置 LaTeX 公式源码（传空字符串即移除） */
+  setFormula(id: string, formula: string): void
+  /** 设置/移除节点内图片（字节由主进程存进包内资源） */
+  setImage(id: string, image: TopicImage | null): void
+  addAttachment(id: string, attachment: Attachment): void
+  removeAttachment(id: string, attachmentId: string): void
 
   /* ---- 画布级元素（关系线 / 边界 / 概要） ---- */
   /**
@@ -610,6 +616,60 @@ export const useEditor = create<EditorState>()((set, get) => ({
       }
       topic.href = next
     }, '修改超链接')
+  },
+
+  setFormula: (id, formula) => {
+    const next = formula.trim()
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      if (next.length === 0) {
+        if (topic.formula === undefined) return
+        topic.formula = undefined
+        return
+      }
+      if (topic.formula === next) return
+      topic.formula = next
+    }, '修改公式')
+  },
+
+  setImage: (id, image) => {
+    // 拿不到像素尺寸时不要写 0，交给渲染层走「尺寸未知」的兜底框
+    const positive = (value: number | undefined): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : undefined
+    const next: TopicImage | null = image
+      ? { path: image.path, width: positive(image.width), height: positive(image.height) }
+      : null
+
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      if (!next) {
+        if (topic.image === undefined) return
+        topic.image = undefined
+        return
+      }
+      topic.image = { ...next }
+    }, next ? '插入图片' : '移除图片')
+  },
+
+  addAttachment: (id, attachment) => {
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      const exists = topic.attachments.some((item) => item.path === attachment.path)
+      if (exists) return
+      topic.attachments.push({ ...attachment })
+    }, '添加附件')
+  },
+
+  removeAttachment: (id, attachmentId) => {
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      const index = topic.attachments.findIndex((item) => item.id === attachmentId)
+      if (index >= 0) topic.attachments.splice(index, 1)
+    }, '删除附件')
   },
 
   /* ------------------------------------------------------------------ */

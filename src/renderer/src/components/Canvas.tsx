@@ -3,7 +3,8 @@ import { layoutSheet } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import type { Topic } from '@shared/model/types'
 import { activeRoot, activeSheet, isSelfOrDescendant } from '@shared/model/tree'
-import { measureTopic } from '../render/measure'
+import { measureTopic, bumpMeasureEpoch } from '../render/measure'
+import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
 import { viewportActions } from '../render/viewport'
 import { themeColorsOf, useEditor } from '../store/editor'
@@ -61,6 +62,28 @@ export default function Canvas(): ReactElement {
   rootRef.current = activeRoot(workbook)
 
   /* ---- 布局计算 ---- */
+  /**
+   * 字体（含 KaTeX 的数学字体）加载完成后，公式的真实宽度才稳定。
+   * 这里用它触发一次重新测量与布局，避免首次打开时公式框尺寸偏小。
+   */
+  const [fontEpoch, setFontEpoch] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined
+    if (!fonts) return
+    void fonts.ready.then(() => {
+      if (cancelled) return
+      // 两处缓存都要失效：公式尺寸缓存 + 节点测量缓存（后者里存着 formulaBox）
+      clearFormulaCache()
+      bumpMeasureEpoch()
+      setFontEpoch((n) => n + 1)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const layout: LayoutResult = useMemo(() => {
     const root = activeRoot(workbook)
     const sheet = activeSheet(workbook)
@@ -71,7 +94,9 @@ export default function Canvas(): ReactElement {
         : measureTopic(topic, depth)
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
     return layoutSheet(root, measure, {}, sheet)
-  }, [workbook, editingId, editingText, editingRich])
+    // fontEpoch 只用于「字体就绪后强制重新布局」，不是布局的输入
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workbook, editingId, editingText, editingRich, fontEpoch])
 
   const layoutRef = useRef<LayoutResult>(layout)
   layoutRef.current = layout

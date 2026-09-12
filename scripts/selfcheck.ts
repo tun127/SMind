@@ -33,7 +33,22 @@ import {
 } from '../src/shared/layout'
 import { MARKER_LABELS, RELATIONSHIP_CURVE_KEY, STRUCTURES } from '../src/shared/xmind/constants'
 import { ALL_PICKABLE_MARKERS, markerVisualOf } from '../src/renderer/src/render/markers'
+import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
+import {
+  IMAGE_FALLBACK,
+  IMAGE_MAX_HEIGHT,
+  imageBoxSize,
+  pureFormulaSize
+} from '../src/shared/layout/accessory'
+import {
+  collectResourceRefs,
+  mimeOfPath,
+  pruneSessionResources,
+  resourcePathFor,
+  safeResourceName
+} from '../src/shared/model/resources'
 import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '../src/shared/recovery'
+import JSZip from 'jszip'
 import { parseXmind } from '../src/shared/xmind/parse'
 import { serializeXmind } from '../src/shared/xmind/serialize'
 import {
@@ -1212,6 +1227,228 @@ async function testNodeElements(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.5b 节点内图片 / 附件 / 公式                                       */
+/* ------------------------------------------------------------------ */
+
+async function testMediaElements(): Promise<void> {
+  group('图片与公式：尺寸规则')
+
+  eq('没有图片时尺寸为 0', imageBoxSize(undefined), { width: 0, height: 0 })
+  eq('超大图片按最大宽度等比缩小', imageBoxSize({ path: 'resources/a.png', width: 400, height: 300 }), {
+    width: 220,
+    height: 165
+  })
+  const tall = imageBoxSize({ path: 'resources/a.png', width: 100, height: 1000 })
+  check('超高图片受最大高度限制', tall.height === IMAGE_MAX_HEIGHT, JSON.stringify(tall))
+  check('缩放后仍然小于等于上限', tall.width <= 220 && tall.height <= IMAGE_MAX_HEIGHT, JSON.stringify(tall))
+
+  const onlyWidth = imageBoxSize({ path: 'resources/a.png', width: 200 })
+  eq('只给宽度时按 4:3 补高度', onlyWidth, { width: 200, height: 150 })
+  const onlyHeight = imageBoxSize({ path: 'resources/a.png', height: 150 })
+  eq('只给高度时按 4:3 补宽度', onlyHeight, { width: 200, height: 150 })
+  eq('尺寸完全未知时用兜底框', imageBoxSize({ path: 'resources/a.png' }), { ...IMAGE_FALLBACK })
+  eq('0 尺寸视为未知', imageBoxSize({ path: 'resources/a.png', width: 0, height: 0 }), { ...IMAGE_FALLBACK })
+
+  const smallFormula = pureFormulaSize('x', 14)
+  const longFormula = pureFormulaSize('\\sum_{i=1}^{n} \\frac{a_i}{b_i} \\cdot \\sqrt{x^2+y^2}', 14)
+  check('公式估算宽度为正', smallFormula.width > 0 && smallFormula.height > 0, JSON.stringify(smallFormula))
+  check('公式估算高度与字号相关', pureFormulaSize('x', 28).height > pureFormulaSize('x', 14).height)
+  check('长公式不超过宽度上限', longFormula.width <= 260, JSON.stringify(longFormula))
+  eq('空公式按最小宽度处理', pureFormulaSize('', 14).width, 36)
+
+  group('资源：路径与 MIME')
+
+  eq('去掉目录只留文件名', safeResourceName('C:\\Users\\me\\图片\\照片.png'), '照片.png')
+  eq('去掉正斜杠路径', safeResourceName('a/b/c.pdf'), 'c.pdf')
+  eq('非法字符替换成下划线', safeResourceName('a<b>c:d?.txt'), 'a_b_c_d_.txt')
+  eq('空名字有兜底', safeResourceName('   '), 'file')
+  eq('去掉开头的点，避免隐藏文件', safeResourceName('.env'), 'env')
+
+  eq('png 的 MIME', mimeOfPath('resources/a.PNG'), 'image/png')
+  eq('jpg 的 MIME', mimeOfPath('resources/a.jpeg'), 'image/jpeg')
+  eq('未知扩展名给通用类型', mimeOfPath('resources/a.zzz'), 'application/octet-stream')
+  eq('无扩展名给通用类型', mimeOfPath('resources/abc'), 'application/octet-stream')
+
+  const packPath = resourcePathFor('img-abc', '照片.png')
+  check('资源路径带 id 前缀并落在 resources/', packPath === 'resources/img-abc-照片.png', packPath)
+
+  group('资源：引用收集与清理')
+
+  reset()
+  const mediaRoot = root().id
+  const mediaId = addChildOf(mediaRoot, '带图片的节点')
+  store().setImage(mediaId, { path: 'resources/img-1-a.png', width: 300, height: 200 })
+  store().addAttachment(mediaId, {
+    id: 'att-1',
+    path: 'resources/att-1-b.pdf',
+    name: 'b.pdf',
+    size: 1234,
+    mime: 'application/pdf'
+  })
+
+  const refs = collectResourceRefs(store().workbook)
+  check('引用里包含图片路径', refs.has('resources/img-1-a.png'))
+  check('引用里包含附件路径', refs.has('resources/att-1-b.pdf'))
+  eq('引用数量正确', refs.size, 2)
+
+  const bytesOf = (n: number): Uint8Array => new Uint8Array([n, n, n])
+  const pool = {
+    'resources/img-1-a.png': bytesOf(1),
+    'resources/att-1-b.pdf': bytesOf(2),
+    // 会话内新增但已被删掉的资源
+    'resources/img-9-gone.png': bytesOf(3),
+    // 文件里原本带着的资源：即使没被引用也必须保留
+    'resources/legacy-unused.png': bytesOf(4)
+  }
+  const pruned = pruneSessionResources(
+    pool,
+    ['resources/img-1-a.png', 'resources/img-9-gone.png'],
+    store().workbook
+  )
+  eq('只清理会话内新增且已无引用的资源', pruned.removed, ['resources/img-9-gone.png'])
+  check('被引用的资源保留', Boolean(pruned.resources['resources/img-1-a.png']))
+  check('文件原有资源一律保留', Boolean(pruned.resources['resources/legacy-unused.png']))
+
+  group('公式：KaTeX 渲染（无 DOM 环境）')
+
+  const rendered = formulaHtml('\\frac{a}{b}')
+  check('渲染结果带 KaTeX 标记', rendered.includes('katex'), rendered.slice(0, 120))
+  check('分数渲染出分子分母两层', rendered.includes('frac-line') || rendered.includes('mfrac'), rendered.slice(0, 200))
+  check('常用符号能渲染', formulaHtml('\\sqrt{x^2+y^2}').includes('katex'))
+  check('求和公式能渲染', formulaHtml('\\sum_{i=1}^{n} i').includes('katex'))
+  check('中文混排不报错', formulaHtml('\\text{总分} = a + b').includes('katex'), formulaHtml('\\text{总分} = a + b').slice(0, 160))
+
+  let brokenThrew = false
+  let brokenHtml = ''
+  try {
+    brokenHtml = formulaHtml('\\frac{')
+  } catch {
+    brokenThrew = true
+  }
+  check('写坏的公式不会抛异常', !brokenThrew)
+  check('写坏的公式仍然给出可渲染内容', brokenHtml.length > 0)
+
+  const fallbackSize = formulaSize('\\frac{a}{b}', 15)
+  check('无 DOM 时公式尺寸退化为估算值', fallbackSize.width > 0 && fallbackSize.height > 0, JSON.stringify(fallbackSize))
+  eq('同一公式的估算值稳定', formulaSize('\\frac{a}{b}', 15), fallbackSize)
+
+  group('图片 / 附件 / 公式：编辑操作')
+
+  reset()
+  const mid = addChildOf(root().id, '媒体节点')
+
+  store().setFormula(mid, '  \\frac{a}{b}  ')
+  eq('公式写入并去掉首尾空白', find(mid)?.formula, '\\frac{a}{b}')
+  store().setFormula(mid, '   ')
+  check('清空公式', find(mid)?.formula === undefined)
+
+  store().setImage(mid, { path: 'resources/img-2-c.png', width: 120, height: 90 })
+  eq('图片写入', find(mid)?.image, { path: 'resources/img-2-c.png', width: 120, height: 90 })
+  store().setImage(mid, null)
+  check('移除图片', find(mid)?.image === undefined)
+
+  store().addAttachment(mid, { id: 'att-a', path: 'resources/att-a-d.docx', name: 'd.docx', size: 88 })
+  eq('附件写入', find(mid)?.attachments.map((a) => a.name), ['d.docx'])
+  store().addAttachment(mid, { id: 'att-a2', path: 'resources/att-a-d.docx', name: 'd.docx', size: 88 })
+  eq('同一个资源不会被重复添加', find(mid)?.attachments.length, 1)
+
+  // 重复添加是空操作：撤销应该回到「添加之前」，而不是把附件删掉
+  store().undo()
+  eq('撤销回到添加附件之前', find(mid)?.attachments.length, 0)
+  store().redo()
+  eq('重做恢复附件', find(mid)?.attachments.map((a) => a.name), ['d.docx'])
+
+  store().removeAttachment(mid, 'att-a')
+  eq('删除附件', find(mid)?.attachments.length, 0)
+  store().undo()
+  eq('撤销能恢复附件', find(mid)?.attachments.map((a) => a.name), ['d.docx'])
+
+  group('图片 / 附件 / 公式：.xmind 往返')
+
+  reset()
+  const rid = addChildOf(root().id, '带媒体资源的节点')
+  store().setFormula(rid, '\\sqrt{x^2+y^2}')
+  store().setImage(rid, { path: 'resources/img-3-pic.png', width: 320, height: 240 })
+  store().addAttachment(rid, {
+    id: 'att-z',
+    path: 'resources/att-z-report.pdf',
+    name: 'report.pdf',
+    size: 2048,
+    mime: 'application/pdf'
+  })
+
+  const mediaResources: Record<string, Uint8Array> = {
+    'resources/img-3-pic.png': new Uint8Array([137, 80, 78, 71, 1, 2, 3]),
+    'resources/att-z-report.pdf': new Uint8Array([37, 80, 68, 70, 9, 9])
+  }
+
+  const beforeMedia = normalize(store().workbook)
+  const zipped = await serializeXmind({ workbook: store().workbook, resources: mediaResources })
+  const parsedMedia = await parseXmind(zipped)
+
+  check('带媒体资源的文档往返一致', normalize(parsedMedia.workbook) === beforeMedia, firstDiff(beforeMedia, normalize(parsedMedia.workbook)))
+  eq('往返保留资源数量', Object.keys(parsedMedia.resources).length, 2)
+  eq(
+    '图片字节原样保留',
+    Array.from(parsedMedia.resources['resources/img-3-pic.png'] ?? []),
+    [137, 80, 78, 71, 1, 2, 3]
+  )
+
+  const roundMedia = findTopic(activeRoot(parsedMedia.workbook), rid)
+  eq('往返保留公式', roundMedia?.formula, '\\sqrt{x^2+y^2}')
+  eq('往返保留图片路径与尺寸', roundMedia?.image, {
+    path: 'resources/img-3-pic.png',
+    width: 320,
+    height: 240
+  })
+  eq('往返保留附件', roundMedia?.attachments.map((a) => [a.path, a.name, a.size, a.mime]), [
+    ['resources/att-z-report.pdf', 'report.pdf', 2048, 'application/pdf']
+  ])
+
+  const second = await parseXmind(
+    await serializeXmind({ workbook: parsedMedia.workbook, resources: parsedMedia.resources })
+  )
+  check('二次往返仍然稳定', normalize(second.workbook) === beforeMedia, firstDiff(beforeMedia, normalize(second.workbook)))
+
+  group('图片 / 附件：字段级写法（对齐真实 Xmind）')
+
+  // 直接看生成的 content.json：包内资源引用必须带 xap: 前缀，Xmind 才认得
+  const rawZip = await JSZip.loadAsync(zipped)
+  const rawJson = JSON.parse((await rawZip.file('content.json')!.async('string')) as string) as Array<{
+    rootTopic: { children: { attached: Array<Record<string, unknown>> } }
+  }>
+  const rawTopics = rawJson[0].rootTopic.children.attached
+  const mediaTopic = rawTopics.find((t) => t.image !== undefined) as
+    | { image: { src: string }; attachments?: Array<{ path: string }> }
+    | undefined
+  check('生成的 content.json 里图片用 xap: 前缀', mediaTopic?.image.src?.startsWith('xap:resources/') ?? false, String(mediaTopic?.image?.src))
+
+  const attachTopic = rawTopics.find((t) => t.attachments !== undefined) as
+    | { attachments: Array<{ path: string; name: string }> }
+    | undefined
+  check(
+    '生成的 content.json 里附件用 xap: 前缀',
+    attachTopic?.attachments?.[0]?.path?.startsWith('xap:resources/') ?? false,
+    String(attachTopic?.attachments?.[0]?.path)
+  )
+  check('附件保留了原始文件名', (attachTopic?.attachments?.[0]?.name ?? '').length > 0)
+  check('包内确实带上了资源字节', Boolean(parsedMedia.resources['resources/img-3-pic.png']))
+
+  // 已带协议的路径不会被重复加前缀
+  reset()
+  const urlId = addChildOf(root().id, '外链图片')
+  store().setImage(urlId, { path: 'https://example.com/a.png', width: 10, height: 10 })
+  const urlZip = await JSZip.loadAsync(
+    await serializeXmind({ workbook: store().workbook, resources: {} })
+  )
+  const urlJson = JSON.parse((await urlZip.file('content.json')!.async('string')) as string) as Array<{
+    rootTopic: { children: { attached: Array<{ image?: { src: string } }> } }
+  }>
+  const urlSrc = urlJson[0].rootTopic.children.attached.find((t) => t.image)?.image?.src
+  eq('外部 URL 不加 xap: 前缀', urlSrc, 'https://example.com/a.png')
+}
+
+/* ------------------------------------------------------------------ */
 /* 12.6 画布级元素（关系线 / 边界 / 概要）                              */
 /* ------------------------------------------------------------------ */
 
@@ -1811,6 +2048,7 @@ async function main(): Promise<void> {
   testLayout()
   testRecovery()
   await testNodeElements()
+  await testMediaElements()
   await testOverlays()
   await testOverlayToggles()
   testStructures()

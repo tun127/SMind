@@ -1,0 +1,100 @@
+/**
+ * LaTeX 公式渲染与尺寸测量。
+ *
+ * 尺寸有两套来源：
+ * 1. 渲染层能拿到 DOM 时，用 KaTeX 真实的排版结果量一次并缓存（sizeCache）；
+ * 2. 拿不到 DOM（自检 / Node 环境）时，退回 shared 里的纯估算。
+ *
+ * 布局（measure.ts）与渲染（TopicNode）用的是同一个 formulaSize，
+ * 因此「布局算出来的框」与「实际画出来的内容」不会打架。
+ */
+import katex from 'katex'
+import { pureFormulaSize, FORMULA_MAX_WIDTH, type Size } from '@shared/layout/accessory'
+
+const htmlCache = new Map<string, string>()
+const sizeCache = new Map<string, Size>()
+const CACHE_LIMIT = 2000
+
+let measureHost: HTMLDivElement | null = null
+
+function hasDom(): boolean {
+  return typeof document !== 'undefined' && typeof window !== 'undefined'
+}
+
+/** 把 LaTeX 源码渲染成 HTML（失败时给出可读的错误提示，而不是抛异常打断整个画布） */
+export function formulaHtml(source: string): string {
+  const cached = htmlCache.get(source)
+  if (cached !== undefined) return cached
+
+  let html: string
+  try {
+    html = katex.renderToString(source, {
+      throwOnError: false,
+      displayMode: false,
+      output: 'html',
+      errorColor: '#d9534f'
+    })
+  } catch (error) {
+    html = `<span class="formula-error" title="${String((error as Error).message ?? '')}">公式无法解析</span>`
+  }
+
+  if (htmlCache.size >= CACHE_LIMIT) htmlCache.clear()
+  htmlCache.set(source, html)
+  return html
+}
+
+function host(): HTMLDivElement | null {
+  if (measureHost) return measureHost
+  if (!document.body) return null
+  const el = document.createElement('div')
+  el.className = 'formula-measure'
+  el.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(el)
+  measureHost = el
+  return measureHost
+}
+
+/**
+ * 公式显示框尺寸。
+ * @param fontSize 公式所在节点的基准字号，保证公式与节点文字成比例
+ */
+export function formulaSize(source: string, fontSize: number): Size {
+  const key = `${fontSize}\u0000${source}`
+  const cached = sizeCache.get(key)
+  if (cached) return cached
+
+  let size = pureFormulaSize(source, fontSize)
+  const el = hasDom() ? host() : null
+  if (el) {
+    try {
+      el.style.fontSize = `${fontSize}px`
+      el.innerHTML = formulaHtml(source)
+      const child = el.firstElementChild
+      const width = child instanceof HTMLElement ? child.offsetWidth : el.offsetWidth
+      const height = child instanceof HTMLElement ? child.offsetHeight : el.offsetHeight
+      if (width > 0 && height > 0) {
+        size = {
+          width: Math.max(1, Math.min(Math.round(width), FORMULA_MAX_WIDTH * 2)),
+          height: Math.max(1, Math.round(height))
+        }
+      }
+    } catch {
+      // 量不出来就用估算值，不影响其它功能
+    } finally {
+      el.innerHTML = ''
+    }
+  }
+
+  if (sizeCache.size >= CACHE_LIMIT) sizeCache.clear()
+  sizeCache.set(key, size)
+  return size
+}
+
+/**
+ * 字体加载完成后 KaTeX 的真实字宽才会稳定。
+ * 调用方（画布）在 document.fonts.ready 之后调用它并触发一次重新布局。
+ */
+export function clearFormulaCache(): void {
+  sizeCache.clear()
+  htmlCache.clear()
+}

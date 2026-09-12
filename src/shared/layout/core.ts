@@ -128,7 +128,9 @@ export class LayoutBuilder {
       paddingX: size.paddingX,
       paddingY: size.paddingY,
       accessory: size.accessory,
-      labelRow: size.labelRow
+      labelRow: size.labelRow,
+      imageBox: size.imageBox,
+      formulaBox: size.formulaBox
     }
     this.nodes.push(node)
     this.nodeMap.set(topic.id, node)

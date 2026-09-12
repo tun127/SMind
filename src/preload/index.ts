@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type MenuCommand, type MindApi, type OpenResult, type RecoveryInfo, type SaveResult } from '@shared/ipc'
+import {
+  IPC,
+  type MenuCommand,
+  type MindApi,
+  type OpenResult,
+  type PickedAttachment,
+  type PickedImage,
+  type RecoveryInfo,
+  type SaveResult
+} from '@shared/ipc'
 import type { Workbook } from '@shared/model/types'
 import type { ThemeDefinition } from '@shared/theme'
 
@@ -55,7 +64,17 @@ const api: MindApi = {
 
   themesImport: () => ipcRenderer.invoke(IPC.themesImport) as Promise<ThemeDefinition | null>,
 
-  themesExport: (theme: ThemeDefinition) => ipcRenderer.invoke(IPC.themesExport, theme) as Promise<boolean>
+  themesExport: (theme: ThemeDefinition) => ipcRenderer.invoke(IPC.themesExport, theme) as Promise<boolean>,
+
+  pickImage: () => ipcRenderer.invoke(IPC.pickImage) as Promise<PickedImage | null>,
+
+  pickAttachment: () => ipcRenderer.invoke(IPC.pickAttachment) as Promise<PickedAttachment | null>,
+
+  openAttachment: (path: string, name: string) =>
+    ipcRenderer.invoke(IPC.openAttachment, path, name) as Promise<boolean>,
+
+  saveAttachmentAs: (path: string, suggestedName: string) =>
+    ipcRenderer.invoke(IPC.saveAttachmentAs, path, suggestedName) as Promise<boolean>
 }
 
 contextBridge.exposeInMainWorld('api', api)

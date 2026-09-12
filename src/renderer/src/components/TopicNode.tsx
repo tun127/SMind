@@ -1,7 +1,10 @@
-import { memo, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
+import { memo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
 import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
+import { BLOCK_GAP, imageBoxSize } from '@shared/layout/accessory'
 import type { RichText, ThemeColors } from '@shared/model/types'
 import { richFromPlain } from '@shared/richtext'
+import { formulaHtml, formulaSize } from '../render/formula'
+import { resourceUrl } from '../render/resource'
 import { branchColorOf, visualFor } from '../render/theme'
 import MarkerIcon, { IndicatorIcon } from './MarkerIcon'
 import RichTextEditor from './RichTextEditor'
@@ -59,6 +62,16 @@ function TopicNodeInner({
   const visual = visualFor(colors, node, layout)
   const color = branchColorOf(colors, layout, node.id)
   const hasChildren = node.topic.children.length > 0
+
+  /** 图片读不出来（资源缺失）时改显示占位，避免只留一个空白框 */
+  const [failedImagePath, setFailedImagePath] = useState<string | null>(null)
+  const image = node.topic.image
+  const imageBox = image ? node.imageBox ?? imageBoxSize(image) : null
+  const imageFailed = Boolean(image && failedImagePath === image.path)
+
+  const formula = node.topic.formula
+  // 正常情况下尺寸来自布局测量结果；个别测量实现没给时退回同一套公式尺寸函数
+  const formulaBox = formula ? node.formulaBox ?? formulaSize(formula, node.fontSize) : null
 
   const style: CSSProperties = {
     left: node.x,
@@ -138,6 +151,46 @@ function TopicNodeInner({
             </div>
           ))}
         </div>
+      )}
+
+      {/* 节点内图片：显示框尺寸来自布局测量结果，保证「测量=显示」 */}
+      {image && imageBox && (
+        <div className="topic__image" style={{ marginTop: BLOCK_GAP }}>
+          {imageFailed ? (
+            <div
+              className="topic__image-missing"
+              style={{ width: imageBox.width, height: imageBox.height }}
+              title={`图片资源缺失：${image.path}`}
+            >
+              图片缺失
+            </div>
+          ) : (
+            <img
+              src={resourceUrl(image.path)}
+              alt=""
+              draggable={false}
+              width={imageBox.width}
+              height={imageBox.height}
+              style={{ width: imageBox.width, height: imageBox.height }}
+              onError={() => setFailedImagePath(image.path)}
+            />
+          )}
+        </div>
+      )}
+
+      {/* LaTeX 公式：KaTeX 渲染成 HTML，直接内嵌在节点里 */}
+      {formula && formulaBox && (
+        <div
+          className="topic__formula"
+          style={{
+            width: formulaBox.width,
+            height: formulaBox.height,
+            marginTop: BLOCK_GAP,
+            fontSize: node.fontSize
+          }}
+          // KaTeX 的输出是我们自己生成的 HTML，不来自用户输入的原样注入
+          dangerouslySetInnerHTML={{ __html: formulaHtml(formula) }}
+        />
       )}
 
       {/* 底部标签行 */}

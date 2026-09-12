@@ -348,6 +348,63 @@ textarea {
   flex: none;
 }
 
+/* ---- 节点内图片与公式 ---- */
+
+.topic__image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.topic__image img {
+  display: block;
+  border-radius: 4px;
+  object-fit: contain;
+  /* 图片不参与画布拖拽，避免拖动节点时被浏览器当成图片拖走 */
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.topic__image-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(140, 148, 160, 0.55);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* 固定尺寸框：与布局测量出来的 formulaBox 完全一致，保证不裁切、不撑开 */
+.topic__formula {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  line-height: 1;
+}
+
+.topic__formula .katex {
+  font-size: 1.1em;
+  white-space: nowrap;
+}
+
+.topic__formula .katex-display {
+  margin: 0;
+}
+
+/* 用于量公式真实尺寸的隐藏容器（不参与显示） */
+.formula-measure {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .topic__indicator {
   color: inherit;
   opacity: 0.72;
@@ -1162,6 +1219,105 @@ textarea {
   color: var(--text-dim);
   font-size: 11px;
 }
+
+/* ---- 图片 / 附件 / 公式（节点属性面板） ---- */
+
+.input--mono {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.image-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.image-row__thumb {
+  flex: none;
+  border: 1px solid var(--border, rgba(140, 148, 160, 0.3));
+  border-radius: 6px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.image-row__meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.image-row__name {
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(140, 148, 160, 0.1);
+  font-size: 12px;
+}
+
+.attachment-row__name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-row__size {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.formula-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  border: 1px dashed rgba(140, 148, 160, 0.4);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.formula-preview__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.formula-preview {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.formula-error {
+  color: #d9534f;
+  font-size: 12px;
+}
+
 
 .btn:disabled {
   opacity: 0.5;

@@ -1,13 +1,24 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { ExternalLink, Plus, X } from 'lucide-react'
+import { Download, ExternalLink, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sigma, X } from 'lucide-react'
 import { activeRoot, activeSheet, findTopic } from '@shared/model/tree'
+import { imageBoxSize } from '@shared/layout/accessory'
 import { MARKER_GROUPS, markerVisualOf } from '../render/markers'
+import { formulaHtml } from '../render/formula'
+import { resourceUrl } from '../render/resource'
 import { useEditor } from '../store/editor'
 import MarkerIcon from './MarkerIcon'
 
 interface Props {
   onClose(): void
   onNotify(message: string): void
+}
+
+/** 附件大小显示成 KB/MB，列表里一眼能看出体积 */
+function formatSize(bytes: number | undefined): string {
+  if (!bytes || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 /** 备注与超链接用本地草稿 + 失焦提交：既不怕输入法打断，也不需要每敲一个字就写历史 */
@@ -19,6 +30,10 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const removeLabel = useEditor((s) => s.removeLabel)
   const setNotes = useEditor((s) => s.setNotes)
   const setHref = useEditor((s) => s.setHref)
+  const setFormula = useEditor((s) => s.setFormula)
+  const setImage = useEditor((s) => s.setImage)
+  const addAttachment = useEditor((s) => s.addAttachment)
+  const removeAttachment = useEditor((s) => s.removeAttachment)
   const removeRelationship = useEditor((s) => s.removeRelationship)
   const removeBoundary = useEditor((s) => s.removeBoundary)
   const removeSummary = useEditor((s) => s.removeSummary)
@@ -34,12 +49,14 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const [labelDraft, setLabelDraft] = useState('')
   const [notesDraft, setNotesDraft] = useState('')
   const [hrefDraft, setHrefDraft] = useState('')
+  const [formulaDraft, setFormulaDraft] = useState('')
 
   // 只在「切换所选节点」时同步草稿，输入过程中绝不覆盖用户正在敲的内容
   useEffect(() => {
     setLabelDraft('')
     setNotesDraft(topic?.notes ?? '')
     setHrefDraft(topic?.href ?? '')
+    setFormulaDraft(topic?.formula ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -89,6 +106,54 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
       if (!ok) onNotify('这个链接不是 http/https/mailto，无法用系统程序打开')
     } catch (error) {
       onNotify(`打开链接失败：${(error as Error).message}`)
+    }
+  }
+
+  const commitFormula = (): void => {
+    if ((topic.formula ?? '') !== formulaDraft.trim()) setFormula(topicId, formulaDraft)
+  }
+
+  const insertImage = async (): Promise<void> => {
+    try {
+      const picked = await window.api.pickImage()
+      if (!picked) return
+      setImage(topicId, { path: picked.path, width: picked.width, height: picked.height })
+      onNotify(
+        picked.width > 0
+          ? `已插入图片 ${picked.name}（${picked.width}×${picked.height}）`
+          : `已插入图片 ${picked.name}（未取到像素尺寸，按默认大小显示）`
+      )
+    } catch (error) {
+      onNotify(`插入图片失败：${(error as Error).message}`)
+    }
+  }
+
+  const attachFile = async (): Promise<void> => {
+    try {
+      const picked = await window.api.pickAttachment()
+      if (!picked) return
+      addAttachment(topicId, picked)
+      onNotify(`已添加附件 ${picked.name}，保存时会打包进 .xmind`)
+    } catch (error) {
+      onNotify(`添加附件失败：${(error as Error).message}`)
+    }
+  }
+
+  const openAttachment = async (path: string, name: string): Promise<void> => {
+    try {
+      const ok = await window.api.openAttachment(path, name)
+      if (!ok) onNotify('打不开这个附件：它可能只是文件里的记录，内容已经丢失')
+    } catch (error) {
+      onNotify(`打开附件失败：${(error as Error).message}`)
+    }
+  }
+
+  const exportAttachment = async (path: string, name: string): Promise<void> => {
+    try {
+      const ok = await window.api.saveAttachmentAs(path, name)
+      if (ok) onNotify('附件已导出')
+    } catch (error) {
+      onNotify(`导出附件失败：${(error as Error).message}`)
     }
   }
 
@@ -257,14 +322,154 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
           </button>
         </div>
 
-        <div className="side-panel__title">其他附加内容</div>
-        <div className="side-panel__hint">
-          附件 {topic.attachments.length} 个
-          {topic.image ? ' · 含图片' : ''}
-          {topic.formula ? ' · 含公式' : ''}
-          <br />
-          这些内容目前会随文件完整保留，编辑入口在后续阶段开放。
+        <div className="side-panel__title">节点内图片</div>
+        {topic.image ? (
+          <div className="image-row">
+            <img
+              className="image-row__thumb"
+              src={resourceUrl(topic.image.path)}
+              alt=""
+              style={{ width: 64, height: 48 }}
+            />
+            <div className="image-row__meta">
+              <div className="image-row__name" title={topic.image.path}>
+                {topic.image.path.split('/').pop()}
+              </div>
+              <div className="side-panel__hint">
+                {topic.image.width && topic.image.height
+                  ? `${topic.image.width}×${topic.image.height}`
+                  : '尺寸未知'}
+                {' · 显示 '}
+                {imageBoxSize(topic.image).width}×{imageBoxSize(topic.image).height}
+              </div>
+              <div className="side-panel__row">
+                <button
+                  type="button"
+                  className="btn"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => void insertImage()}
+                >
+                  <ImageIcon size={14} />
+                  更换
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setImage(topicId, null)}
+                >
+                  <X size={14} />
+                  移除
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="side-panel__row">
+            <button
+              type="button"
+              className="btn btn--primary"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => void insertImage()}
+            >
+              <ImageIcon size={14} />
+              插入图片…
+            </button>
+          </div>
+        )}
+
+        <div className="side-panel__title">附件</div>
+        {topic.attachments.length > 0 && (
+          <div className="attachment-list">
+            {topic.attachments.map((item) => (
+              <div key={item.id} className="attachment-row">
+                <Paperclip size={13} />
+                <span className="attachment-row__name" title={item.name}>
+                  {item.name}
+                </span>
+                <span className="attachment-row__size">{formatSize(item.size)}</span>
+                <button
+                  type="button"
+                  className="chip__del"
+                  title="用系统默认程序打开"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => void openAttachment(item.path, item.name)}
+                >
+                  <FolderOpen size={12} />
+                </button>
+                <button
+                  type="button"
+                  className="chip__del"
+                  title="导出到其他位置"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => void exportAttachment(item.path, item.name)}
+                >
+                  <Download size={12} />
+                </button>
+                <button
+                  type="button"
+                  className="chip__del"
+                  title="移除附件"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => removeAttachment(topicId, item.id)}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="side-panel__row">
+          <button
+            type="button"
+            className="btn"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void attachFile()}
+          >
+            <Paperclip size={14} />
+            添加附件…
+          </button>
         </div>
+
+        <div className="side-panel__title">LaTeX 公式</div>
+        <textarea
+          className="input input--area input--mono"
+          rows={3}
+          placeholder="例如 \frac{a}{b}、\sqrt{x^2+y^2}、\sum_{i=1}^{n} i"
+          value={formulaDraft}
+          onChange={(event) => setFormulaDraft(event.target.value)}
+          onBlur={commitFormula}
+        />
+        <div className="formula-preview-row">
+          <span className="formula-preview__label">
+            <Sigma size={13} /> 预览
+          </span>
+          {formulaDraft.trim().length > 0 ? (
+            <div
+              className="formula-preview"
+              // KaTeX 的输出由渲染器生成，不是用户 HTML
+              dangerouslySetInnerHTML={{ __html: formulaHtml(formulaDraft.trim()) }}
+            />
+          ) : (
+            <span className="side-panel__hint">输入公式后这里会实时预览，离开输入框即保存</span>
+          )}
+        </div>
+        {topic.formula && (
+          <div className="side-panel__row">
+            <button
+              type="button"
+              className="btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setFormulaDraft('')
+                setFormula(topicId, '')
+              }}
+            >
+              <X size={14} />
+              移除公式
+            </button>
+          </div>
+        )}
 
         <div className="side-panel__title">画布元素</div>
         <div className="side-panel__hint">
