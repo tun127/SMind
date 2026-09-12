@@ -1,0 +1,137 @@
+import type { ReactElement, ReactNode } from 'react'
+import { AlertTriangle, HardDriveDownload } from 'lucide-react'
+import type { RecoveryInfo } from '@shared/ipc'
+
+interface ModalProps {
+  title: string
+  icon?: ReactNode
+  children: ReactNode
+  footer: ReactNode
+  onMaskClick?: () => void
+}
+
+export function Modal({ title, icon, children, footer, onMaskClick }: ModalProps): ReactElement {
+  return (
+    <div className="modal-mask" onClick={onMaskClick}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal__header">
+          {icon && <span className="modal__icon">{icon}</span>}
+          <span className="modal__title">{title}</span>
+        </div>
+        <div className="modal__body">{children}</div>
+        <div className="modal__footer">{footer}</div>
+      </div>
+    </div>
+  )
+}
+
+interface RecoveryDialogProps {
+  info: RecoveryInfo
+  onRestore(): void
+  onDiscard(): void
+}
+
+export function RecoveryDialog({ info, onRestore, onDiscard }: RecoveryDialogProps): ReactElement {
+  const time = new Date(info.savedAt || Date.now()).toLocaleString('zh-CN')
+  return (
+    <Modal
+      title="发现未保存的内容"
+      icon={<HardDriveDownload size={18} />}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onDiscard}>
+            忽略并删除
+          </button>
+          <button type="button" className="btn btn--primary" onClick={onRestore}>
+            恢复
+          </button>
+        </>
+      }
+    >
+      <p>
+        上次退出时《{info.title}》还有未保存的修改（{time}）。
+      </p>
+      <p className="modal__dim">是否恢复到编辑器中？</p>
+    </Modal>
+  )
+}
+
+interface UnsavedDialogProps {
+  fileName: string
+  onSave(): void
+  onDiscard(): void
+  onCancel(): void
+}
+
+export function UnsavedDialog({ fileName, onSave, onDiscard, onCancel }: UnsavedDialogProps): ReactElement {
+  return (
+    <Modal
+      title="有未保存的修改"
+      icon={<AlertTriangle size={18} />}
+      onMaskClick={onCancel}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onCancel}>
+            取消
+          </button>
+          <button type="button" className="btn btn--danger" onClick={onDiscard}>
+            不保存
+          </button>
+          <button type="button" className="btn btn--primary" onClick={onSave}>
+            保存
+          </button>
+        </>
+      }
+    >
+      <p>《{fileName}》有未保存的修改。</p>
+      <p className="modal__dim">保存后再继续，还是放弃这些修改？</p>
+    </Modal>
+  )
+}
+
+const SHORTCUTS: Array<[string, string]> = [
+  ['Tab', '为当前主题添加子主题'],
+  ['Enter', '添加同级主题'],
+  ['双击主题 / F2', '编辑文本'],
+  ['Esc', '取消编辑'],
+  ['Enter（编辑中）', '确认并新建同级主题'],
+  ['Tab（编辑中）', '确认并新建子主题'],
+  ['Shift + Enter（编辑中）', '文本换行'],
+  ['Delete / Backspace', '删除所选主题'],
+  ['方向键', '在主题之间移动选择'],
+  ['空格', '折叠 / 展开所选主题'],
+  ['Ctrl + C / Ctrl + V', '复制 / 粘贴主题'],
+  ['Ctrl + Z / Ctrl + Shift + Z', '撤销 / 重做'],
+  ['拖动主题到另一个主题', '改变父级'],
+  ['拖动主题到空白处', '自由摆放位置'],
+  ['左键拖动空白处', '框选多个主题（按住 Ctrl 为追加）'],
+  ['右键 / 中键拖动', '平移画布'],
+  ['Ctrl + 滚轮', '以指针为中心缩放'],
+  ['拖动关系线两端的圆点', '把这一端改接到别的主题'],
+  ['拖动关系线线身', '移动这条关系线（双击恢复自动弯度）'],
+  ['Ctrl + N / O / S', '新建 / 打开 / 保存'],
+  ['Ctrl + 0 / Ctrl + 1', '实际大小 / 适应画布']
+]
+
+export function ShortcutsDialog({ onClose }: { onClose(): void }): ReactElement {
+  return (
+    <Modal
+      title="快捷键说明"
+      onMaskClick={onClose}
+      footer={
+        <button type="button" className="btn btn--primary" onClick={onClose}>
+          知道了
+        </button>
+      }
+    >
+      <div className="shortcut-list">
+        {SHORTCUTS.map(([key, desc]) => (
+          <div key={key} className="shortcut-row">
+            <kbd>{key}</kbd>
+            <span>{desc}</span>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  )
+}

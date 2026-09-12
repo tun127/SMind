@@ -1,0 +1,180 @@
+import { memo, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
+import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
+import type { RichText, ThemeColors } from '@shared/model/types'
+import { richFromPlain } from '@shared/richtext'
+import { branchColorOf, visualFor } from '../render/theme'
+import MarkerIcon, { IndicatorIcon } from './MarkerIcon'
+import RichTextEditor from './RichTextEditor'
+
+export interface TopicNodeProps {
+  node: NodeLayout
+  layout: LayoutResult
+  colors: ThemeColors
+  selected: boolean
+  editing: boolean
+  editingRich: RichText | null
+  highlighted: boolean
+  dragOffset: { dx: number; dy: number } | null
+  onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, id: string) => void
+  onDoubleClick: (id: string) => void
+  onRichChange: (id: string, rich: RichText) => void
+  onCancelEdit: () => void
+  onCommitAndAddChild: () => void
+  onCommitAndAddSibling: () => void
+  onToggleCollapse: (id: string) => void
+}
+
+function segmentStyle(segment: StyledSegment): CSSProperties {
+  const decoration = [segment.underline ? 'underline' : '', segment.strike ? 'line-through' : '']
+    .filter(Boolean)
+    .join(' ')
+  const style: CSSProperties = {
+    fontWeight: segment.weight,
+    fontSize: segment.fontSize
+  }
+  if (segment.italic) style.fontStyle = 'italic'
+  if (decoration) style.textDecoration = decoration
+  if (segment.color) style.color = segment.color
+  if (segment.fontFamily) style.fontFamily = segment.fontFamily
+  return style
+}
+
+function TopicNodeInner({
+  node,
+  layout,
+  colors,
+  selected,
+  editing,
+  editingRich,
+  highlighted,
+  dragOffset,
+  onPointerDown,
+  onDoubleClick,
+  onRichChange,
+  onCancelEdit,
+  onCommitAndAddChild,
+  onCommitAndAddSibling,
+  onToggleCollapse
+}: TopicNodeProps): ReactElement {
+  const visual = visualFor(colors, node, layout)
+  const color = branchColorOf(colors, layout, node.id)
+  const hasChildren = node.topic.children.length > 0
+
+  const style: CSSProperties = {
+    left: node.x,
+    top: node.y,
+    width: node.width,
+    // 编辑时高度交给内容决定，避免富文本内容被裁掉
+    height: editing ? 'auto' : node.height,
+    minHeight: node.height,
+    background: visual.background,
+    color: visual.color,
+    borderRadius: visual.borderRadius,
+    fontWeight: visual.fontWeight,
+    boxShadow: visual.boxShadow,
+    transform: dragOffset ? `translate(${dragOffset.dx}px, ${dragOffset.dy}px)` : undefined,
+    zIndex: dragOffset ? 30 : selected ? 20 : 1
+  }
+
+  const className = [
+    'topic',
+    node.depth === 0 ? 'topic--root' : node.depth === 1 ? 'topic--level1' : 'topic--deep',
+    selected ? 'topic--selected' : '',
+    highlighted ? 'topic--drop' : '',
+    dragOffset ? 'topic--dragging' : '',
+    editing ? 'topic--editing' : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <div
+      className={className}
+      style={style}
+      data-topic-id={node.id}
+      onPointerDown={(event) => onPointerDown(event, node.id)}
+      onDoubleClick={(event) => {
+        event.stopPropagation()
+        onDoubleClick(node.id)
+      }}
+    >
+      {/* 顶部图标行：标记图标 + 备注/链接/附件/公式/图片指示 */}
+      {node.accessory.items.length > 0 && (
+        <div className="topic__accessory" style={{ height: node.accessory.height }}>
+          {node.accessory.items.map((item, index) =>
+            item.kind === 'marker' ? (
+              <MarkerIcon key={`m-${index}-${item.markerId ?? ''}`} markerId={item.markerId ?? ''} />
+            ) : (
+              <IndicatorIcon key={`i-${index}-${item.kind}`} kind={item.kind} />
+            )
+          )}
+        </div>
+      )}
+
+      {editing ? (
+        <RichTextEditor
+          node={node}
+          rich={editingRich ?? node.topic.titleRich ?? richFromPlain(node.topic.title)}
+          onChange={(rich) => onRichChange(node.id, rich)}
+          onCancel={onCancelEdit}
+          onAddChild={onCommitAndAddChild}
+          onAddSibling={onCommitAndAddSibling}
+        />
+      ) : (
+        <div className="topic__text">
+          {node.lines.map((line, lineIndex) => (
+            <div
+              key={lineIndex}
+              className="topic__line"
+              style={{ height: line.height, lineHeight: `${line.height}px`, textAlign: line.align }}
+            >
+              {line.segments.length === 0
+                ? '\u00A0'
+                : line.segments.map((segment, segmentIndex) => (
+                    <span key={segmentIndex} style={segmentStyle(segment)}>
+                      {segment.text}
+                    </span>
+                  ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 底部标签行 */}
+      {node.labelRow.items.length > 0 && (
+        <div className="topic__labels" style={{ height: node.labelRow.height }}>
+          {node.labelRow.items.map((label, index) => (
+            <span
+              key={`l-${index}-${label.text}`}
+              className="topic__label"
+              style={{ width: label.width }}
+              title={label.text}
+            >
+              {label.text}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {hasChildren && (
+        <button
+          type="button"
+          className={`topic__collapse topic__collapse--${node.side === 'left' ? 'left' : 'right'}`}
+          title={node.topic.collapsed ? '展开子主题' : '折叠子主题'}
+          style={{ background: color }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggleCollapse(node.id)
+          }}
+        >
+          {node.topic.collapsed ? '+' : '−'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+const TopicNode = memo(TopicNodeInner)
+export default TopicNode

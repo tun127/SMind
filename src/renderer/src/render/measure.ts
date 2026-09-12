@@ -1,0 +1,450 @@
+import type {
+  AccessoryItem,
+  AccessoryRow,
+  LabelRow,
+  MeasureResult,
+  MeasuredLabel,
+  MeasuredLine,
+  StyledSegment
+} from '@shared/layout/types'
+import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/model/types'
+import { richFromPlain } from '@shared/richtext'
+
+export const FONT_FAMILY =
+  '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", system-ui, sans-serif'
+
+export const NODE_FONT_SIZES = [19, 15, 14] as const
+const NODE_FONT_WEIGHTS = [700, 600, 500] as const
+
+const TEXT_MAX_ROOT = 320
+const TEXT_MAX = 240
+const MIN_WIDTH_ROOT = 120
+const MIN_WIDTH = 76
+const PADDING_X_ROOT = 24
+const PADDING_X = 14
+const PADDING_Y_ROOT = 15
+const PADDING_Y = 9
+const LINE_HEIGHT_RATIO = 1.5
+/** 项目符号的前缀，参与测量也参与渲染，保证所见即所得 */
+const BULLET_PREFIX = '•  '
+
+/* ---- 图标行与标签行的排版常量（与 styles.css 保持一致） ---- */
+const ICON_SIZE = 16
+const ICON_GAP = 3
+const ROW_GAP = 5
+const LABEL_FONT_SIZE = 11
+const LABEL_HEIGHT = 18
+const LABEL_PADDING_X = 7
+const LABEL_GAP = 4
+const LABEL_MAX_WIDTH = 130
+
+/** 一行放不下时换行，返回需要几行 */
+function rowCount(widths: number[], gap: number, maxWidth: number): number {
+  if (widths.length === 0) return 0
+  let rows = 1
+  let current = 0
+  for (const width of widths) {
+    const next = current === 0 ? width : current + gap + width
+    if (next > maxWidth && current > 0) {
+      rows += 1
+      current = width
+    } else {
+      current = next
+    }
+  }
+  return rows
+}
+
+/** 顶部图标行：标记图标 + 备注/链接/附件/公式/图片的指示图标 */
+function accessoryOf(topic: Topic): AccessoryRow {
+  const items: AccessoryItem[] = []
+
+  for (const marker of topic.markers ?? []) {
+    const id = marker?.markerId
+    if (typeof id === 'string' && id.length > 0) items.push({ kind: 'marker', markerId: id, width: ICON_SIZE })
+  }
+  if (topic.notes && topic.notes.length > 0) items.push({ kind: 'notes', width: ICON_SIZE })
+  if (topic.href) items.push({ kind: 'link', width: ICON_SIZE })
+  if ((topic.attachments?.length ?? 0) > 0) items.push({ kind: 'attachment', width: ICON_SIZE })
+  if (topic.formula) items.push({ kind: 'formula', width: ICON_SIZE })
+  if (topic.image) items.push({ kind: 'image', width: ICON_SIZE })
+
+  if (items.length === 0) return { items, height: 0, width: 0 }
+
+  const rows = rowCount(
+    items.map((item) => item.width),
+    ICON_GAP,
+    TEXT_MAX
+  )
+  const natural = items.length * ICON_SIZE + (items.length - 1) * ICON_GAP
+  return {
+    items,
+    height: rows * ICON_SIZE + (rows - 1) * ICON_GAP + ROW_GAP,
+    width: Math.min(natural, TEXT_MAX)
+  }
+}
+
+function labelStyle(): ResolvedStyle {
+  return {
+    bold: true,
+    italic: false,
+    underline: false,
+    strike: false,
+    fontSize: LABEL_FONT_SIZE,
+    weight: 600,
+    fontFamily: FONT_FAMILY
+  }
+}
+
+/** 底部标签行 */
+function labelsOf(topic: Topic): LabelRow {
+  const style = labelStyle()
+  const items: MeasuredLabel[] = []
+
+  for (const raw of topic.labels ?? []) {
+    const text = typeof raw === 'string' ? raw.trim() : ''
+    if (text.length === 0) continue
+    let textWidth = 0
+    for (const ch of text) textWidth += widthOf(ch, style)
+    items.push({
+      text,
+      width: Math.min(Math.round(textWidth) + LABEL_PADDING_X * 2, LABEL_MAX_WIDTH)
+    })
+  }
+
+  if (items.length === 0) return { items, height: 0, width: 0 }
+
+  const rows = rowCount(
+    items.map((item) => item.width),
+    LABEL_GAP,
+    TEXT_MAX
+  )
+  const natural = items.reduce((sum, item) => sum + item.width, 0) + (items.length - 1) * LABEL_GAP
+  return {
+    items,
+    // 换行后的行间距必须与 styles.css 里 .topic__labels 的 gap 一致，否则多行标签会被裁掉
+    height: rows * LABEL_HEIGHT + (rows - 1) * LABEL_GAP + ROW_GAP,
+    width: Math.min(natural, TEXT_MAX)
+  }
+}
+
+/**
+ * 图标/标签的缓存签名。
+ * 这些内容会改变节点尺寸，所以必须参与测量缓存的键，
+ * 否则「加了一个标签但节点没变高」。
+ * 没有任何附加元素时返回空串，保证绝大多数节点走最短路径。
+ */
+function accessoryKey(topic: Topic): string {
+  const hasAny =
+    (topic.markers?.length ?? 0) > 0 ||
+    (topic.labels?.length ?? 0) > 0 ||
+    Boolean(topic.notes) ||
+    Boolean(topic.href) ||
+    Boolean(topic.formula) ||
+    Boolean(topic.image) ||
+    (topic.attachments?.length ?? 0) > 0
+  if (!hasAny) return ''
+
+  return [
+    (topic.markers ?? []).map((marker) => marker?.markerId ?? '').join(','),
+    (topic.labels ?? []).join('\u0001'),
+    topic.notes ? 'n' : '',
+    topic.href ? 'h' : '',
+    topic.formula ? 'f' : '',
+    topic.image ? 'i' : '',
+    (topic.attachments?.length ?? 0) > 0 ? 'a' : ''
+  ].join('|')
+}
+
+interface BaseStyle {
+  fontSize: number
+  weight: number
+  paddingX: number
+  paddingY: number
+  maxTextWidth: number
+  minWidth: number
+}
+
+interface ResolvedStyle {
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  strike: boolean
+  color?: string
+  fontSize: number
+  weight: number
+  fontFamily: string
+}
+
+interface StyledChar {
+  ch: string
+  style: ResolvedStyle
+}
+
+function baseOf(depth: number): BaseStyle {
+  const index = Math.min(depth, 2)
+  const isRoot = depth === 0
+  return {
+    fontSize: NODE_FONT_SIZES[index],
+    weight: NODE_FONT_WEIGHTS[index],
+    paddingX: isRoot ? PADDING_X_ROOT : PADDING_X,
+    paddingY: isRoot ? PADDING_Y_ROOT : PADDING_Y,
+    maxTextWidth: isRoot ? TEXT_MAX_ROOT : TEXT_MAX,
+    minWidth: isRoot ? MIN_WIDTH_ROOT : MIN_WIDTH
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Canvas 文本测量                                                     */
+/* ------------------------------------------------------------------ */
+
+let measureCtx: CanvasRenderingContext2D | null = null
+let lastFont = ''
+
+function getCtx(): CanvasRenderingContext2D {
+  if (!measureCtx) {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('当前环境不支持 Canvas 文本测量')
+    measureCtx = ctx
+  }
+  return measureCtx
+}
+
+function fontOf(style: ResolvedStyle): string {
+  return `${style.italic ? 'italic ' : ''}${style.weight} ${style.fontSize}px ${style.fontFamily}`
+}
+
+/** 单字符宽度缓存：富文本逐字符测量时必须缓存，否则 2000 节点会明显卡顿 */
+const charWidthCache = new Map<string, number>()
+const CHAR_CACHE_LIMIT = 60000
+
+function widthOf(ch: string, style: ResolvedStyle): number {
+  const font = fontOf(style)
+  const key = `${font}\u0000${ch}`
+  const cached = charWidthCache.get(key)
+  if (cached !== undefined) return cached
+
+  const ctx = getCtx()
+  if (lastFont !== font) {
+    ctx.font = font
+    lastFont = font
+  }
+  const width = ctx.measureText(ch).width
+  if (charWidthCache.size >= CHAR_CACHE_LIMIT) charWidthCache.clear()
+  charWidthCache.set(key, width)
+  return width
+}
+
+/* ------------------------------------------------------------------ */
+/* 断行                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 贪心断行，优先在空白处折行。
+ * 逐字符测量而不是逐词，是因为中文没有词边界。
+ */
+function wrapChars(chars: StyledChar[], maxWidth: number): StyledChar[][] {
+  if (chars.length === 0) return [[]]
+  const lines: StyledChar[][] = []
+  let start = 0
+  let index = 0
+  let width = 0
+  let lastSpace = -1
+
+  while (index < chars.length) {
+    const charWidth = widthOf(chars[index].ch, chars[index].style)
+    if (width + charWidth > maxWidth && index > start) {
+      const breakAt = lastSpace > start ? lastSpace + 1 : index
+      lines.push(chars.slice(start, breakAt))
+      start = breakAt
+      // 行首空格不参与排版
+      while (start < chars.length && chars[start].ch === ' ') start += 1
+      index = start
+      width = 0
+      lastSpace = -1
+      continue
+    }
+    if (chars[index].ch === ' ') lastSpace = index
+    width += charWidth
+    index += 1
+  }
+
+  if (start < chars.length) lines.push(chars.slice(start))
+  return lines.length > 0 ? lines : [[]]
+}
+
+function sameStyle(segment: StyledSegment, style: ResolvedStyle): boolean {
+  return (
+    segment.weight === style.weight &&
+    Boolean(segment.italic) === style.italic &&
+    Boolean(segment.underline) === style.underline &&
+    Boolean(segment.strike) === style.strike &&
+    segment.color === style.color &&
+    segment.fontSize === style.fontSize &&
+    segment.fontFamily === style.fontFamily
+  )
+}
+
+function segmentOf(text: string, style: ResolvedStyle): StyledSegment {
+  return {
+    text,
+    weight: style.weight,
+    italic: style.italic || undefined,
+    underline: style.underline || undefined,
+    strike: style.strike || undefined,
+    color: style.color,
+    fontSize: style.fontSize,
+    fontFamily: style.fontFamily
+  }
+}
+
+function groupSegments(chars: StyledChar[]): StyledSegment[] {
+  const segments: StyledSegment[] = []
+  for (const char of chars) {
+    const previous = segments[segments.length - 1]
+    if (previous && sameStyle(previous, char.style)) previous.text += char.ch
+    else segments.push(segmentOf(char.ch, char.style))
+  }
+  return segments
+}
+
+/* ------------------------------------------------------------------ */
+/* 测量主流程                                                          */
+/* ------------------------------------------------------------------ */
+
+function baseResolved(base: BaseStyle): ResolvedStyle {
+  return {
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    fontSize: base.fontSize,
+    weight: base.weight,
+    fontFamily: FONT_FAMILY
+  }
+}
+
+function resolveRun(run: RichTextRun, base: BaseStyle): ResolvedStyle {
+  const bold = Boolean(run.bold)
+  return {
+    bold,
+    italic: Boolean(run.italic),
+    underline: Boolean(run.underline),
+    strike: Boolean(run.strike),
+    color: run.color,
+    fontSize: run.fontSize && run.fontSize > 0 ? run.fontSize : base.fontSize,
+    weight: bold ? Math.max(base.weight, 700) : base.weight,
+    fontFamily: run.fontFamily && run.fontFamily.length > 0 ? run.fontFamily : FONT_FAMILY
+  }
+}
+
+function charsOfParagraph(paragraph: RichTextParagraph, base: BaseStyle): StyledChar[] {
+  const chars: StyledChar[] = []
+  if (paragraph.bullet) {
+    const style = baseResolved(base)
+    for (const ch of BULLET_PREFIX) chars.push({ ch, style })
+  }
+  for (const run of paragraph.runs) {
+    const style = resolveRun(run, base)
+    for (const ch of run.text) chars.push({ ch, style })
+  }
+  return chars
+}
+
+function compute(topic: Topic, depth: number): MeasureResult {
+  const base = baseOf(depth)
+  const rich: RichText = topic.titleRich ?? richFromPlain(topic.title)
+  const paragraphs: RichTextParagraph[] = rich.paragraphs.length > 0 ? rich.paragraphs : [{ runs: [] }]
+
+  const lines: MeasuredLine[] = []
+  for (const paragraph of paragraphs) {
+    const chars = charsOfParagraph(paragraph, base)
+    for (const lineChars of wrapChars(chars, base.maxTextWidth)) {
+      let width = 0
+      let maxFontSize = 0
+      for (const char of lineChars) {
+        width += widthOf(char.ch, char.style)
+        if (char.style.fontSize > maxFontSize) maxFontSize = char.style.fontSize
+      }
+      if (maxFontSize === 0) maxFontSize = base.fontSize
+      lines.push({
+        segments: groupSegments(lineChars),
+        width: Math.round(width * 10) / 10,
+        height: Math.round(maxFontSize * LINE_HEIGHT_RATIO),
+        align: paragraph.align ?? 'center'
+      })
+    }
+  }
+
+  if (lines.length === 0) {
+    lines.push({ segments: [], width: 0, height: Math.round(base.fontSize * LINE_HEIGHT_RATIO), align: 'center' })
+  }
+
+  const accessory = accessoryOf(topic)
+  const labelRow = labelsOf(topic)
+
+  let maxLineWidth = 0
+  for (const line of lines) if (line.width > maxLineWidth) maxLineWidth = line.width
+
+  // 图标行 / 标签行可能比文字宽，节点宽度取三者最大值
+  const contentWidth = Math.max(maxLineWidth, accessory.width, labelRow.width)
+  const width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2, base.minWidth)
+
+  let height = base.paddingY * 2 + accessory.height + labelRow.height
+  for (const line of lines) height += line.height
+
+  return {
+    width,
+    height,
+    lines,
+    fontSize: base.fontSize,
+    lineHeight: Math.round(base.fontSize * LINE_HEIGHT_RATIO),
+    paddingX: base.paddingX,
+    paddingY: base.paddingY,
+    accessory,
+    labelRow
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 缓存                                                                */
+/* ------------------------------------------------------------------ */
+
+const plainCache = new Map<string, MeasureResult>()
+const PLAIN_CACHE_LIMIT = 20000
+/** 富文本用对象身份做键：immer 每次修改都会产生新对象，天然就是版本号 */
+const richCache = new WeakMap<RichText, Map<string, MeasureResult>>()
+
+/**
+ * 测量节点尺寸。
+ * 无格式的节点走「标题 + 层级 + 附加元素」字符串缓存；
+ * 有格式的节点走对象身份缓存，避免 JSON.stringify 带来的开销。
+ * 附加元素（标记/标签/备注等）也必须进键，否则改了它们尺寸不会更新。
+ */
+export function measureTopic(topic: Topic, depth: number): MeasureResult {
+  const extra = accessoryKey(topic)
+  const rich = topic.titleRich
+
+  if (rich) {
+    let byKey = richCache.get(rich)
+    if (!byKey) {
+      byKey = new Map<string, MeasureResult>()
+      richCache.set(rich, byKey)
+    }
+    const key = `${depth}\u0000${extra}`
+    const hit = byKey.get(key)
+    if (hit) return hit
+    const result = compute(topic, depth)
+    byKey.set(key, result)
+    return result
+  }
+
+  const key = `${depth}\u0000${topic.title}\u0000${extra}`
+  const cached = plainCache.get(key)
+  if (cached) return cached
+  const result = compute(topic, depth)
+  if (plainCache.size >= PLAIN_CACHE_LIMIT) plainCache.clear()
+  plainCache.set(key, result)
+  return result
+}

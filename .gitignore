@@ -1,0 +1,12 @@
+node_modules
+out
+dist
+release
+.DS_Store
+*.log
+.vite
+tsconfig.tsbuildinfo
+.tmp-check
+dev.log
+dev.err.log
+.dsh-meow
