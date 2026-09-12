@@ -51,6 +51,8 @@ import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '../sr
 import JSZip from 'jszip'
 import { parseXmind } from '../src/shared/xmind/parse'
 import { serializeXmind } from '../src/shared/xmind/serialize'
+import { parseLegacyContent } from '../src/shared/xmind/legacy'
+import { childOf, childText, childrenOf, parseXml } from '../src/shared/xmind/xml'
 import {
   hasFormatting,
   plainTextOf,
@@ -2030,6 +2032,207 @@ function testStructures(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.7 Xmind 8 旧版（content.xml）                                    */
+/* ------------------------------------------------------------------ */
+
+const LEGACY_XML = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0" xmlns:svg="http://www.w3.org/2000/svg" version="2.0">
+  <sheet id="sheet-1" theme="theme-1">
+    <title>旧版画布</title>
+    <topic id="root-1" structure-class="org.xmind.ui.logic.right" style-id="style-root">
+      <title>中心 &amp; 主题</title>
+      <notes>
+        <plain>纯文本备注</plain>
+        <html><![CDATA[<p>HTML 备注 <b>加粗</b></p>]]></html>
+      </notes>
+      <labels><label>标签A</label><label>标签B</label></labels>
+      <marker-refs><marker-ref marker-id="priority-1"/><marker-ref marker-id="star-red"/></marker-refs>
+      <href>https://example.com/legacy</href>
+      <image src="xap:resources/pic.png" width="120" height="80"/>
+      <attachments>
+        <attachment id="att-1" path="xap:attachments/doc.pdf" name="doc.pdf" size="2048" mime="application/pdf"/>
+      </attachments>
+      <children>
+        <topics type="attached">
+          <topic id="child-1">
+            <title>子主题</title>
+            <branch>folded</branch>
+            <children>
+              <topics type="attached">
+                <topic id="grand-1"><title>孙主题</title></topic>
+              </topics>
+            </children>
+          </topic>
+          <topic id="child-2">
+            <title>带未知元素</title>
+            <extensions><extension provider="org.example" content="不认识的扩展"/></extensions>
+          </topic>
+        </topics>
+        <topics type="detached">
+          <topic id="float-1">
+            <title>浮动主题</title>
+            <position svg:x="30" svg:y="-40"/>
+          </topic>
+        </topics>
+      </children>
+    </topic>
+    <relationships>
+      <relationship id="rel-1" end1="child-1" end2="child-2"><title>关联</title></relationship>
+    </relationships>
+    <summaries>
+      <summary id="sum-1" topic-id="child-1" range="(child-1,child-2)"><title>阶段总结</title></summary>
+    </summaries>
+    <boundaries>
+      <boundary id="bnd-1" range="(child-1,child-2)"><title>边界</title></boundary>
+    </boundaries>
+  </sheet>
+</xmap-content>`
+
+async function testLegacy(): Promise<void> {
+  group('XML 解析器')
+  const tree = parseXml(LEGACY_XML)!
+  check('解析出根节点', tree !== null && tree.local === 'xmap-content', tree?.name)
+  eq('子节点数量', childrenOf(tree, 'sheet').length, 1)
+
+  const sheetNode = childOf(tree, 'sheet')!
+  eq('读到属性', sheetNode.attrs['id'], 'sheet-1')
+  eq('读到子元素文本', childText(sheetNode, 'title'), '旧版画布')
+  eq('实体被解码', childText(childOf(sheetNode, 'topic'), 'title'), '中心 & 主题')
+
+  const notesNode = childOf(childOf(sheetNode, 'topic'), 'notes')!
+  eq('plain 文本', childText(notesNode, 'plain'), '纯文本备注')
+  check('CDATA 原样保留', (childText(notesNode, 'html') ?? '').includes('<b>加粗</b>'), childText(notesNode, 'html'))
+
+  const markerRefs = childOf(childOf(sheetNode, 'topic'), 'marker-refs')!
+  eq('自闭合标签解析成子元素', childrenOf(markerRefs, 'marker-ref').length, 2)
+  eq('自闭合标签的属性可读', childrenOf(markerRefs, 'marker-ref')[0].attrs['marker-id'], 'priority-1')
+  eq('注释被忽略', parseXml('<a><!-- 注释 --><b/></a>')!.children.length, 1)
+  eq('单引号属性也能解析', parseXml(`<a x='1'/>`)!.attrs['x'], '1')
+  eq('数字实体', parseXml('<a>&#65;&#x42;</a>')!.text, 'AB')
+  check('非 XML 文本返回 null', parseXml('这不是 XML') === null)
+  check('只有声明时返回 null', parseXml('<?xml version="1.0"?>') === null)
+
+  group('Xmind 8 旧版：读取')
+
+  const legacy = parseLegacyContent(tree)
+  eq('画布数量', legacy.workbook.sheets.length, 1)
+  eq('画布标题', legacy.workbook.sheets[0].title, '旧版画布')
+  check('给出了旧版兼容提示', legacy.warnings.some((w) => w.includes('Xmind 8')), legacy.warnings.join(' | '))
+  check(
+    '提示说明了样式不解析',
+    legacy.warnings.some((w) => w.includes('styles.xml')),
+    legacy.warnings.join(' | ')
+  )
+
+  const legacyRoot = legacy.workbook.sheets[0].rootTopic
+  eq('结构类型', legacyRoot.structureClass, 'org.xmind.ui.logic.right')
+  eq('标题', legacyRoot.title, '中心 & 主题')
+  eq('备注纯文本', legacyRoot.notes, '纯文本备注')
+  check('备注 HTML 保留', (legacyRoot.notesHtml ?? '').includes('<b>加粗</b>'), String(legacyRoot.notesHtml))
+  eq('标签', legacyRoot.labels, ['标签A', '标签B'])
+  eq('标记', legacyRoot.markers.map((m) => m.markerId), ['priority-1', 'star-red'])
+  eq('超链接', legacyRoot.href, 'https://example.com/legacy')
+  eq('图片路径剥掉 xap:', legacyRoot.image?.path, 'resources/pic.png')
+  eq('图片尺寸', [legacyRoot.image?.width, legacyRoot.image?.height], [120, 80])
+  eq('附件', legacyRoot.attachments.map((a) => [a.path, a.name, a.size, a.mime]), [
+    ['attachments/doc.pdf', 'doc.pdf', 2048, 'application/pdf']
+  ])
+  eq('子主题标题', legacyRoot.children.map((c) => c.title), ['子主题', '带未知元素'])
+  check('折叠状态', legacyRoot.children[0].collapsed === true)
+  eq('孙主题', legacyRoot.children[0].children.map((c) => c.title), ['孙主题'])
+  eq('浮动主题', legacyRoot.detachedChildren.map((c) => c.title), ['浮动主题'])
+  eq('svg:x / svg:y 被识别', legacyRoot.detachedChildren[0].position, { x: 30, y: -40 })
+
+  const unknownExt = legacyRoot.children[1].extensions
+  check('未知元素被原样保留', Array.isArray(unknownExt) && unknownExt.length === 1, JSON.stringify(unknownExt))
+  check(
+    '保留的扩展带上原始 provider 与内容',
+    Boolean(
+      unknownExt &&
+        (unknownExt[0] as { provider?: string }).provider === 'org.example' &&
+        String((unknownExt[0] as { content?: string }).content).includes('不认识的扩展')
+    ),
+    JSON.stringify(unknownExt)
+  )
+
+  const legacySheet = legacy.workbook.sheets[0]
+  eq('关系线', legacySheet.relationships.map((r) => [r.end1Id, r.end2Id, r.title]), [['child-1', 'child-2', '关联']])
+  eq('边界', legacySheet.boundaries.map((b) => [b.range, b.title]), [['(child-1,child-2)', '边界']])
+  eq('概要', legacySheet.summaries.map((s) => [s.topicId, s.range, s.title]), [
+    ['child-1', '(child-1,child-2)', '阶段总结']
+  ])
+  eq('节点总数', countTopics(legacyRoot), 5)
+
+  group('Xmind 8 旧版：损坏文件与升级路径')
+
+  let badMessage = ''
+  try {
+    parseLegacyContent(parseXml('<xmap-content><sheet/></xmap-content>')!)
+  } catch (error) {
+    badMessage = (error as Error).message
+  }
+  check('没有画布的文件给出可读错误', badMessage.includes('没有找到任何画布'), badMessage)
+
+  // 旧版读进来之后按新版格式序列化，再读回来结构必须一致
+  const upgraded = JSON.parse(JSON.stringify(legacy.workbook)) as Workbook
+  const upgradedRoot = activeRoot(upgraded)
+  eq('升级到新版格式后节点数不变', countTopics(upgradedRoot), countTopics(legacyRoot))
+  eq('升级后 id 保留', upgradedRoot.id, legacyRoot.id)
+  eq('升级后附件路径保留', upgradedRoot.attachments.map((a) => a.path), ['attachments/doc.pdf'])
+  check('升级后未知扩展仍在', Array.isArray(upgradedRoot.children[1].extensions))
+}
+
+/** 整包走一遍：从 zip 到模型，再到新版格式 */
+async function testLegacyPackage(): Promise<void> {
+  group('Xmind 8 旧版：整包读取与升级保存')
+
+  const zip = new JSZip()
+  zip.file('content.xml', LEGACY_XML)
+  zip.file('styles.xml', '<xmap-styles/>')
+  zip.file('resources/pic.png', new Uint8Array([1, 2, 3]))
+  zip.file('attachments/doc.pdf', new Uint8Array([4, 5, 6]))
+  const pkg = await parseXmind(await zip.generateAsync({ type: 'uint8array' }))
+
+  eq('整包读取：画布数量', pkg.workbook.sheets.length, 1)
+  eq('整包读取：资源同时收了 resources/ 与 attachments/', Object.keys(pkg.resources).sort(), [
+    'attachments/doc.pdf',
+    'resources/pic.png'
+  ])
+  check(
+    '整包读取：给出旧版兼容提示',
+    pkg.warnings.some((w) => w.includes('Xmind 8')),
+    pkg.warnings.join(' | ')
+  )
+  eq('整包读取：标题正确', activeRoot(pkg.workbook).title, '中心 & 主题')
+
+  const upgradedBytes = await serializeXmind({ workbook: pkg.workbook, resources: pkg.resources })
+  const upgradedPkg = await parseXmind(upgradedBytes)
+  eq('升级保存后：标题不变', activeRoot(upgradedPkg.workbook).title, '中心 & 主题')
+  eq('升级保存后：资源不丢', Object.keys(upgradedPkg.resources).sort(), [
+    'attachments/doc.pdf',
+    'resources/pic.png'
+  ])
+  eq('升级保存后：附件字段完整', activeRoot(upgradedPkg.workbook).attachments.map((a) => [a.path, a.name]), [
+    ['attachments/doc.pdf', 'doc.pdf']
+  ])
+  eq('升级保存后：图片字段完整', activeRoot(upgradedPkg.workbook).image?.path, 'resources/pic.png')
+  check(
+    '升级保存后不再提示旧版',
+    !upgradedPkg.warnings.some((w) => w.includes('Xmind 8')),
+    upgradedPkg.warnings.join(' | ')
+  )
+
+  // 既没有 content.json 也没有 content.xml 的包
+  let message = ''
+  try {
+    await parseXmind(await new JSZip().generateAsync({ type: 'uint8array' }))
+  } catch (error) {
+    message = (error as Error).message
+  }
+  check('空包给出可读错误', message.includes('既没有 content.json 也没有 content.xml'), message)
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -2052,6 +2255,8 @@ async function main(): Promise<void> {
   await testOverlays()
   await testOverlayToggles()
   testStructures()
+  testLegacy()
+  await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()
   await testUnknownPassthrough()

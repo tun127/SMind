@@ -16,6 +16,8 @@ import {
 import { createId } from '../model/factory'
 import { normalizeThemeColors } from '../theme'
 import { DEFAULT_STRUCTURE, STRUCTURES, THEME_NAMESPACE, XMIND_FILES } from './constants'
+import { parseLegacyContent } from './legacy'
+import { parseXml } from './xml'
 
 /** 我们自己的扩展 provider 标识，用于承载 Xmind 不认识的字段 */
 export const OUR_PROVIDER = 'com.mindmap.local'
@@ -279,7 +281,7 @@ export async function isLegacyXmind(data: Uint8Array): Promise<boolean> {
 
 /**
  * 解析 .xmind 文件。
- * 兼容 Xmind 2020+（content.json）；旧版 Xmind 8（content.xml）在 P6 阶段实现。
+ * 兼容 Xmind 2020+（content.json）与 Xmind 8 旧版（content.xml）。
  */
 export async function parseXmind(data: Uint8Array): Promise<ParseResult> {
   const warnings: string[] = []
@@ -287,10 +289,11 @@ export async function parseXmind(data: Uint8Array): Promise<ParseResult> {
 
   const contentFile = zip.file(XMIND_FILES.content)
   if (!contentFile) {
-    if (zip.file(XMIND_FILES.legacyContent)) {
-      throw new Error('这是 Xmind 8 旧版格式（content.xml），暂未支持，将在 P6 阶段实现兼容。')
+    const legacyFile = zip.file(XMIND_FILES.legacyContent)
+    if (!legacyFile) {
+      throw new Error('文件不是有效的 .xmind 文件：既没有 content.json 也没有 content.xml')
     }
-    throw new Error('文件不是有效的 .xmind 文件：缺少 content.json')
+    return parseLegacyPackage(zip, legacyFile)
   }
 
   const text = await contentFile.async('string')
@@ -322,12 +325,7 @@ export async function parseXmind(data: Uint8Array): Promise<ParseResult> {
   }
 
   // 读取资源文件
-  const resources: Record<string, Uint8Array> = {}
-  for (const [name, file] of Object.entries(zip.files)) {
-    if (file.dir) continue
-    if (!name.startsWith(XMIND_FILES.resourcesDir)) continue
-    resources[name] = await file.async('uint8array')
-  }
+  const resources = await readResources(zip)
 
   const workbook: Workbook = {
     version: MODEL_VERSION,
@@ -350,6 +348,36 @@ export async function parseXmind(data: Uint8Array): Promise<ParseResult> {
     }
   }
 
+  return { workbook, resources, warnings }
+}
+
+/** 读取包内的图片/附件资源（resources/ 与旧版的 attachments/ 都收） */
+async function readResources(zip: JSZip): Promise<Record<string, Uint8Array>> {
+  const resources: Record<string, Uint8Array> = {}
+  for (const [name, file] of Object.entries(zip.files)) {
+    if (file.dir) continue
+    if (!name.startsWith(XMIND_FILES.resourcesDir) && !name.startsWith('attachments/')) continue
+    resources[name] = await file.async('uint8array')
+  }
+  return resources
+}
+
+/** 读取 Xmind 8 旧版（content.xml） */
+async function parseLegacyPackage(zip: JSZip, contentFile: JSZip.JSZipObject): Promise<ParseResult> {
+  let text: string
+  try {
+    text = await contentFile.async('string')
+  } catch {
+    throw new Error('content.xml 读取失败：文件已损坏')
+  }
+
+  const tree = parseXml(text)
+  if (!tree) {
+    throw new Error('content.xml 解析失败：文件已损坏或不是合法的 XML')
+  }
+
+  const { workbook, warnings } = parseLegacyContent(tree)
+  const resources = await readResources(zip)
   return { workbook, resources, warnings }
 }
 

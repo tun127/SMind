@@ -461,6 +461,137 @@ async function sample20() {
   )
 }
 
+/** 21：Xmind 8 旧版格式（content.xml），用来验证旧版读取与兼容提示 */
+async function sample21() {
+  const png = makePng(200, 120)
+  const csv = Buffer.from('阶段,负责人,状态\n需求,张三,完成\n开发,李四,进行中\n', 'utf8')
+
+  const contentXml = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0" xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:svg="http://www.w3.org/2000/svg" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink" modified-by="samples" timestamp="1704067200000" version="2.0">
+  <sheet id="sheet-legacy-0001" theme="theme-legacy-0001" timestamp="1704067200000">
+    <topic id="topic-legacy-0001" structure-class="org.xmind.ui.map.unbalanced" style-id="style-root" timestamp="1704067200000">
+      <title>旧版文件 &amp; 兼容测试</title>
+      <children>
+        <topics type="attached">
+          <topic id="topic-legacy-0002" timestamp="1704067200000">
+            <title>带标记与标签</title>
+            <labels>
+              <label>重点</label>
+              <label>旧版</label>
+            </labels>
+            <marker-refs>
+              <marker-ref marker-id="priority-1"/>
+              <marker-ref marker-id="task-half"/>
+            </marker-refs>
+            <notes>
+              <plain>这是一条备注，来自 Xmind 8 的 plain 字段。</plain>
+              <html><![CDATA[<p>这是一条备注，来自 Xmind 8 的 <b>html</b> 字段。</p>]]></html>
+            </notes>
+            <href>https://xmind.app/</href>
+          </topic>
+          <topic id="topic-legacy-0003" timestamp="1704067200000">
+            <title>已折叠的分支</title>
+            <branch>folded</branch>
+            <children>
+              <topics type="attached">
+                <topic id="topic-legacy-0004" timestamp="1704067200000">
+                  <title>折叠里的子主题</title>
+                </topic>
+              </topics>
+            </children>
+          </topic>
+          <topic id="topic-legacy-0005" timestamp="1704067200000">
+            <title>带图片与附件</title>
+            <image src="xap:resources/legacy-chart.png" width="200" height="120"/>
+            <attachments>
+              <attachment id="att-legacy-0001" path="xap:attachments/legacy-data.csv" name="legacy-data.csv" size="${csv.length}" mime="text/csv"/>
+            </attachments>
+          </topic>
+          <topic id="topic-legacy-0006" timestamp="1704067200000" structure-class="org.xmind.ui.logic.right">
+            <title>自带结构类型的子分支</title>
+            <children>
+              <topics type="attached">
+                <topic id="topic-legacy-0007" timestamp="1704067200000">
+                  <title>三级主题</title>
+                </topic>
+              </topics>
+            </children>
+          </topic>
+          <topic id="topic-legacy-0008" timestamp="1704067200000">
+            <title>带未知元素的分支</title>
+            <extensions>
+              <extension provider="org.example.custom" content="本软件不认识这段数据，但必须原样保留"/>
+            </extensions>
+          </topic>
+        </topics>
+        <topics type="detached">
+          <topic id="topic-legacy-0009" timestamp="1704067200000">
+            <title>浮动主题</title>
+            <position svg:x="120" svg:y="-80"/>
+          </topic>
+        </topics>
+      </children>
+    </topic>
+    <relationships>
+      <relationship id="rel-legacy-0001" end1="topic-legacy-0002" end2="topic-legacy-0005">
+        <title>关联</title>
+      </relationship>
+    </relationships>
+    <summaries>
+      <summary id="summary-legacy-0001" topic-id="topic-legacy-0002" range="(topic-legacy-0002,topic-legacy-0003)">
+        <title>阶段总结</title>
+      </summary>
+    </summaries>
+    <boundaries>
+      <boundary id="boundary-legacy-0001" range="(topic-legacy-0005,topic-legacy-0006)">
+        <title>边界</title>
+      </boundary>
+    </boundaries>
+  </sheet>
+</xmap-content>
+`
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<xmap-styles xmlns="urn:xmind:xmap:xmlns:style:2.0" version="2.0">
+  <styles>
+    <style id="style-root" type="topic">
+      <topic-properties fo:font-size="24pt" fo:font-weight="bold" svg:fill="#3f51b5"/>
+    </style>
+  </styles>
+  <themes>
+    <theme id="theme-legacy-0001">
+      <theme-properties>
+        <default-style ref="theme-legacy-0001.default"/>
+      </theme-properties>
+    </theme>
+  </themes>
+</xmap-styles>
+`
+
+  const metaXml = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<meta xmlns="urn:xmind:xmap:xmlns:meta:2.0" version="2.0">
+  <Author><Name>samples</Name></Author>
+  <Create><Time>2024-01-01 00:00:00</Time></Create>
+</meta>
+`
+
+  const zip = new JSZip()
+  zip.file('content.xml', contentXml, FILE_OPTIONS)
+  zip.file('styles.xml', stylesXml, FILE_OPTIONS)
+  zip.file('meta.xml', metaXml, FILE_OPTIONS)
+  zip.file('META-INF/manifest.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<manifest xmlns="urn:xmind:xmap:xmlns:manifest:1.0"/>\n', FILE_OPTIONS)
+  zip.file('Thumbnails/thumbnail.png', TINY_PNG, FILE_OPTIONS)
+  zip.file('resources/legacy-chart.png', png, FILE_OPTIONS)
+  zip.file('attachments/legacy-data.csv', csv, FILE_OPTIONS)
+  for (const dir of ['Thumbnails/', 'resources/', 'attachments/', 'META-INF/']) {
+    zip.file(dir, null, { dir: true, date: FIXED_DATE })
+  }
+
+  const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  await writeFile(join(outDir, '21-Xmind8旧版格式.xmind'), buffer)
+  console.log(`已生成 21-Xmind8旧版格式.xmind（${(buffer.length / 1024).toFixed(1)} KB）`)
+}
+
 async function main() {
   await mkdir(outDir, { recursive: true })
   await sample1()
@@ -470,6 +601,7 @@ async function main() {
   await sample5()
   await structureSamples()
   await sample20()
+  await sample21()
   console.log(`\n样本已写入：${outDir}`)
 }
 
