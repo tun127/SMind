@@ -23,6 +23,7 @@ import {
 import { parseXmind } from '@shared/xmind/parse'
 import { serializeXmind } from '@shared/xmind/serialize'
 import { activeSheetOf, buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
+import { imageExportFormatDef, type ImageExportFormat } from '@shared/export/types'
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
 import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '@shared/recovery'
 import { buildAppMenu } from './menu'
@@ -481,6 +482,36 @@ function registerIpc(): void {
     await fs.writeFile(target, content, 'utf8')
     return target
   })
+
+  /* ---- 图片导出（P6） ---- */
+
+  /**
+   * 渲染进程负责排版与栅格化，这里只弹保存框、落盘。
+   * SVG 是文本按 UTF-8 写，PNG/PDF 是字节按二进制写。
+   */
+  ipcMain.handle(
+    IPC.saveExport,
+    async (_e, data: Uint8Array | string, fileName: string, ext: ImageExportFormat): Promise<string | null> => {
+      const def = imageExportFormatDef(ext)
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: `导出为 ${def.label}`,
+        defaultPath: fileName || `思维导图.${def.ext}`,
+        filters: [
+          { name: def.label, extensions: [def.ext] },
+          { name: '所有文件', extensions: ['*'] }
+        ]
+      })
+      if (result.canceled || !result.filePath) return null
+
+      const target = result.filePath.toLowerCase().endsWith(`.${def.ext}`)
+        ? result.filePath
+        : `${result.filePath}.${def.ext}`
+
+      if (typeof data === 'string') await fs.writeFile(target, data, 'utf8')
+      else await fs.writeFile(target, Buffer.from(data))
+      return target
+    }
+  )
 
   ipcMain.on(IPC.confirmClose, () => {
     allowClose = true

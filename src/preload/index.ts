@@ -10,6 +10,7 @@ import {
   type SaveResult
 } from '@shared/ipc'
 import type { Workbook } from '@shared/model/types'
+import type { ImageExportFormat } from '@shared/export/types'
 import type { OutlineFormat } from '@shared/outline'
 import type { ThemeDefinition } from '@shared/theme'
 
@@ -78,7 +79,10 @@ const api: MindApi = {
     ipcRenderer.invoke(IPC.saveAttachmentAs, path, suggestedName) as Promise<boolean>,
 
   exportOutline: (workbook: Workbook, format: OutlineFormat) =>
-    ipcRenderer.invoke(IPC.exportOutline, workbook, format) as Promise<string | null>
+    ipcRenderer.invoke(IPC.exportOutline, workbook, format) as Promise<string | null>,
+
+  saveExport: (data: Uint8Array | string, fileName: string, ext: ImageExportFormat) =>
+    ipcRenderer.invoke(IPC.saveExport, data, fileName, ext) as Promise<string | null>
 }
 
 contextBridge.exposeInMainWorld('api', api)

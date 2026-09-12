@@ -35,6 +35,16 @@ import {
 import { MARKER_LABELS, RELATIONSHIP_CURVE_KEY, STRUCTURES } from '../src/shared/xmind/constants'
 import { ALL_PICKABLE_MARKERS, markerVisualOf } from '../src/renderer/src/render/markers'
 import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
+import { buildDrawing } from '../src/renderer/src/export/drawing'
+import { drawingToSvg } from '../src/renderer/src/export/svg'
+import { KATEX_INLINE_CSS, KATEX_INLINED_FONTS } from '../src/renderer/src/export/katex-assets'
+import { buildImagePdf } from '../src/shared/export/pdf'
+import {
+  IMAGE_EXPORT_FORMATS,
+  IMAGE_EXPORT_SCALES,
+  imageExportFormatDef,
+  type ImageExportFormat
+} from '../src/shared/export/types'
 import {
   IMAGE_FALLBACK,
   IMAGE_MAX_HEIGHT,
@@ -2563,6 +2573,264 @@ function testSearch(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.10 导出：绘图指令 / SVG / PDF                                     */
+/* ------------------------------------------------------------------ */
+
+/** 造一张覆盖各种元素的画布，供导出测试用 */
+function buildExportScene(): { layout: ReturnType<typeof layoutSheet>; colors: ReturnType<typeof themeColorsOf> } {
+  reset()
+  const rootId = root().id
+  store().setTitle(rootId, '导出测试')
+
+  const a = addChildOf(rootId, '带标记与标签')
+  store().toggleMarker(a, 'priority-1')
+  store().toggleMarker(a, 'task-quarter')
+  store().addLabel(a, '标签甲')
+  store().setNotes(a, '有备注')
+
+  const b = addChildOf(rootId, '带图片与公式')
+  store().setImage(b, { path: 'resources/pic.png', width: 120, height: 80 })
+  store().setFormula(b, '\\frac{a}{b}')
+
+  const c = addChildOf(b, '子主题')
+  store().setTitle(c, '子主题 & <特殊>')
+
+  store().select(a)
+  store().toggleMarker(c, 'star-red')
+
+  // 关系线需要按住 Ctrl 选中两个主题，这里直接调动作
+  store().select(a)
+  const sheetCurrent = sheet()
+  void sheetCurrent
+
+  const layout = layoutSheet(root(), fakeMeasure, {}, sheet())
+  return { layout, colors: themeColorsOf(store().workbook) }
+}
+
+function testExportDrawing(): void {
+  group('导出：绘图指令')
+
+  const { layout, colors } = buildExportScene()
+  const drawing = buildDrawing({ layout, colors, background: colors.canvas })
+
+  check('画布尺寸来自布局边界', drawing.width === layout.bounds.width && drawing.height === layout.bounds.height)
+  eq('背景色透传', drawing.background, colors.canvas)
+
+  const rects = drawing.ops.filter((op) => op.kind === 'rect')
+  const paths = drawing.ops.filter((op) => op.kind === 'path')
+  const texts = drawing.ops.filter((op) => op.kind === 'lineText')
+  const labels = drawing.ops.filter((op) => op.kind === 'text')
+  const badges = drawing.ops.filter((op) => op.kind === 'badge')
+  const pies = drawing.ops.filter((op) => op.kind === 'pie')
+  const glyphs = drawing.ops.filter((op) => op.kind === 'glyph')
+
+  check('每个节点都有一条文字行', texts.length >= layout.nodes.length, `${texts.length} vs ${layout.nodes.length}`)
+  check('根节点画成圆角矩形', rects.some((op) => op.kind === 'rect' && op.shadow === true))
+  check('一级主题的矩形带边框', rects.some((op) => op.kind === 'rect' && op.stroke !== undefined))
+  check('深层节点画下划线（不是矩形）', paths.some((op) => op.kind === 'path' && op.strokeWidth === 2))
+  check('连线按分支着色', paths.some((op) => op.kind === 'path' && colors.branches.includes(String(op.stroke))))
+
+  check('优先级标记画成数字徽标', badges.length >= 1)
+  eq('徽标文字是优先级数字', badges[0]?.kind === 'badge' ? badges[0].text : '', '1')
+  check('进度标记画成饼形', pies.length >= 1)
+  check('星标画成图形', glyphs.length >= 1)
+  check('标签画成底部胶囊', labels.some((op) => op.kind === 'text' && op.text === '标签甲'))
+
+  const textOf = drawing.ops.find((op) => op.kind === 'lineText' && op.segments.some((s) => s.text.includes('特殊')))
+  check('特殊字符原样进入指令（转义交给后端）', Boolean(textOf))
+
+  const formulaOp = drawing.ops.find((op) => op.kind === 'formula')
+  check('公式节点生成公式指令', Boolean(formulaOp))
+  check('没有位图时公式退回源码', formulaOp?.kind === 'formula' && formulaOp.href === undefined && formulaOp.fallbackText === '\\frac{a}{b}')
+
+  // 有图片资源时使用图片指令，没有时画占位框
+  const withoutImage = drawing.ops.filter((op) => op.kind === 'image').length
+  eq('没有图片资源时不生成 image 指令', withoutImage, 0)
+  const withImage = buildDrawing({
+    layout,
+    colors,
+    background: colors.canvas,
+    images: new Map([['resources/pic.png', 'data:image/png;base64,AAAA']])
+  })
+  check('有图片资源时生成 image 指令', withImage.ops.some((op) => op.kind === 'image'))
+
+  // 透明背景
+  const transparent = buildDrawing({ layout, colors, background: null })
+  eq('透明背景记为 null', transparent.background, null)
+
+  group('导出：SVG')
+
+  const svg = drawingToSvg(drawing)
+  check('SVG 有 XML 声明与命名空间', svg.startsWith('<?xml version="1.0" encoding="UTF-8"?>'))
+  check('SVG 带 viewBox', svg.includes(`viewBox="0 0 ${drawing.width} ${drawing.height}"`))
+  check('SVG 画了背景矩形', svg.includes(`fill="${colors.canvas}"`))
+  check('SVG 含文字元素', svg.includes('<text'))
+  check('SVG 含路径元素', svg.includes('<path'))
+  check('SVG 定义了投影滤镜', svg.includes('id="node-shadow"'))
+
+  // 用我们自己的 XML 解析器反向校验：生成的 SVG 必须是结构合法的 XML，
+  // 否则浏览器/其它软件打开就是一片报错
+  const parsedSvg = parseXml(svg)
+  check('导出的 SVG 是合法 XML', parsedSvg !== null && parsedSvg.local === 'svg', parsedSvg?.name ?? 'null')
+  eq('SVG 根节点的子元素数量大于 0', (parsedSvg?.children.length ?? 0) > 0, true)
+  check(
+    'SVG 里带特殊字符的文字没有被截断',
+    (svg.match(/<text/g) ?? []).length === (svg.match(/<\/text>/g) ?? []).length
+  )
+  const titleNode = [...(parsedSvg?.children ?? [])].find((child) => child.local === 'text')
+  check('解析回来的文字节点带内容', Boolean(titleNode && titleNode.text.length >= 0))
+
+  const transparentSvg = drawingToSvg(transparent)
+  check('透明背景的 SVG 不画背景矩形', !transparentSvg.includes('<rect x="0" y="0" width='))
+
+  // 转义：标题里的 & < > 必须变成实体，否则 SVG 直接坏掉
+  const escapeScene = buildDrawing({ layout, colors, background: null })
+  const escapeSvg = drawingToSvg({
+    ...escapeScene,
+    ops: [
+      {
+        kind: 'text',
+        x: 0,
+        y: 0,
+        text: '<a & b> "引号"',
+        fontSize: 12,
+        fontWeight: 400,
+        fill: '#000',
+        anchor: 'start',
+        baseline: 'middle'
+      }
+    ]
+  })
+  check('SVG 转义 & < >（文本内容）', escapeSvg.includes('&lt;a &amp; b&gt;'), escapeSvg.slice(escapeSvg.indexOf('<text'), escapeSvg.indexOf('<text') + 160))
+  check('文本内容里的引号保持原样（XML 文本里不需要转义）', escapeSvg.includes('"引号"'))
+
+  // 属性里的 & 必须转义，否则属性被截断
+  const attrSvg = drawingToSvg({
+    ...escapeScene,
+    ops: [
+      {
+        kind: 'image',
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 10,
+        href: 'mind-resource://local/a.png?x=1&y=2'
+      }
+    ]
+  })
+  check('SVG 转义属性里的 &', attrSvg.includes('href="mind-resource://local/a.png?x=1&amp;y=2"'), attrSvg.match(/href="[^"]*"/)?.[0] ?? '')
+
+  const fallbackSvg = drawingToSvg({
+    ...escapeScene,
+    ops: [
+      {
+        kind: 'formula',
+        x: 0,
+        y: 0,
+        w: 40,
+        h: 20,
+        source: 'x^2',
+        fallbackText: 'x^2',
+        fontSize: 14,
+        color: '#333'
+      }
+    ]
+  })
+  check('公式没有位图时在 SVG 里输出源码', fallbackSvg.includes('x^2') && !fallbackSvg.includes('<image'))
+
+  group('导出：PDF')
+
+  // 4x2 像素的假位图：RGB 共 24 字节
+  const rgb = new Uint8Array(4 * 2 * 3).fill(128)
+  const fakeCompressed = new Uint8Array([1, 2, 3, 4, 5])
+  const pdf = buildImagePdf({
+    pixelWidth: 4,
+    pixelHeight: 2,
+    rgb,
+    compressed: fakeCompressed,
+    rasterScale: 2,
+    title: '导出测试'
+  })
+  const pdfText = new TextDecoder('latin1').decode(pdf)
+
+  check('PDF 以 %PDF- 开头', pdfText.startsWith('%PDF-1.4'))
+  check('PDF 以 %%EOF 结尾', pdfText.trimEnd().endsWith('%%EOF'))
+  check('PDF 声明图像对象', pdfText.includes('/Subtype /Image'))
+  check('PDF 图像尺寸正确', pdfText.includes('/Width 4') && pdfText.includes('/Height 2'))
+  check('PDF 使用 FlateDecode', pdfText.includes('/Filter /FlateDecode'))
+  check('PDF 的 Length 与实际压缩数据一致', pdfText.includes(`/Length ${fakeCompressed.length}`))
+  // 4 像素 / 2 倍率 × 0.75 = 1.5pt；2 像素 → 0.75pt
+  check('PDF 页面按倍率换算尺寸', pdfText.includes('/MediaBox [0 0 1.5 0.75]'), pdfText.match(/MediaBox[^\]]*\]/)?.[0] ?? '')
+  check('PDF 内容流把图铺满整页', pdfText.includes('q 1.5 0 0 0.75 0 0 cm /Im0 Do Q'))
+  check(
+    'PDF 中文标题按 UTF-16BE 十六进制写入（不会被截断成乱码）',
+    pdfText.includes('/Title <FEFF5BFC51FA6D4B8BD5>'),
+    pdfText.match(/\/Title [^/]*/)?.[0] ?? ''
+  )
+  const asciiPdf = new TextDecoder('latin1').decode(
+    buildImagePdf({ pixelWidth: 2, pixelHeight: 2, rgb: new Uint8Array(12), compressed: new Uint8Array(1), title: 'demo' })
+  )
+  check('PDF 纯 ASCII 标题用字面量写法', asciiPdf.includes('/Title (demo)'))
+  check('PDF 标题里的括号会被转义', new TextDecoder('latin1').decode(
+    buildImagePdf({ pixelWidth: 2, pixelHeight: 2, rgb: new Uint8Array(12), compressed: new Uint8Array(1), title: 'a(b)c' })
+  ).includes('/Title (a\\(b\\)c)'))
+
+  // xref 偏移必须能对上对象起始位置，否则 PDF 阅读器会报错
+  const xrefAt = pdfText.indexOf('xref')
+  const startxref = Number(pdfText.slice(pdfText.lastIndexOf('startxref') + 9).trim().split(/\s/)[0])
+  eq('startxref 指向 xref 表', startxref, xrefAt)
+  const offsets = [...pdfText.slice(xrefAt).matchAll(/(\d{10}) 00000 n/g)].map((m) => Number(m[1]))
+  eq('xref 里对象数量正确', offsets.length, 6)
+  check(
+    '每个对象的偏移都指向 "N 0 obj"',
+    offsets.every((offset, index) => pdfText.slice(offset, offset + 12).startsWith(`${index + 1} 0 obj`)),
+    offsets.map((offset, index) => `${index + 1}@${offset}:${pdfText.slice(offset, offset + 8)}`).join(' | ')
+  )
+
+  let pdfError = ''
+  try {
+    buildImagePdf({ pixelWidth: 4, pixelHeight: 2, rgb: new Uint8Array(5), compressed: fakeCompressed })
+  } catch (error) {
+    pdfError = (error as Error).message
+  }
+  check('PDF：RGB 长度不对时报错', pdfError.includes('长度与尺寸不匹配'), pdfError)
+
+  let pdfZero = ''
+  try {
+    buildImagePdf({ pixelWidth: 0, pixelHeight: 0, rgb: new Uint8Array(0), compressed: fakeCompressed })
+  } catch (error) {
+    pdfZero = (error as Error).message
+  }
+  check('PDF：尺寸为 0 时报错', pdfZero.includes('尺寸非法'), pdfZero)
+
+  group('导出：KaTeX 资源（公式位图用）')
+
+  check('内联字体齐全（20 个 woff2）', KATEX_INLINED_FONTS.length === 20, String(KATEX_INLINED_FONTS.length))
+  check('KaTeX 样式里没有未处理的字体路径', !KATEX_INLINE_CSS.includes('url(fonts/'))
+  check('KaTeX 样式里字体已内联', KATEX_INLINE_CSS.includes('url(data:font/woff2;base64,'))
+  check('KaTeX 样式含关键类名', KATEX_INLINE_CSS.includes('.katex'))
+}
+
+/** 导出格式表与倍率 */
+function testExportFormats(): void {
+  group('导出：格式与选项')
+
+  eq('三种格式', IMAGE_EXPORT_FORMATS.map((item) => item.id), ['png', 'svg', 'pdf'])
+  eq('扩展名正确', IMAGE_EXPORT_FORMATS.map((item) => item.ext), ['png', 'svg', 'pdf'])
+  check('只有 SVG 不需要倍率', IMAGE_EXPORT_FORMATS.filter((item) => !item.scalable).map((item) => item.id).join(',') === 'svg')
+  eq('倍率选项', IMAGE_EXPORT_SCALES, [1, 2, 3, 4])
+  eq('取格式定义', imageExportFormatDef('pdf').label, 'PDF 文档')
+
+  let bad = ''
+  try {
+    imageExportFormatDef('docx' as ImageExportFormat)
+  } catch (error) {
+    bad = (error as Error).message
+  }
+  check('未知格式给出可读错误', bad.includes('不支持的导出格式'), bad)
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -2588,6 +2856,8 @@ async function main(): Promise<void> {
   testLegacy()
   testOutline()
   testSearch()
+  testExportDrawing()
+  testExportFormats()
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()

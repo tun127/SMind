@@ -1,4 +1,5 @@
 import type { Workbook } from './model/types'
+import type { ImageExportFormat } from './export/types'
 import type { OutlineFormat } from './outline'
 import type { ThemeDefinition } from './theme'
 
@@ -68,7 +69,9 @@ export const IPC = {
   openAttachment: 'resource:open-attachment',
   saveAttachmentAs: 'resource:save-attachment-as',
   /* ---- 大纲导出（P5） ---- */
-  exportOutline: 'outline:export'
+  exportOutline: 'outline:export',
+  /* ---- 图片导出（P6） ---- */
+  saveExport: 'export:save'
 } as const
 
 export type MenuCommand =
@@ -135,4 +138,11 @@ export interface MindApi {
   /* ---- 大纲导出（P5） ---- */
   /** 导出当前画布的大纲（TXT / Markdown / OPML），取消返回 null，成功返回写入路径 */
   exportOutline(workbook: Workbook, format: OutlineFormat): Promise<string | null>
+
+  /* ---- 图片导出（P6） ---- */
+  /**
+   * 把已经生成好的导出内容写到用户选择的位置。
+   * 渲染进程负责排版与栅格化，主进程只负责弹保存框与落盘。
+   */
+  saveExport(data: Uint8Array | string, fileName: string, ext: ImageExportFormat): Promise<string | null>
 }

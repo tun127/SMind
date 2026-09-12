@@ -11,6 +11,7 @@ import StatusBar from './components/StatusBar'
 import ThemePanel from './components/ThemePanel'
 import Toolbar from './components/Toolbar'
 import { RecoveryDialog, ShortcutsDialog, UnsavedDialog } from './components/Dialogs'
+import ExportDialog from './components/ExportDialog'
 import { viewportActions } from './render/viewport'
 import { snapshotForSave, useEditor } from './store/editor'
 
@@ -32,6 +33,8 @@ export default function App(): ReactElement {
   const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node' | 'search'>('none')
   /** 左侧大纲面板：与画布并排显示，改哪边另一边都跟着变 */
   const [showOutline, setShowOutline] = useState(false)
+  /** 导出设置框 */
+  const [showExport, setShowExport] = useState(false)
   const toastTimer = useRef<number | null>(null)
   /** 是否还停在「发现未保存内容」这一步没做决定 */
   const recoveryPendingRef = useRef(false)
@@ -407,7 +410,8 @@ export default function App(): ReactElement {
           onThemes: () => setSidePanel((current) => (current === 'theme' ? 'none' : 'theme')),
           onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node')),
           onOutline: () => setShowOutline((current) => !current),
-          onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search'))
+          onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
+          onExport: () => setShowExport(true)
         }}
       />
 
@@ -453,6 +457,8 @@ export default function App(): ReactElement {
       )}
 
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
+
+      {showExport && <ExportDialog onClose={() => setShowExport(false)} onNotify={showToast} />}
 
       {toast && <div className="toast">{toast}</div>}
     </div>

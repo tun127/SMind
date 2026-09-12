@@ -5,6 +5,7 @@ import {
   FilePlus,
   FolderOpen,
   Frame,
+  ImageDown,
   ListTree,
   Maximize,
   Palette,
@@ -35,6 +36,7 @@ export interface ToolbarActions {
   onNodes(): void
   onOutline(): void
   onSearch(): void
+  onExport(): void
 }
 
 interface Props {
@@ -245,6 +247,14 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           onClick={actions.onSearch}
         >
           <SearchIcon size={17} />
+        </button>
+        <button
+          type="button"
+          className="tool-btn"
+          title="导出为图片 / SVG / PDF"
+          onClick={actions.onExport}
+        >
+          <ImageDown size={17} />
         </button>
         <button type="button" className="tool-btn" title="主题外观" onClick={actions.onThemes}>
           <Palette size={17} />
