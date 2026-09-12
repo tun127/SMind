@@ -11,11 +11,14 @@ export interface ViewportActions {
   zoomTo(zoom: number): void
   /** 把指定节点滚动到可见范围内（新节点可能生成在视口外） */
   ensureVisible(id: string): void
+  /** 把指定节点移到视口正中（搜索命中跳转用） */
+  centerOn(id: string): void
 }
 
 export const viewportActions: ViewportActions = {
   fit: () => {},
   centerRoot: () => {},
   zoomTo: () => {},
-  ensureVisible: () => {}
+  ensureVisible: () => {},
+  centerOn: () => {}
 }

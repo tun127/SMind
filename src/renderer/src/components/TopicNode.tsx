@@ -17,6 +17,10 @@ export interface TopicNodeProps {
   editing: boolean
   editingRich: RichText | null
   highlighted: boolean
+  /** 命中当前搜索关键词 */
+  searchHit: boolean
+  /** 被筛选条件排除（淡出显示） */
+  dimmed: boolean
   dragOffset: { dx: number; dy: number } | null
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, id: string) => void
   onDoubleClick: (id: string) => void
@@ -50,6 +54,8 @@ function TopicNodeInner({
   editing,
   editingRich,
   highlighted,
+  searchHit,
+  dimmed,
   dragOffset,
   onPointerDown,
   onDoubleClick,
@@ -94,6 +100,8 @@ function TopicNodeInner({
     node.depth === 0 ? 'topic--root' : node.depth === 1 ? 'topic--level1' : 'topic--deep',
     selected ? 'topic--selected' : '',
     highlighted ? 'topic--drop' : '',
+    searchHit ? 'topic--hit' : '',
+    dimmed ? 'topic--dimmed' : '',
     dragOffset ? 'topic--dragging' : '',
     editing ? 'topic--editing' : ''
   ]

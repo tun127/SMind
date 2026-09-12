@@ -51,6 +51,109 @@ textarea {
   left: 320px;
 }
 
+/* 底部画布标签栏：画布让出底部一条 */
+.app__body--tabs .canvas {
+  bottom: 31px;
+}
+
+/* ------------------------------------------------------------------ */
+/* 画布标签栏                                                          */
+/* ------------------------------------------------------------------ */
+
+.sheet-tabs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 31px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 24px;
+  border-radius: 5px;
+  background: rgba(140, 148, 160, 0.12);
+}
+
+.sheet-tab--active {
+  background: rgba(47, 107, 255, 0.16);
+}
+
+.sheet-tab__name {
+  max-width: 180px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sheet-tab--active .sheet-tab__name {
+  font-weight: 600;
+}
+
+.sheet-tab__input {
+  width: 140px;
+  height: 20px;
+  margin: 0 4px;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.sheet-tab__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 3px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sheet-tab__close:hover {
+  background: #eb5757;
+  color: #fff;
+}
+
+.sheet-tab--add {
+  width: 24px;
+  justify-content: center;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sheet-tab--add:hover {
+  background: rgba(47, 107, 255, 0.16);
+  color: var(--accent);
+}
+
 /* ------------------------------------------------------------------ */
 /* 大纲面板                                                            */
 /* ------------------------------------------------------------------ */
@@ -218,6 +321,219 @@ textarea {
 
 .outline-panel__hint b {
   color: var(--text);
+}
+
+/* ------------------------------------------------------------------ */
+/* 搜索 / 筛选 / 统计面板                                              */
+/* ------------------------------------------------------------------ */
+
+.side-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 8px;
+}
+
+.search-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.search-hit {
+  display: flex;
+  align-items: stretch;
+  border-radius: 6px;
+  background: rgba(140, 148, 160, 0.09);
+}
+
+.search-hit--active {
+  background: rgba(47, 107, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(47, 107, 255, 0.35);
+}
+
+.search-hit__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-hit__title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-hit__snippet {
+  display: block;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-hit__field {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(140, 148, 160, 0.25);
+  font-size: 10px;
+}
+
+.search-hit__replace {
+  flex: none;
+  width: 26px;
+  border: none;
+  border-left: 1px solid rgba(140, 148, 160, 0.25);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.search-hit__replace:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.chip--toggle {
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chip--toggle:hover {
+  border-color: rgba(140, 148, 160, 0.5);
+}
+
+.chip--active {
+  border-color: var(--accent);
+  background: rgba(47, 107, 255, 0.16);
+  color: var(--accent);
+}
+
+.chip__count {
+  margin-left: 2px;
+  opacity: 0.65;
+  font-size: 10px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.stats-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 2px;
+  border-radius: 6px;
+  background: rgba(140, 148, 160, 0.1);
+}
+
+.stats-cell__value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.stats-cell__label {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.stats-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.stats-lines b {
+  color: var(--text);
+}
+
+.stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 5px;
+  background: rgba(140, 148, 160, 0.08);
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stats-row:hover {
+  background: rgba(47, 107, 255, 0.14);
+}
+
+.stats-row__name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats-row__count {
+  flex: none;
+  color: var(--text-dim);
+}
+
+/* 搜索命中的节点：加一圈醒目的描边 */
+.topic--hit {
+  box-shadow: 0 0 0 3px rgba(255, 138, 0, 0.85), 0 6px 16px rgba(16, 24, 40, 0.18) !important;
+}
+
+/* 被筛选排除的节点：淡出但仍可点选 */
+.topic--dimmed {
+  opacity: 0.22;
+  filter: saturate(0.4);
 }
 
 /* ------------------------------------------------------------------ */

@@ -12,6 +12,7 @@ import {
   Redo2,
   RotateCcw,
   Save,
+  Search as SearchIcon,
   Spline,
   Tag,
   Trash2,
@@ -33,6 +34,7 @@ export interface ToolbarActions {
   onThemes(): void
   onNodes(): void
   onOutline(): void
+  onSearch(): void
 }
 
 interface Props {
@@ -235,6 +237,14 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         </button>
         <button type="button" className="tool-btn" title="节点属性（标记 / 标签 / 备注 / 超链接）" onClick={actions.onNodes}>
           <Tag size={17} />
+        </button>
+        <button
+          type="button"
+          className="tool-btn"
+          title="搜索 / 筛选 / 统计（Ctrl+F）"
+          onClick={actions.onSearch}
+        >
+          <SearchIcon size={17} />
         </button>
         <button type="button" className="tool-btn" title="主题外观" onClick={actions.onThemes}>
           <Palette size={17} />

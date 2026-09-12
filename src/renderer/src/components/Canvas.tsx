@@ -3,6 +3,7 @@ import { layoutSheet } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import type { Topic } from '@shared/model/types'
 import { activeRoot, activeSheet, isSelfOrDescendant } from '@shared/model/tree'
+import { applyTopicFilter, hitTopicIds, isFilterActive, searchSheet } from '@shared/search'
 import { measureTopic, bumpMeasureEpoch } from '../render/measure'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
@@ -24,6 +25,8 @@ export default function Canvas(): ReactElement {
   const editingRich = useEditor((s) => s.editingRich)
   const setPan = useEditor((s) => s.setPan)
   const setZoom = useEditor((s) => s.setZoom)
+  const search = useEditor((s) => s.search)
+  const filter = useEditor((s) => s.filter)
 
   const [dragVisual, setDragVisual] = useState<{ id: string; dx: number; dy: number } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
@@ -216,12 +219,35 @@ export default function Canvas(): ReactElement {
     [setPan]
   )
 
+  /** 把某个节点移到视口正中（搜索跳转用，缩放保持不变） */
+  const centerOn = useCallback(
+    (id: string): void => {
+      const el = containerRef.current
+      const lay = layoutRef.current
+      if (!el || !lay) return
+      const node = lay.nodeMap.get(id)
+      if (!node) return
+      const z = zoomRef.current
+      const width = el.clientWidth
+      const height = el.clientHeight
+      if (width === 0 || height === 0) return
+      // 让节点中心落在视口中心；搜索面板占了右侧，这里往左让出一点，避免被面板挡住
+      const targetX = width / 2 - 150
+      const targetY = height / 2
+      const centerX = (node.x + node.width / 2) * z
+      const centerY = (node.y + node.height / 2) * z
+      setPan({ x: targetX - centerX, y: targetY - centerY })
+    },
+    [setPan]
+  )
+
   useEffect(() => {
     viewportActions.fit = fit
     viewportActions.centerRoot = centerRoot
     viewportActions.zoomTo = zoomTo
     viewportActions.ensureVisible = ensureVisible
-  }, [fit, centerRoot, zoomTo, ensureVisible])
+    viewportActions.centerOn = centerOn
+  }, [fit, centerRoot, zoomTo, ensureVisible, centerOn])
 
   /* ---- 进入编辑态时保证节点可见（新建主题可能超出视口） ---- */
   useEffect(() => {
@@ -561,6 +587,20 @@ export default function Canvas(): ReactElement {
   }, [layout, pan.x, pan.y, zoom, size.width, size.height, editingId])
 
   const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes])
+
+  /* ---- 搜索命中与筛选：面板与画布共用 store 里的同一份条件 ---- */
+  const sheet = useMemo(() => activeSheet(workbook), [workbook])
+
+  const searchHits = useMemo(
+    () => (search.query.trim().length > 0 ? hitTopicIds(searchSheet(sheet, search.query, search.options)) : null),
+    [sheet, search.query, search.options]
+  )
+
+  const filterResult = useMemo(
+    () => (isFilterActive(filter) ? applyTopicFilter(sheet.rootTopic, filter) : null),
+    [sheet, filter]
+  )
+
   const visibleEdges = useMemo(
     () => layout.edges.filter((e) => visibleIds.has(e.toId) || visibleIds.has(e.fromId)),
     [layout.edges, visibleIds]
@@ -749,6 +789,8 @@ export default function Canvas(): ReactElement {
             editing={editingId === node.id}
             editingRich={editingId === node.id ? editingRich : null}
             highlighted={dropTarget === node.id || handleDrag?.targetId === node.id}
+            searchHit={searchHits ? searchHits.has(node.id) : false}
+            dimmed={filterResult ? !filterResult.keep.has(node.id) : false}
             dragOffset={dragVisual && dragVisual.id === node.id ? { dx: dragVisual.dx, dy: dragVisual.dy } : null}
             onPointerDown={handleNodePointerDown}
             onDoubleClick={(id) => useEditor.getState().beginEdit(id)}

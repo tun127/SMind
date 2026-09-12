@@ -5,6 +5,8 @@ import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
 import OutlinePanel from './components/OutlinePanel'
 import RichFormatBar from './components/RichFormatBar'
+import SearchPanel from './components/SearchPanel'
+import SheetTabs from './components/SheetTabs'
 import StatusBar from './components/StatusBar'
 import ThemePanel from './components/ThemePanel'
 import Toolbar from './components/Toolbar'
@@ -27,7 +29,7 @@ export default function App(): ReactElement {
   const [pending, setPending] = useState<{ run: () => void } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   /** 右侧抽屉：同一时刻只开一个 */
-  const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node'>('none')
+  const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node' | 'search'>('none')
   /** 左侧大纲面板：与画布并排显示，改哪边另一边都跟着变 */
   const [showOutline, setShowOutline] = useState(false)
   const toastTimer = useRef<number | null>(null)
@@ -338,6 +340,10 @@ export default function App(): ReactElement {
         } else if (key === 'v') {
           e.preventDefault()
           store.paste()
+        } else if (key === 'f') {
+          // Ctrl+F：打开搜索面板（与 Xmind 一致）
+          e.preventDefault()
+          setSidePanel('search')
         }
         return
       }
@@ -400,15 +406,18 @@ export default function App(): ReactElement {
           onHelp: () => setShowShortcuts(true),
           onThemes: () => setSidePanel((current) => (current === 'theme' ? 'none' : 'theme')),
           onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node')),
-          onOutline: () => setShowOutline((current) => !current)
+          onOutline: () => setShowOutline((current) => !current),
+          onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search'))
         }}
       />
 
-      <div className={showOutline ? 'app__body app__body--with-outline' : 'app__body'}>
+      <div className={showOutline ? 'app__body app__body--tabs app__body--with-outline' : 'app__body app__body--tabs'}>
         {showOutline && <OutlinePanel onClose={() => setShowOutline(false)} onNotify={showToast} />}
         <Canvas />
+        <SheetTabs onNotify={showToast} />
         {sidePanel === 'theme' && <ThemePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
         {sidePanel === 'node' && <NodePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
+        {sidePanel === 'search' && <SearchPanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
       </div>
 
       {/* 仅在进入编辑态时出现 */}

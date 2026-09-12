@@ -1,8 +1,16 @@
 import { create } from 'zustand'
 import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } from 'immer'
 import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
-import { createId, createTopic, createWorkbook } from '@shared/model/factory'
+import { createId, createSheet, createTopic, createWorkbook } from '@shared/model/factory'
 import { hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
+import {
+  EMPTY_FILTER,
+  countOccurrences,
+  countTitleMatches,
+  replaceInText,
+  type SearchOptions,
+  type TopicFilter
+} from '@shared/search'
 import { DEFAULT_THEME, getThemeColors } from '@shared/theme'
 import {
   activeRoot,
@@ -14,7 +22,8 @@ import {
   findParent,
   findTopic,
   isSelfOrDescendant,
-  moveTopic
+  moveTopic,
+  walk
 } from '@shared/model/tree'
 import {
   buildRange,
@@ -41,6 +50,19 @@ interface HistoryEntry {
 /** 合并窗口：同一个 coalesceKey 在此时间内的连续操作算作一步 */
 const COALESCE_WINDOW_MS = 1500
 
+/** 搜索状态：条件放在 store 里，画布与搜索面板才能用同一份条件算命中 */
+export interface SearchState {
+  query: string
+  replacement: string
+  options: Required<SearchOptions>
+}
+
+const EMPTY_SEARCH: SearchState = {
+  query: '',
+  replacement: '',
+  options: { caseSensitive: false, inNotes: false, inLabels: false }
+}
+
 export interface EditorState {
   workbook: Workbook
   filePath: string | null
@@ -59,8 +81,34 @@ export interface EditorState {
   zoom: number
   pan: { x: number; y: number }
 
+  /** 搜索条件：面板与画布共用，保证两边看到的命中完全一致 */
+  search: SearchState
+  /** 按标记 / 标签筛选 */
+  filter: TopicFilter
+
   undoStack: HistoryEntry[]
   redoStack: HistoryEntry[]
+
+  /* ---- 检索（P7） ---- */
+  setSearchQuery(query: string): void
+  setSearchReplacement(replacement: string): void
+  setSearchOption(key: keyof SearchOptions, value: boolean): void
+  resetSearch(): void
+  /** 把标题里的关键词全部替换掉，返回替换处数 */
+  replaceAllInTitles(): number
+  /** 替换某一个节点标题里的关键词，返回替换处数 */
+  replaceInTopic(topicId: string): number
+
+  /* ---- 筛选（P7） ---- */
+  toggleFilterMarker(markerId: string): void
+  toggleFilterLabel(label: string): void
+  clearFilter(): void
+
+  /* ---- 多画布（P7） ---- */
+  addSheet(): string
+  removeSheet(id: string): void
+  renameSheet(id: string, title: string): void
+  setActiveSheet(id: string): void
 
   /* ---- 视图 ---- */
   setZoom(zoom: number): void
@@ -217,6 +265,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
   zoom: 1,
   pan: { x: 0, y: 0 },
 
+  search: { ...EMPTY_SEARCH },
+  filter: { ...EMPTY_FILTER },
+
   undoStack: [],
   redoStack: [],
 
@@ -229,6 +280,141 @@ export const useEditor = create<EditorState>()((set, get) => ({
   zoomBy: (factor) => set((s) => ({ zoom: clampZoom(s.zoom * factor) })),
 
   setPan: (pan) => set({ pan }),
+
+  /* ------------------------------------------------------------------ */
+  /* 检索与筛选                                                          */
+  /* ------------------------------------------------------------------ */
+
+  setSearchQuery: (query) => set((s) => ({ search: { ...s.search, query } })),
+
+  setSearchReplacement: (replacement) => set((s) => ({ search: { ...s.search, replacement } })),
+
+  setSearchOption: (key, value) =>
+    set((s) => ({ search: { ...s.search, options: { ...s.search.options, [key]: value } } })),
+
+  resetSearch: () => set({ search: { ...EMPTY_SEARCH } }),
+
+  replaceAllInTitles: () => {
+    const { search, workbook } = get()
+    const query = search.query
+    if (query.length === 0) return 0
+
+    // 先按当前条件数出总处数（mutate 不返回值），再统一替换
+    const total = countTitleMatches(workbook, query, search.options)
+    if (total === 0) return 0
+
+    get().mutate((draft) => {
+      for (const sheet of draft.sheets) {
+        walk(sheet.rootTopic, (topic) => {
+          const result = replaceInText(topic.title, query, search.replacement, search.options.caseSensitive)
+          if (result.count === 0) return
+          topic.title = result.text
+          // 文本长度变了，原来的富文本区间就对不上了，必须一并清掉
+          topic.titleRich = undefined
+        })
+      }
+    }, '替换全部')
+    return total
+  },
+
+  replaceInTopic: (topicId) => {
+    const { search, workbook } = get()
+    const query = search.query
+    if (query.length === 0) return 0
+
+    const root = activeRoot(workbook)
+    const topic = findTopic(root, topicId)
+    if (!topic) return 0
+    const count = countOccurrences(topic.title, query, search.options.caseSensitive)
+    if (count === 0) return 0
+
+    get().mutate((draft) => {
+      const target = findTopic(activeRoot(draft), topicId)
+      if (!target) return
+      const result = replaceInText(target.title, query, search.replacement, search.options.caseSensitive)
+      target.title = result.text
+      target.titleRich = undefined
+    }, '替换文本')
+    return count
+  },
+
+  toggleFilterMarker: (markerId) =>
+    set((s) => ({
+      filter: {
+        ...s.filter,
+        markers: s.filter.markers.includes(markerId)
+          ? s.filter.markers.filter((id) => id !== markerId)
+          : [...s.filter.markers, markerId]
+      }
+    })),
+
+  toggleFilterLabel: (label) =>
+    set((s) => ({
+      filter: {
+        ...s.filter,
+        labels: s.filter.labels.includes(label)
+          ? s.filter.labels.filter((item) => item !== label)
+          : [...s.filter.labels, label]
+      }
+    })),
+
+  clearFilter: () => set({ filter: { ...EMPTY_FILTER } }),
+
+  /* ------------------------------------------------------------------ */
+  /* 多画布                                                              */
+  /* ------------------------------------------------------------------ */
+
+  addSheet: () => {
+    const { workbook } = get()
+    const sheet = createSheet(`画布 ${workbook.sheets.length + 1}`, '中心主题')
+    get().mutate((draft) => {
+      draft.sheets.push(sheet)
+      draft.activeSheetId = sheet.id
+    }, '新建画布')
+    set({ selection: [sheet.rootTopic.id], editingId: null, editingText: '', editingRich: null, zoom: 1, pan: { x: 0, y: 0 } })
+    return sheet.id
+  },
+
+  removeSheet: (id) => {
+    const { workbook } = get()
+    // 至少留一张画布
+    if (workbook.sheets.length <= 1) return
+    const index = workbook.sheets.findIndex((sheet) => sheet.id === id)
+    if (index < 0) return
+    const next = workbook.sheets[index + 1] ?? workbook.sheets[index - 1]
+
+    get().mutate((draft) => {
+      draft.sheets = draft.sheets.filter((sheet) => sheet.id !== id)
+      if (draft.activeSheetId === id) draft.activeSheetId = next.id
+    }, '删除画布')
+    set({ selection: [], editingId: null, editingText: '', editingRich: null, zoom: 1, pan: { x: 0, y: 0 } })
+  },
+
+  renameSheet: (id, title) => {
+    get().mutate((draft) => {
+      const sheet = draft.sheets.find((item) => item.id === id)
+      if (sheet) sheet.title = title
+    }, '重命名画布')
+  },
+
+  /**
+   * 切换画布不写历史、也不标记未保存：切标签页本身不是对内容的修改。
+   * activeSheetId 会在下一次保存时一并写进文件。
+   */
+  setActiveSheet: (id) =>
+    set((s) => {
+      if (s.workbook.activeSheetId === id) return {}
+      if (!s.workbook.sheets.some((sheet) => sheet.id === id)) return {}
+      return {
+        workbook: { ...s.workbook, activeSheetId: id },
+        selection: [],
+        editingId: null,
+        editingText: '',
+        editingRich: null,
+        zoom: 1,
+        pan: { x: 0, y: 0 }
+      }
+    }),
 
   /* ------------------------------------------------------------------ */
   /* 文档                                                                */

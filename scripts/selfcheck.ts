@@ -65,6 +65,18 @@ import {
   type OutlineFormat
 } from '../src/shared/outline'
 import {
+  applyTopicFilter,
+  collectLabels,
+  countOccurrences,
+  countTitleMatches,
+  hitTopicIds,
+  isFilterActive,
+  replaceInText,
+  searchWorkbook,
+  sheetStats,
+  snippetOf
+} from '../src/shared/search'
+import {
   hasFormatting,
   plainTextOf,
   richFromPlain,
@@ -2379,6 +2391,178 @@ function countSelfClosing(opml: string): number {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.9 检索 / 替换 / 筛选 / 统计 / 多画布                             */
+/* ------------------------------------------------------------------ */
+
+function testSearch(): void {
+  group('搜索：计数与片段')
+
+  eq('统计出现次数', countOccurrences('abcabc', 'abc'), 2)
+  eq('默认不区分大小写', countOccurrences('AbC', 'abc'), 1)
+  eq('区分大小写时大小写不同就不算命中', countOccurrences('AbC', 'abc', true), 0)
+  eq('空关键词返回 0', countOccurrences('abc', ''), 0)
+  eq('重叠不算两次（不重叠前进）', countOccurrences('aaaa', 'aa'), 2)
+  check('片段带省略号', snippetOf('前面很长的一段文字关键词后面还有很长的一段文字', '关键词', false, 4).includes('关键词'))
+
+  group('搜索：替换')
+
+  eq('替换全部', replaceInText('a-b-a', 'a', 'X').text, 'X-b-X')
+  eq('替换次数', replaceInText('a-b-a', 'a', 'X').count, 2)
+  eq('替换为空串等于删除', replaceInText('abc', 'b', '').text, 'ac')
+  eq('没有命中时原样返回', replaceInText('abc', 'z', 'X').text, 'abc')
+  eq('没有命中时次数为 0', replaceInText('abc', 'z', 'X').count, 0)
+  eq('替换内容含特殊字符不被当成模式', replaceInText('a.a', '.', '$1').text, 'a$1a')
+  eq('空关键词不动文本', replaceInText('abc', '', 'X').text, 'abc')
+
+  group('搜索：在工作簿里查')
+
+  reset()
+  const sRoot = root().id
+  const a = addChildOf(sRoot, '设计评审')
+  const b = addChildOf(sRoot, '评审记录')
+  const c = addChildOf(sRoot, '无关主题')
+  store().setNotes(a, '评审要点：先看交互')
+  store().addLabel(b, '评审')
+  store().setTitle(c, '设计草稿')
+
+  const byTitle = searchWorkbook(store().workbook, '评审')
+  eq('标题命中两个节点', byTitle.filter((hit) => hit.field === 'title').map((hit) => hit.title), ['设计评审', '评审记录'])
+  eq('默认不搜备注', byTitle.some((hit) => hit.field === 'notes'), false)
+  eq('默认不搜标签', byTitle.some((hit) => hit.field === 'label'), false)
+
+  const withNotes = searchWorkbook(store().workbook, '要点', { inNotes: true })
+  eq('打开备注后能命中备注', withNotes.map((hit) => hit.field), ['notes'])
+  eq('备注命中的节点正确', withNotes[0].topicId, a)
+
+  const withLabels = searchWorkbook(store().workbook, '评审', { inLabels: true })
+  check('打开标签后能命中标签', withLabels.some((hit) => hit.field === 'label'))
+  eq('命中集合去重', hitTopicIds(withLabels).size, 2)
+
+  eq('空关键词不返回命中', searchWorkbook(store().workbook, '').length, 0)
+  eq('命中带层级', searchWorkbook(store().workbook, '设计评审')[0].depth, 1)
+
+  group('搜索：替换落库')
+
+  store().setSearchQuery('评审')
+  store().setSearchReplacement('X')
+  eq('替换前的命中处数', countTitleMatches(store().workbook, '评审'), 2)
+  const replaced = store().replaceAllInTitles()
+  eq('替换全部返回处数', replaced, 2)
+  eq('标题已被替换', findTopic(activeRoot(store().workbook), a)?.title, '设计X')
+  eq('第二个也被替换', findTopic(activeRoot(store().workbook), b)?.title, 'X记录')
+  eq('无关主题没被改', findTopic(activeRoot(store().workbook), c)?.title, '设计草稿')
+  store().undo()
+  eq('Ctrl+Z 能撤销替换', findTopic(activeRoot(store().workbook), a)?.title, '设计评审')
+
+  const oneCount = store().replaceInTopic(c)
+  eq('单条替换：没有命中时返回 0', oneCount, 0)
+  store().setTitle(c, '设计草稿评审')
+  const oneCount2 = store().replaceInTopic(c)
+  eq('单条替换：命中时返回处数', oneCount2, 1)
+  eq('单条替换结果', findTopic(activeRoot(store().workbook), c)?.title, '设计草稿X')
+
+  group('筛选：按标记与标签')
+
+  reset()
+  const fRoot = root().id
+  const m1 = addChildOf(fRoot, '高优先级')
+  store().toggleMarker(m1, 'priority-1')
+  const m2 = addChildOf(fRoot, '低优先级')
+  store().toggleMarker(m2, 'priority-5')
+  const m3 = addChildOf(fRoot, '带标签的高优先级')
+  store().toggleMarker(m3, 'priority-1')
+  store().addLabel(m3, '重要')
+  const m4 = addChildOf(fRoot, '既无标记也无标签')
+
+  eq('空筛选不算激活', isFilterActive({ markers: [], labels: [] }), false)
+  eq('空筛选时全部算命中', applyTopicFilter(activeRoot(store().workbook), { markers: [], labels: [] }).hits.size, 0)
+
+  const byMarker = applyTopicFilter(activeRoot(store().workbook), { markers: ['priority-1'], labels: [] })
+  eq('按标记筛选命中两个', byMarker.hits.size, 2)
+  check('按标记命中包含 m1', byMarker.hits.has(m1))
+  check('按标记命中包含 m3', byMarker.hits.has(m3))
+  check('未命中的节点不在保留集合里', !byMarker.keep.has(m4))
+  check('根节点被保留（命中节点的祖先）', byMarker.keep.has(fRoot))
+
+  const byTwoMarkers = applyTopicFilter(activeRoot(store().workbook), {
+    markers: ['priority-1', 'priority-5'],
+    labels: []
+  })
+  eq('多个标记之间是「或」', byTwoMarkers.hits.size, 3)
+
+  const byMarkerAndLabel = applyTopicFilter(activeRoot(store().workbook), {
+    markers: ['priority-1'],
+    labels: ['重要']
+  })
+  eq('标记与标签之间是「且」', byMarkerAndLabel.hits.size, 1)
+  check('且关系命中 m3', byMarkerAndLabel.hits.has(m3))
+
+  const byLabel = applyTopicFilter(activeRoot(store().workbook), { markers: [], labels: ['重要'] })
+  eq('只按标签筛选', byLabel.hits.size, 1)
+
+  const labels = collectLabels(store().workbook)
+  eq('收集到的标签', labels.map((item) => [item.label, item.count]), [['重要', 1]])
+
+  group('统计')
+
+  reset()
+  const stRoot = root().id
+  const s1 = addChildOf(stRoot, '一级甲')
+  const s2 = addChildOf(s1, '二级乙')
+  addChildOf(s2, '三级丙')
+  store().setNotes(s1, '有备注')
+  store().addLabel(s2, '标签甲')
+  store().toggleMarker(s1, 'priority-1')
+  store().toggleMarker(s2, 'priority-1')
+  store().toggleMarker(s2, 'star-red')
+
+  const stats = sheetStats(sheet())
+  // reset() 建的新文档带「中心主题 + 两个示例分支」，所以这里共 6 个节点
+  eq('统计：节点总数', stats.topics, 6)
+  eq('统计：与树上的节点数一致', stats.topics, countTopics(activeRoot(store().workbook)))
+  eq('统计：最大深度（0 基）', stats.maxDepth, 3)
+  eq('统计：叶子数（两个示例分支 + 最深节点）', stats.leaves, 3)
+  eq('统计：标题字数', stats.characters, 23)
+  eq('统计：含备注节点数', stats.withNotes, 1)
+  eq('统计：标记分布', stats.markers, [
+    { markerId: 'priority-1', count: 2 },
+    { markerId: 'star-red', count: 1 }
+  ])
+  eq('统计：标签分布', stats.labels.map((item) => [item.label, item.count]), [['标签甲', 1]])
+  eq('统计：无附件时计数为 0', stats.withAttachments, 0)
+
+  group('多画布')
+
+  reset()
+  eq('默认只有一张画布', store().workbook.sheets.length, 1)
+  const newSheetId = store().addSheet()
+  eq('新建后有两张画布', store().workbook.sheets.length, 2)
+  eq('新建后自动切到新画布', store().workbook.activeSheetId, newSheetId)
+  eq('新画布标题', store().workbook.sheets[1].title, '画布 2')
+  check('新画布有根主题', Boolean(activeRoot(store().workbook).id))
+
+  const firstId = store().workbook.sheets[0].id
+  // 先假装刚保存过，才能验证「切换画布」本身不会把文档标脏
+  store().markSaved('D:/tmp/切换测试.xmind')
+  eq('切换前不脏', store().dirty, false)
+  // 此时的撤销栈里还有前面「新建/改名画布」留下的记录，切换不应再往上加
+  const undoBefore = store().undoStack.length
+  store().setActiveSheet(firstId)
+  eq('切换画布', store().workbook.activeSheetId, firstId)
+  eq('切换画布不标记未保存', store().dirty, false)
+  eq('切换画布不写入撤销栈', store().undoStack.length, undoBefore)
+
+  store().renameSheet(firstId, '改名后的画布')
+  eq('重命名画布', store().workbook.sheets[0].title, '改名后的画布')
+
+  store().removeSheet(firstId)
+  eq('删除画布后只剩一张', store().workbook.sheets.length, 1)
+  eq('删除当前画布后自动切到另一张', store().workbook.activeSheetId, newSheetId)
+  store().removeSheet(newSheetId)
+  eq('最后一张画布不允许删除', store().workbook.sheets.length, 1)
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -2403,6 +2587,7 @@ async function main(): Promise<void> {
   testStructures()
   testLegacy()
   testOutline()
+  testSearch()
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()
