@@ -77,7 +77,9 @@ export const IPC = {
   aiConfigGet: 'ai:config-get',
   aiConfigSave: 'ai:config-save',
   aiChat: 'ai:chat',
-  aiTest: 'ai:test'
+  aiTest: 'ai:test',
+  /* ---- 大纲文件导入（P9+） ---- */
+  importText: 'file:import-text'
 } as const
 
 export type MenuCommand =
@@ -97,6 +99,8 @@ export type MenuCommand =
   | 'view:toggle-structure'
   | 'help:shortcuts'
   | 'file:import-theme'
+  | 'file:import-markdown'
+  | 'file:import-opml'
   | 'file:export-image'
   | 'file:export-txt'
   | 'file:export-md'
@@ -166,6 +170,19 @@ export interface MindApi {
   aiChat(messages: AiMessage[], options?: { timeoutMs?: number }): Promise<AiChatResult>
   /** 用一条极短的消息测试连通性 */
   aiTest(): Promise<AiTestResult>
+
+  /* ---- 大纲文件导入 ---- */
+  /**
+   * 选一个 Markdown / OPML 文件并读出文本（用于一键生成导图）。
+   * 取消返回 null。
+   */
+  importText(kind: 'markdown' | 'opml'): Promise<ImportedTextFile | null>
+}
+
+export interface ImportedTextFile {
+  path: string
+  name: string
+  text: string
 }
 
 export interface AiConfigPatch {

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Braces,
   ChevronDown,
@@ -12,6 +13,7 @@ import {
   ImageDown,
   ListTree,
   Maximize,
+  MoreHorizontal,
   Palette,
   Plus,
   Redo2,
@@ -48,6 +50,9 @@ export interface ToolbarActions {
   onExport(): void
   /** 导入主题文件（.json） */
   onImportTheme(): void
+  /** 导入 Markdown / OPML 一键生成导图 */
+  onImportMarkdown(): void
+  onImportOpml(): void
   /** 直接导出大纲（不带设置框） */
   onExportOutline(format: OutlineFormat): void
   /** AI 相关 */
@@ -65,71 +70,121 @@ interface Props {
 
 /**
  * 工具栏上的下拉菜单。
- * 点按钮展开，点菜单项或点别处收起；按钮本身不抢焦点（否则会吃掉 Enter/Tab）。
+ *
+ * 菜单渲染在 **document.body 的传送门**里，而不是按钮旁边：
+ * 工具栏是横排容器（窗口变窄时会换行/滚动），绝对定位的菜单会被它裁掉——
+ * 之前「点 AI 没反应」就是这个原因。用传送门 + fixed 定位后不再受任何祖先容器影响。
  */
 function ToolMenu({
   icon,
   label,
   title,
-  items
+  items,
+  iconOnly = false
 }: {
   icon: ReactNode
   label: string
   title: string
   items: Array<{ key: string; label: string; hint?: string; icon?: ReactNode; onSelect(): void }>
+  iconOnly?: boolean
 }): ReactElement {
-  const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const open = position !== null
+
+  const openMenu = (): void => {
+    const el = buttonRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const width = 236
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
+    // 下方放不下就往上弹
+    const estimatedHeight = 60 + 62 * 0 + 0
+    const top =
+      rect.bottom + 6 + estimatedHeight > window.innerHeight - 8 && rect.top > 240
+        ? Math.max(8, rect.top - 6 - 300)
+        : rect.bottom + 6
+    setPosition({ top, left })
+  }
 
   useEffect(() => {
     if (!open) return
-    const close = (): void => setOpen(false)
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target as Node | null
+      if (target && (listRef.current?.contains(target) || buttonRef.current?.contains(target))) return
+      setPosition(null)
     }
-    window.addEventListener('pointerdown', close)
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setPosition(null)
+    }
+    // 滚动/改窗口大小后按钮位置会变，直接收起最省心
+    const onScrollOrResize = (): void => setPosition(null)
+
+    window.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onScrollOrResize)
+    window.addEventListener('scroll', onScrollOrResize, true)
     return () => {
-      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onScrollOrResize)
+      window.removeEventListener('scroll', onScrollOrResize, true)
     }
   }, [open])
+
+  const menu = (
+    <div
+      ref={listRef}
+      className="tool-menu__list"
+      style={{ position: 'fixed', top: position?.top ?? 0, left: position?.left ?? 0 }}
+    >
+      {items.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          className="tool-menu__item"
+          title={item.hint}
+          onClick={() => {
+            setPosition(null)
+            item.onSelect()
+          }}
+        >
+          <span className="tool-menu__icon">{item.icon}</span>
+          <span className="tool-menu__text">
+            {item.label}
+            {item.hint ? <em className="tool-menu__hint">{item.hint}</em> : null}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
 
   return (
     <span className="tool-menu">
       <button
+        ref={buttonRef}
         type="button"
-        className={open ? 'tool-btn tool-btn--labeled tool-btn--active' : 'tool-btn tool-btn--labeled'}
+        className={[
+          'tool-btn',
+          iconOnly ? '' : 'tool-btn--labeled',
+          open ? 'tool-btn--active' : ''
+        ]
+          .filter(Boolean)
+          .join(' ')}
         title={title}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (open) setPosition(null)
+          else openMenu()
+        }}
       >
         {icon}
-        {label}
-        <ChevronDown size={13} />
+        {iconOnly ? null : label}
+        {iconOnly ? null : <ChevronDown size={13} />}
       </button>
 
-      {open && (
-        <div className="tool-menu__list" onPointerDown={(event) => event.stopPropagation()}>
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className="tool-menu__item"
-              title={item.hint}
-              onClick={() => {
-                setOpen(false)
-                item.onSelect()
-              }}
-            >
-              <span className="tool-menu__icon">{item.icon}</span>
-              <span className="tool-menu__text">
-                {item.label}
-                {item.hint ? <em className="tool-menu__hint">{item.hint}</em> : null}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      {open && position ? createPortal(menu, document.body) : null}
     </span>
   )
 }
@@ -221,6 +276,20 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
               onSelect: actions.onOpen
             },
             {
+              key: 'import-markdown',
+              label: '导入 Markdown 生成导图',
+              hint: '按标题/列表自动生成',
+              icon: <FileText size={15} />,
+              onSelect: actions.onImportMarkdown
+            },
+            {
+              key: 'import-opml',
+              label: '导入 OPML 生成导图',
+              hint: 'Xmind / 幕布 / 亿图都能导出',
+              icon: <FileText size={15} />,
+              onSelect: actions.onImportOpml
+            },
+            {
               key: 'import-theme',
               label: '导入主题文件',
               hint: '.json',
@@ -310,15 +379,6 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         >
           <Trash2 size={17} />
         </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="恢复自动布局"
-          disabled={!hasFreePosition}
-          onClick={() => selectedId && store().clearPosition(selectedId)}
-        >
-          <RotateCcw size={17} />
-        </button>
       </div>
 
       <div className="toolbar__divider" />
@@ -344,45 +404,37 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
 
       <div className="toolbar__divider" />
 
-      {/* 画布级元素：创建入口放在工具栏，常用操作不用再翻面板 */}
+      {/* 画布级元素：创建入口放在工具栏。
+          只留图标（文字会把工具栏撑长），怎么用写在提示里 */}
       <div className="toolbar__group">
         <span className="tool-btn-wrap" title={relationshipHint}>
           <button
             type="button"
-            className={
-              toggle.relationshipId ? 'tool-btn tool-btn--labeled tool-btn--active' : 'tool-btn tool-btn--labeled'
-            }
+            className={toggle.relationshipId ? 'tool-btn tool-btn--active' : 'tool-btn'}
             disabled={selection.length !== 2}
             onClick={() => store().addRelationship()}
           >
-            <Spline size={16} />
-            关系线
+            <Spline size={17} />
           </button>
         </span>
         <span className="tool-btn-wrap" title={summaryHint}>
           <button
             type="button"
-            className={
-              toggle.summaryId ? 'tool-btn tool-btn--labeled tool-btn--active' : 'tool-btn tool-btn--labeled'
-            }
+            className={toggle.summaryId ? 'tool-btn tool-btn--active' : 'tool-btn'}
             disabled={selection.length === 0}
             onClick={() => store().addSummary()}
           >
-            <Braces size={16} />
-            概要
+            <Braces size={17} />
           </button>
         </span>
         <span className="tool-btn-wrap" title={boundaryHint}>
           <button
             type="button"
-            className={
-              toggle.boundaryId ? 'tool-btn tool-btn--labeled tool-btn--active' : 'tool-btn tool-btn--labeled'
-            }
+            className={toggle.boundaryId ? 'tool-btn tool-btn--active' : 'tool-btn'}
             disabled={selection.length === 0}
             onClick={() => store().addBoundary()}
           >
-            <Frame size={16} />
-            边界
+            <Frame size={17} />
           </button>
         </span>
       </div>
@@ -398,9 +450,6 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         >
           <ListTree size={17} />
         </button>
-        <button type="button" className="tool-btn" title="节点属性（标记 / 标签 / 备注 / 超链接）" onClick={actions.onNodes}>
-          <Tag size={17} />
-        </button>
         <button
           type="button"
           className="tool-btn"
@@ -408,9 +457,6 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           onClick={actions.onSearch}
         >
           <SearchIcon size={17} />
-        </button>
-        <button type="button" className="tool-btn" title="主题外观" onClick={actions.onThemes}>
-          <Palette size={17} />
         </button>
       </div>
 
@@ -479,10 +525,44 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
 
       <div className="toolbar__divider" />
 
+      {/* 不常用但仍需要一键到达的：收进「更多」，让主行保持短 */}
       <div className="toolbar__group">
-        <button type="button" className="tool-btn" title="快捷键说明" onClick={actions.onHelp}>
-          <CircleHelp size={17} />
-        </button>
+        <ToolMenu
+          iconOnly
+          icon={<MoreHorizontal size={17} />}
+          label="更多"
+          title="更多功能"
+          items={[
+            {
+              key: 'nodes',
+              label: '节点属性',
+              hint: '标记 / 标签 / 备注 / 超链接 / 附件 / 公式',
+              icon: <Tag size={15} />,
+              onSelect: actions.onNodes
+            },
+            {
+              key: 'themes',
+              label: '主题外观',
+              hint: '配色与主题库',
+              icon: <Palette size={15} />,
+              onSelect: actions.onThemes
+            },
+            {
+              key: 'reset-layout',
+              label: '恢复自动布局',
+              hint: hasFreePosition ? '把自由摆放的主题放回自动位置' : '选中自由摆放的主题后可用',
+              icon: <RotateCcw size={15} />,
+              onSelect: () => selectedId && store().clearPosition(selectedId)
+            },
+            {
+              key: 'shortcuts',
+              label: '快捷键说明',
+              hint: '全部快捷键速查',
+              icon: <CircleHelp size={15} />,
+              onSelect: actions.onHelp
+            }
+          ]}
+        />
       </div>
     </div>
   )

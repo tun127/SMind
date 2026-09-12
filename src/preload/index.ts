@@ -4,6 +4,7 @@ import {
   type AiChatResult,
   type AiConfigPatch,
   type AiTestResult,
+  type ImportedTextFile,
   type MenuCommand,
   type MindApi,
   type OpenResult,
@@ -95,7 +96,10 @@ const api: MindApi = {
   aiChat: (messages: AiMessage[], options?: { timeoutMs?: number }) =>
     ipcRenderer.invoke(IPC.aiChat, messages, options) as Promise<AiChatResult>,
 
-  aiTest: () => ipcRenderer.invoke(IPC.aiTest) as Promise<AiTestResult>
+  aiTest: () => ipcRenderer.invoke(IPC.aiTest) as Promise<AiTestResult>,
+
+  importText: (kind: 'markdown' | 'opml') =>
+    ipcRenderer.invoke(IPC.importText, kind) as Promise<ImportedTextFile | null>
 }
 
 contextBridge.exposeInMainWorld('api', api)

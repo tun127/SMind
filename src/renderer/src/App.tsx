@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import type { RecoveryInfo } from '@shared/ipc'
 import type { OutlineFormat } from '@shared/outline'
 import { activeRoot, findParent, findTopic } from '@shared/model/tree'
+import { parseMarkdownOutline } from '@shared/import/markdown'
+import { parseOpmlOutline } from '@shared/import/opml'
 import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
 import OutlinePanel from './components/OutlinePanel'
@@ -182,6 +184,38 @@ export default function App(): ReactElement {
     [commitPending, showToast]
   )
 
+  /**
+   * 导入 Markdown / OPML 一键生成导图。
+   * 解析逻辑在 shared 里（纯函数、有自检），这里只负责选文件、落地到新画布、给提示。
+   */
+  const importOutlineFile = useCallback(
+    async (kind: 'markdown' | 'opml'): Promise<void> => {
+      commitPending()
+      try {
+        const file = await window.api.importText(kind)
+        if (!file) return
+
+        const fallbackTitle = file.name.replace(/\.[^.]+$/, '') || '导入的大纲'
+        const parsed =
+          kind === 'markdown'
+            ? parseMarkdownOutline(file.text, fallbackTitle)
+            : parseOpmlOutline(file.text, fallbackTitle)
+
+        if (!parsed.root) {
+          showToast(`导入失败：${parsed.warnings.join('；') || '文件里没有可用的大纲'}`)
+          return
+        }
+
+        const count = useEditor.getState().applyOutlineTree({ kind: 'newSheet' }, parsed.root, fallbackTitle)
+        const extra = parsed.warnings.length > 0 ? `（${parsed.warnings.join('；')}）` : ''
+        showToast(`已从「${file.name}」导入 ${count} 个主题${extra}，可用 Ctrl+Z 撤回`)
+      } catch (error) {
+        showToast(`导入失败：${(error as Error).message}`)
+      }
+    },
+    [commitPending, showToast]
+  )
+
   /* ------------------------------------------------------------------ */
   /* 菜单命令                                                            */
   /* ------------------------------------------------------------------ */
@@ -235,6 +269,12 @@ export default function App(): ReactElement {
         case 'file:import-theme':
           void importTheme()
           break
+        case 'file:import-markdown':
+          void importOutlineFile('markdown')
+          break
+        case 'file:import-opml':
+          void importOutlineFile('opml')
+          break
         case 'file:export-image':
           setShowExport(true)
           break
@@ -252,7 +292,7 @@ export default function App(): ReactElement {
       }
     })
     return off
-  }, [guard, newDocument, openDocument, saveDocument, importTheme, exportOutlineAs])
+  }, [guard, newDocument, openDocument, saveDocument, importTheme, importOutlineFile, exportOutlineAs])
 
   /* ------------------------------------------------------------------ */
   /* 关闭窗口                                                            */
@@ -465,6 +505,8 @@ export default function App(): ReactElement {
           onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
           onExport: () => setShowExport(true),
           onImportTheme: () => void importTheme(),
+          onImportMarkdown: () => void importOutlineFile('markdown'),
+          onImportOpml: () => void importOutlineFile('opml'),
           onExportOutline: (format) => void exportOutlineAs(format),
           onAiGenerate: () => setAiTask('generate'),
           onAiExpand: () => setAiTask('expand'),

@@ -60,6 +60,8 @@ import {
   parseOutline,
   toConfigView
 } from '../src/shared/ai'
+import { parseMarkdownOutline } from '../src/shared/import/markdown'
+import { parseOpmlOutline } from '../src/shared/import/opml'
 import {
   IMAGE_FALLBACK,
   IMAGE_MAX_HEIGHT,
@@ -3072,6 +3074,142 @@ function testAi(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.12 导入：Markdown / OPML 一键生成导图                            */
+/* ------------------------------------------------------------------ */
+
+function testImport(): void {
+  group('导入 Markdown：结构与容错')
+
+  const nested = parseMarkdownOutline('# 产品规划\n## 市场分析\n### 目标用户\n## 产品设计')
+  eq('标题按级别嵌套', nested.root?.title, '产品规划')
+  eq('二级标题是子节点', nested.root?.children.map((c) => c.title), ['市场分析', '产品设计'])
+  eq('三级标题挂到二级下', nested.root?.children[0].children.map((c) => c.title), ['目标用户'])
+  eq('节点总数', nested.count, 4)
+
+  const withList = parseMarkdownOutline('# 计划\n- 甲\n  - 甲一\n- 乙')
+  eq('列表挂在标题下', withList.root?.children.map((c) => c.title), ['甲', '乙'])
+  eq('列表按缩进嵌套', withList.root?.children[0].children.map((c) => c.title), ['甲一'])
+  eq('标题+列表总数', withList.count, 4)
+
+  const twoSections = parseMarkdownOutline('# 甲\n- x\n# 乙\n- y')
+  eq('同级标题不嵌套', twoSections.root?.children.map((c) => c.title), ['甲', '乙'])
+  check('并列顶层套一个根', twoSections.warnings.length === 1, twoSections.warnings.join('|'))
+
+  const noHeading = parseMarkdownOutline('- 根\n  - 子\n    - 孙')
+  eq('没有标题时第一个列表项当根', noHeading.root?.title, '根')
+  eq('没有标题也能嵌套', noHeading.root?.children[0].children.map((c) => c.title), ['孙'])
+
+  const fenced = parseMarkdownOutline('# 标题\n```\n- 代码里的不算\n```\n- 真正的项')
+  check('代码块内容不被当成节点', !JSON.stringify(fenced.root).includes('代码里的不算'))
+  eq('代码块外的列表正常', fenced.count, 2)
+
+  const frontMatter = parseMarkdownOutline('---\ntitle: x\n tags: [a]\n---\n# 真标题\n- 项')
+  eq('front-matter 被跳过', frontMatter.root?.title, '真标题')
+  eq('front-matter 后节点数正确', frontMatter.count, 2)
+
+  const noisy = parseMarkdownOutline('# 标题\n> 引用不是节点\n| a | b |\n| - | - |\n---\n- 项')
+  eq('引用/表格/水平线都被跳过', noisy.count, 2)
+
+  const numbered = parseMarkdownOutline('# 步骤\n1. 第一\n2. 第二\n   1. 第二点一')
+  eq('数字列表可解析', numbered.root?.children.map((c) => c.title), ['第一', '第二'])
+  eq('数字列表缩进嵌套', numbered.root?.children[1].children.map((c) => c.title), ['第二点一'])
+
+  eq('粗体标记被清理', parseMarkdownOutline('- **重点**内容').root?.title, '重点内容')
+  eq('斜体标记被清理', parseMarkdownOutline('- *斜*体').root?.title, '斜体')
+  eq('行内代码被清理', parseMarkdownOutline('- `code` 说明').root?.title, 'code 说明')
+  eq('链接只留文字', parseMarkdownOutline('- [文档](https://example.com) 说明').root?.title, '文档 说明')
+  eq('图片只留替代文字', parseMarkdownOutline('- ![架构图](a.png)').root?.title, '架构图')
+  eq('行尾锚点被清理', parseMarkdownOutline('## 标题 ##').root?.title, '标题')
+
+  const emptyMd = parseMarkdownOutline('')
+  eq('空文件不产出节点', emptyMd.root, null)
+  check('空文件给出提示', emptyMd.warnings.length === 1, emptyMd.warnings.join('|'))
+
+  const paragraphs = parseMarkdownOutline('这是第一段\n这是第二段')
+  eq('只有段落时按一行一主题导入', paragraphs.root?.children.map((c) => c.title), ['这是第一段', '这是第二段'])
+  check('并给出格式提示', paragraphs.warnings.some((w) => w.includes('一行一个主题')), paragraphs.warnings.join('|'))
+
+  const longParagraph = parseMarkdownOutline('x'.repeat(80))
+  eq('超长段落不当作主题', longParagraph.root, null)
+
+  const bom = parseMarkdownOutline('\ufeff# 标题')
+  eq('BOM 不影响解析', bom.root?.title, '标题')
+
+  group('导入 OPML')
+
+  const opml = parseOpmlOutline(`<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>我的导图</title></head>
+  <body>
+    <outline text="中心主题">
+      <outline text="分支一" _note="这是备注"/>
+      <outline text="分支二">
+        <outline text="细节点"/>
+      </outline>
+    </outline>
+  </body>
+</opml>`)
+  eq('OPML 根节点', opml.root?.title, '中心主题')
+  eq('OPML 子节点', opml.root?.children.map((c) => c.title), ['分支一', '分支二'])
+  eq('OPML 三级节点', opml.root?.children[1].children.map((c) => c.title), ['细节点'])
+  eq('OPML 节点总数', opml.count, 4)
+  eq('_note 被导入为备注', opml.root?.children[0].notes, '这是备注')
+
+  const opmlMulti = parseOpmlOutline(`<opml version="2.0"><head><title>文件标题</title></head><body>
+    <outline text="甲"/><outline text="乙"/>
+  </body></opml>`)
+  eq('并列节点用文件标题套根', opmlMulti.root?.title, '文件标题')
+  eq('并列节点都在根下', opmlMulti.root?.children.map((c) => c.title), ['甲', '乙'])
+
+  const container = parseOpmlOutline(`<opml version="2.0"><body>
+    <outline>
+      <outline text="甲"/><outline text="乙"/>
+    </outline>
+  </body></opml>`)
+  eq('没有 text 的容器节点被展开（不丢数据）', container.root?.children.map((c) => c.title), ['甲', '乙'])
+
+  const noBody = parseOpmlOutline('<opml version="2.0"><outline text="甲"/></opml>')
+  eq('没有 body 时兜底解析', noBody.root?.title, '甲')
+
+  const noOutline = parseOpmlOutline('<opml version="2.0"><body></body></opml>')
+  eq('没有 outline 时返回 null', noOutline.root, null)
+  check('没有 outline 时给出提示', noOutline.warnings.length === 1)
+
+  let opmlError = ''
+  try {
+    parseOpmlOutline('这不是 XML')
+  } catch (error) {
+    opmlError = (error as Error).message
+  }
+  check('非法 OPML 抛出可读错误', opmlError.includes('不是合法的 XML'), opmlError)
+
+  group('导入：备注一并带进模型')
+
+  const noteTopic = outlineToTopic({
+    title: '节点',
+    notes: '备注 <b>内容</b>',
+    children: [{ title: '子', children: [] }]
+  })
+  eq('备注写入模型', noteTopic.notes, '备注 <b>内容</b>')
+  check('备注 HTML 被转义', (noteTopic.notesHtml ?? '').includes('&lt;b&gt;'), String(noteTopic.notesHtml))
+  eq('子节点没有备注', noteTopic.children[0].notes, undefined)
+
+  group('导入：落地到画布')
+
+  reset()
+  const markdownText = '# 学习计划\n- 前端\n  - React\n- 后端'
+  const parsedMd = parseMarkdownOutline(markdownText, '学习计划')
+  const beforeSheets = store().workbook.sheets.length
+  const imported = store().applyOutlineTree({ kind: 'newSheet' }, parsedMd.root!, parsedMd.root!.title)
+  eq('导入节点数', imported, 4)
+  eq('导入后新增一张画布', store().workbook.sheets.length, beforeSheets + 1)
+  eq('画布中心主题正确', activeRoot(store().workbook).title, '学习计划')
+  eq('导入层级正确', activeRoot(store().workbook).children[0].children.map((c) => c.title), ['React'])
+  store().undo()
+  eq('一次撤销回到导入前', store().workbook.sheets.length, beforeSheets)
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -3100,6 +3238,7 @@ async function main(): Promise<void> {
   testExportDrawing()
   testExportFormats()
   testAi()
+  testImport()
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()

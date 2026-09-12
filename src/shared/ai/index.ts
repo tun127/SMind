@@ -189,6 +189,8 @@ export function buildPolishMessages(input: { title: string; style?: string }): A
 export interface OutlineNode {
   title: string
   children: OutlineNode[]
+  /** 备注（OPML 的 _note 等），导入时一并带进模型 */
+  notes?: string
 }
 
 export interface ParsedOutline {
@@ -315,11 +317,25 @@ export function countOutlineNodes(node: OutlineNode | null): number {
   return total
 }
 
-/** 把解析出来的大纲转成模型里的主题树（AI 结果落盘用） */
+/** 把解析出来的大纲转成模型里的主题树（AI 结果与导入落盘都用它） */
 export function outlineToTopic(node: OutlineNode, structureClass?: string): Topic {
   const topic = createTopic(node.title, structureClass)
   topic.children = node.children.map((child) => outlineToTopic(child))
+  if (node.notes && node.notes.trim().length > 0) {
+    topic.notes = node.notes
+    topic.notesHtml = `<p>${escapeHtmlForNotes(node.notes).replace(/\n/g, '<br/>')}</p>`
+  }
   return topic
+}
+
+/** 备注 HTML 由纯文本派生时的转义（与编辑器里的规则一致） */
+function escapeHtmlForNotes(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 /** 解析「一行一个」的列表（扩写结果那种） */

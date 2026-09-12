@@ -17,7 +17,12 @@ export function buildAppMenu(): void {
         { label: '打开 / 导入 .xmind…', accelerator: 'CmdOrCtrl+O', click: () => send('file:open') },
         {
           label: '导入',
-          submenu: [{ label: '导入主题文件…', click: () => send('file:import-theme') }]
+          submenu: [
+            { label: '导入 Markdown 生成导图…', click: () => send('file:import-markdown') },
+            { label: '导入 OPML 生成导图…', click: () => send('file:import-opml') },
+            { type: 'separator' },
+            { label: '导入主题文件…', click: () => send('file:import-theme') }
+          ]
         },
         { type: 'separator' },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => send('file:save') },

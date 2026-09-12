@@ -8,6 +8,7 @@ import {
   type AiChatResult,
   type AiConfigPatch,
   type AiTestResult,
+  type ImportedTextFile,
   type OpenResult,
   type PickedAttachment,
   type PickedImage,
@@ -655,6 +656,39 @@ function registerIpc(): void {
     } catch (error) {
       return { ok: false, message: (error as Error).message }
     }
+  })
+
+  /* ---- 大纲文件导入（Markdown / OPML） ---- */
+
+  ipcMain.handle(IPC.importText, async (_e, kind: 'markdown' | 'opml'): Promise<ImportedTextFile | null> => {
+    const isMarkdown = kind !== 'opml'
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: isMarkdown ? '导入 Markdown 生成导图' : '导入 OPML 生成导图',
+      filters: isMarkdown
+        ? [
+            { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
+            { name: '所有文件', extensions: ['*'] }
+          ]
+        : [
+            { name: 'OPML', extensions: ['opml', 'xml'] },
+            { name: '所有文件', extensions: ['*'] }
+          ],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+
+    const path = result.filePaths[0]
+    let text: string
+    try {
+      text = await fs.readFile(path, 'utf8')
+    } catch (error) {
+      throw new Error(`读取文件失败：${(error as Error).message}`)
+    }
+    // 去掉 UTF-8 BOM，否则第一行会被当成乱码
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
+    if (text.trim().length === 0) throw new Error('这个文件是空的')
+
+    return { path, name: basename(path), text }
   })
 
   ipcMain.on(IPC.confirmClose, () => {

@@ -626,13 +626,13 @@ textarea {
 }
 
 .tool-menu__list {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 60;
+  /* 位置由 JS 按按钮位置算好后写进 style（fixed 定位 + 传送门到 body） */
+  z-index: 120;
   display: flex;
   flex-direction: column;
-  min-width: 210px;
+  min-width: 236px;
+  max-height: 60vh;
+  overflow-y: auto;
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -896,19 +896,14 @@ textarea {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   user-select: none;
-  /* 按钮变多后，窗口变窄时改为横向滚动，而不是把按钮压扁 */
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  /* 窗口变窄时换行，而不是横向滚动：
+     横向滚动会让工具栏变成裁切容器，把下拉菜单整个裁掉（之前「点 AI 没反应」的根因）。
+     现在菜单走传送门 + fixed 定位，这里换行只是为了不让任何按钮被藏起来。 */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
-.toolbar::-webkit-scrollbar {
-  height: 6px;
-}
-
-.toolbar::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: var(--border);
-}
+/* 滚动条样式已移除：工具栏现在换行显示，不再是滚动容器 */
 
 /* 分组与分隔线不参与压缩，保证按钮始终是完整尺寸 */
 .toolbar__group,
