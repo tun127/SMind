@@ -10,6 +10,7 @@ import {
   type SaveResult
 } from '@shared/ipc'
 import type { Workbook } from '@shared/model/types'
+import type { OutlineFormat } from '@shared/outline'
 import type { ThemeDefinition } from '@shared/theme'
 
 const api: MindApi = {
@@ -74,7 +75,10 @@ const api: MindApi = {
     ipcRenderer.invoke(IPC.openAttachment, path, name) as Promise<boolean>,
 
   saveAttachmentAs: (path: string, suggestedName: string) =>
-    ipcRenderer.invoke(IPC.saveAttachmentAs, path, suggestedName) as Promise<boolean>
+    ipcRenderer.invoke(IPC.saveAttachmentAs, path, suggestedName) as Promise<boolean>,
+
+  exportOutline: (workbook: Workbook, format: OutlineFormat) =>
+    ipcRenderer.invoke(IPC.exportOutline, workbook, format) as Promise<string | null>
 }
 
 contextBridge.exposeInMainWorld('api', api)

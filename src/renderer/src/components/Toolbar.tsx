@@ -5,6 +5,7 @@ import {
   FilePlus,
   FolderOpen,
   Frame,
+  ListTree,
   Maximize,
   Palette,
   Plus,
@@ -31,13 +32,16 @@ export interface ToolbarActions {
   onHelp(): void
   onThemes(): void
   onNodes(): void
+  onOutline(): void
 }
 
 interface Props {
   actions: ToolbarActions
+  /** 大纲面板是否已打开（用于按钮的按下态） */
+  outlineOpen?: boolean
 }
 
-export default function Toolbar({ actions }: Props): ReactElement {
+export default function Toolbar({ actions, outlineOpen = false }: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
   const zoom = useEditor((s) => s.zoom)
@@ -221,6 +225,14 @@ export default function Toolbar({ actions }: Props): ReactElement {
       <div className="toolbar__divider" />
 
       <div className="toolbar__group">
+        <button
+          type="button"
+          className={outlineOpen ? 'tool-btn tool-btn--active' : 'tool-btn'}
+          title={outlineOpen ? '关闭大纲视图' : '大纲视图（与导图双向实时同步）'}
+          onClick={actions.onOutline}
+        >
+          <ListTree size={17} />
+        </button>
         <button type="button" className="tool-btn" title="节点属性（标记 / 标签 / 备注 / 超链接）" onClick={actions.onNodes}>
           <Tag size={17} />
         </button>

@@ -1,4 +1,5 @@
 import type { Workbook } from './model/types'
+import type { OutlineFormat } from './outline'
 import type { ThemeDefinition } from './theme'
 
 export interface OpenResult {
@@ -65,7 +66,9 @@ export const IPC = {
   pickImage: 'resource:pick-image',
   pickAttachment: 'resource:pick-attachment',
   openAttachment: 'resource:open-attachment',
-  saveAttachmentAs: 'resource:save-attachment-as'
+  saveAttachmentAs: 'resource:save-attachment-as',
+  /* ---- 大纲导出（P5） ---- */
+  exportOutline: 'outline:export'
 } as const
 
 export type MenuCommand =
@@ -128,4 +131,8 @@ export interface MindApi {
   openAttachment(path: string, name: string): Promise<boolean>
   /** 把附件另存到用户选择的位置，取消或失败返回 false */
   saveAttachmentAs(path: string, suggestedName: string): Promise<boolean>
+
+  /* ---- 大纲导出（P5） ---- */
+  /** 导出当前画布的大纲（TXT / Markdown / OPML），取消返回 null，成功返回写入路径 */
+  exportOutline(workbook: Workbook, format: OutlineFormat): Promise<string | null>
 }

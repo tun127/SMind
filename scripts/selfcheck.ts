@@ -22,6 +22,7 @@ import {
   normalizeThemeDefinition
 } from '../src/shared/theme'
 import { activeRoot, activeSheet, countCharacters, countTopics, findParent, findTopic } from '../src/shared/model/tree'
+import { createTopic, createWorkbook } from '../src/shared/model/factory'
 import {
   buildRange,
   indexTree,
@@ -53,6 +54,16 @@ import { parseXmind } from '../src/shared/xmind/parse'
 import { serializeXmind } from '../src/shared/xmind/serialize'
 import { parseLegacyContent } from '../src/shared/xmind/legacy'
 import { childOf, childText, childrenOf, parseXml } from '../src/shared/xmind/xml'
+import {
+  OUTLINE_FORMATS,
+  buildOutline,
+  outlineFormatDef,
+  outlineRows,
+  toMarkdown,
+  toOpml,
+  toPlainText,
+  type OutlineFormat
+} from '../src/shared/outline'
 import {
   hasFormatting,
   plainTextOf,
@@ -2233,6 +2244,141 @@ async function testLegacyPackage(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.8 大纲：摊平与导出                                               */
+/* ------------------------------------------------------------------ */
+
+function buildOutlineSample(): Workbook {
+  const workbook = createWorkbook({ rootTitle: '产品规划', seedBranches: [] })
+  const root = workbook.sheets[0].rootTopic
+  const mk = (title: string): Topic => createTopic(title)
+  const market = mk('市场分析')
+  market.children = [mk('目标用户'), mk('竞品对比')]
+  market.notes = '第一行\n第二行'
+  const design = mk('产品设计')
+  design.labels = ['重点']
+  design.markers = [{ markerId: 'priority-1' }]
+  design.href = 'https://example.com'
+  design.collapsed = true
+  design.children = [mk('信息架构')]
+  const launch = mk('上线运营')
+  launch.attachments = [{ id: 'att-1', path: 'resources/a.pdf', name: 'a.pdf' }]
+  launch.image = { path: 'resources/b.png', width: 100, height: 60 }
+  launch.formula = 'E = mc^2'
+  market.children[0].children = [mk('画像')]
+  root.children = [market, design, launch]
+  root.detachedChildren = [mk('浮动想法')]
+  return workbook
+}
+
+function testOutline(): void {
+  group('大纲：摊平')
+
+  const workbook = buildOutlineSample()
+  const root = activeRoot(workbook)
+  const rows = outlineRows(root, { skipCollapsed: true })
+
+  eq('第一行是根主题', rows[0].title, '产品规划')
+  eq('第一行深度为 0', rows[0].depth, 0)
+  eq('折叠分支的子节点被跳过', rows.some((row) => row.title === '信息架构'), false)
+  check('折叠分支自身仍在', rows.some((row) => row.title === '产品设计' && row.collapsed))
+  check('有子节点标记正确', rows.find((r) => r.title === '产品设计')?.hasChildren === true)
+  check('没有子节点的行不带标记', rows.find((r) => r.title === '竞品对比')?.hasChildren === false)
+  check('中间层节点也算有子节点', rows.find((r) => r.title === '目标用户')?.hasChildren === true)
+  eq('深度正确', rows.find((r) => r.title === '目标用户')?.depth, 2)
+  eq('浮动主题也出现在大纲里', rows.some((row) => row.title === '浮动想法'), true)
+  eq('顺序与树一致', rows.map((row) => row.title).slice(0, 6), [
+    '产品规划',
+    '市场分析',
+    '目标用户',
+    '画像',
+    '竞品对比',
+    '产品设计'
+  ])
+
+  const all = outlineRows(root)
+  eq('不跳过折叠时能看到全部节点', all.some((row) => row.title === '信息架构'), true)
+  check('完整行数更多', all.length > rows.length)
+
+  const designRow = rows.find((row) => row.title === '产品设计')
+  check('行上带标记数量', designRow?.markerCount === 1)
+  check('行上带标签数量', designRow?.labelCount === 1)
+  check('行上带超链接标记', designRow?.hasLink === true)
+  const launchRow = rows.find((row) => row.title === '上线运营')
+  check('行上带附件标记', launchRow?.hasAttachment === true)
+  check('行上带图片标记', launchRow?.hasImage === true)
+  check('行上带公式标记', launchRow?.hasFormula === true)
+  check('行上带备注标记', rows.find((row) => row.title === '市场分析')?.hasNotes === true)
+
+  group('大纲：导出 TXT')
+
+  const txt = toPlainText(root)
+  check('TXT 以 BOM 开头（Windows 记事本不乱码）', buildOutline(workbook, 'txt').startsWith('\ufeff'))
+  check('TXT 按层级缩进', txt.includes('\r\n  市场分析\r\n    目标用户'), JSON.stringify(txt.slice(0, 80)))
+  check('TXT 每行一个主题', txt.trim().split('\r\n').length === all.length)
+  check('TXT 包含折叠分支里的节点', txt.includes('信息架构'))
+  check('TXT 以换行结尾', txt.endsWith('\r\n'))
+
+  group('大纲：导出 Markdown')
+
+  const md = toMarkdown(root)
+  check('Markdown 根主题是一级标题', md.startsWith('# 产品规划\n'))
+  check('Markdown 子主题用列表', md.includes('\n- 市场分析'))
+  check('Markdown 二级缩进两个空格', md.includes('\n  - 目标用户'))
+  check('Markdown 三级缩进四个空格', md.includes('\n    - 画像'))
+  check('Markdown 备注写成引用块', md.includes('  > 第一行') && md.includes('  > 第二行'))
+  check('Markdown 以换行结尾', md.endsWith('\n'))
+
+  group('大纲：导出 OPML')
+
+  const opml = toOpml(activeSheet(workbook))
+  check('OPML 声明版本', opml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">'))
+  check('OPML 头部带画布标题', opml.includes('<title>画布 1</title>'))
+  check('OPML 用 outline 元素', opml.includes('<outline text="产品规划">'))
+  check('OPML 备注写成 _note', opml.includes('_note="第一行 第二行"'))
+  check('OPML 超链接写成 _link', opml.includes('_link="https://example.com"'))
+  check('OPML 自闭合标签用于叶子节点', opml.includes('<outline text="竞品对比"/>'))
+  check('OPML 叶子节点不会被写成带子元素的标签', !opml.includes('<outline text="竞品对比">'))
+  check('OPML 结构闭合', (opml.match(/<outline/g) ?? []).length === (opml.match(/<\/outline>/g) ?? []).length + countSelfClosing(opml))
+
+  const special = createTopic('A & B <C> "D"')
+  special.children = [createTopic("it's fine")]
+  const specialWorkbook = createWorkbook({ rootTitle: '特殊字符' })
+  activeRoot(specialWorkbook).children = [special]
+  const specialOpml = toOpml(activeSheet(specialWorkbook))
+  check('OPML 转义 & < > "', specialOpml.includes('A &amp; B &lt;C&gt; &quot;D&quot;'))
+  check('OPML 转义单引号', specialOpml.includes('it&apos;s fine'))
+
+  group('大纲：格式注册与错误处理')
+
+  eq('支持三种格式', OUTLINE_FORMATS.map((item) => item.id), ['txt', 'md', 'opml'])
+  eq('扩展名正确', OUTLINE_FORMATS.map((item) => item.ext), ['txt', 'md', 'opml'])
+  eq('取格式定义', outlineFormatDef('md').label, 'Markdown')
+
+  let badFormat = ''
+  try {
+    buildOutline(workbook, 'docx' as OutlineFormat)
+  } catch (error) {
+    badFormat = (error as Error).message
+  }
+  check('不支持的格式给出可读错误', badFormat.includes('不支持的导出格式'), badFormat)
+
+  const emptyWorkbook = createWorkbook()
+  emptyWorkbook.sheets = []
+  let noSheet = ''
+  try {
+    buildOutline(emptyWorkbook, 'txt')
+  } catch (error) {
+    noSheet = (error as Error).message
+  }
+  check('没有画布时给出可读错误', noSheet.includes('没有可导出'), noSheet)
+}
+
+/** 统计 OPML 里自闭合的 outline 数量（用于校验标签配对） */
+function countSelfClosing(opml: string): number {
+  return (opml.match(/<outline [^>]*\/>/g) ?? []).length
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -2256,6 +2402,7 @@ async function main(): Promise<void> {
   await testOverlayToggles()
   testStructures()
   testLegacy()
+  testOutline()
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()

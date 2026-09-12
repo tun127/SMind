@@ -3,6 +3,7 @@ import type { RecoveryInfo } from '@shared/ipc'
 import { activeRoot, findParent, findTopic } from '@shared/model/tree'
 import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
+import OutlinePanel from './components/OutlinePanel'
 import RichFormatBar from './components/RichFormatBar'
 import StatusBar from './components/StatusBar'
 import ThemePanel from './components/ThemePanel'
@@ -27,6 +28,8 @@ export default function App(): ReactElement {
   const [showShortcuts, setShowShortcuts] = useState(false)
   /** 右侧抽屉：同一时刻只开一个 */
   const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node'>('none')
+  /** 左侧大纲面板：与画布并排显示，改哪边另一边都跟着变 */
+  const [showOutline, setShowOutline] = useState(false)
   const toastTimer = useRef<number | null>(null)
   /** 是否还停在「发现未保存内容」这一步没做决定 */
   const recoveryPendingRef = useRef(false)
@@ -388,6 +391,7 @@ export default function App(): ReactElement {
   return (
     <div className="app">
       <Toolbar
+        outlineOpen={showOutline}
         actions={{
           onNew: () => guard(newDocument),
           onOpen: () => guard(() => void openDocument()),
@@ -395,11 +399,13 @@ export default function App(): ReactElement {
           onSaveAs: () => void saveDocument(true),
           onHelp: () => setShowShortcuts(true),
           onThemes: () => setSidePanel((current) => (current === 'theme' ? 'none' : 'theme')),
-          onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node'))
+          onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node')),
+          onOutline: () => setShowOutline((current) => !current)
         }}
       />
 
-      <div className="app__body">
+      <div className={showOutline ? 'app__body app__body--with-outline' : 'app__body'}>
+        {showOutline && <OutlinePanel onClose={() => setShowOutline(false)} onNotify={showToast} />}
         <Canvas />
         {sidePanel === 'theme' && <ThemePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
         {sidePanel === 'node' && <NodePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}

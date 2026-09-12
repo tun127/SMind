@@ -22,6 +22,7 @@ import {
 } from '@shared/model/resources'
 import { parseXmind } from '@shared/xmind/parse'
 import { serializeXmind } from '@shared/xmind/serialize'
+import { activeSheetOf, buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
 import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '@shared/recovery'
 import { buildAppMenu } from './menu'
@@ -455,6 +456,30 @@ function registerIpc(): void {
     if (result.canceled || !result.filePath) return false
     await fs.writeFile(result.filePath, Buffer.from(bytes))
     return true
+  })
+
+  /* ---- 大纲导出（P5） ---- */
+
+  ipcMain.handle(IPC.exportOutline, async (_e, workbook: Workbook, format: OutlineFormat): Promise<string | null> => {
+    const def = outlineFormatDef(format)
+    const sheet = activeSheetOf(workbook)
+    const content = buildOutline(workbook, format)
+
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: def.dialogTitle,
+      defaultPath: `${sheet?.title || '大纲'}.${def.ext}`,
+      filters: [
+        { name: def.label, extensions: [def.ext] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled || !result.filePath) return null
+
+    const target = result.filePath.toLowerCase().endsWith(`.${def.ext}`)
+      ? result.filePath
+      : `${result.filePath}.${def.ext}`
+    await fs.writeFile(target, content, 'utf8')
+    return target
   })
 
   ipcMain.on(IPC.confirmClose, () => {
