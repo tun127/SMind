@@ -46,6 +46,21 @@ import {
   type ImageExportFormat
 } from '../src/shared/export/types'
 import {
+  DEFAULT_AI_CONFIG,
+  buildExpandMessages,
+  buildGenerateMessages,
+  buildPolishMessages,
+  chatCompletionsUrl,
+  cleanPolishedTitle,
+  describeAiError,
+  extractContent,
+  normalizeAiConfig,
+  outlineToTopic,
+  parseFlatList,
+  parseOutline,
+  toConfigView
+} from '../src/shared/ai'
+import {
   IMAGE_FALLBACK,
   IMAGE_MAX_HEIGHT,
   imageBoxSize,
@@ -2831,6 +2846,232 @@ function testExportFormats(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 12.11 AI：配置 / 提示词 / 解析 / 错误翻译                            */
+/* ------------------------------------------------------------------ */
+
+function testAi(): void {
+  group('AI：配置')
+
+  const defaults = normalizeAiConfig(undefined)
+  eq('空配置用默认 BaseURL', defaults.config.baseUrl, DEFAULT_AI_CONFIG.baseUrl)
+  eq('空配置用默认模型', defaults.config.model, DEFAULT_AI_CONFIG.model)
+  eq('空配置没有 Key', defaults.config.apiKey, '')
+  eq('空配置无告警（默认值可用）', defaults.warnings.length, 0)
+
+  const bad = normalizeAiConfig({ baseUrl: 'api.deepseek.com', model: '  ', temperature: 9 })
+  eq('缺协议的 BaseURL 回退默认', bad.config.baseUrl, DEFAULT_AI_CONFIG.baseUrl)
+  check('缺协议时给出提示', bad.warnings.length === 1, bad.warnings.join('|'))
+  eq('空模型名回退默认', bad.config.model, DEFAULT_AI_CONFIG.model)
+  eq('温度被夹到上限', bad.config.temperature, 2)
+  eq('负温度被夹到 0', normalizeAiConfig({ temperature: -3 }).config.temperature, 0)
+  eq('非法温度回退默认', normalizeAiConfig({ temperature: Number.NaN }).config.temperature, DEFAULT_AI_CONFIG.temperature)
+
+  const view = toConfigView({ baseUrl: 'https://x/v1', model: 'm', temperature: 0.5, apiKey: 'sk-abcdef123456' })
+  eq('掩码保留前缀与后四位', view.keyPreview, 'sk-…3456')
+  check('界面上不出现完整 Key', !JSON.stringify(view).includes('sk-abcdef123456'))
+  eq('没 Key 时掩码为 null', toConfigView({ ...DEFAULT_AI_CONFIG }).keyPreview, null)
+  eq('短 Key 只显示星号', toConfigView({ ...DEFAULT_AI_CONFIG, apiKey: 'abc' }).keyPreview, '****')
+
+  group('AI：接口地址拼装')
+
+  eq('裸域名补 /v1/chat/completions', chatCompletionsUrl('https://api.deepseek.com'), 'https://api.deepseek.com/v1/chat/completions')
+  eq('带 /v1 不重复补', chatCompletionsUrl('https://api.openai.com/v1'), 'https://api.openai.com/v1/chat/completions')
+  eq('末尾斜杠会被去掉', chatCompletionsUrl('https://api.openai.com/v1/'), 'https://api.openai.com/v1/chat/completions')
+  eq('完整地址原样使用', chatCompletionsUrl('https://x.com/v1/chat/completions'), 'https://x.com/v1/chat/completions')
+  eq('本地端口 + /v1', chatCompletionsUrl('http://localhost:11434/v1'), 'http://localhost:11434/v1/chat/completions')
+  eq('智谱 v4 形态', chatCompletionsUrl('https://open.bigmodel.cn/api/paas/v4'), 'https://open.bigmodel.cn/api/paas/v4/chat/completions')
+  eq('空串返回空', chatCompletionsUrl('   '), '')
+
+  group('AI：提示词')
+
+  const generate = buildGenerateMessages({ topic: '学会做菜', depth: 4, extra: '面向零基础' })
+  eq('生成提示词两条消息', generate.length, 2)
+  eq('系统消息要求缩进大纲', generate[0].role, 'system')
+  check('系统消息说明只输出大纲', generate[0].content.includes('缩进大纲'))
+  check('用户消息带主题', generate[1].content.includes('学会做菜'))
+  check('用户消息带层级', generate[1].content.includes('最多 4 层'))
+  check('用户消息带补充要求', generate[1].content.includes('面向零基础'))
+  check('没写层级时给默认值', buildGenerateMessages({ topic: 'x' })[1].content.includes('最多 3 层'))
+
+  const expand = buildExpandMessages({ title: '市场分析', existing: ['目标用户'], count: 4, notes: '看竞品', path: ['规划', '市场分析'] })
+  check('扩写提示词带当前主题', expand[1].content.includes('市场分析'))
+  check('扩写提示词带已有子主题（避免重复）', expand[1].content.includes('目标用户'))
+  check('扩写提示词带备注', expand[1].content.includes('看竞品'))
+  check('扩写提示词带所在分支', expand[1].content.includes('规划 → 市场分析'))
+  check('扩写提示词带数量', expand[1].content.includes('补 4 个'))
+
+  const polish = buildPolishMessages({ title: '我们做了一个测试' })
+  check('润色提示词要求只返回文本', polish[0].content.includes('只返回改写后的那一句'))
+  check('润色提示词带原文', polish[1].content.includes('我们做了一个测试'))
+  check('润色可指定风格', buildPolishMessages({ title: 'x', style: '口语化' })[1].content.includes('口语化'))
+
+  group('AI：解析模型输出')
+
+  const parsed = parseOutline(`好的，这是大纲：
+- 产品规划
+  - 市场分析
+    - 目标用户
+  - 产品设计
+  - 研发计划`)
+  eq('解析出根节点', parsed.root?.title, '产品规划')
+  eq('解析出节点总数', parsed.count, 5)
+  eq('一级子节点', parsed.root?.children.map((c) => c.title), ['市场分析', '产品设计', '研发计划'])
+  eq('二级子节点', parsed.root?.children[0].children.map((c) => c.title), ['目标用户'])
+  check('开场白那行被跳过', !JSON.stringify(parsed.root).includes('好的'))
+
+  // 模型给出多个并列顶层节点时，套一个根，不散着
+  const multiRoot = parseOutline('- 甲\n- 乙')
+  eq('并列顶层套根', multiRoot.root?.children.map((c) => c.title), ['甲', '乙'])
+  check('并列顶层给出提示', multiRoot.warnings.some((w) => w.includes('并列')), multiRoot.warnings.join('|'))
+
+  // 模型常见的几种「不听话」写法都要能处理
+  check('代码块包裹能剥掉', parseOutline('```\n- A\n  - B\n```').count === 2)
+  check('星号列表也能解析', parseOutline('* A\n  * B').count === 2)
+  check('数字列表也能解析', parseOutline('1. A\n  1. B').count === 2)
+  check(
+    'Markdown 标题也能解析（并列时套一个根）',
+    parseOutline('# A\n## B').root?.children.length === 2,
+    JSON.stringify(parseOutline('# A\n## B').root)
+  )
+  check('制表符缩进也能解析', parseOutline('- A\n\t- B').root?.children.length === 1)
+  eq('多余空行不影响', parseOutline('- A\n\n\n  - B').count, 2)
+  check('加粗标题去掉星号', parseOutline('- **重要**').root?.title === '重要', parseOutline('- **重要**').root?.title)
+  check(
+    '开场白不进入大纲（关键）',
+    parseOutline('好的，这是大纲：\n- 甲\n  - 乙').root?.title === '甲',
+    JSON.stringify(parseOutline('好的，这是大纲：\n- 甲\n  - 乙').root)
+  )
+  eq('开场白被跳过后节点数正确', parseOutline('好的，这是大纲：\n- 甲\n  - 乙').count, 2)
+
+  const flatRoots = parseOutline('- 甲\n- 乙\n- 丙', '我的主题')
+  eq('多个顶层节点套一个根', flatRoots.root?.title, '我的主题')
+  eq('同级的都挂在根下', flatRoots.root?.children.length, 3)
+  check('多顶层时给出提示', flatRoots.warnings.length === 1, flatRoots.warnings.join('|'))
+
+  const shifted = parseOutline('    - 根\n      - 子')
+  eq('整体缩进的层级被归一化', shifted.root?.title, '根')
+  eq('归一化后子节点关系正确', shifted.root?.children.length, 1)
+
+  const deepJump = parseOutline('- 根\n      - 跳级子节点')
+  check('层级跳跃不会崩（按最近父级挂）', (deepJump.root?.children.length ?? 0) >= 1)
+
+  const empty = parseOutline('很抱歉，我无法完成这个请求。')
+  eq('只有说明文字时根为 null', empty.root, null)
+  eq('只有说明文字时给提示', empty.warnings.length, 1)
+  check('提示说明了原因', empty.warnings[0].includes('说明文字'), empty.warnings[0])
+
+  const bare = parseOutline('甲\n乙\n丙')
+  eq('没有列表符号时按一行一个主题解析', bare.root?.children.map((c) => c.title), ['甲', '乙', '丙'])
+  check('并给出格式提示', bare.warnings.some((w) => w.includes('一行一个主题')), bare.warnings.join('|'))
+
+  eq('平铺列表解析', parseFlatList('- 甲\n- 乙\n- 丙'), ['甲', '乙', '丙'])
+  eq('平铺列表忽略空行与解释', parseFlatList('这是结果：\n\n- 甲\n\n- 乙'), ['这是结果：', '甲', '乙'])
+  eq('平铺列表剥掉缩进', parseFlatList('  - 甲\n    - 乙'), ['甲', '乙'])
+
+  group('AI：润色结果清洗')
+
+  eq('去掉包裹的引号', cleanPolishedTitle('"优化后的标题"'), '优化后的标题')
+  eq('去掉中文引号', cleanPolishedTitle('「优化后的标题」'), '优化后的标题')
+  eq('去掉编号前缀', cleanPolishedTitle('1. 优化后的标题'), '优化后的标题')
+  eq('只取第一行', cleanPolishedTitle('优化后的标题\n解释：我改了用词'), '优化后的标题')
+  eq('去掉列表符号', cleanPolishedTitle('- 优化后的标题'), '优化后的标题')
+  eq('空输入返回空', cleanPolishedTitle('   '), '')
+  eq('不误删内容里的引号', cleanPolishedTitle('他说"你好"'), '他说"你好"')
+
+  group('AI：响应解析与错误翻译')
+
+  eq(
+    '取 message.content',
+    extractContent({ choices: [{ message: { content: '结果' } }] }),
+    '结果'
+  )
+  eq('兼容 text 字段', extractContent({ choices: [{ text: '旧格式' }] }), '旧格式')
+
+  let noChoices = ''
+  try {
+    extractContent({ choices: [] })
+  } catch (error) {
+    noChoices = (error as Error).message
+  }
+  check('choices 为空给出可读错误', noChoices.includes('choices 为空'), noChoices)
+
+  let apiError = ''
+  try {
+    extractContent({ error: { message: '额度不足' } })
+  } catch (error) {
+    apiError = (error as Error).message
+  }
+  check('响应里带 error 时透出服务端信息', apiError.includes('额度不足'), apiError)
+
+  let notObject = ''
+  try {
+    extractContent('不是对象')
+  } catch (error) {
+    notObject = (error as Error).message
+  }
+  check('非对象给出可读错误', notObject.includes('不是合法的 JSON 对象'), notObject)
+
+  check('401 提示检查 Key', describeAiError(401, '{"error":{"message":"invalid api key"}}').includes('API Key'))
+  check('401 带上服务端信息', describeAiError(401, '{"error":{"message":"invalid api key"}}').includes('invalid api key'))
+  check('404 提示 BaseURL/模型名', describeAiError(404, '').includes('/v1'))
+  check('429 提示限流', describeAiError(429, '').includes('限流'))
+  check('400 提示模型名或长度', describeAiError(400, '').includes('模型名'))
+  check('5xx 说明不是用户的问题', describeAiError(503, '').includes('不是你的问题'))
+  check('其它状态码也给状态码', describeAiError(418, '').includes('418'))
+  check('超长响应体被截断', describeAiError(400, 'x'.repeat(500)).length < 400)
+
+  group('AI：大纲落到模型')
+
+  const toTopic = outlineToTopic({ title: '根', children: [{ title: '子', children: [] }] })
+  eq('转成主题树', toTopic.title, '根')
+  eq('子节点也转了', toTopic.children.map((c) => c.title), ['子'])
+  check('生成了 id', toTopic.id.length > 0 && toTopic.children[0].id.length > 0)
+  check('id 互不相同', toTopic.id !== toTopic.children[0].id)
+  eq('默认字段齐全', [toTopic.labels.length, toTopic.markers.length, toTopic.attachments.length], [0, 0, 0])
+
+  group('AI：结果写入画布（一步撤销）')
+
+  reset()
+  const aiRootId = root().id
+  const aiTarget = addChildOf(aiRootId, '待扩写')
+  const before = store().undoStack.length
+  const added = store().addChildTitles(aiTarget, ['甲', '乙', '  ', '丙'])
+  eq('空白标题被忽略', added, 3)
+  eq('子主题真写进去了', find(aiTarget)?.children.map((c) => c.title), ['甲', '乙', '丙'])
+  eq('整批只占一步撤销', store().undoStack.length, before + 1)
+  store().undo()
+  eq('一次撤销整批回退', find(aiTarget)?.children.length, 0)
+
+  const sheetsBefore = store().workbook.sheets.length
+  const applied = store().applyOutlineTree({ kind: 'newSheet' }, {
+    title: 'AI 主题',
+    children: [{ title: '分支一', children: [{ title: '细节点', children: [] }] }]
+  })
+  eq('生成的节点数正确', applied, 3)
+  eq('新画布已创建', store().workbook.sheets.length, sheetsBefore + 1)
+  eq('当前画布切到新画布', activeRoot(store().workbook).title, 'AI 主题')
+  eq('层级被正确写入', activeRoot(store().workbook).children[0].children[0].title, '细节点')
+  store().undo()
+  eq('撤销后回到原来的画布数', store().workbook.sheets.length, sheetsBefore)
+
+  reset()
+  const hostId = addChildOf(root().id, '宿主主题')
+  const childApplied = store().applyOutlineTree({ kind: 'childOf', id: hostId }, {
+    title: '生成的分支',
+    children: []
+  })
+  eq('挂到已有主题下：节点数', childApplied, 1)
+  eq('挂载结果正确', find(hostId)?.children.map((c) => c.title), ['生成的分支'])
+
+  const unknownTarget = store().applyOutlineTree({ kind: 'childOf', id: '不存在的主题' }, {
+    title: 'x',
+    children: []
+  })
+  eq('目标主题不存在时不会崩（返回计数但什么都没写）', unknownTarget, 1)
+  eq('确实没有写进任何地方', find(hostId)?.children.length, 1)
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -2858,6 +3099,7 @@ async function main(): Promise<void> {
   testSearch()
   testExportDrawing()
   testExportFormats()
+  testAi()
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()

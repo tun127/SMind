@@ -19,10 +19,13 @@ import {
   Save,
   SaveAll,
   Search as SearchIcon,
+  Settings2,
+  Sparkles,
   Spline,
   Tag,
   Trash2,
   Undo2,
+  Wand2,
   ZoomIn,
   ZoomOut
 } from 'lucide-react'
@@ -47,6 +50,11 @@ export interface ToolbarActions {
   onImportTheme(): void
   /** 直接导出大纲（不带设置框） */
   onExportOutline(format: OutlineFormat): void
+  /** AI 相关 */
+  onAiGenerate(): void
+  onAiExpand(): void
+  onAiPolish(): void
+  onAiSettings(): void
 }
 
 interface Props {
@@ -404,6 +412,47 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         <button type="button" className="tool-btn" title="主题外观" onClick={actions.onThemes}>
           <Palette size={17} />
         </button>
+      </div>
+
+      <div className="toolbar__divider" />
+
+      {/* AI：常用动作放在工具栏，设置也在同一处 */}
+      <div className="toolbar__group">
+        <ToolMenu
+          icon={<Sparkles size={16} />}
+          label="AI"
+          title="AI 助手（OpenAI 兼容接口）"
+          items={[
+            {
+              key: 'ai-generate',
+              label: '一键生成导图…',
+              hint: '给个主题就出整张图',
+              icon: <Sparkles size={15} />,
+              onSelect: actions.onAiGenerate
+            },
+            {
+              key: 'ai-expand',
+              label: '扩写子主题',
+              hint: '给选中的主题补下级',
+              icon: <ListTree size={15} />,
+              onSelect: actions.onAiExpand
+            },
+            {
+              key: 'ai-polish',
+              label: '润色标题',
+              hint: '改写选中主题的文字',
+              icon: <Wand2 size={15} />,
+              onSelect: actions.onAiPolish
+            },
+            {
+              key: 'ai-settings',
+              label: 'AI 设置…',
+              hint: 'BaseURL / Key / 模型',
+              icon: <Settings2 size={15} />,
+              onSelect: actions.onAiSettings
+            }
+          ]}
+        />
       </div>
 
       <div className="toolbar__spacer" />

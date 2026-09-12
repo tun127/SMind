@@ -1,4 +1,5 @@
 import type { Workbook } from './model/types'
+import type { AiConfigView, AiMessage } from './ai'
 import type { ImageExportFormat } from './export/types'
 import type { OutlineFormat } from './outline'
 import type { ThemeDefinition } from './theme'
@@ -71,7 +72,12 @@ export const IPC = {
   /* ---- 大纲导出（P5） ---- */
   exportOutline: 'outline:export',
   /* ---- 图片导出（P6） ---- */
-  saveExport: 'export:save'
+  saveExport: 'export:save',
+  /* ---- AI（P8） ---- */
+  aiConfigGet: 'ai:config-get',
+  aiConfigSave: 'ai:config-save',
+  aiChat: 'ai:chat',
+  aiTest: 'ai:test'
 } as const
 
 export type MenuCommand =
@@ -150,4 +156,36 @@ export interface MindApi {
    * 渲染进程负责排版与栅格化，主进程只负责弹保存框与落盘。
    */
   saveExport(data: Uint8Array | string, fileName: string, ext: ImageExportFormat): Promise<string | null>
+
+  /* ---- AI（P8） ---- */
+  /** 读取 AI 配置（Key 只回掩码，完整 Key 不进渲染进程） */
+  aiConfigGet(): Promise<AiConfigView>
+  /** 保存 AI 配置；apiKey 传空字符串/不传表示沿用已保存的 Key */
+  aiConfigSave(patch: AiConfigPatch): Promise<AiConfigView>
+  /** 调一次 chat/completions，返回模型正文 */
+  aiChat(messages: AiMessage[], options?: { timeoutMs?: number }): Promise<AiChatResult>
+  /** 用一条极短的消息测试连通性 */
+  aiTest(): Promise<AiTestResult>
+}
+
+export interface AiConfigPatch {
+  baseUrl?: string
+  model?: string
+  temperature?: number
+  apiKey?: string
+}
+
+export interface AiChatResult {
+  content: string
+  /** 实际使用的模型名（服务端可能回不同的） */
+  model: string
+  /** 本次消耗的 token（服务端没给就是 null） */
+  totalTokens: number | null
+}
+
+export interface AiTestResult {
+  ok: boolean
+  message: string
+  /** 测试失败时的原始状态码，便于排查 */
+  status?: number
 }

@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   IPC,
+  type AiChatResult,
+  type AiConfigPatch,
+  type AiTestResult,
   type MenuCommand,
   type MindApi,
   type OpenResult,
@@ -9,6 +12,7 @@ import {
   type RecoveryInfo,
   type SaveResult
 } from '@shared/ipc'
+import type { AiConfigView, AiMessage } from '@shared/ai'
 import type { Workbook } from '@shared/model/types'
 import type { ImageExportFormat } from '@shared/export/types'
 import type { OutlineFormat } from '@shared/outline'
@@ -82,7 +86,16 @@ const api: MindApi = {
     ipcRenderer.invoke(IPC.exportOutline, workbook, format) as Promise<string | null>,
 
   saveExport: (data: Uint8Array | string, fileName: string, ext: ImageExportFormat) =>
-    ipcRenderer.invoke(IPC.saveExport, data, fileName, ext) as Promise<string | null>
+    ipcRenderer.invoke(IPC.saveExport, data, fileName, ext) as Promise<string | null>,
+
+  aiConfigGet: () => ipcRenderer.invoke(IPC.aiConfigGet) as Promise<AiConfigView>,
+
+  aiConfigSave: (patch: AiConfigPatch) => ipcRenderer.invoke(IPC.aiConfigSave, patch) as Promise<AiConfigView>,
+
+  aiChat: (messages: AiMessage[], options?: { timeoutMs?: number }) =>
+    ipcRenderer.invoke(IPC.aiChat, messages, options) as Promise<AiChatResult>,
+
+  aiTest: () => ipcRenderer.invoke(IPC.aiTest) as Promise<AiTestResult>
 }
 
 contextBridge.exposeInMainWorld('api', api)

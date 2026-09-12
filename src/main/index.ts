@@ -5,12 +5,26 @@ import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   IPC,
+  type AiChatResult,
+  type AiConfigPatch,
+  type AiTestResult,
   type OpenResult,
   type PickedAttachment,
   type PickedImage,
   type RecoveryInfo,
   type SaveResult
 } from '@shared/ipc'
+import {
+  DEFAULT_AI_CONFIG,
+  chatCompletionsUrl,
+  describeAiError,
+  extractContent,
+  normalizeAiConfig,
+  toConfigView,
+  type AiConfig,
+  type AiConfigView,
+  type AiMessage
+} from '@shared/ai'
 import type { Workbook } from '@shared/model/types'
 import { createId } from '@shared/model/factory'
 import {
@@ -142,6 +156,96 @@ async function readThemes(): Promise<ThemeDefinition[]> {
 
 async function writeThemes(themes: ThemeDefinition[]): Promise<void> {
   await fs.writeFile(themesFile(), JSON.stringify({ version: 1, themes }, null, 2))
+}
+
+/* ------------------------------------------------------------------ */
+/* AI 配置与请求代理（P8）                                             */
+/* ------------------------------------------------------------------ */
+
+const aiConfigFile = (): string => join(app.getPath('userData'), 'ai-config.json')
+
+async function readAiConfig(): Promise<AiConfig> {
+  try {
+    const raw: unknown = JSON.parse(await fs.readFile(aiConfigFile(), 'utf8'))
+    return normalizeAiConfig(raw).config
+  } catch {
+    return { ...DEFAULT_AI_CONFIG }
+  }
+}
+
+async function writeAiConfig(config: AiConfig): Promise<void> {
+  await fs.writeFile(aiConfigFile(), JSON.stringify(config, null, 2), 'utf8')
+}
+
+/**
+ * 调一次 OpenAI 兼容的 chat/completions。
+ *
+ * 放在主进程做：① 绕开渲染进程的 CORS 限制；② 超时与错误翻译集中在一处；
+ * ③ API Key 只留在主进程的配置文件里，不经过渲染进程。
+ */
+async function callAi(
+  config: AiConfig,
+  messages: AiMessage[],
+  timeoutMs: number
+): Promise<AiChatResult> {
+  if (config.apiKey.length === 0) {
+    throw new Error('还没有配置 API Key：请打开「AI 设置」填入后再试')
+  }
+  const url = chatCompletionsUrl(config.baseUrl)
+  if (url.length === 0) throw new Error('BaseURL 没有配置')
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages,
+        temperature: config.temperature,
+        stream: false
+      }),
+      signal: controller.signal
+    })
+
+    const text = await response.text()
+    if (!response.ok) {
+      throw new Error(describeAiError(response.status, text))
+    }
+
+    let payload: unknown
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      throw new Error('AI 返回的不是合法 JSON：可能 BaseURL 指向的不是兼容接口')
+    }
+
+    const content = extractContent(payload)
+    const usage = isRecord(payload) && isRecord(payload.usage) ? payload.usage : null
+    const totalTokens = usage && typeof usage.total_tokens === 'number' ? usage.total_tokens : null
+    const model = isRecord(payload) && typeof payload.model === 'string' ? payload.model : config.model
+    return { content, model, totalTokens }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`请求超时（超过 ${Math.round(timeoutMs / 1000)} 秒）：网络慢或模型响应太慢，可以稍后再试`)
+    }
+    if (error instanceof TypeError) {
+      // fetch 的网络层错误（DNS/连接被拒/证书）
+      throw new Error(`连不上 AI 服务：请检查 BaseURL 是否正确、网络是否可用（${error.message}）`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /* ------------------------------------------------------------------ */
@@ -512,6 +616,46 @@ function registerIpc(): void {
       return target
     }
   )
+
+  /* ---- AI（P8） ---- */
+
+  ipcMain.handle(IPC.aiConfigGet, async (): Promise<AiConfigView> => toConfigView(await readAiConfig()))
+
+  ipcMain.handle(IPC.aiConfigSave, async (_e, patch: AiConfigPatch): Promise<AiConfigView> => {
+    const current = await readAiConfig()
+    const merged: AiConfig = {
+      baseUrl: typeof patch.baseUrl === 'string' && patch.baseUrl.trim().length > 0 ? patch.baseUrl.trim() : current.baseUrl,
+      model: typeof patch.model === 'string' && patch.model.trim().length > 0 ? patch.model.trim() : current.model,
+      temperature: typeof patch.temperature === 'number' ? patch.temperature : current.temperature,
+      // 空字符串表示「不改动已保存的 Key」，避免用户看不到明文时误清空
+      apiKey: typeof patch.apiKey === 'string' && patch.apiKey.trim().length > 0 ? patch.apiKey.trim() : current.apiKey
+    }
+    const { config } = normalizeAiConfig(merged)
+    await writeAiConfig(config)
+    return toConfigView(config)
+  })
+
+  ipcMain.handle(
+    IPC.aiChat,
+    async (_e, messages: AiMessage[], options?: { timeoutMs?: number }): Promise<AiChatResult> => {
+      const config = await readAiConfig()
+      return callAi(config, messages, options?.timeoutMs ?? 120000)
+    }
+  )
+
+  ipcMain.handle(IPC.aiTest, async (): Promise<AiTestResult> => {
+    const config = await readAiConfig()
+    try {
+      const result = await callAi(
+        config,
+        [{ role: 'user', content: '请只回复两个字：正常' }],
+        25000
+      )
+      return { ok: true, message: `连接正常（模型 ${result.model}）：${result.content.trim().slice(0, 20)}` }
+    } catch (error) {
+      return { ok: false, message: (error as Error).message }
+    }
+  })
 
   ipcMain.on(IPC.confirmClose, () => {
     allowClose = true

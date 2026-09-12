@@ -12,6 +12,8 @@ import StatusBar from './components/StatusBar'
 import ThemePanel from './components/ThemePanel'
 import Toolbar from './components/Toolbar'
 import { RecoveryDialog, ShortcutsDialog, UnsavedDialog } from './components/Dialogs'
+import AiDialog, { type AiTask } from './components/AiDialog'
+import AiSettingsDialog from './components/AiSettingsDialog'
 import ExportDialog from './components/ExportDialog'
 import { viewportActions } from './render/viewport'
 import { snapshotForSave, useEditor } from './store/editor'
@@ -36,6 +38,9 @@ export default function App(): ReactElement {
   const [showOutline, setShowOutline] = useState(false)
   /** 导出设置框 */
   const [showExport, setShowExport] = useState(false)
+  /** AI 对话框：生成 / 扩写 / 润色 */
+  const [aiTask, setAiTask] = useState<AiTask | null>(null)
+  const [showAiSettings, setShowAiSettings] = useState(false)
   const toastTimer = useRef<number | null>(null)
   /** 是否还停在「发现未保存内容」这一步没做决定 */
   const recoveryPendingRef = useRef(false)
@@ -460,7 +465,11 @@ export default function App(): ReactElement {
           onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
           onExport: () => setShowExport(true),
           onImportTheme: () => void importTheme(),
-          onExportOutline: (format) => void exportOutlineAs(format)
+          onExportOutline: (format) => void exportOutlineAs(format),
+          onAiGenerate: () => setAiTask('generate'),
+          onAiExpand: () => setAiTask('expand'),
+          onAiPolish: () => setAiTask('polish'),
+          onAiSettings: () => setShowAiSettings(true)
         }}
       />
 
@@ -508,6 +517,12 @@ export default function App(): ReactElement {
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} onNotify={showToast} />}
+
+      {aiTask && <AiDialog task={aiTask} onClose={() => setAiTask(null)} onNotify={showToast} />}
+
+      {showAiSettings && (
+        <AiSettingsDialog onClose={() => setShowAiSettings(false)} onNotify={showToast} />
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>

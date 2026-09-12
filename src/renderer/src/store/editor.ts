@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } from 'immer'
 import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
 import { createId, createSheet, createTopic, createWorkbook } from '@shared/model/factory'
+import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
 import { hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
 import {
   EMPTY_FILTER,
@@ -109,6 +110,16 @@ export interface EditorState {
   removeSheet(id: string): void
   renameSheet(id: string, title: string): void
   setActiveSheet(id: string): void
+
+  /* ---- AI 结果落地（P8） ---- */
+  /** 给某个主题一次性追加若干子主题（AI 扩写用，整批算一步撤销） */
+  addChildTitles(parentId: string, titles: string[]): number
+  /** 把 AI 生成的整棵大纲应用到画布：新建一张画布，或挂到指定主题下面 */
+  applyOutlineTree(
+    target: { kind: 'newSheet' } | { kind: 'childOf'; id: string },
+    root: OutlineNode,
+    sheetTitle?: string
+  ): number
 
   /* ---- 视图 ---- */
   setZoom(zoom: number): void
@@ -415,6 +426,64 @@ export const useEditor = create<EditorState>()((set, get) => ({
         pan: { x: 0, y: 0 }
       }
     }),
+
+  /* ------------------------------------------------------------------ */
+  /* AI 结果落地                                                         */
+  /* ------------------------------------------------------------------ */
+
+  addChildTitles: (parentId, titles) => {
+    const cleaned = titles.map((title) => title.trim()).filter((title) => title.length > 0)
+    if (cleaned.length === 0) return 0
+
+    const created: string[] = []
+    get().mutate((draft) => {
+      const parent = findTopic(activeRoot(draft), parentId) ?? activeRoot(draft)
+      for (const title of cleaned) {
+        const node = createTopic(title)
+        parent.children.push(node)
+        created.push(node.id)
+      }
+      if (parent.collapsed) parent.collapsed = false
+    }, 'AI 扩写子主题')
+
+    if (created.length > 0) set({ selection: created })
+    return created.length
+  },
+
+  applyOutlineTree: (target, root, sheetTitle) => {
+    const count = countOutlineNodes(root)
+    if (count === 0) return 0
+
+    if (target.kind === 'newSheet') {
+      const sheet = createSheet(sheetTitle && sheetTitle.trim().length > 0 ? sheetTitle.trim() : root.title)
+      // 让生成的大纲直接成为这张画布的中心主题
+      sheet.rootTopic = outlineToTopic(root)
+      get().mutate((draft) => {
+        draft.sheets.push(sheet)
+        draft.activeSheetId = sheet.id
+      }, 'AI 生成导图')
+      set({
+        selection: [sheet.rootTopic.id],
+        editingId: null,
+        editingText: '',
+        editingRich: null,
+        zoom: 1,
+        pan: { x: 0, y: 0 }
+      })
+      return count
+    }
+
+    // 挂到已有主题下：根节点的文字成为新的子主题
+    const childTopic = outlineToTopic(root)
+    get().mutate((draft) => {
+      const parent = findTopic(activeRoot(draft), target.id)
+      if (!parent) return
+      parent.children.push(childTopic)
+      if (parent.collapsed) parent.collapsed = false
+    }, 'AI 生成子主题')
+    set({ selection: [childTopic.id] })
+    return count
+  },
 
   /* ------------------------------------------------------------------ */
   /* 文档                                                                */
