@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import type { RecoveryInfo } from '@shared/ipc'
+import type { OutlineFormat } from '@shared/outline'
 import { activeRoot, findParent, findTopic } from '@shared/model/tree'
 import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
@@ -146,6 +147,37 @@ export default function App(): ReactElement {
   )
 
   /* ------------------------------------------------------------------ */
+  /* 导入 / 导出（工具栏与菜单共用）                                      */
+  /* ------------------------------------------------------------------ */
+
+  /** 导入主题文件（.json），存进「我的主题」 */
+  const importTheme = useCallback(async (): Promise<void> => {
+    try {
+      const theme = await window.api.themesImport()
+      if (!theme) return
+      await window.api.themesSave(theme)
+      showToast(`已导入主题「${theme.name}」，可在「主题外观」里选用`)
+    } catch (error) {
+      showToast(`导入主题失败：${(error as Error).message}`)
+    }
+  }, [showToast])
+
+  /** 导出当前画布的大纲（TXT / Markdown / OPML） */
+  const exportOutlineAs = useCallback(
+    async (format: OutlineFormat): Promise<void> => {
+      commitPending()
+      try {
+        const workbook = useEditor.getState().workbook
+        const path = await window.api.exportOutline(workbook, format)
+        if (path) showToast(`已导出大纲：${path}`)
+      } catch (error) {
+        showToast(`导出大纲失败：${(error as Error).message}`)
+      }
+    },
+    [commitPending, showToast]
+  )
+
+  /* ------------------------------------------------------------------ */
   /* 菜单命令                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -195,12 +227,27 @@ export default function App(): ReactElement {
         case 'help:shortcuts':
           setShowShortcuts(true)
           break
+        case 'file:import-theme':
+          void importTheme()
+          break
+        case 'file:export-image':
+          setShowExport(true)
+          break
+        case 'file:export-txt':
+          void exportOutlineAs('txt')
+          break
+        case 'file:export-md':
+          void exportOutlineAs('md')
+          break
+        case 'file:export-opml':
+          void exportOutlineAs('opml')
+          break
         default:
           break
       }
     })
     return off
-  }, [guard, newDocument, openDocument, saveDocument])
+  }, [guard, newDocument, openDocument, saveDocument, importTheme, exportOutlineAs])
 
   /* ------------------------------------------------------------------ */
   /* 关闭窗口                                                            */
@@ -411,7 +458,9 @@ export default function App(): ReactElement {
           onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node')),
           onOutline: () => setShowOutline((current) => !current),
           onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
-          onExport: () => setShowExport(true)
+          onExport: () => setShowExport(true),
+          onImportTheme: () => void importTheme(),
+          onExportOutline: (format) => void exportOutlineAs(format)
         }}
       />
 

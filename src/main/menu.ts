@@ -14,10 +14,25 @@ export function buildAppMenu(): void {
       label: '文件',
       submenu: [
         { label: '新建', accelerator: 'CmdOrCtrl+N', click: () => send('file:new') },
-        { label: '打开…', accelerator: 'CmdOrCtrl+O', click: () => send('file:open') },
+        { label: '打开 / 导入 .xmind…', accelerator: 'CmdOrCtrl+O', click: () => send('file:open') },
+        {
+          label: '导入',
+          submenu: [{ label: '导入主题文件…', click: () => send('file:import-theme') }]
+        },
         { type: 'separator' },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => send('file:save') },
         { label: '另存为…', accelerator: 'CmdOrCtrl+Shift+S', click: () => send('file:save-as') },
+        { type: 'separator' },
+        {
+          label: '导出',
+          submenu: [
+            { label: '图片 / SVG / PDF…', accelerator: 'CmdOrCtrl+E', click: () => send('file:export-image') },
+            { type: 'separator' },
+            { label: '大纲 · TXT', click: () => send('file:export-txt') },
+            { label: '大纲 · Markdown', click: () => send('file:export-md') },
+            { label: '大纲 · OPML', click: () => send('file:export-opml') }
+          ]
+        },
         { type: 'separator' },
         isMac ? { role: 'close', label: '关闭窗口' } : { role: 'quit', label: '退出' }
       ]

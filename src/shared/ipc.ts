@@ -90,6 +90,11 @@ export type MenuCommand =
   | 'view:fit'
   | 'view:toggle-structure'
   | 'help:shortcuts'
+  | 'file:import-theme'
+  | 'file:export-image'
+  | 'file:export-txt'
+  | 'file:export-md'
+  | 'file:export-opml'
 
 /** preload 暴露给渲染进程的 API */
 export interface MindApi {

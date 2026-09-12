@@ -1,8 +1,12 @@
-import { useMemo, type MouseEvent, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import {
   Braces,
   ChevronDown,
+  CircleHelp,
+  FileInput,
+  FileOutput,
   FilePlus,
+  FileText,
   FolderOpen,
   Frame,
   ImageDown,
@@ -13,6 +17,7 @@ import {
   Redo2,
   RotateCcw,
   Save,
+  SaveAll,
   Search as SearchIcon,
   Spline,
   Tag,
@@ -22,6 +27,7 @@ import {
   ZoomOut
 } from 'lucide-react'
 import { DEFAULT_STRUCTURE, STRUCTURES } from '@shared/xmind/constants'
+import type { OutlineFormat } from '@shared/outline'
 import { activeRoot, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
 import { overlayToggleOf, useEditor } from '../store/editor'
@@ -37,12 +43,87 @@ export interface ToolbarActions {
   onOutline(): void
   onSearch(): void
   onExport(): void
+  /** 导入主题文件（.json） */
+  onImportTheme(): void
+  /** 直接导出大纲（不带设置框） */
+  onExportOutline(format: OutlineFormat): void
 }
 
 interface Props {
   actions: ToolbarActions
   /** 大纲面板是否已打开（用于按钮的按下态） */
   outlineOpen?: boolean
+}
+
+/**
+ * 工具栏上的下拉菜单。
+ * 点按钮展开，点菜单项或点别处收起；按钮本身不抢焦点（否则会吃掉 Enter/Tab）。
+ */
+function ToolMenu({
+  icon,
+  label,
+  title,
+  items
+}: {
+  icon: ReactNode
+  label: string
+  title: string
+  items: Array<{ key: string; label: string; hint?: string; icon?: ReactNode; onSelect(): void }>
+}): ReactElement {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (): void => setOpen(false)
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <span className="tool-menu">
+      <button
+        type="button"
+        className={open ? 'tool-btn tool-btn--labeled tool-btn--active' : 'tool-btn tool-btn--labeled'}
+        title={title}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {icon}
+        {label}
+        <ChevronDown size={13} />
+      </button>
+
+      {open && (
+        <div className="tool-menu__list" onPointerDown={(event) => event.stopPropagation()}>
+          {items.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className="tool-menu__item"
+              title={item.hint}
+              onClick={() => {
+                setOpen(false)
+                item.onSelect()
+              }}
+            >
+              <span className="tool-menu__icon">{item.icon}</span>
+              <span className="tool-menu__text">
+                {item.label}
+                {item.hint ? <em className="tool-menu__hint">{item.hint}</em> : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
 }
 
 export default function Toolbar({ actions, outlineOpen = false }: Props): ReactElement {
@@ -98,12 +179,84 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         <button type="button" className="tool-btn" title="新建 (Ctrl+N)" onClick={actions.onNew}>
           <FilePlus size={17} />
         </button>
-        <button type="button" className="tool-btn" title="打开 (Ctrl+O)" onClick={actions.onOpen}>
+        <button
+          type="button"
+          className="tool-btn"
+          title="打开 / 导入 .xmind 文件 (Ctrl+O)"
+          onClick={actions.onOpen}
+        >
           <FolderOpen size={17} />
         </button>
         <button type="button" className="tool-btn" title="保存 (Ctrl+S)" onClick={actions.onSave}>
           <Save size={17} />
         </button>
+        <button
+          type="button"
+          className="tool-btn"
+          title="另存为 (Ctrl+Shift+S)"
+          onClick={actions.onSaveAs}
+        >
+          <SaveAll size={17} />
+        </button>
+
+        {/* 导入 / 导出：常用功能不藏在菜单里 */}
+        <ToolMenu
+          icon={<FileInput size={16} />}
+          label="导入"
+          title="导入文件"
+          items={[
+            {
+              key: 'import-xmind',
+              label: '打开 .xmind 文件',
+              hint: 'Ctrl+O',
+              icon: <FolderOpen size={15} />,
+              onSelect: actions.onOpen
+            },
+            {
+              key: 'import-theme',
+              label: '导入主题文件',
+              hint: '.json',
+              icon: <Palette size={15} />,
+              onSelect: actions.onImportTheme
+            }
+          ]}
+        />
+
+        <ToolMenu
+          icon={<FileOutput size={16} />}
+          label="导出"
+          title="导出图片、PDF 或大纲"
+          items={[
+            {
+              key: 'export-image',
+              label: 'PNG / SVG / PDF…',
+              hint: '可选清晰度与背景',
+              icon: <ImageDown size={15} />,
+              onSelect: actions.onExport
+            },
+            {
+              key: 'export-txt',
+              label: '大纲 · TXT',
+              hint: '纯文本',
+              icon: <FileText size={15} />,
+              onSelect: () => actions.onExportOutline('txt')
+            },
+            {
+              key: 'export-md',
+              label: '大纲 · Markdown',
+              hint: '.md',
+              icon: <FileText size={15} />,
+              onSelect: () => actions.onExportOutline('md')
+            },
+            {
+              key: 'export-opml',
+              label: '大纲 · OPML',
+              hint: '可导入其它导图软件',
+              icon: <FileText size={15} />,
+              onSelect: () => actions.onExportOutline('opml')
+            }
+          ]}
+        />
       </div>
 
       <div className="toolbar__divider" />
@@ -248,14 +401,6 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         >
           <SearchIcon size={17} />
         </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="导出为图片 / SVG / PDF"
-          onClick={actions.onExport}
-        >
-          <ImageDown size={17} />
-        </button>
         <button type="button" className="tool-btn" title="主题外观" onClick={actions.onThemes}>
           <Palette size={17} />
         </button>
@@ -280,6 +425,14 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         </button>
         <button type="button" className="tool-btn" title="适应画布 (Ctrl+1)" onClick={() => viewportActions.fit()}>
           <Maximize size={17} />
+        </button>
+      </div>
+
+      <div className="toolbar__divider" />
+
+      <div className="toolbar__group">
+        <button type="button" className="tool-btn" title="快捷键说明" onClick={actions.onHelp}>
+          <CircleHelp size={17} />
         </button>
       </div>
     </div>
