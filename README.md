@@ -3,6 +3,18 @@
 > 一个**本地**思维导图软件，原生文件格式就是 `.xmind`，可直接与 Xmind 互通。
 > 无账号、无服务器：**除了你主动点 AI，全程离线**。
 
+## 界面预览
+
+![功能一览：富文本、公式、标记标签、关系线、边界与概要](docs/images/screenshot-1-overview.png)
+
+![头脑风暴：思维导图（平衡）结构，左右分布](docs/images/screenshot-2-structures.png)
+
+![项目规划](docs/images/screenshot-3-plan.png)
+
+![鱼骨图分析](docs/images/screenshot-4-fishbone.png)
+
+> 这四张图的源文件在 [`examples/`](./examples) 目录里，用 SMind 直接打开就能玩。
+
 ---
 
 ## 目录
