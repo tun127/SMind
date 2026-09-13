@@ -4,6 +4,7 @@
  */
 import type { StructureClass, Topic } from '../model/types'
 import type { LayoutBuilder } from './core'
+import { addDecoration, round } from './core'
 import { placeVerticalColumn } from './stack'
 
 export function placeFishboneSubtree(
@@ -33,5 +34,23 @@ export function placeFishboneSubtree(
     placeVerticalColumn(builder, child, centerX - childSize.width / 2, childY, side < 0 ? -1 : 1, depth + 1, indent)
     anchors.push({ id: child.id, x: Math.round(anchorX), side })
     cursor += extent + builder.gapX + boneSlant + indent * (builder.maxDepth(child) - 1)
+  })
+
+  // 主脊：坐标归一化之后从分支右缘向右补一条横线，鱼骨的「脊」才看得见
+  builder.onFinish((result) => {
+    const branch = result.nodeMap.get(topic.id)
+    if (!branch) return
+    const spineY = branch.y + branch.height / 2
+    let endX = branch.x + branch.width
+    for (const anchor of anchors) {
+      const child = result.nodeMap.get(anchor.id)
+      if (!child) continue
+      endX = Math.max(endX, child.x + child.width / 2)
+    }
+    addDecoration(result, {
+      d: `M ${round(branch.x + branch.width)} ${round(spineY)} L ${round(endX + 16)} ${round(spineY)}`,
+      branchId: topic.id,
+      widthScale: 1.6
+    })
   })
 }

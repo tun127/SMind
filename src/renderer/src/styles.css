@@ -1302,7 +1302,9 @@ textarea {
   display: flex;
   flex-direction: column;
   border-radius: 6px;
-  background: rgba(15, 23, 42, 0.06);
+  /* 实色浅色卡片：不管节点/主题是什么配色，代码都清晰可读 */
+  background: #f6f8fa;
+  border: 1px solid rgba(15, 23, 42, 0.14);
   overflow: hidden;
   text-align: left;
 }
@@ -1326,7 +1328,7 @@ textarea {
   font-family: Consolas, 'JetBrains Mono', Menlo, 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.45;
-  color: #334155;
+  color: #24292f;
   white-space: pre;
   overflow: auto;
   min-height: 0;

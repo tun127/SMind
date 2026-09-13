@@ -29,6 +29,45 @@ function fileNameOf(path: string | null): string | null {
   return parts[parts.length - 1] || path
 }
 
+interface PastedImage {
+  path: string
+  width: number
+  height: number
+}
+
+/**
+ * 读取系统剪贴板里的图片。
+ *
+ * 优先走渲染进程的标准异步剪贴板 API（navigator.clipboard.read）——它读的就是
+ * 系统剪贴板，截图 / 复制的图都能拿到；读不到（权限或实现差异）再退回
+ * 主进程的 paste-image。两条路都没有图片就返回 null，由调用方按「粘贴节点」处理。
+ */
+async function readClipboardImage(): Promise<PastedImage | null> {
+  try {
+    const items = await navigator.clipboard.read()
+    for (const item of items) {
+      const mime = item.types.find((type) => type.startsWith('image/'))
+      if (!mime) continue
+      const blob = await item.getType(mime)
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      if (bytes.byteLength === 0) continue
+      const picked = await window.api.addImage(
+        mime === 'image/jpeg' ? '剪贴板图片.jpg' : '剪贴板图片.png',
+        bytes
+      )
+      if (picked) return { path: picked.path, width: picked.width, height: picked.height }
+    }
+  } catch {
+    /* 渲染进程读不到就走主进程 */
+  }
+  try {
+    const picked = await window.api.pasteImage()
+    return picked ? { path: picked.path, width: picked.width, height: picked.height } : null
+  } catch {
+    return null
+  }
+}
+
 export default function App(): ReactElement {
   const filePath = useEditor((s) => s.filePath)
   const dirty = useEditor((s) => s.dirty)
@@ -558,21 +597,17 @@ export default function App(): ReactElement {
           // 先试剪贴板里的图片（截图后直接 Ctrl+V 贴到选中的主题上）；没有图片再按「粘贴节点」处理
           void (async () => {
             if (!store.editingId && selectedId) {
-              try {
-                const image = await window.api.pasteImage()
-                if (image) {
-                  useEditor
-                    .getState()
-                    .setImage(selectedId, { path: image.path, width: image.width, height: image.height })
-                  showToast(
-                    image.width > 0
-                      ? `已把剪贴板图片贴到选中的主题（${image.width}×${image.height}）`
-                      : '已把剪贴板图片贴到选中的主题（未取到像素尺寸，按默认大小显示）'
-                  )
-                  return
-                }
-              } catch {
-                /* 读不到就当剪贴板里没有图片 */
+              const image = await readClipboardImage()
+              if (image) {
+                useEditor
+                  .getState()
+                  .setImage(selectedId, { path: image.path, width: image.width, height: image.height })
+                showToast(
+                  image.width > 0
+                    ? `已把剪贴板图片贴到选中的主题（${image.width}×${image.height}）`
+                    : '已把剪贴板图片贴到选中的主题（未取到像素尺寸，按默认大小显示）'
+                )
+                return
               }
             }
             useEditor.getState().paste()

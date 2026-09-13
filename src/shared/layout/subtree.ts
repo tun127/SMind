@@ -53,7 +53,12 @@ export function anchorsForChild(
 ): { from: Anchor; to: Anchor } {
   if (!child.topic.structureClass) return fallback
   const family = getStructureDef(child.topic.structureClass).family
-  if (family === 'orgchart' || family === 'fishbone' || family === 'matrix') {
+  if (family === 'fishbone') {
+    // 鱼骨的骨刺：从分支右缘连到子主题近侧，贝塞尔曲线自带「斜伸出去」的骨形；
+    // 主脊那条横线由 fishbone-subtree 的 finish 钩子补画
+    return { from: 'right', to: 'left' }
+  }
+  if (family === 'orgchart' || family === 'matrix') {
     return verticalAnchors(parent, child)
   }
   return fallback

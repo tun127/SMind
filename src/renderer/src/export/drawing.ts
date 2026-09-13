@@ -404,7 +404,9 @@ function nodeOps(
       w: codeBox.width,
       h: codeBox.height,
       r: 6,
-      fill: 'rgba(15, 23, 42, 0.06)'
+      fill: '#f6f8fa',
+      stroke: 'rgba(15, 23, 42, 0.14)',
+      strokeWidth: 1
     })
     const codeLines = topic.code.text.length > 0 ? topic.code.text.split('\n') : ['']
     const lineH = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
@@ -417,7 +419,7 @@ function nodeOps(
         text: line,
         fontSize: CODE_FONT_SIZE,
         fontWeight: 400,
-        fill: '#334155',
+        fill: '#24292f',
         anchor: 'start',
         baseline: 'alphabetic',
         fontFamily: CODE_FONT_FAMILY
