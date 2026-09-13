@@ -201,4 +201,4 @@ export interface MindPackage {
 }
 
 export const MODEL_VERSION = 1
-export const CREATOR = { name: 'SMind', version: '0.3.0' }
+export const CREATOR = { name: 'SMind', version: '0.4.0' }
