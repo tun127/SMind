@@ -342,6 +342,11 @@ export function connectTree(
     for (const child of topic.collapsed ? [] : topic.children) {
       const childNode = result.nodeMap.get(child.id)
       if (!childNode) continue
+      // 括号图：括号本身就是连线，父子边不再重复画（括号由 placeBraceChildren 的钩子补）
+      if (topic.structureClass && getStructureDef(topic.structureClass).family === 'brace') {
+        walk(child)
+        continue
+      }
       const anchors = anchorOf(parent, childNode)
       addEdge(result, parent.id, childNode.id, anchorPoint(parent, anchors.from), anchorPoint(childNode, anchors.to), kind)
       walk(child)

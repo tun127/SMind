@@ -16,13 +16,23 @@ import type { StructureClass, Topic } from '../model/types'
 import { getStructureDef, TOPIC_SIDE_KEY } from '../xmind/constants'
 import type { NodeLayout, Side } from './types'
 import type { Anchor, LayoutBuilder } from './core'
-import { addDecoration, addEdge, anchorPoint, round, verticalAnchors } from './core'
+import { addDecoration, addEdge, anchorPoint, bracePath, round, verticalAnchors } from './core'
 import { placeVerticalChildren, placeVerticalColumn } from './stack'
 import { placeOrgChartChildren } from './orgchart'
 import { placeFishboneSubtree } from './fishbone-subtree'
 
-/** 分支级支持的家族；其余（时间轴/括号图/树状表格/矩阵/放射状）回落为当前排布 */
-const SUPPORTED_BRANCH_FAMILIES = new Set(['logic', 'tree', 'mindmap', 'orgchart', 'fishbone'])
+/** 分支级支持的家族：结构清单里的全部家族（时间轴/括号/树状表格/矩阵是 v1.1 补上的） */
+const SUPPORTED_BRANCH_FAMILIES = new Set([
+  'logic',
+  'tree',
+  'mindmap',
+  'orgchart',
+  'fishbone',
+  'timeline',
+  'brace',
+  'spreadsheet',
+  'matrix'
+])
 
 /** 主题的有效结构：自己的 structureClass 优先，否则继承父链 */
 export function effectiveStructure(
@@ -45,20 +55,28 @@ export function declaresOwnStructure(
   return SUPPORTED_BRANCH_FAMILIES.has(family)
 }
 
-/** 连线锚点：子主题声明了「纵向家族」时改用上下锚点，其余用父级家族的默认锚点 */
+/** 连线锚点：按子主题声明的家族与它所在的排布方向选锚点 */
 export function anchorsForChild(
   parent: NodeLayout,
   child: NodeLayout,
   fallback: { from: Anchor; to: Anchor }
 ): { from: Anchor; to: Anchor } {
-  if (!child.topic.structureClass) return fallback
-  const family = getStructureDef(child.topic.structureClass).family
-  if (family === 'fishbone') {
-    // 鱼骨的骨刺：从分支右缘连到子主题近侧，贝塞尔曲线自带「斜伸出去」的骨形；
-    // 主脊那条横线由 fishbone-subtree 的 finish 钩子补画
-    return { from: 'right', to: 'left' }
+  const declared = child.topic.structureClass
+  if (declared) {
+    const family = getStructureDef(declared).family
+    if (family === 'fishbone' || family === 'timeline' || family === 'matrix') {
+      // 骨刺 / 时间轴刻目 / 矩阵格：从父级右缘连到子主题近侧；
+      // 鱼骨与时间轴的主脊横线由 fishbone-subtree 的 finish 钩子补画
+      return { from: 'right', to: 'left' }
+    }
+    if (family === 'orgchart') {
+      return verticalAnchors(parent, child)
+    }
+    // brace 的括号本身就是连线（connectTree 会跳过这条边）
   }
-  if (family === 'orgchart' || family === 'matrix') {
+  // 纵向缩进列里的边（鱼骨深层、树状表格的列、时间轴分支）按几何取上下锚点，
+  // 否则沿用父级家族的默认锚点会把「在正下方」的子节点连成斜线
+  if (child.side === 'up' || child.side === 'down') {
     return verticalAnchors(parent, child)
   }
   return fallback
@@ -93,8 +111,21 @@ export function placeSubtree(
     )
     return
   }
-  if (family === 'fishbone') {
+  if (family === 'fishbone' || family === 'timeline') {
+    // 时间轴（水平）与鱼骨共用「主脊 + 上下交替」的几何；主脊由钩子补画
     placeFishboneSubtree(builder, topic, depth, cls)
+    return
+  }
+  if (family === 'matrix') {
+    placeMatrixChildren(builder, topic, x, y, depth, cls)
+    return
+  }
+  if (family === 'brace') {
+    placeBraceChildren(builder, topic, x, y, depth, cls)
+    return
+  }
+  if (family === 'spreadsheet') {
+    placeSpreadsheetChildren(builder, topic, x, y, depth, cls)
     return
   }
   if (family === 'mindmap') {
@@ -127,4 +158,141 @@ function placeMindmapChildren(
   })
   placeVerticalChildren(builder, node, right, 1, depth + 1, undefined, inherited)
   placeVerticalChildren(builder, node, left, -1, depth + 1, undefined, inherited)
+}
+
+/**
+ * 矩阵图：子主题排成网格（最多两列，按列填充），整体垂直居中于分支右侧。
+ * 每列宽取该列子树的最大宽、每行高取该行最大高，格子互不重叠。
+ */
+function placeMatrixChildren(
+  builder: LayoutBuilder,
+  topic: Topic,
+  x: number,
+  y: number,
+  depth: number,
+  inherited: StructureClass
+): void {
+  const node = builder.nodeMap.get(topic.id)
+  if (!node) return
+  const kids = builder.visibleChildren(topic)
+  if (kids.length === 0) return
+
+  const cols = Math.min(2, kids.length)
+  const rows = Math.ceil(kids.length / cols)
+  const extents = kids.map((kid) => builder.subtreeExtent(kid, inherited))
+
+  const colWidths: number[] = []
+  for (let c = 0; c < cols; c += 1) {
+    let width = 0
+    for (let i = c; i < kids.length; i += cols) width = Math.max(width, extents[i].width)
+    colWidths.push(width)
+  }
+  const rowHeights: number[] = []
+  for (let r = 0; r < rows; r += 1) {
+    let height = 0
+    for (let i = r * cols; i < Math.min((r + 1) * cols, kids.length); i += 1) {
+      height = Math.max(height, extents[i].height)
+    }
+    rowHeights.push(height)
+  }
+
+  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + builder.gapX * (cols - 1)
+  const totalHeight = rowHeights.reduce((a, b) => a + b, 0) + builder.gapY * (rows - 1)
+  const top = y + node.height / 2 - totalHeight / 2
+  const left = x + node.width + builder.gapX
+
+  for (let c = 0; c < cols; c += 1) {
+    let cursorY = top
+    const cellX = left + colWidths.slice(0, c).reduce((a, b) => a + b, 0) + builder.gapX * c
+    for (let r = 0; r < rows; r += 1) {
+      const index = r * cols + c
+      if (index >= kids.length) break
+      const child = kids[index]
+      const size = builder.size(child.id)
+      const cellY = cursorY + (rowHeights[r] - size.height) / 2 + (child.position?.y ?? 0)
+      if (declaresOwnStructure(builder, child, inherited)) {
+        placeSubtree(builder, child, cellX, cellY, depth + 1, 'right', inherited)
+      } else {
+        builder.add(child, cellX, cellY, depth + 1, 'right')
+        placeMatrixChildren(builder, child, cellX, cellY, depth + 1, inherited)
+      }
+      cursorY += rowHeights[r] + builder.gapY
+    }
+  }
+}
+
+/**
+ * 括号图：子主题垂直排成一列，括号在 finish 钩子里补画
+ * （父子连线由 connectTree 跳过——括号本身就是连线）。
+ */
+function placeBraceChildren(
+  builder: LayoutBuilder,
+  topic: Topic,
+  x: number,
+  y: number,
+  depth: number,
+  inherited: StructureClass
+): void {
+  const node = builder.nodeMap.get(topic.id)
+  if (!node) return
+  const kids = builder.visibleChildren(topic)
+  if (kids.length === 0) return
+
+  const columnX = x + node.width + builder.gapX
+  placeVerticalChildren(builder, node, kids, 1, depth + 1, () => columnX, inherited)
+
+  builder.onFinish((result) => {
+    const branch = result.nodeMap.get(topic.id)
+    if (!branch) return
+    let top = Number.POSITIVE_INFINITY
+    let bottom = Number.NEGATIVE_INFINITY
+    let left = Number.POSITIVE_INFINITY
+    for (const child of kids) {
+      const item = result.nodeMap.get(child.id)
+      if (!item) continue
+      top = Math.min(top, item.y)
+      bottom = Math.max(bottom, item.y + item.height)
+      left = Math.min(left, item.x)
+    }
+    if (!Number.isFinite(top)) return
+    addDecoration(result, {
+      d: bracePath(left - builder.gapX * 0.5, top, bottom, branch.x + branch.width + 4),
+      branchId: topic.id,
+      widthScale: 1.2
+    })
+  })
+}
+
+/**
+ * 树状表格：子主题横向排成「表头行」，各自的后代沿垂直缩进列表往下排，
+ * 横看是列、竖看是行，接近表格的行列感。
+ */
+function placeSpreadsheetChildren(
+  builder: LayoutBuilder,
+  topic: Topic,
+  x: number,
+  y: number,
+  depth: number,
+  inherited: StructureClass
+): void {
+  const node = builder.nodeMap.get(topic.id)
+  if (!node) return
+  const kids = builder.visibleChildren(topic)
+  if (kids.length === 0) return
+
+  let cursor = x + node.width + builder.gapX
+  for (const child of kids) {
+    const extent = builder.subtreeExtent(child, inherited).width
+    const size = builder.size(child.id)
+    const childX = cursor + extent / 2 - size.width / 2 + (child.position?.x ?? 0)
+    const childY = y + node.height + builder.gapY + (child.position?.y ?? 0)
+
+    if (declaresOwnStructure(builder, child, inherited)) {
+      placeSubtree(builder, child, childX, childY, depth + 1, 'down', inherited)
+    } else {
+      builder.add(child, childX, childY, depth + 1, 'down')
+      placeVerticalColumn(builder, child, childX, childY, 1, depth + 1, Math.max(18, builder.gapX * 0.5))
+    }
+    cursor += extent + builder.gapX
+  }
 }

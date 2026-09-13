@@ -176,7 +176,7 @@ import {
   tiptapToRich,
   type TipTapDoc
 } from '../src/shared/richtext'
-import type { MeasureResult } from '../src/shared/layout/types'
+import type { MeasureResult, NodeLayout } from '../src/shared/layout/types'
 import type { MindPackage, RichText, Topic, Workbook } from '../src/shared/model/types'
 
 /* ------------------------------------------------------------------ */
@@ -1264,6 +1264,62 @@ function testBranchStructure(): void {
     nodeC1.y < boxC.y && nodeC2.y > boxC.y,
     `${Math.round(nodeC1.y)} / ${Math.round(nodeC2.y)} vs ${Math.round(boxC.y)}`
   )
+}
+
+/* ------------------------------------------------------------------ */
+/* 8.5f 分支级结构：矩阵 / 括号 / 时间轴 / 树状表格                     */
+/* ------------------------------------------------------------------ */
+
+function testBranchFamiliesMore(): void {
+  group('分支级结构：矩阵 / 括号 / 时间轴 / 树状表格')
+  reset()
+  const rootId = root().id
+  const m = addChildOf(rootId, '矩阵分支')
+  const b = addChildOf(rootId, '括号分支')
+  const t = addChildOf(rootId, '时间轴分支')
+  const s = addChildOf(rootId, '表格分支')
+  const m1 = addChildOf(m, '格一')
+  const m2 = addChildOf(m, '格二')
+  const m3 = addChildOf(m, '格三')
+  const b1 = addChildOf(b, '括甲')
+  const s1 = addChildOf(s, '列甲')
+  const s11 = addChildOf(s1, '甲一')
+  const t1 = addChildOf(t, '刻一')
+  const t2 = addChildOf(t, '刻二')
+
+  store().setStructure('org.xmind.ui.logic.right', rootId)
+  store().setStructure('org.xmind.ui.matrix', m)
+  store().setStructure('org.xmind.ui.brace.right', b)
+  store().setStructure('org.xmind.ui.timeline.horizontal', t)
+  store().setStructure('org.xmind.ui.spreadsheet', s)
+
+  const layout = layoutSheet(root(), fakeMeasure)
+  const n = (id: string): NodeLayout => {
+    const item = layout.nodeMap.get(id)
+    if (!item) throw new Error(`节点 ${id} 不在布局里`)
+    return item
+  }
+
+  check('全部进布局', [m, b, t, s, m1, m2, m3, b1, s1, s11, t1, t2].every((id) => layout.nodeMap.has(id)))
+  // 矩阵：两列网格——三个格子里恰有两个同列（x 相同、y 不同），第三个在更右的一列
+  {
+    const xs = [n(m1).x, n(m2).x, n(m3).x]
+    const left = Math.min(...xs)
+    const sameColumn = xs.filter((x) => Math.abs(x - left) < 2)
+    check(
+      '矩阵：两列网格',
+      new Set(xs.map((x) => Math.round(x))).size === 2 && sameColumn.length === 2,
+      JSON.stringify(xs.map((x, i) => ({ x, y: [n(m1).y, n(m2).y, n(m3).y][i] })))
+    )
+  }
+  // 括号：父子边被括号取代，括号是结构装饰线
+  check('括号：不再画父子边', !layout.edges.some((edge) => edge.toId === b1))
+  check('括号：有括号装饰线', layout.decorations.some((d) => d.branchId === b))
+  // 时间轴：刻目沿主脊上下交替
+  check('时间轴：刻目分居主脊上下', n(t1).y < n(t).y && n(t2).y > n(t).y)
+  // 树状表格：列头行在分支下方，后代沿缩进列往下
+  check('表格：列头在分支下方', n(s1).y > n(s).y + n(s).height - 1)
+  check('表格：后代在列头下方', n(s11).y > n(s1).y + n(s1).height - 1)
 }
 
 /* ------------------------------------------------------------------ */
@@ -4611,6 +4667,7 @@ async function main(): Promise<void> {
   testMisc()
   testTypedChar()
   testBranchStructure()
+  testBranchFamiliesMore()
   testPickDocumentArg()
   testViewLock()
   testSnapshot()
