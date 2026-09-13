@@ -187,4 +187,4 @@ export interface MindPackage {
 }
 
 export const MODEL_VERSION = 1
-export const CREATOR = { name: 'MindMap', version: '0.1.0' }
+export const CREATOR = { name: 'MindMap', version: '0.1.1' }
