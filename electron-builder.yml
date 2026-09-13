@@ -1,5 +1,5 @@
 appId: com.mindmap.local
-productName: 思维导图
+productName: Mind
 directories:
   buildResources: build
   output: release
@@ -17,6 +17,8 @@ files:
   - '!*.md'
 asar: true
 win:
+  # 由 npm run icon 生成（自绘的多尺寸 ico，含 16/24/32/48/64/128/256）
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:
@@ -24,11 +26,17 @@ win:
     - target: portable
       arch:
         - x64
+  # 只作为兜底；两个目标各自覆盖，避免它们生成同名文件互相覆盖
   artifactName: ${productName}-${version}-${arch}.${ext}
 nsis:
+  # 安装版
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: 思维导图
+  shortcutName: Mind
+portable:
+  # 免安装版（绿色版），与安装版分开放，否则后构建的会覆盖前一个
+  artifactName: ${productName}-${version}-${arch}-portable.${ext}
