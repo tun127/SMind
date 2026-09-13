@@ -22,6 +22,7 @@ import {
   detachTopic,
   findParent,
   findTopic,
+  flatten,
   isSelfOrDescendant,
   moveTopic,
   walk
@@ -33,7 +34,8 @@ import {
   sameRange,
   withCurveOffset
 } from '@shared/layout'
-import { RELATIONSHIP_CURVE_KEY } from '@shared/xmind/constants'
+import { RELATIONSHIP_CURVE_KEY, TOPIC_SIDE_KEY } from '@shared/xmind/constants'
+import { resolveDrop, type DropMode } from '@shared/model/drop'
 
 enablePatches()
 
@@ -129,6 +131,12 @@ export interface EditorState {
   /* ---- 文档 ---- */
   newDocument(): void
   loadDocument(workbook: Workbook, path: string | null): void
+  /**
+   * 把当前文档的内容换成某个历史版本。
+   * 刻意**保留 filePath**（恢复的是「当前文档的旧内容」，不该把文档换成别的文件），
+   * 并标记为未保存——恢复出来的内容与磁盘上的还不一样。
+   */
+  restoreDocument(workbook: Workbook): void
   markSaved(path: string): void
 
   /* ---- 编辑 ---- */
@@ -164,10 +172,44 @@ export interface EditorState {
   setTitle(id: string, title: string): void
   setRichText(id: string, rich: RichText | null): void
   toggleCollapse(id: string): void
+  /**
+   * 直接指定折叠状态。拖拽时用它把落点那个折叠着的主题**展开**——
+   * 不展开就看不见新子主题会落在哪，落点预览成了空谈。
+   */
+  setCollapsed(id: string, collapsed: boolean): void
   setStructure(structureClass: string, targetId?: string): void
   moveNode(id: string, targetId: string, index?: number): boolean
+  /**
+   * 用快捷键微调选中主题（与亿图脑图一致，适合结构复杂时精确挪动）：
+   * - `↑` / `↓`：在同级里上移 / 下移一位
+   * - `Home` / `End`：移到同级的最前 / 最后
+   * - `←`：升级，成为父级的后一个兄弟
+   * - `→`：降级，成为前一个兄弟的最后一个子主题
+   */
+  moveSelectionByKey(key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End'): boolean
+  /**
+   * 把一级主题对调到中心主题的另一侧（知犀 / Xmind 的「左右位置调整」）。
+   * 平衡结构默认按顺序交替分配左右，这里写入的是显式覆盖。
+   */
+  setTopicSide(id: string, side: 'left' | 'right'): void
+  /**
+   * 拖拽节点释放。落点一律由 `resolveDrop` 裁决（在 shared/model/drop 里，
+   * 与画布上的落点预览共用同一套规则）：
+   * - `child` → 成为目标的**最后一个子主题**；
+   * - `before` / `after` → 插到目标**前面 / 后面**、与它同级；
+   * - 落点非法（自己 / 自己的后代 / 原地不动）→ 返回 false，不做改动。
+   * 因为判定只看"目标是谁 + 指针在它的哪个分区"，所以**任意两个节点之间**都能拖。
+   */
+  dropNode(id: string, targetId: string, mode: DropMode): boolean
   offsetPosition(id: string, dx: number, dy: number): void
+  /**
+   * 一次写完多个主题的自由位置（多选拖拽用）。
+   * 走一次 mutate，所以整群移动在撤销里是**一步**，而不是一堆零碎记录。
+   */
+  offsetPositions(moves: Array<{ id: string; dx: number; dy: number }>): void
   clearPosition(id: string): void
+  /** 把当前画布上所有自由摆放的主题一次性放回自动布局（一步撤销） */
+  clearAllPositions(): number
   copySelection(): void
   paste(): void
 
@@ -521,6 +563,21 @@ export const useEditor = create<EditorState>()((set, get) => ({
       pan: { x: 0, y: 0 }
     })),
 
+  restoreDocument: (workbook) =>
+    set((state) => ({
+      workbook,
+      // filePath 保持不动；标记为未保存，避免用户以为已经落盘
+      dirty: true,
+      docSeq: state.docSeq + 1,
+      selection: [],
+      editingId: null,
+      editingText: '',
+      editingRich: null,
+      // 恢复是一次大跨度替换，撤销栈对它没有意义（恢复前会自动存一份版本兜底）
+      undoStack: [],
+      redoStack: []
+    })),
+
   markSaved: (path) => set({ filePath: path, dirty: false }),
 
   /* ------------------------------------------------------------------ */
@@ -735,12 +792,65 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   toggleCollapse: (id) => {
+    const topic = findTopic(activeRoot(get().workbook), id)
+    if (!topic || topic.children.length === 0) return
+    get().setCollapsed(id, !topic.collapsed)
+  },
+
+  setCollapsed: (id, collapsed) => {
     get().mutate((draft) => {
       const topic = findTopic(activeRoot(draft), id)
       if (!topic || topic.children.length === 0) return
       // 用 undefined 表示展开，让模型中只存在「折叠 / 未设置」两种状态
-      topic.collapsed = topic.collapsed ? undefined : true
+      const next = collapsed ? true : undefined
+      if (topic.collapsed === next) return
+      topic.collapsed = next
+      // 标签保持与手动折叠一致：同一个主题的连续折叠/展开才能合并成一步撤销
     }, '折叠/展开')
+  },
+
+  setTopicSide: (id, side) => {
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      const properties: Record<string, string> = { ...(topic.style?.properties ?? {}) }
+      if (properties[TOPIC_SIDE_KEY] === side) return
+      properties[TOPIC_SIDE_KEY] = side
+      topic.style = { ...(topic.style ?? {}), properties }
+    }, '调整分支左右')
+  },
+
+  moveSelectionByKey: (key) => {
+    const state = get()
+    const id = state.selection[0]
+    if (!id) return false
+    const root = activeRoot(state.workbook)
+    // 中心主题不能被移动
+    if (id === root.id) return false
+    const parent = findParent(root, id)
+    if (!parent) return false
+    const index = parent.children.findIndex((child) => child.id === id)
+    if (index < 0) return false
+    const last = parent.children.length - 1
+
+    if (key === 'ArrowUp') return index === 0 ? false : state.moveNode(id, parent.id, index - 1)
+    if (key === 'ArrowDown') return index === last ? false : state.moveNode(id, parent.id, index + 1)
+    if (key === 'Home') return index === 0 ? false : state.moveNode(id, parent.id, 0)
+    if (key === 'End') return index === last ? false : state.moveNode(id, parent.id, parent.children.length)
+
+    if (key === 'ArrowLeft') {
+      // 升级：挪到父级的后面，成为父级的兄弟
+      const grandParent = findParent(root, parent.id)
+      if (!grandParent) return false
+      const parentIndex = grandParent.children.findIndex((child) => child.id === parent.id)
+      if (parentIndex < 0) return false
+      return state.moveNode(id, grandParent.id, parentIndex + 1)
+    }
+
+    // 降级：挂到前一个兄弟下面。没有前一个兄弟就无处可降。
+    const previous = index > 0 ? parent.children[index - 1] : undefined
+    if (!previous) return false
+    return state.moveNode(id, previous.id)
   },
 
   setStructure: (structureClass, targetId) => {
@@ -757,15 +867,42 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (id === root.id) return false
     if (isSelfOrDescendant(root, id, targetId)) return false
     const parent = findParent(root, id)
-    if (parent && parent.id === targetId) return false
+    // 同父级且没给插入位置 → 等于原地不动，直接忽略（避免产生空的撤销记录）。
+    // 给了 index 才是「同级排序」，那是允许的。
+    if (parent && parent.id === targetId && index === undefined) return false
     let ok = false
     get().mutate((draft) => {
       ok = moveTopic(activeRoot(draft), id, targetId, index)
-      // 换了父级后，原本「同级连续区间」可能不再成立，顺手清掉失效的边界/概要
-      if (ok) pruneOverlays(activeSheet(draft))
+      if (ok) {
+        // **顺手清掉自由摆放的偏移**：留着它，主题会落在自动布局位置 + 偏移的地方，
+        // 也就是"落点预览画在这里、松手却出现在别处"，看起来就像没连上。
+        // 拖到某个落点上本来就是"把它放回树里的这个位置"的意思。
+        const moved = findTopic(activeRoot(draft), id)
+        if (moved) moved.position = undefined
+        // 换了父级后，原本「同级连续区间」可能不再成立，顺手清掉失效的边界/概要
+        pruneOverlays(activeSheet(draft))
+      }
     }, '移动主题')
     if (ok) set({ selection: [id] })
     return ok
+  },
+
+  dropNode: (id, targetId, mode) => {
+    const root = activeRoot(get().workbook)
+    // 与画布上的落点预览共用同一套裁决规则，避免"预览说这样、落下去却那样"
+    const plan = resolveDrop(root, id, targetId, mode)
+    if (!plan) return false
+    if (plan.mode === 'child') return get().moveNode(id, plan.targetId)
+
+    // 同级插入：下标必须在「先把自己摘掉」的数组上算——
+    // moveTopic 是先摘后插，若自己原本排在目标之前，用摘除前的下标
+    // 插入会整体前移一位、落到错误的位置。
+    const parent = findTopic(root, plan.parentId)
+    if (!parent) return false
+    const rest = parent.children.filter((child) => child.id !== id)
+    const at = rest.findIndex((child) => child.id === targetId)
+    if (at < 0) return false
+    return get().moveNode(id, plan.parentId, plan.mode === 'before' ? at : at + 1)
   },
 
   offsetPosition: (id, dx, dy) => {
@@ -777,11 +914,34 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }, '移动位置')
   },
 
+  offsetPositions: (moves) => {
+    if (moves.length === 0) return
+    get().mutate((draft) => {
+      const root = activeRoot(draft)
+      for (const move of moves) {
+        const topic = findTopic(root, move.id)
+        if (!topic) continue
+        const base = topic.position ?? { x: 0, y: 0 }
+        topic.position = { x: base.x + move.dx, y: base.y + move.dy }
+      }
+    }, '移动位置')
+  },
+
   clearPosition: (id) => {
     get().mutate((draft) => {
       const topic = findTopic(activeRoot(draft), id)
       if (topic) topic.position = undefined
     }, '恢复自动布局')
+  },
+
+  clearAllPositions: () => {
+    const root = activeRoot(get().workbook)
+    const floating = flatten(root).filter((topic) => topic.position !== undefined)
+    if (floating.length === 0) return 0
+    get().mutate((draft) => {
+      for (const topic of flatten(activeRoot(draft))) topic.position = undefined
+    }, '全部恢复自动布局')
+    return floating.length
   },
 
   copySelection: () => {

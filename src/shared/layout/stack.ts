@@ -7,6 +7,7 @@
  *  - x 坐标是相对父节点还是按层级对齐（树状表格）
  */
 import type { Topic } from '../model/types'
+import { TOPIC_SIDE_KEY } from '../xmind/constants'
 import type { LayoutResult, MeasureResult, NodeLayout } from './types'
 import { LayoutBuilder, addDecoration, addEdge, bracePath, connectTree, horizontalAnchors, round } from './core'
 
@@ -104,25 +105,38 @@ export function layoutMindmap(root: Topic, builder: LayoutBuilder): LayoutResult
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
 
-  const entries = builder
-    .visibleChildren(root)
-    .map((topic, index) => ({ topic, index, extent: builder.verticalExtent(topic) }))
-  const byExtent = [...entries].sort((a, b) => b.extent - a.extent)
+  const entries = builder.visibleChildren(root)
 
+  /**
+   * 左右分配：**优先用主题上记录的显式侧**（用户把分支拖到中心主题另一侧时写入），
+   * 其余按**顺序交替**——第 1 个在右、第 2 个在左、第 3 个在右……（与 Xmind 平衡图一致）。
+   *
+   * 这里绝不能按"子树高度"去配平：那样只要挪动一个子节点，
+   * 各分支的高度就变了，左右归属会整体翻转，
+   * 表现成「分支主题 1 和分支主题 2 莫名其妙换位」——与内容无关的稳定排布才有可预期性。
+   */
   const rightSet = new Set<string>()
-  let rightTotal = 0
-  let leftTotal = 0
-  for (const entry of byExtent) {
-    if (rightTotal <= leftTotal) {
-      rightSet.add(entry.topic.id)
-      rightTotal += entry.extent + builder.gapY
-    } else {
-      leftTotal += entry.extent + builder.gapY
-    }
-  }
+  entries.forEach((topic, index) => {
+    const manual = topic.style?.properties?.[TOPIC_SIDE_KEY]
+    if (manual === 'right') rightSet.add(topic.id)
+    else if (manual === 'left') return
+    else if (index % 2 === 0) rightSet.add(topic.id)
+  })
 
-  placeVerticalChildren(builder, rootNode, entries.filter((e) => rightSet.has(e.topic.id)).map((e) => e.topic), 1, 1)
-  placeVerticalChildren(builder, rootNode, entries.filter((e) => !rightSet.has(e.topic.id)).map((e) => e.topic), -1, 1)
+  placeVerticalChildren(
+    builder,
+    rootNode,
+    entries.filter((topic) => rightSet.has(topic.id)),
+    1,
+    1
+  )
+  placeVerticalChildren(
+    builder,
+    rootNode,
+    entries.filter((topic) => !rightSet.has(topic.id)),
+    -1,
+    1
+  )
 
   const result = builder.finish(root)
   connectTree(result, root, 'bezier', horizontalAnchors)

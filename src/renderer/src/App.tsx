@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
-import type { RecoveryInfo } from '@shared/ipc'
+import type { OpenResult, RecoveryInfo } from '@shared/ipc'
 import type { OutlineFormat } from '@shared/outline'
 import { activeRoot, findParent, findTopic } from '@shared/model/tree'
 import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
@@ -18,6 +18,7 @@ import { RecoveryDialog, ShortcutsDialog, UnsavedDialog } from './components/Dia
 import AiDialog, { type AiTask } from './components/AiDialog'
 import AiSettingsDialog from './components/AiSettingsDialog'
 import ExportDialog from './components/ExportDialog'
+import HistoryDialog from './components/HistoryDialog'
 import { viewportActions } from './render/viewport'
 import { snapshotForSave, useEditor } from './store/editor'
 
@@ -46,6 +47,8 @@ export default function App(): ReactElement {
   /** AI 对话框：生成 / 扩写 / 润色 */
   const [aiTask, setAiTask] = useState<AiTask | null>(null)
   const [showAiSettings, setShowAiSettings] = useState(false)
+  /** 历史记录 / 常用 / 保存位置 */
+  const [showHistory, setShowHistory] = useState(false)
   const toastTimer = useRef<number | null>(null)
   /** 是否还停在「发现未保存内容」这一步没做决定 */
   const recoveryPendingRef = useRef(false)
@@ -96,11 +99,9 @@ export default function App(): ReactElement {
     [commitPending, showToast]
   )
 
-  const openDocument = useCallback(async (): Promise<void> => {
-    commitPending()
-    try {
-      const result = await window.api.openDialog()
-      if (!result) return
+  /** 把「打开结果」落到编辑器里（对话框打开与历史记录打开共用一套收尾逻辑） */
+  const applyOpenResult = useCallback(
+    async (result: OpenResult): Promise<void> => {
       useEditor.getState().loadDocument(result.workbook, result.path)
       // 换了文档，上一份的自动存档已经没意义，清掉避免下次启动误提示恢复
       try {
@@ -114,10 +115,69 @@ export default function App(): ReactElement {
       }
       if (result.warnings.length > 0) messages.push(...result.warnings)
       if (messages.length > 0) showToast(messages.join('；'))
+    },
+    [showToast]
+  )
+
+  const openDocument = useCallback(async (): Promise<void> => {
+    commitPending()
+    try {
+      const result = await window.api.openDialog()
+      if (!result) return
+      await applyOpenResult(result)
     } catch (err) {
       showToast(`打开失败：${(err as Error).message}`)
     }
-  }, [commitPending, showToast])
+  }, [commitPending, applyOpenResult, showToast])
+
+  /** 直接打开某个路径（历史记录里点一条走这里） */
+  const openPath = useCallback(
+    async (path: string): Promise<void> => {
+      commitPending()
+      try {
+        await applyOpenResult(await window.api.openPath(path))
+      } catch (err) {
+        showToast(`打开失败：${(err as Error).message}`)
+      }
+    },
+    [commitPending, applyOpenResult, showToast]
+  )
+
+  /**
+   * 恢复到某个历史版本。
+   *
+   * 恢复前**先自动存一份「恢复前」的版本**：万一点错了还能再回来，
+   * 这也是恢复动作不进撤销栈的安全网。
+   */
+  const restoreSnapshot = useCallback(
+    async (snapshotId: string): Promise<void> => {
+      commitPending()
+      const store = useEditor.getState()
+
+      try {
+        await window.api.snapshotCreate({
+          workbook: snapshotForSave(store),
+          path: store.filePath,
+          title: defaultDocumentName(store.workbook),
+          reason: 'before-restore'
+        })
+      } catch {
+        // 兜底版本存不上也要继续恢复，不能因此卡住用户
+      }
+
+      try {
+        const result = await window.api.snapshotRestore(snapshotId)
+        useEditor.getState().restoreDocument(result.workbook)
+        const messages = ['已恢复到所选版本（恢复前的状态也留了一份，可再切回）']
+        if (result.resourceCount > 0) messages.push(`带回了 ${result.resourceCount} 个图片/附件资源`)
+        if (result.warnings.length > 0) messages.push(...result.warnings)
+        showToast(messages.join('；'))
+      } catch (error) {
+        showToast(`恢复失败：${(error as Error).message}`)
+      }
+    },
+    [commitPending, showToast]
+  )
 
   /**
    * 正常关闭应用。
@@ -291,6 +351,9 @@ export default function App(): ReactElement {
         case 'file:export-opml':
           void exportOutlineAs('opml')
           break
+        case 'file:history':
+          setShowHistory(true)
+          break
         default:
           break
       }
@@ -327,6 +390,29 @@ export default function App(): ReactElement {
         fileNameOf(store.filePath) ?? '未命名导图'
       )
     }, 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  /* ------------------------------------------------------------------ */
+  /* 自动版本快照                                                        */
+  /* ------------------------------------------------------------------ */
+
+  useEffect(() => {
+    // 每 10 分钟留一个版本；内容与上一份相同（或距上次太近）时
+    // 主进程会按内容指纹直接忽略，不会白写盘。
+    // 只对「已保存过的文档」记录：还没有路径的文档由自动保存与崩溃恢复兜底。
+    const timer = window.setInterval(() => {
+      const store = useEditor.getState()
+      if (!store.filePath) return
+      void window.api
+        .snapshotCreate({
+          workbook: snapshotForSave(store),
+          path: store.filePath,
+          title: defaultDocumentName(store.workbook),
+          reason: 'auto'
+        })
+        .catch(() => undefined)
+    }, 600000)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -380,7 +466,7 @@ export default function App(): ReactElement {
     const name = filePath
       ? (fileNameOf(filePath) ?? '未命名导图')
       : defaultDocumentName(useEditor.getState().workbook)
-    window.api.setTitle(`${dirty ? '● ' : ''}${name} - 思维导图`)
+    window.api.setTitle(`${dirty ? '● ' : ''}${name} - Mind`)
     // rootTitle 参与依赖：改名后标题栏要立刻跟着变
   }, [filePath, dirty, rootTitle])
 
@@ -428,6 +514,13 @@ export default function App(): ReactElement {
       const store = useEditor.getState()
       const selectedId = store.selection[0]
 
+      // Alt+↑ / ↓：同级上移 / 下移（知犀的写法，和 Ctrl+Shift+方向键等价）
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault()
+        store.moveSelectionByKey(e.key)
+        return
+      }
+
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase()
         if (key === 'z') {
@@ -447,6 +540,18 @@ export default function App(): ReactElement {
           // Ctrl+F：打开搜索面板（与 Xmind 一致）
           e.preventDefault()
           setSidePanel('search')
+        } else if (
+          e.shiftKey &&
+          (e.key === 'ArrowUp' ||
+            e.key === 'ArrowDown' ||
+            e.key === 'ArrowLeft' ||
+            e.key === 'ArrowRight' ||
+            e.key === 'Home' ||
+            e.key === 'End')
+        ) {
+          // Ctrl+Shift+方向键：选中主题的精确移动（与亿图脑图一致）
+          e.preventDefault()
+          store.moveSelectionByKey(e.key)
         }
         return
       }
@@ -519,7 +624,8 @@ export default function App(): ReactElement {
           onAiGenerate: () => setAiTask('generate'),
           onAiExpand: () => setAiTask('expand'),
           onAiPolish: () => setAiTask('polish'),
-          onAiSettings: () => setShowAiSettings(true)
+          onAiSettings: () => setShowAiSettings(true),
+          onHistory: () => setShowHistory(true)
         }}
       />
 
@@ -572,6 +678,15 @@ export default function App(): ReactElement {
 
       {showAiSettings && (
         <AiSettingsDialog onClose={() => setShowAiSettings(false)} onNotify={showToast} />
+      )}
+
+      {showHistory && (
+        <HistoryDialog
+          onClose={() => setShowHistory(false)}
+          onNotify={showToast}
+          onOpenFile={(path) => guard(() => void openPath(path))}
+          onRestore={(snapshotId) => guard(() => void restoreSnapshot(snapshotId))}
+        />
       )}
 
       {toast && <div className="toast">{toast}</div>}

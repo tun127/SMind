@@ -1,3 +1,4 @@
+import { DEFAULT_STRUCTURE } from '../xmind/constants'
 import { CREATOR, MODEL_VERSION, type Sheet, type Topic, type Workbook } from './types'
 
 let idCounter = 0
@@ -26,9 +27,12 @@ export function createSheet(title = '画布 1', rootTitle = '中心主题'): She
   return {
     id: createId('sheet'),
     title,
+    // 新建画布的结构一律取 DEFAULT_STRUCTURE（逻辑图·向右）。
+    // 这里曾经写死过「思维导图（平衡）」，于是「默认结构」这个约定被悄悄绕过：
+    // 只有导入的文件和工具栏下拉认识它，真正常用的「新建导图 / 新建画布」出来的却还是平衡图。
     rootTopic: {
       ...createTopic(rootTitle),
-      structureClass: 'org.xmind.ui.map.unbalanced'
+      structureClass: DEFAULT_STRUCTURE
     },
     relationships: [],
     boundaries: [],

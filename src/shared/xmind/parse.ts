@@ -16,6 +16,7 @@ import {
 import { createId } from '../model/factory'
 import { normalizeThemeColors } from '../theme'
 import { DEFAULT_STRUCTURE, STRUCTURES, THEME_NAMESPACE, XMIND_FILES } from './constants'
+import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument, EMMX_PAGE_FILE } from './emmx'
 import { parseLegacyContent } from './legacy'
 import { parseXml } from './xml'
 
@@ -280,10 +281,16 @@ export async function isLegacyXmind(data: Uint8Array): Promise<boolean> {
 }
 
 /**
- * 解析 .xmind 文件。
- * 兼容 Xmind 2020+（content.json）与 Xmind 8 旧版（content.xml）。
+ * 解析 .xmind / .emmx 文件。
+ * 兼容 Xmind 2020+（content.json）、Xmind 8 旧版（content.xml），
+ * 以及亿图脑图的 .emmx（本身是 Xmind 格式时走正常解析；专有二进制格式走文字提取）。
+ *
+ * @param options.fileName 文件名（不带路径），用于给「无标题」的导入结果取名
  */
-export async function parseXmind(data: Uint8Array): Promise<ParseResult> {
+export async function parseXmind(
+  data: Uint8Array,
+  options: { fileName?: string } = {}
+): Promise<ParseResult> {
   const warnings: string[] = []
   const zip = await JSZip.loadAsync(data)
 
@@ -291,7 +298,12 @@ export async function parseXmind(data: Uint8Array): Promise<ParseResult> {
   if (!contentFile) {
     const legacyFile = zip.file(XMIND_FILES.legacyContent)
     if (!legacyFile) {
-      throw new Error('文件不是有效的 .xmind 文件：既没有 content.json 也没有 content.xml')
+      // 亿图脑图的专有格式：内容在 mmpage/page.bin 里，只能做文字提取
+      const emmxPage = zip.file(EMMX_PAGE_FILE)
+      if (emmxPage) return parseEmmxPackage(emmxPage, options.fileName)
+      throw new Error(
+        '文件不是有效的 .xmind / .emmx：既没有 content.json、content.xml，也没有亿图脑图的页数据'
+      )
     }
     return parseLegacyPackage(zip, legacyFile)
   }
@@ -302,6 +314,12 @@ export async function parseXmind(data: Uint8Array): Promise<ParseResult> {
     rawSheets = JSON.parse(text)
   } catch {
     throw new Error('content.json 解析失败：文件已损坏或格式不正确')
+  }
+
+  // 亿图脑图的 ver:2 结构（{ver, contents}）与 Xmind 完全不同，走专用解析
+  const emmx = parseEmmxDocument(rawSheets, options.fileName)
+  if (emmx) {
+    return { workbook: emmx.workbook, resources: await readResources(zip), warnings: emmx.warnings }
   }
 
   const sheets = asArray(rawSheets)
@@ -360,6 +378,36 @@ async function readResources(zip: JSZip): Promise<Record<string, Uint8Array>> {
     resources[name] = await file.async('uint8array')
   }
   return resources
+}
+
+/**
+ * 读取亿图脑图的专有 .emmx。
+ *
+ * 只能做文字提取：节点之间的父子关系存在专有对象图里，需要完整逆向才拿得到，
+ * 与其猜一个错的层级，不如老实告诉用户「文字都在、结构要自己整理」。
+ */
+async function parseEmmxPackage(
+  pageFile: JSZip.JSZipObject,
+  fileName?: string
+): Promise<ParseResult> {
+  let pageBin: Uint8Array
+  try {
+    pageBin = await pageFile.async('uint8array')
+  } catch {
+    throw new Error('亿图脑图的页数据读取失败：文件可能已损坏')
+  }
+
+  const texts = extractEmmxTexts(pageBin)
+  if (texts.length === 0) {
+    throw new Error(
+      '这是亿图脑图的专有 .emmx 格式，但没有从页数据里提取到任何文字，暂时打不开。建议在亿图脑图里「导出为 .xmind」后再打开。'
+    )
+  }
+
+  const { workbook, warnings } = buildEmmxWorkbook(texts, fileName)
+  // 专有格式里的图片无法定位到具体节点，不做导入：
+  // 否则会在文件里留下一堆没有归属的资源，反而更难处理
+  return { workbook, resources: {}, warnings }
 }
 
 /** 读取 Xmind 8 旧版（content.xml） */

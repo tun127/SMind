@@ -32,7 +32,11 @@ export const STRUCTURES: StructureDef[] = [
   { class: 'org.xmind.ui.matrix', label: '矩阵图', supported: true, family: 'matrix' }
 ]
 
-export const DEFAULT_STRUCTURE: StructureClass = 'org.xmind.ui.map.unbalanced'
+/**
+ * 新建导图的默认结构：**逻辑图（向右）**。
+ * 单侧展开、层级一眼看清，比平衡图更适合承载长文本，也更接近大多数人日常画导图的习惯。
+ */
+export const DEFAULT_STRUCTURE: StructureClass = 'org.xmind.ui.logic.right'
 
 const STRUCTURE_MAP = new Map(STRUCTURES.map((s) => [s.class, s]))
 
@@ -90,6 +94,13 @@ export const THEME_NAMESPACE = 'com.mindmap.local.theme'
  * Xmind 也会忽略不认识的属性键，不影响兼容性。
  */
 export const RELATIONSHIP_CURVE_KEY = 'com.mindmap.local.curve'
+
+/**
+ * 一级主题被手动调到中心主题哪一侧。存在 topic.style.properties 下。
+ * 平衡结构默认按顺序交替分配左右，用户把它拖到另一侧时写这个键覆盖；
+ * 不认识的键 Xmind 会忽略，往返不丢。
+ */
+export const TOPIC_SIDE_KEY = 'com.mindmap.local.side'
 
 /** .xmind 包内固定文件名 */
 export const XMIND_FILES = {

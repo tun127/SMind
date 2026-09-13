@@ -16,12 +16,27 @@ export interface TopicNodeProps {
   selected: boolean
   editing: boolean
   editingRich: RichText | null
-  highlighted: boolean
+  /**
+   * 落点高亮：
+   * - `child`：松手后成为它的子主题（绿色虚线）；
+   * - `sibling`：松手后插到它前面 / 后面（蓝色虚线）——只标**参照的那个主题本身**。
+   *   绝不标它的父级：把父级框出来会让用户误以为"要落到父级上"（尤其父级是中心主题时）。
+   */
+  highlight: 'child' | 'sibling' | null
   /** 命中当前搜索关键词 */
   searchHit: boolean
   /** 被筛选条件排除（淡出显示） */
   dimmed: boolean
   dragOffset: { dx: number; dy: number } | null
+  /** 是否是「手里正抓着的那一个」（它随之移动的后代不算），用于区分抬起的手感 */
+  dragPrimary: boolean
+  /** 正被拖着（含跟着走的子树）。拖动中不再显示落点高亮，免得和"抓着的东西"打架 */
+  dragged: boolean
+  /**
+   * 是否可拖动。中心主题是整张图的锚点，不能拖走，
+   * 所以它不显示「抓取」光标——光标本身就是最省事的操作提示。
+   */
+  draggable: boolean
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, id: string) => void
   onDoubleClick: (id: string) => void
   onRichChange: (id: string, rich: RichText) => void
@@ -53,10 +68,13 @@ function TopicNodeInner({
   selected,
   editing,
   editingRich,
-  highlighted,
+  highlight,
   searchHit,
   dimmed,
   dragOffset,
+  dragPrimary,
+  dragged,
+  draggable,
   onPointerDown,
   onDoubleClick,
   onRichChange,
@@ -90,19 +108,29 @@ function TopicNodeInner({
     color: visual.color,
     borderRadius: visual.borderRadius,
     fontWeight: visual.fontWeight,
-    boxShadow: visual.boxShadow,
+    // 抓着的那一个额外加一层投影，看起来是「被拎起来了」；
+    // 跟着走的后代不加，否则整棵子树都在发光，反而看不出抓到的是谁
+    boxShadow: dragPrimary
+      ? [visual.boxShadow, '0 10px 22px rgba(16, 24, 40, 0.24)'].filter(Boolean).join(', ')
+      : visual.boxShadow,
     transform: dragOffset ? `translate(${dragOffset.dx}px, ${dragOffset.dy}px)` : undefined,
     zIndex: dragOffset ? 30 : selected ? 20 : 1
   }
 
   const className = [
     'topic',
+    draggable ? 'topic--draggable' : '',
     node.depth === 0 ? 'topic--root' : node.depth === 1 ? 'topic--level1' : 'topic--deep',
     selected ? 'topic--selected' : '',
-    highlighted ? 'topic--drop' : '',
+    // 自由摆放（有位置偏移）的主题标出来：它们会被自动布局甩在一边、连线横穿画布，
+    // 一眼能认出"这几个是我手动摆过的"，而不是莫名其妙就乱了
+    node.topic.position ? 'topic--floating' : '',
+    !dragged && highlight === 'child' ? 'topic--drop' : '',
+    !dragged && highlight === 'sibling' ? 'topic--drop-sibling' : '',
     searchHit ? 'topic--hit' : '',
     dimmed ? 'topic--dimmed' : '',
     dragOffset ? 'topic--dragging' : '',
+    dragPrimary ? 'topic--drag-primary' : '',
     editing ? 'topic--editing' : ''
   ]
     .filter(Boolean)

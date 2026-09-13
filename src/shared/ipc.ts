@@ -1,6 +1,8 @@
 import type { Workbook } from './model/types'
 import type { AiConfigView, AiMessage } from './ai'
 import type { ImageExportFormat } from './export/types'
+import type { HistoryEntry } from './history'
+import type { SnapshotItem, SnapshotReason } from './snapshot'
 import type { OutlineFormat } from './outline'
 import type { ThemeDefinition } from './theme'
 
@@ -79,7 +81,21 @@ export const IPC = {
   aiChat: 'ai:chat',
   aiTest: 'ai:test',
   /* ---- 大纲文件导入（P9+） ---- */
-  importText: 'file:import-text'
+  importText: 'file:import-text',
+  /* ---- 历史记录与常用（P9+） ---- */
+  historyList: 'history:list',
+  historyTogglePin: 'history:toggle-pin',
+  historyRemove: 'history:remove',
+  historyClear: 'history:clear',
+  historySaveDir: 'history:save-dir',
+  historyChooseSaveDir: 'history:choose-save-dir',
+  historyReveal: 'history:reveal',
+  /* ---- 文档版本快照（P9+） ---- */
+  snapshotList: 'snapshot:list',
+  snapshotCreate: 'snapshot:create',
+  snapshotRestore: 'snapshot:restore',
+  snapshotRemove: 'snapshot:remove',
+  snapshotClear: 'snapshot:clear'
 } as const
 
 export type MenuCommand =
@@ -105,6 +121,7 @@ export type MenuCommand =
   | 'file:export-txt'
   | 'file:export-md'
   | 'file:export-opml'
+  | 'file:history'
 
 /** preload 暴露给渲染进程的 API */
 export interface MindApi {
@@ -177,6 +194,56 @@ export interface MindApi {
    * 取消返回 null。
    */
   importText(kind: 'markdown' | 'opml'): Promise<ImportedTextFile | null>
+
+  /* ---- 历史记录与常用（P9+） ---- */
+  /** 打开历史（常用在最前，带「文件是否还在原位置」标记） */
+  historyList(): Promise<HistoryEntry[]>
+  /** 切换常用（收藏） */
+  historyTogglePin(path: string): Promise<HistoryEntry[]>
+  /** 从历史里移除一条 */
+  historyRemove(path: string): Promise<HistoryEntry[]>
+  /** 清空历史 */
+  historyClear(): Promise<HistoryEntry[]>
+  /** 当前的默认保存目录 */
+  historySaveDir(): Promise<string>
+  /** 让用户选一个目录作为默认保存位置，取消返回 null */
+  historyChooseSaveDir(): Promise<string | null>
+  /** 在系统文件管理器里打开某个文件或目录 */
+  revealInFolder(path: string): Promise<void>
+
+  /* ---- 文档版本快照（P9+） ---- */
+  /**
+   * 当前文档的版本列表。
+   * 只服务「已保存过的文档」：path 为 null 时返回空列表
+   * （未保存文档的内容安全由自动保存与崩溃恢复负责）。
+   */
+  snapshotList(path: string | null): Promise<SnapshotItem[]>
+  /**
+   * 存一份版本。
+   * reason 为 auto 时，内容与上一份相同（或距上次太近）会被忽略，不会重复写盘。
+   */
+  snapshotCreate(input: {
+    workbook: Workbook
+    path: string | null
+    title: string
+    reason: SnapshotReason
+    note?: string
+  }): Promise<SnapshotItem[]>
+  /**
+   * 恢复某个版本。
+   * 刻意不复用 OpenResult：恢复是「把当前文档换回旧内容」，
+   * 文件路径要保留当前值，而不是变成快照里记录的那个。
+   */
+  snapshotRestore(id: string): Promise<SnapshotRestoreResult>
+  snapshotRemove(id: string, path: string | null): Promise<SnapshotItem[]>
+  snapshotClear(path: string | null): Promise<SnapshotItem[]>
+}
+
+/** 恢复版本的结果：只带回内容，不带路径（路径沿用当前文档） */
+export interface SnapshotRestoreResult {
+  workbook: Workbook
+  warnings: string[]
+  resourceCount: number
 }
 
 export interface ImportedTextFile {

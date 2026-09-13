@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
 import { createHash } from 'node:crypto'
 import { promises as fs, existsSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   IPC,
@@ -13,7 +13,8 @@ import {
   type PickedAttachment,
   type PickedImage,
   type RecoveryInfo,
-  type SaveResult
+  type SaveResult,
+  type SnapshotRestoreResult
 } from '@shared/ipc'
 import {
   DEFAULT_AI_CONFIG,
@@ -38,11 +39,38 @@ import {
 import { parseXmind } from '@shared/xmind/parse'
 import { serializeXmind } from '@shared/xmind/serialize'
 import { activeSheetOf, buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
-import { defaultFileName } from '@shared/model/naming'
+import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
+import type { HistoryEntry } from '@shared/history'
+import type { SnapshotItem, SnapshotReason } from '@shared/snapshot'
+import {
+  clearAllHistory,
+  currentSaveDir,
+  listHistory,
+  recordVisit,
+  rememberSaveDir,
+  removeEntry,
+  togglePin
+} from './history'
+import {
+  clearSnapshotsFor,
+  createSnapshot,
+  listSnapshots,
+  readSnapshotBytes,
+  removeSnapshotById
+} from './snapshot'
 import { imageExportFormatDef, type ImageExportFormat } from '@shared/export/types'
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
 import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '@shared/recovery'
 import { buildAppMenu } from './menu'
+
+/** 应用名：与 electron-builder 的 productName、窗口标题保持一致 */
+const APP_NAME = 'Mind'
+
+/**
+ * 开发模式下的窗口/任务栏图标（打包后由 exe 自带图标，不需要它）。
+ * 用 existsSync 判断：打包后这个路径不存在，直接跳过而不是报错。
+ */
+const devIconFile = join(__dirname, '../../build/icon.png')
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | null = null
@@ -111,10 +139,13 @@ function pruneForSave(workbook: Workbook): void {
 
 async function readDocument(path: string): Promise<OpenResult> {
   const buf = await fs.readFile(path)
-  const parsed = await parseXmind(new Uint8Array(buf))
+  // 传文件名进去：亿图脑图的专有 .emmx 没有自带文档名，只能拿文件名当中心主题
+  const parsed = await parseXmind(new Uint8Array(buf), { fileName: basename(path) })
   // 关键：资源必须留着，否则「打开带图的文件 → 另存」会把图片丢掉
   loadedResources = parsed.resources
   sessionResources.clear()
+  // 记一笔打开历史（用中心主题名，方便在历史界面里认出是哪张图）
+  await recordVisit(path, defaultDocumentName(parsed.workbook)).catch(() => undefined)
   return {
     path,
     workbook: parsed.workbook,
@@ -127,6 +158,9 @@ async function writeDocument(path: string, workbook: Workbook): Promise<SaveResu
   pruneForSave(workbook)
   const bytes = await serializeXmind({ workbook, resources: loadedResources })
   await fs.writeFile(path, Buffer.from(bytes))
+  // 保存成功也记一笔，并记住这次用的目录（下次「另存为」默认落在这里）
+  await rememberSaveDir(dirname(path)).catch(() => undefined)
+  await recordVisit(path, defaultDocumentName(workbook)).catch(() => undefined)
   return { path }
 }
 
@@ -266,8 +300,9 @@ function createWindow(): void {
     minHeight: 620,
     show: false,
     backgroundColor: '#f4f5f7',
-    title: '思维导图',
+    title: APP_NAME,
     autoHideMenuBar: false,
+    ...(existsSync(devIconFile) ? { icon: devIconFile } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -347,7 +382,13 @@ function registerIpc(): void {
   ipcMain.handle(IPC.openDialog, async (): Promise<OpenResult | null> => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: '打开思维导图',
-      filters: [{ name: '思维导图文件', extensions: ['xmind'] }],
+      filters: [
+        // .emmx 是亿图脑图（EdrawMind / MindMaster）的文件，能直接打开
+        { name: '思维导图文件', extensions: ['xmind', 'emmx', 'emm'] },
+        { name: 'Xmind 文件', extensions: ['xmind'] },
+        { name: '亿图脑图文件', extensions: ['emmx', 'emm'] },
+        { name: '全部文件', extensions: ['*'] }
+      ],
       properties: ['openFile']
     })
     if (result.canceled || result.filePaths.length === 0) return null
@@ -363,9 +404,11 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.saveAs,
     async (_e, workbook: Workbook, suggestedName: string): Promise<SaveResult | null> => {
+      // 默认落在记住的保存目录（首次是「文档/思维导图」）
+      const dir = await currentSaveDir()
       const result = await dialog.showSaveDialog(mainWindow!, {
         title: '另存为',
-        defaultPath: suggestedName,
+        defaultPath: join(dir, suggestedName),
         filters: [{ name: '思维导图文件', extensions: ['xmind'] }]
       })
       if (result.canceled || !result.filePath) return null
@@ -691,6 +734,86 @@ function registerIpc(): void {
 
     return { path, name: basename(path), text }
   })
+
+  /* ---- 历史记录与常用（P9+） ---- */
+
+  ipcMain.handle(IPC.historyList, async (): Promise<HistoryEntry[]> => listHistory())
+
+  ipcMain.handle(IPC.historyTogglePin, async (_e, path: string): Promise<HistoryEntry[]> => togglePin(path))
+
+  ipcMain.handle(IPC.historyRemove, async (_e, path: string): Promise<HistoryEntry[]> => removeEntry(path))
+
+  ipcMain.handle(IPC.historyClear, async (): Promise<HistoryEntry[]> => clearAllHistory())
+
+  ipcMain.handle(IPC.historySaveDir, async (): Promise<string> => currentSaveDir())
+
+  ipcMain.handle(IPC.historyChooseSaveDir, async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '选择默认保存位置',
+      defaultPath: await currentSaveDir(),
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return rememberSaveDir(result.filePaths[0])
+  })
+
+  ipcMain.handle(IPC.historyReveal, async (_e, path: string): Promise<void> => {
+    if (existsSync(path)) shell.showItemInFolder(path)
+  })
+
+  /* ---- 文档版本快照（P9+） ---- */
+
+  ipcMain.handle(
+    IPC.snapshotList,
+    async (_e, path: string | null): Promise<SnapshotItem[]> => listSnapshots(path)
+  )
+
+  ipcMain.handle(
+    IPC.snapshotCreate,
+    async (
+      _e,
+      input: {
+        workbook: Workbook
+        path: string | null
+        title: string
+        reason: SnapshotReason
+        note?: string
+      }
+    ): Promise<SnapshotItem[]> =>
+      createSnapshot({
+        workbook: input.workbook,
+        // 资源留在主进程，直接取当前文档的那一份
+        resources: loadedResources,
+        path: input.path,
+        title: input.title,
+        reason: input.reason,
+        note: input.note
+      })
+  )
+
+  ipcMain.handle(IPC.snapshotRestore, async (_e, id: string): Promise<SnapshotRestoreResult> => {
+    const bytes = await readSnapshotBytes(id)
+    if (!bytes) throw new Error('这个版本的文件已经不在了，可能被清理过')
+    const parsed = await parseXmind(bytes)
+    // 与打开文件一致：资源必须留在主进程，否则「恢复后再保存」会把图片丢掉
+    loadedResources = parsed.resources
+    sessionResources.clear()
+    return {
+      workbook: parsed.workbook,
+      warnings: parsed.warnings,
+      resourceCount: Object.keys(parsed.resources).length
+    }
+  })
+
+  ipcMain.handle(
+    IPC.snapshotRemove,
+    async (_e, id: string, path: string | null): Promise<SnapshotItem[]> => removeSnapshotById(id, path)
+  )
+
+  ipcMain.handle(
+    IPC.snapshotClear,
+    async (_e, path: string | null): Promise<SnapshotItem[]> => clearSnapshotsFor(path)
+  )
 
   ipcMain.on(IPC.confirmClose, () => {
     allowClose = true

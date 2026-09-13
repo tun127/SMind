@@ -75,6 +75,22 @@ export function isSelfOrDescendant(root: Topic, ancestorId: string, targetId: st
   return hit
 }
 
+/**
+ * 某个节点连同它全部后代的 id。
+ * 拖拽时整棵子树要一起移动（否则子节点的连接线会掉队），所以需要这个集合。
+ */
+export function subtreeIds(root: Topic, id: string): string[] {
+  const start = findTopic(root, id)
+  if (!start) return []
+  const ids: string[] = []
+  const collect = (topic: Topic): void => {
+    ids.push(topic.id)
+    for (const child of topic.children) collect(child)
+  }
+  collect(start)
+  return ids
+}
+
 /** 从树上摘除节点并返回它 */
 export function detachTopic(root: Topic, id: string): Topic | null {
   let removed: Topic | null = null

@@ -25,6 +25,8 @@ export function buildAppMenu(): void {
           ]
         },
         { type: 'separator' },
+        { label: '历史记录与常用…', accelerator: 'CmdOrCtrl+H', click: () => send('file:history') },
+        { type: 'separator' },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => send('file:save') },
         { label: '另存为…', accelerator: 'CmdOrCtrl+Shift+S', click: () => send('file:save-as') },
         { type: 'separator' },

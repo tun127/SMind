@@ -21,8 +21,51 @@ import {
   normalizeThemeColors,
   normalizeThemeDefinition
 } from '../src/shared/theme'
-import { activeRoot, activeSheet, countCharacters, countTopics, findParent, findTopic } from '../src/shared/model/tree'
-import { createTopic, createWorkbook } from '../src/shared/model/factory'
+import { activeRoot, activeSheet, countCharacters, countTopics, findParent, findTopic, subtreeIds } from '../src/shared/model/tree'
+import { createSheet, createTopic, createWorkbook } from '../src/shared/model/factory'
+import { alsoDraggedOf, moveRootsOf, resolveDragMove } from '../src/shared/model/dragmove'
+import {
+  blockReasonOf,
+  closestNodeWithin,
+  distanceToRect,
+  nearestInRegion,
+  nearestSiblingGap,
+  perpendicularOf,
+  resolveDrop,
+  stackDirection,
+  zoneOf,
+  type DropAxis,
+  type DropNode,
+  type DropRect,
+  type SiblingStack,
+  type SnapNode
+} from '../src/shared/model/drop'
+import {
+  HISTORY_LIMIT,
+  clearHistory,
+  emptyHistory,
+  normalizeHistory,
+  recordVisit,
+  relativeTime,
+  removeEntry,
+  sortEntries,
+  togglePin
+} from '../src/shared/history'
+import {
+  SNAPSHOT_LIMITS,
+  addSnapshot,
+  clearDocSnapshots,
+  documentKeyOf,
+  emptySnapshotIndex,
+  formatBytes,
+  normalizeSnapshotIndex,
+  removeSnapshot,
+  shouldAutoSnapshot,
+  snapshotLabel,
+  snapshotReasonLabel,
+  snapshotsOf,
+  type SnapshotItem
+} from '../src/shared/snapshot'
 import {
   buildRange,
   indexTree,
@@ -32,7 +75,14 @@ import {
   resolveRange,
   sameRange
 } from '../src/shared/layout'
-import { MARKER_LABELS, RELATIONSHIP_CURVE_KEY, STRUCTURES } from '../src/shared/xmind/constants'
+import {
+  DEFAULT_STRUCTURE,
+  MARKER_LABELS,
+  RELATIONSHIP_CURVE_KEY,
+  STRUCTURES
+} from '../src/shared/xmind/constants'
+import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument } from '../src/shared/xmind/emmx'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { ALL_PICKABLE_MARKERS, markerVisualOf } from '../src/renderer/src/render/markers'
 import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
 import { buildDrawing } from '../src/renderer/src/export/drawing'
@@ -216,7 +266,10 @@ function testInit(): void {
   check('只有一个画布', state.workbook.sheets.length === 1)
   check('根主题标题正确', root().title === '中心主题', root().title)
   check('根主题默认带 2 个分支', root().children.length === 2, String(root().children.length))
-  check('默认结构为思维导图', root().structureClass === 'org.xmind.ui.map.unbalanced')
+  check('默认结构为逻辑图（向右）', root().structureClass === 'org.xmind.ui.logic.right', String(root().structureClass))
+  // 「新建导图 / 新建画布 / 新增画布」走的是同一套工厂函数，默认结构必须处处一致
+  eq('新建工作簿也用默认结构', createWorkbook().sheets[0].rootTopic.structureClass, DEFAULT_STRUCTURE)
+  eq('新建画布也用默认结构', createSheet('画布 2').rootTopic.structureClass, DEFAULT_STRUCTURE)
   check('初始不脏', state.dirty === false)
   check('初始无历史', state.undoStack.length === 0 && state.redoStack.length === 0)
   check('初始无选中', state.selection.length === 0 && state.editingId === null)
@@ -445,6 +498,560 @@ function testMove(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 7.5 拖拽落点：拖到兄弟上排序、拖到其它节点上成为子主题（Xmind 同款）  */
+/* ------------------------------------------------------------------ */
+
+function testNodeDrag(): void {
+  group('拖拽落点：同级排序')
+
+  reset()
+  const dragRoot = root()
+  const n1 = addChildOf(dragRoot.id, '一')
+  const n2 = addChildOf(dragRoot.id, '二')
+  const n3 = addChildOf(dragRoot.id, '三')
+  const n1a = addChildOf(n1, '一-1')
+
+  // 根节点自带「分支主题 1/2」两个默认子节点，所以只看本用例自己造的几个，
+  // 否则断言会被默认内容干扰
+  const mine = new Set([n1, n2, n3, n1a])
+  const order = (parentId: string): string[] =>
+    (find(parentId)?.children ?? []).filter((topic) => mine.has(topic.id)).map((topic) => topic.title)
+  eq('初始顺序', order(dragRoot.id), ['一', '二', '三'])
+
+  store().dropNode(n1, n3, 'after')
+  eq('拖到兄弟上会排到它后面', order(dragRoot.id), ['二', '三', '一'])
+  eq('子树跟着一起走', find(n1)?.children.length, 1)
+
+  // 关键回归：自己原本排在目标**前面**时，下标会因先摘除而前移一位，
+  // 如果用摘除前的下标就会落错位置。
+  store().dropNode(n1, n2, 'after')
+  eq('自己排在目标前面时也能落到正确位置', order(dragRoot.id), ['二', '一', '三'])
+
+  store().undo()
+  eq('排序可以撤销', order(dragRoot.id), ['二', '三', '一'])
+
+  group('拖拽落点：成为子主题')
+
+  // n2 与 n1a 既不同父级也不是兄弟，属于「任意两个节点之间」
+  store().dropNode(n2, n1a, 'child')
+  eq('拖到非兄弟节点上会成为它的子主题', findParent(root(), n2)?.id, n1a)
+  eq('成为最后一个子主题', find(n1a)?.children.filter((topic) => mine.has(topic.id)).length, 1)
+  eq('原本的父级少了一个', order(dragRoot.id), ['三', '一'])
+
+  group('拖拽落点：拒绝的情形')
+
+  eq('不能拖到自己的后代里', store().dropNode(n1, n1a, 'child'), false)
+  eq('不能拖到自己身上', store().dropNode(n1, n1, 'child'), false)
+  eq('拖到自己的父级上不做任何事', store().dropNode(n3, root().id, 'child'), false)
+  eq('根主题不能被拖动', store().dropNode(root().id, n3, 'child'), false)
+  eq('拒绝后顺序不变', order(dragRoot.id), ['三', '一'])
+
+  group('拖拽落点：同父级显式下标')
+
+  reset()
+  const r2 = root()
+  const x1 = addChildOf(r2.id, '甲')
+  addChildOf(r2.id, '乙')
+  addChildOf(r2.id, '丙')
+  const own = new Set([x1])
+  const titles = (): string[] =>
+    (find(r2.id)?.children ?? []).filter((topic) => own.has(topic.id)).map((topic) => topic.title)
+  const allTitles = (): string[] => (find(r2.id)?.children ?? []).map((topic) => topic.title)
+
+  const startIndex = allTitles().indexOf('甲')
+  check('同父级 + 无下标仍然被忽略', store().moveNode(x1, r2.id) === false)
+  check('同父级 + 显式下标允许移动', store().moveNode(x1, r2.id, 99) === true)
+  eq('越界下标会落到末尾', titles(), ['甲'])
+  eq('确实排在了最后', allTitles()[allTitles().length - 1], '甲')
+  store().undo()
+  eq('同父级排序也能撤销', allTitles().indexOf('甲'), startIndex)
+
+  group('拖拽子树集合')
+
+  reset()
+  const sRoot = root()
+  const s1 = addChildOf(sRoot.id, '一级')
+  const s11 = addChildOf(s1, '二级')
+  const s111 = addChildOf(s11, '三级')
+  const s2 = addChildOf(sRoot.id, '旁边的')
+
+  eq('子树包含自己和所有后代', subtreeIds(root(), s1).sort(), [s1, s11, s111].sort())
+  eq('叶子节点只有自己', subtreeIds(root(), s111), [s111])
+  eq('根节点的子树是整棵树', subtreeIds(root(), sRoot.id).length, countTopics(root()))
+  eq('不存在的 id 返回空', subtreeIds(root(), 'nope'), [])
+  check('不包含无关的兄弟节点', !subtreeIds(root(), s1).includes(s2))
+
+  group('拖拽落点裁决：任意两个节点之间')
+
+  reset()
+  const gRoot = root()
+  const ga = addChildOf(gRoot.id, 'A')
+  const gb = addChildOf(gRoot.id, 'B')
+  const ga1 = addChildOf(ga, 'A-1')
+  const gb1 = addChildOf(gb, 'B-1')
+
+  /** 落点裁决的比较统一用 JSON 串，避免依赖对象引用 */
+  const planOf = (dragged: string, target: string, preferAfter: boolean): string =>
+    JSON.stringify(resolveDrop(root(), dragged, target, preferAfter ? 'after' : 'child'))
+
+  // 本轮反馈第 1 条：连接根节点的那几个兄弟之间要能拖
+  eq(
+    '根级兄弟之间：贴外侧 → 插在其后',
+    planOf(ga, gb, true),
+    JSON.stringify({ targetId: gb, mode: 'after', parentId: gRoot.id })
+  )
+  eq(
+    '根级兄弟之间：停在身上 → 成为其子主题',
+    planOf(ga, gb, false),
+    JSON.stringify({ targetId: gb, mode: 'child', parentId: gb })
+  )
+
+  // 本轮反馈第 2 条：任意两个节点之间都能拖
+  eq(
+    '跨分支：贴外侧 → 插在其后（即成为该分支的兄弟）',
+    planOf(ga, gb1, true),
+    JSON.stringify({ targetId: gb1, mode: 'after', parentId: gb })
+  )
+  eq(
+    '跨分支：停在身上 → 成为其子主题',
+    planOf(ga, gb1, false),
+    JSON.stringify({ targetId: gb1, mode: 'child', parentId: gb1 })
+  )
+  eq(
+    '深层节点拖到另一分支的深层节点',
+    planOf(ga1, gb1, false),
+    JSON.stringify({ targetId: gb1, mode: 'child', parentId: gb1 })
+  )
+  eq(
+    '深层节点贴到另一分支深层节点外侧',
+    planOf(ga1, gb1, true),
+    JSON.stringify({ targetId: gb1, mode: 'after', parentId: gb })
+  )
+
+  group('拖拽落点裁决：拒绝与特例')
+
+  check('目标是自己是非法落点', resolveDrop(root(), ga, ga, 'child') === null)
+  check('目标是自己的后代是非法落点', resolveDrop(root(), ga, ga1, 'child') === null)
+  check('目标是自己的后代时贴外侧也非法', resolveDrop(root(), ga, ga1, 'after') === null)
+  check('停在父级身上＝原地不动', resolveDrop(root(), ga1, ga, 'child') === null)
+  eq(
+    '贴父级外侧 → 升一级，成为父级的兄弟',
+    planOf(ga1, ga, true),
+    JSON.stringify({ targetId: ga, mode: 'after', parentId: gRoot.id })
+  )
+  check('根主题不能被拖动', resolveDrop(root(), gRoot.id, gb, 'child') === null)
+  eq(
+    '目标是根主题 → 只能成为它的子主题',
+    planOf(gb1, gRoot.id, true),
+    JSON.stringify({ targetId: gRoot.id, mode: 'child', parentId: gRoot.id })
+  )
+
+  group('多选拖拽：落点裁决与移动集合')
+
+  // 多选时「成为某人的子主题」只解释得通一个主题，所以直接判为非法，
+  // 免得预览画一个位置、松手却只动其中一个。
+  check(
+    '多选拖拽时不能成为目标子主题',
+    resolveDrop(root(), ga, gb, 'child', [ga, gb1]) === null
+  )
+  eq(
+    '多选拖拽时同级插入仍然成立',
+    JSON.stringify(resolveDrop(root(), ga, gb, 'after', [ga, gb1])),
+    JSON.stringify({ targetId: gb, mode: 'after', parentId: gRoot.id })
+  )
+  check(
+    '多选拖拽时不能落进任一被拖主题的子树',
+    resolveDrop(root(), gb, ga1, 'after', [gb, ga]) === null
+  )
+  check(
+    '多选拖拽时不能落在任一被拖主题自己身上',
+    resolveDrop(root(), ga, gb1, 'after', [ga, gb1]) === null
+  )
+
+  // 移动集合：选中一群时整群一起走，父子同时入选只留父级
+  const groupMove = resolveDragMove(root(), gb, [gb, gb1])
+  eq('整群被拖：抓的那个在里面', groupMove.ids.includes(gb), true)
+  eq('整群被拖：它的后代跟着走（不重复记录）', groupMove.ids.sort(), subtreeIds(root(), gb).sort())
+  eq('只写最上面那个父级的位置', moveRootsOf(groupMove), [gb])
+
+  const twoBranches = resolveDragMove(root(), ga, [ga, gb, ga1])
+  eq(
+    '父子同时入选时去冗余',
+    twoBranches.ids.sort(),
+    [...subtreeIds(root(), ga), ...subtreeIds(root(), gb)].sort()
+  )
+  eq('两处自由位置都要写', moveRootsOf(twoBranches).sort(), [ga, gb].sort())
+
+  // 抓在没被选中的主题上 → 只走它自己（不会"顺手"把别人也带走）
+  const soloMove = resolveDragMove(root(), gb1, [ga, gb])
+  eq('抓未被选中的主题只走它自己', soloMove.ids, [gb1])
+  eq('单选时也不会去动别人', resolveDragMove(root(), ga, [ga]).ids.sort(), subtreeIds(root(), ga).sort())
+
+  group('拖拽落点：单选拖动时「成为子主题」不能被多选规则误禁（真缺陷回归）')
+
+  // 画布传给 resolveDrop 的「其它被拖主题」必须是**顶层**被拖主题里除锚点之外的那些，
+  // 而不是「锚点 + 它整棵子树」。传错的话这个列表永远非空，
+  // 于是「多选才该禁用」的 child 会连单选一起禁掉——拖到主题上什么都不发生。
+  const soloAlso = alsoDraggedOf(resolveDragMove(root(), ga, [ga]), ga)
+  eq('单选拖动时「其它被拖主题」为空（哪怕它自己有子节点）', soloAlso, [])
+  check(
+    '单选拖到别的主题上 → 可以成为它的子主题',
+    resolveDrop(root(), ga, gb, 'child', soloAlso) !== null
+  )
+
+  const groupAlso = alsoDraggedOf(resolveDragMove(root(), ga, [ga, gb]), ga)
+  eq('多选拖动时「其它被拖主题」是其余顶层主题', groupAlso, [gb])
+  check(
+    '多选拖到别的主题上 → 仍然禁止成为子主题（预览才不会骗人）',
+    resolveDrop(root(), ga, gb1, 'child', groupAlso) === null
+  )
+
+  group('拖拽落点：非法落点要给得出「为什么」')
+
+  eq(
+    '落在自己的父级身上 → 已是它的子主题',
+    blockReasonOf(root(), ga1, ga, 'child'),
+    '它已经是这个主题的子主题了'
+  )
+  eq(
+    '多选落成子主题 → 只能插到同级之间',
+    blockReasonOf(root(), ga, gb, 'child', [gb]),
+    '多选拖拽只能插到同级之间'
+  )
+  eq('落回自己身上', blockReasonOf(root(), ga, ga, 'child'), '不能落回自己身上')
+  eq('同级插值类的非法落点', blockReasonOf(root(), ga, gb, 'before'), '这里不能落')
+
+  group('折叠状态：拖拽时要能把落点展开')
+
+  reset()
+  const colRoot = root()
+  const colParent = addChildOf(colRoot.id, '折叠的')
+  addChildOf(colParent, '藏起来的')
+  store().setCollapsed(colParent, true)
+  check('能直接折叠', find(colParent)?.collapsed === true)
+  store().setCollapsed(colParent, false)
+  check('能直接展开（拖拽落点上要用它，否则看不见新子主题落在哪）', !find(colParent)?.collapsed)
+  const collapseHistory = store().undoStack.length
+  store().setCollapsed(colParent, false)
+  eq('已经是展开态时不再产生撤销记录', store().undoStack.length, collapseHistory)
+  store().setCollapsed(colParent, true)
+  eq('再折叠回去也是一步', store().undoStack.length, collapseHistory + 1)
+
+  group('拖拽落点裁决：节点分区（Xmind / 亿图脑图同款）')
+
+  const wide = { x: 0, y: 0, width: 100, height: 40 }
+  const tall = { x: 0, y: 0, width: 40, height: 100 }
+  const rightward: DropAxis = { axis: 'x', forward: true }
+  const leftward: DropAxis = { axis: 'x', forward: false }
+  const downward: DropAxis = { axis: 'y', forward: true }
+  const upward: DropAxis = { axis: 'y', forward: false }
+
+  eq('朝右：贴右缘 → 插到后面', zoneOf(wide, { x: 95, y: 20 }, rightward), 'after')
+  eq('朝右：贴左缘 → 插到前面', zoneOf(wide, { x: 5, y: 20 }, rightward), 'before')
+  eq('朝右：中间 → 成为子主题', zoneOf(wide, { x: 50, y: 20 }, rightward), 'child')
+  eq('朝左：贴左缘才是"后面"', zoneOf(wide, { x: 5, y: 20 }, leftward), 'after')
+  eq('朝左：贴右缘是"前面"', zoneOf(wide, { x: 95, y: 20 }, leftward), 'before')
+  eq('朝左：中间 → 成为子主题', zoneOf(wide, { x: 50, y: 20 }, leftward), 'child')
+
+  // 平衡导图里同级是竖着排的，所以分区落在节点的上/下缘
+  eq('朝下：贴下缘 → 插到后面', zoneOf(tall, { x: 20, y: 95 }, downward), 'after')
+  eq('朝下：贴上缘 → 插到前面', zoneOf(tall, { x: 20, y: 5 }, downward), 'before')
+  eq('朝下：中间 → 成为子主题', zoneOf(tall, { x: 20, y: 50 }, downward), 'child')
+  eq('朝上：贴上缘才是"后面"', zoneOf(tall, { x: 20, y: 5 }, upward), 'after')
+  eq('朝上：贴下缘是"前面"', zoneOf(tall, { x: 20, y: 95 }, upward), 'before')
+
+  eq('拿不到方向时一律按子主题处理', zoneOf(wide, { x: 95, y: 20 }, null), 'child')
+  eq('零尺寸矩形不会除零', zoneOf({ x: 0, y: 0, width: 0, height: 0 }, { x: 0, y: 0 }, rightward), 'child')
+
+  group('拖拽落点裁决：同级排列方向')
+
+  const box = (x: number, y: number): DropRect => ({ x, y, width: 100, height: 30 })
+  // 平衡思维导图的子节点其实是**竖着**排的。这一点以前是按「父 → 子」去猜的，
+  // 结果把"插到下面那个兄弟后面"画到了右边，看着就像要连回根节点。
+  eq(
+    '竖排（平衡导图）：轴为 y、朝下',
+    JSON.stringify(stackDirection(box(0, 0), box(0, 60))),
+    JSON.stringify({ axis: 'y', forward: true })
+  )
+  eq(
+    '竖排且反序：朝上',
+    JSON.stringify(stackDirection(box(0, 60), box(0, 0))),
+    JSON.stringify({ axis: 'y', forward: false })
+  )
+  eq(
+    '横排（组织架构图）：轴为 x、朝右',
+    JSON.stringify(stackDirection(box(0, 0), box(140, 0))),
+    JSON.stringify({ axis: 'x', forward: true })
+  )
+  eq(
+    '横排且反序：朝左',
+    JSON.stringify(stackDirection(box(140, 0), box(0, 0))),
+    JSON.stringify({ axis: 'x', forward: false })
+  )
+  eq(
+    '斜向但以横为主：判为 x',
+    JSON.stringify(stackDirection(box(0, 0), box(100, 40))),
+    JSON.stringify({ axis: 'x', forward: true })
+  )
+  eq(
+    '垂直于 y 轴得到 x 轴',
+    JSON.stringify(perpendicularOf({ axis: 'y', forward: true })),
+    JSON.stringify({ axis: 'x', forward: true })
+  )
+
+  group('快捷键移动主题（亿图脑图同款）')
+
+  reset()
+  const kRoot = root()
+  const m1 = addChildOf(kRoot.id, '一')
+  const m2 = addChildOf(kRoot.id, '二')
+  const m3 = addChildOf(kRoot.id, '三')
+  const m1a = addChildOf(m1, '一-1')
+  const kNamed = new Set([m1, m2, m3, m1a])
+  // 同样只看本用例自己造的节点，避免受默认子节点干扰
+  const kOrder = (): string[] =>
+    (find(kRoot.id)?.children ?? []).filter((topic) => kNamed.has(topic.id)).map((topic) => topic.title)
+
+  store().select(m2)
+  check('↑ 把第二个上移一位', store().moveSelectionByKey('ArrowUp') === true)
+  eq('顺序变成「二、一、三」', kOrder().join(','), '二,一,三')
+  check('↓ 再下移回来', store().moveSelectionByKey('ArrowDown') === true)
+  eq('回到「一、二、三」', kOrder().join(','), '一,二,三')
+
+  store().select(m1)
+  store().moveSelectionByKey('Home')
+  check('已在最前时 ↑ 不做改动', store().moveSelectionByKey('ArrowUp') === false)
+  store().select(m3)
+  store().moveSelectionByKey('End')
+  check('已在最后时 ↓ 不做改动', store().moveSelectionByKey('ArrowDown') === false)
+
+  store().select(m3)
+  check('Home 移到同级最前', store().moveSelectionByKey('Home') === true)
+  eq('三跑到最前面', kOrder().join(','), '三,一,二')
+  check('End 移到同级最后', store().moveSelectionByKey('End') === true)
+  eq('三回到最后面', kOrder().join(','), '一,二,三')
+
+  store().select(m1a)
+  check('← 升级成功', store().moveSelectionByKey('ArrowLeft') === true)
+  eq('一-1 变成中心主题的子节点', findParent(root(), m1a)?.id, kRoot.id)
+  eq('并且紧跟在「一」后面', kOrder().join(','), '一,一-1,二,三')
+
+  store().select(m1a)
+  check('→ 降级成功', store().moveSelectionByKey('ArrowRight') === true)
+  eq('一-1 又回到「一」下面', findParent(root(), m1a)?.id, m1)
+
+  store().select(kRoot.id)
+  check('中心主题不能被移动', store().moveSelectionByKey('ArrowUp') === false)
+
+  store().select(m1)
+  store().moveSelectionByKey('Home')
+  check('已是第一个时没有可降级的目标', store().moveSelectionByKey('ArrowRight') === false)
+  check('升级也做不了，因为父级就是中心主题', store().moveSelectionByKey('ArrowLeft') === false)
+
+  group('拖拽落点裁决：同级空隙（在任意两个节点之间插入）')
+
+  const gapStack: SiblingStack = {
+    parentId: 'p',
+    children: [
+      { id: 'c1', rect: { x: 0, y: 0, width: 100, height: 30 } },
+      { id: 'c2', rect: { x: 0, y: 100, width: 100, height: 30 } },
+      { id: 'c3', rect: { x: 0, y: 200, width: 100, height: 30 } }
+    ]
+  }
+  const stacks = [gapStack]
+  eq('落在 c1 与 c2 的空隙里 → 插到 c1 后面', nearestSiblingGap(stacks, { x: 50, y: 65 })?.targetId, 'c1')
+  eq('落在 c2 与 c3 的空隙里 → 插到 c2 后面', nearestSiblingGap(stacks, { x: 50, y: 165 })?.targetId, 'c2')
+  eq('带回正确的父级', nearestSiblingGap(stacks, { x: 50, y: 65 })?.parentId, 'p')
+  check('空隙边缘附近也能命中', nearestSiblingGap(stacks, { x: 50, y: 76 }) !== null)
+  check('离空隙太远就不算（交给自由摆放）', nearestSiblingGap(stacks, { x: 50, y: 500 }) === null)
+  check('横向偏离太远也不算', nearestSiblingGap(stacks, { x: 900, y: 65 }) === null)
+  check('只有一个子节点时没有空隙', nearestSiblingGap([{ parentId: 'p', children: [gapStack.children[0]] }], { x: 50, y: 15 }) === null)
+  check('空数组不会崩', nearestSiblingGap([], { x: 0, y: 0 }) === null)
+
+  group('拖拽落点裁决：空白处的吸附（不能随便掉进自由摆放）')
+
+  const snapNodes: DropNode[] = [
+    { id: 'n1', rect: { x: 0, y: 0, width: 100, height: 30 } },
+    { id: 'n2', rect: { x: 0, y: 200, width: 100, height: 30 } }
+  ]
+  eq('正落在节点上时距离为 0', closestNodeWithin(snapNodes, { x: 50, y: 15 }, new Set())?.id, 'n1')
+  eq(
+    '落在节点右侧一点点 → 仍然吸附到这个节点',
+    closestNodeWithin(snapNodes, { x: 130, y: 15 }, new Set())?.id,
+    'n1'
+  )
+  eq(
+    '落在节点下方一点点 → 仍然吸附到最近的那个',
+    closestNodeWithin(snapNodes, { x: 50, y: 120 }, new Set())?.id,
+    'n2'
+  )
+  check('离所有节点都很远 → 才允许自由摆放', closestNodeWithin(snapNodes, { x: 900, y: 900 }, new Set()) === null)
+  check('被拖的子树不参与吸附', closestNodeWithin(snapNodes, { x: 50, y: 15 }, new Set(['n1']))?.id === 'n2')
+  check('空列表不会崩', closestNodeWithin([], { x: 0, y: 0 }, new Set()) === null)
+  eq('贴着矩形内也算 0 距离', distanceToRect({ x: 0, y: 0 }, { x: 0, y: 0, width: 10, height: 10 }), 0)
+
+  const otherStack: SiblingStack = {
+    parentId: 'q',
+    children: [
+      { id: 'd1', rect: { x: 400, y: 0, width: 100, height: 30 } },
+      { id: 'd2', rect: { x: 400, y: 60, width: 100, height: 30 } }
+    ]
+  }
+  eq('多个堆时取最近的那个', nearestSiblingGap([gapStack, otherStack], { x: 450, y: 45 })?.targetId, 'd1')
+
+  group('拖拽落点裁决：分轴「可吸附区域」（生长方向宽、同级方向窄）')
+
+  /**
+   * 场景照抄用户截图：在向右长的结构里，一个主题**右侧那片空白**
+   * 必须是"可以落到它下面"，而不是被判成自由摆放。
+   * 区域的宽度按轴给：右侧（生长方向）外扩 84，上下（同级方向）只各外扩 29。
+   */
+  const childArea: SnapNode = {
+    id: 'orange',
+    rect: { x: 640, y: 296, width: 65, height: 34 },
+    region: { x: 640 - 29, y: 296 - 29, width: 65 + 29 + 84, height: 34 + 29 + 29 },
+    depth: 1
+  }
+  eq(
+    '拖到主题右侧的子节点区 → 命中该主题（而不是自由摆放）',
+    nearestInRegion([childArea], { x: 762, y: 312 }, new Set())?.id,
+    'orange'
+  )
+  eq(
+    '拖到主题上下方一点点 → 仍命中该主题（那条缝也算）',
+    nearestInRegion([childArea], { x: 670, y: 335 }, new Set())?.id,
+    'orange'
+  )
+  eq(
+    '拖到主题右侧再远一点（超出生长方向外扩）→ 不命中',
+    nearestInRegion([childArea], { x: 830, y: 312 }, new Set()),
+    null
+  )
+  eq(
+    '拖到主题上下方太远 → 不命中（交给自由摆放）',
+    nearestInRegion([childArea], { x: 670, y: 420 }, new Set()),
+    null
+  )
+  eq(
+    '区域边界上也算命中',
+    nearestInRegion([childArea], { x: 789, y: 312 }, new Set())?.id,
+    'orange'
+  )
+
+  const bandA: SnapNode = {
+    id: 'A',
+    rect: { x: 0, y: 0, width: 100, height: 30 },
+    region: { x: -20, y: -20, width: 140, height: 70 },
+    depth: 1
+  }
+  const bandB: SnapNode = {
+    id: 'B',
+    rect: { x: 0, y: 60, width: 100, height: 30 },
+    region: { x: -20, y: 40, width: 140, height: 70 },
+    depth: 2
+  }
+  eq('指针落在本体上时优先本体', nearestInRegion([bandA, bandB], { x: 50, y: 20 }, new Set())?.id, 'A')
+  eq(
+    '两个区域都命中时取离本体更近的那个',
+    nearestInRegion([bandA, bandB], { x: 50, y: 48 }, new Set())?.id,
+    'B'
+  )
+  eq(
+    '距离相同时取更深的那个',
+    nearestInRegion([bandA, bandB], { x: 50, y: 45 }, new Set())?.id,
+    'B'
+  )
+  check(
+    '被拖的子树不参与区域吸附',
+    nearestInRegion([bandA], { x: 50, y: 20 }, new Set(['A'])) === null
+  )
+  check('空候选返回 null', nearestInRegion([], { x: 0, y: 0 }) === null)
+
+  group('拖拽落点裁决：本轮反馈的场景（非根级的同级之间）')
+
+  reset()
+  const fbRoot = root()
+  const fbParent = addChildOf(fbRoot.id, '分支主题 2')
+  const k1 = addChildOf(fbParent, '子 1')
+  const k2 = addChildOf(fbParent, '子 2')
+  addChildOf(fbParent, '子 3')
+
+  eq(
+    '非根级的同级之间：贴外侧 → 插在其后',
+    JSON.stringify(resolveDrop(root(), k1, k2, 'after')),
+    JSON.stringify({ targetId: k2, mode: 'after', parentId: fbParent })
+  )
+  eq(
+    '非根级的同级之间：停在身上 → 成为其子主题',
+    JSON.stringify(resolveDrop(root(), k1, k2, 'child')),
+    JSON.stringify({ targetId: k2, mode: 'child', parentId: k2 })
+  )
+  store().dropNode(k1, k2, 'after')
+  eq(
+    '落下去之后顺序正确',
+    (find(fbParent)?.children ?? []).map((topic) => topic.title).join(','),
+    '子 2,子 1,子 3'
+  )
+
+  group('拖拽落点裁决：插到前面（before）')
+
+  reset()
+  const bRoot = root()
+  const b1 = addChildOf(bRoot.id, '甲')
+  const b2 = addChildOf(bRoot.id, '乙')
+  const b3 = addChildOf(bRoot.id, '丙')
+  const bNamed = new Set([b1, b2, b3])
+  const bOrder = (): string[] =>
+    (find(bRoot.id)?.children ?? []).filter((topic) => bNamed.has(topic.id)).map((topic) => topic.title)
+
+  store().dropNode(b3, b1, 'before')
+  eq('丙 插到了 甲 的前面', bOrder().join(','), '丙,甲,乙')
+  store().undo()
+  eq('before 插入可以撤销', bOrder().join(','), '甲,乙,丙')
+  store().dropNode(b1, b3, 'after')
+  eq('甲 插到了 丙 的后面', bOrder().join(','), '乙,丙,甲')
+
+  group('默认结构与左右对调')
+
+  eq('新建导图默认用逻辑图（向右）', DEFAULT_STRUCTURE, 'org.xmind.ui.logic.right')
+
+  reset()
+  const sideRoot = root()
+  const sideA = addChildOf(sideRoot.id, '一')
+  const sideB = addChildOf(sideRoot.id, '二')
+  store().setStructure('org.xmind.ui.map.unbalanced')
+  const sideOf = (id: string): string => {
+    const lay = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+    return lay.nodeMap.get(id)?.side ?? '?'
+  }
+
+  eq('交替分配：第一个在右', sideOf(sideA), 'right')
+  eq('交替分配：第二个在左', sideOf(sideB), 'left')
+  store().setTopicSide(sideA, 'left')
+  eq('显式指定后第一个改到左侧', sideOf(sideA), 'left')
+  store().undo()
+  eq('左右对调可以撤销', sideOf(sideA), 'right')
+
+  group('平衡结构：左右归属不受内容变化影响（回归）')
+
+  reset()
+  const qRoot = root()
+  const q1 = addChildOf(qRoot.id, '分支 1')
+  const q2 = addChildOf(qRoot.id, '分支 2')
+  store().setStructure('org.xmind.ui.map.unbalanced')
+  const before1 = sideOf(q1)
+  const before2 = sideOf(q2)
+  check('两个分支分别落在两侧', before1 !== before2, `${before1} / ${before2}`)
+
+  // 给「分支 1」塞一堆子节点，让它远远高于「分支 2」。
+  // 旧实现按子树高度做贪心配平，这一步会把左右整体换过来，
+  // 表现就是「挪了个子节点，分支主题 1 和 2 莫名其妙换位」。
+  for (let i = 0; i < 6; i += 1) addChildOf(q1, `长内容 ${i}`)
+  eq('内容变多后分支 1 仍在原来那侧', sideOf(q1), before1)
+  eq('内容变多后分支 2 仍在原来那侧', sideOf(q2), before2)
+}
+
+/* ------------------------------------------------------------------ */
 /* 8. 复制粘贴 / 折叠 / 结构 / 自由定位                                 */
 /* ------------------------------------------------------------------ */
 
@@ -486,8 +1093,26 @@ function testMisc(): void {
   eq('自由定位累加正确', find(b1)?.position, { x: 10, y: -20 })
   store().offsetPosition(b1, 5, 5)
   eq('自由定位二次累加正确', find(b1)?.position, { x: 15, y: -15 })
+  // 把带偏移的主题拖到另一个落点上时，偏移必须清掉：
+  // 否则它会落在"自动布局位置 + 偏移"的地方，也就是落点预览画在一处、松手却在另一处。
+  const dropHost = addChildOf(rootId, '落点宿主')
+  store().dropNode(b1, dropHost, 'child')
+  check('落到新父级后清掉自由偏移', find(b1)?.position === undefined, JSON.stringify(find(b1)?.position))
+  check('确实换了父级', findParent(root(), b1)?.id === dropHost)
+  store().undo()
+  eq('撤销后偏移也回来了', find(b1)?.position, { x: 15, y: -15 })
+
   store().clearPosition(b1)
   check('恢复自动布局清空偏移', find(b1)?.position === undefined)
+
+  // 整张画布一起恢复：自由摆放的主题多了以后，一个个恢复太慢
+  store().offsetPosition(b1, 30, 0)
+  store().offsetPosition(dropHost, -20, 10)
+  eq('统计出 2 个自由摆放的主题', store().clearAllPositions(), 2)
+  check('全部放回自动布局', find(b1)?.position === undefined && find(dropHost)?.position === undefined)
+  eq('没有自由摆放时返回 0 且不写历史', store().clearAllPositions(), 0)
+  store().undo()
+  check('整批恢复可以一次撤销', find(b1)?.position !== undefined || find(dropHost)?.position !== undefined)
 
   // 统计
   check('字数统计可用', countCharacters(root()) > 0, String(countCharacters(root())))
@@ -849,6 +1474,10 @@ function testLayout(): void {
   addChildOf(b1, '一甲')
   addChildOf(b1, '一乙')
   addChildOf(b2, '二甲')
+
+  // 新建导图默认是「逻辑图（向右）」这种单侧结构；本组要验证的是**平衡图**的左右分配，
+  // 所以这里显式把结构切回思维导图（平衡）。
+  store().setStructure('org.xmind.ui.map.unbalanced')
 
   const result = layoutSheet(root(), fakeMeasure)
   const total = countTopics(root())
@@ -2280,7 +2909,7 @@ async function testLegacyPackage(): Promise<void> {
   } catch (error) {
     message = (error as Error).message
   }
-  check('空包给出可读错误', message.includes('既没有 content.json 也没有 content.xml'), message)
+  check('空包给出可读错误', message.includes('既没有 content.json、content.xml'), message)
 }
 
 /* ------------------------------------------------------------------ */
@@ -3270,6 +3899,451 @@ function testNaming(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 历史记录 / 常用（纯函数）                                           */
+/* ------------------------------------------------------------------ */
+
+function testHistory(): void {
+  group('历史记录：结构校验与兜底')
+
+  const blank = emptyHistory()
+  eq('空历史版本号', blank.version, 1)
+  eq('空历史没有条目', blank.entries.length, 0)
+  check('空历史没有默认目录', blank.saveDir === null)
+
+  eq('null 输入返回空历史', normalizeHistory(null).entries.length, 0)
+  eq('字符串输入返回空历史', normalizeHistory('not-an-object').entries.length, 0)
+  eq('数组输入返回空历史', normalizeHistory([1, 2, 3]).entries.length, 0)
+  eq('无 entries 字段返回空历史', normalizeHistory({ version: 1 }).entries.length, 0)
+
+  const mixed = normalizeHistory({
+    version: 99,
+    saveDir: '   D:\\图   ',
+    entries: [
+      null,
+      'string',
+      { name: '没有路径' },
+      { path: '   ' },
+      { path: 'D:\\a.xmind', name: 'a.xmind', title: '甲', openedAt: 100, openCount: 2, pinned: true },
+      { path: 'd:\\A.XMIND', name: '重复项', openedAt: 200 },
+      { path: 'D:\\b.xmind', openedAt: 'bad', openCount: -3, pinned: 'yes' }
+    ]
+  })
+  eq('坏条目被丢弃、重复被合并', mixed.entries.length, 2)
+  eq('默认目录去掉首尾空格', mixed.saveDir, 'D:\\图')
+  eq('路径大小写不同视为同一个文件', mixed.entries.filter((e) => e.pinned).length, 1)
+  eq('先出现的那条胜出', mixed.entries.find((e) => e.pinned)?.title, '甲')
+
+  const odd = mixed.entries.find((entry) => entry.path === 'D:\\b.xmind')!
+  eq('非法时间归零', odd.openedAt, 0)
+  eq('非法次数回到 1', odd.openCount, 1)
+  eq('非布尔值不算常用', odd.pinned, false)
+  eq('缺名字时用路径末段兜底', odd.name, 'b.xmind')
+
+  group('历史记录：排序与数量上限')
+
+  const sorted = sortEntries([
+    { path: 'a', name: 'a', title: '', openedAt: 1, openCount: 1, pinned: false },
+    { path: 'b', name: 'b', title: '', openedAt: 5, openCount: 1, pinned: false },
+    { path: 'c', name: 'c', title: '', openedAt: 2, openCount: 1, pinned: true }
+  ])
+  eq('排序：常用优先，其余按时间倒序', sorted.map((entry) => entry.path), ['c', 'b', 'a'])
+
+  const before = [
+    { path: 'x', name: 'x', title: '', openedAt: 1, openCount: 1, pinned: false },
+    { path: 'y', name: 'y', title: '', openedAt: 9, openCount: 1, pinned: false }
+  ]
+  sortEntries(before)
+  eq('排序不修改传入的数组', before.map((entry) => entry.path), ['x', 'y'])
+
+  const many = normalizeHistory({
+    entries: Array.from({ length: 40 }, (_, index) => ({
+      path: `D:\\f${index}.xmind`,
+      openedAt: index,
+      // 故意让最旧的一条是常用：它必须活下来
+      pinned: index === 0
+    }))
+  })
+  eq('非常用条目被裁到上限', many.entries.filter((entry) => !entry.pinned).length, HISTORY_LIMIT)
+  eq('常用条目不受上限影响', many.entries.filter((entry) => entry.pinned).length, 1)
+  eq('常用永远排在第一位', many.entries[0].pinned, true)
+
+  const times = many.entries.filter((entry) => !entry.pinned).map((entry) => entry.openedAt)
+  check(
+    '其余按最近打开倒序',
+    times.every((value, index) => index === 0 || times[index - 1] >= value),
+    times.slice(0, 5).join(',')
+  )
+
+  group('历史记录：记录一次打开')
+
+  let file = emptyHistory()
+  file = recordVisit(file, { path: 'D:\\a.xmind', name: 'a.xmind', title: '甲', at: 1000 })
+  eq('新记录进入历史', file.entries.length, 1)
+  eq('首次打开次数为 1', file.entries[0].openCount, 1)
+  eq('新记录默认不是常用', file.entries[0].pinned, false)
+  eq('记录了中心主题名', file.entries[0].title, '甲')
+
+  file = recordVisit(file, { path: 'd:\\A.XMIND', title: '甲改', at: 2000 })
+  eq('同一文件重复打开只留一条', file.entries.length, 1)
+  eq('打开次数累加', file.entries[0].openCount, 2)
+  eq('最近打开时间被刷新', file.entries[0].openedAt, 2000)
+  eq('标题被更新', file.entries[0].title, '甲改')
+
+  file = recordVisit(file, { path: 'D:\\a.xmind', title: '   ', at: 3000 })
+  eq('空标题不会覆盖已有标题', file.entries[0].title, '甲改')
+  eq('次数继续累加', file.entries[0].openCount, 3)
+
+  eq('空白路径被忽略', recordVisit(file, { path: '   ' }).entries.length, 1)
+
+  const twoPaths = recordVisit(file, { path: 'D:\\c.xmind', title: '丙', at: 4000 })
+  eq('最近打开的排在最前', twoPaths.entries[0].path, 'D:\\c.xmind')
+
+  group('历史记录：常用 / 移除 / 清空')
+
+  let pinnedFile = emptyHistory()
+  pinnedFile = recordVisit(pinnedFile, { path: 'D:\\x.xmind', at: 1 })
+  pinnedFile = recordVisit(pinnedFile, { path: 'D:\\y.xmind', at: 2 })
+  eq('最新的在最前', pinnedFile.entries[0].path, 'D:\\y.xmind')
+
+  pinnedFile = togglePin(pinnedFile, 'd:\\X.XMIND')
+  eq('切成常用', pinnedFile.entries.filter((entry) => entry.pinned).length, 1)
+  eq('常用被排到最前', pinnedFile.entries[0].path, 'D:\\x.xmind')
+
+  pinnedFile = togglePin(pinnedFile, 'D:\\x.xmind')
+  eq('再点一次取消常用', pinnedFile.entries.filter((entry) => entry.pinned).length, 0)
+
+  pinnedFile = removeEntry(pinnedFile, 'd:\\y.XMIND')
+  eq('移除不区分大小写', pinnedFile.entries.length, 1)
+  eq('剩下的是另一条', pinnedFile.entries[0].path, 'D:\\x.xmind')
+
+  const cleared = clearHistory({ ...pinnedFile, saveDir: 'D:\\保存位置' })
+  eq('清空后没有条目', cleared.entries.length, 0)
+  eq('清空不影响默认保存目录', cleared.saveDir, 'D:\\保存位置')
+
+  group('历史记录：相对时间')
+
+  const now = 1_700_000_000_000
+  eq('刚刚', relativeTime(now - 5_000, now), '刚刚')
+  eq('N 分钟前', relativeTime(now - 5 * 60_000, now), '5 分钟前')
+  eq('N 小时前', relativeTime(now - 3 * 3_600_000, now), '3 小时前')
+  eq('昨天', relativeTime(now - 30 * 3_600_000, now), '昨天')
+  eq('N 天前', relativeTime(now - 5 * 86_400_000, now), '5 天前')
+  eq('未来时间显示刚刚', relativeTime(now + 10_000, now), '刚刚')
+  eq('非法时间返回空串', relativeTime(Number.NaN, now), '')
+  eq('零值返回空串', relativeTime(0, now), '')
+
+  const longAgo = relativeTime(now - 40 * 86_400_000, now)
+  check('超过 30 天显示具体日期', /^\d{4}-\d{2}-\d{2}$/.test(longAgo), longAgo)
+}
+
+/* ------------------------------------------------------------------ */
+/* 版本快照（纯函数）                                                   */
+/* ------------------------------------------------------------------ */
+
+const DOC_A = 'file:d:\\a.xmind'
+const DOC_B = 'file:d:\\b.xmind'
+
+function snap(over: Partial<SnapshotItem> & { id: string }): SnapshotItem {
+  return {
+    docKey: DOC_A,
+    title: '甲',
+    path: 'D:\\a.xmind',
+    at: 1000,
+    size: 2048,
+    reason: 'auto',
+    hash: `hash-${over.id}`,
+    ...over
+  }
+}
+
+function testSnapshots(): void {
+  group('版本快照：文档键')
+
+  eq('已保存文档按路径归并（大小写与斜杠都不敏感）', documentKeyOf('D:\\图\\a.xmind'), documentKeyOf('d:/图/a.xmind'))
+  check('不同文件是不同的键', documentKeyOf('D:\\a.xmind') !== documentKeyOf('D:\\b.xmind'))
+  check('没有路径时返回 null（不记录版本）', documentKeyOf(null) === null)
+  check('空白路径也返回 null', documentKeyOf('   ') === null)
+  check('undefined 返回 null', documentKeyOf(undefined) === null)
+  check('首尾空格不影响归并', documentKeyOf('  D:\\a.xmind  ') === documentKeyOf('D:\\a.xmind'))
+
+  group('版本快照：索引校验')
+
+  eq('空索引没有条目', emptySnapshotIndex().items.length, 0)
+  eq('null 输入返回空索引', normalizeSnapshotIndex(null).index.items.length, 0)
+  eq('数组输入返回空索引', normalizeSnapshotIndex([1, 2]).index.items.length, 0)
+
+  const dirty = normalizeSnapshotIndex({
+    version: 9,
+    items: [
+      null,
+      'string',
+      { id: 'no-doc-key' },
+      { id: 'ok', docKey: DOC_A },
+      { id: 'ok', docKey: DOC_B }
+    ]
+  })
+  eq('坏条目被丢弃、重复 id 只留一条', dirty.index.items.length, 1)
+  eq('缺字段时来源回退为自动', dirty.index.items[0].reason, 'auto')
+  eq('非法时间归零', dirty.index.items[0].at, 0)
+  eq('缺标题时为空串', dirty.index.items[0].title, '')
+
+  const orphaned = normalizeSnapshotIndex({
+    items: [{ id: 'orphan1' }, { id: 'unsafe/../x' }, { name: '没有 id' }]
+  })
+  eq('缺字段的条目被丢弃', orphaned.index.items.length, 0)
+  eq('丢弃的条目会上报要删的文件（不安全的 id 除外）', orphaned.dropped, ['orphan1'])
+
+  const duplicated = normalizeSnapshotIndex({
+    items: [
+      { id: 'keep1', docKey: DOC_A, at: 5, reason: 'manual' },
+      { id: 'keep1', docKey: DOC_B, at: 6 }
+    ]
+  })
+  eq('重复 id 只留一条', duplicated.index.items.length, 1)
+  eq('重复 id 不会被误当成垃圾删文件', duplicated.dropped.filter((id) => id === 'keep1').length, 0)
+
+  group('版本快照：数量上限与裁剪')
+
+  const many = normalizeSnapshotIndex({
+    items: Array.from({ length: 40 }, (_, index) => ({
+      id: `s${index}`,
+      docKey: DOC_A,
+      at: 1000 + index,
+      // 偶数下标是自动版本，奇数是手动版本
+      reason: index % 2 === 0 ? 'auto' : 'manual'
+    }))
+  })
+  const kept = many.index.items
+  eq('单文档被裁到上限', kept.length, SNAPSHOT_LIMITS.perDoc)
+  eq('手动版本全部保留', kept.filter((item) => item.reason === 'manual').length, 20)
+  eq('自动版本只留最新的一部分', kept.filter((item) => item.reason === 'auto').length, 10)
+  eq('被裁掉的数量正确', many.dropped.length, 10)
+
+  const keptIds = new Set(kept.map((item) => item.id))
+  check('被裁的 id 不在保留名单里', many.dropped.every((id) => !keptIds.has(id)))
+  check(
+    '留下的是最新的自动版本',
+    kept.filter((item) => item.reason === 'auto').every((item) => Number(item.id.slice(1)) >= 20),
+    kept
+      .filter((item) => item.reason === 'auto')
+      .map((item) => item.id)
+      .join(',')
+  )
+
+  const twoDocs = normalizeSnapshotIndex({
+    items: [
+      ...Array.from({ length: 40 }, (_, index) => ({ id: `a${index}`, docKey: DOC_A, at: 1000 + index })),
+      { id: 'b1', docKey: DOC_B, at: 1 }
+    ]
+  })
+  check('另一个文档的版本不受影响', twoDocs.index.items.some((item) => item.id === 'b1'))
+
+  group('版本快照：增删与查询')
+
+  let result = addSnapshot(emptySnapshotIndex(), snap({ id: 'v1', at: 100 }))
+  eq('新增一个版本', result.index.items.length, 1)
+  eq('没有需要删的文件', result.dropped.length, 0)
+
+  result = addSnapshot(result.index, snap({ id: 'v2', at: 200 }))
+  eq('再新增一个', result.index.items.length, 2)
+
+  eq('按时间倒序查询', snapshotsOf(result.index, DOC_A).map((item) => item.id), ['v2', 'v1'])
+  eq('查别的文档为空', snapshotsOf(result.index, DOC_B).length, 0)
+
+  result = addSnapshot(result.index, snap({ id: 'v2', at: 300 }))
+  eq('同 id 覆盖而不是重复', result.index.items.length, 2)
+
+  const afterRemove = removeSnapshot(result.index, 'v2')
+  eq('删除生效', snapshotsOf(afterRemove.index, DOC_A).map((item) => item.id), ['v1'])
+  eq('删除会同时上报要删的文件', afterRemove.dropped, ['v2'])
+  eq('删除不存在的 id 不报错', removeSnapshot(result.index, 'not-exist').index.items.length, 2)
+
+  const both = addSnapshot(addSnapshot(emptySnapshotIndex(), snap({ id: 'x1' })).index, snap({ id: 'y1', docKey: DOC_B })).index
+  const cleared = clearDocSnapshots(both, DOC_A)
+  eq('只清指定文档的版本', cleared.index.items.map((item) => item.id), ['y1'])
+  eq('清掉的 id 会一并上报（否则文件永远留在磁盘上）', cleared.dropped, ['x1'])
+
+  group('版本快照：自动快照的判定')
+
+  check('没有版本时先存一个', shouldAutoSnapshot([], 'h1', 1000))
+
+  const base = [snap({ id: 'v1', at: 10_000, hash: 'same' })]
+  check('内容没变就不重复存', !shouldAutoSnapshot(base, 'same', 10_000 + 60 * 60_000))
+  check('内容变了但间隔太近也先不存', !shouldAutoSnapshot(base, 'other', 10_000 + 60_000))
+  check('内容变了且间隔足够才存', shouldAutoSnapshot(base, 'other', 10_000 + SNAPSHOT_LIMITS.minGap))
+  check(
+    '间隔按最新一条算',
+    !shouldAutoSnapshot(
+      [...base, snap({ id: 'v2', at: 10_000 + 4 * 60_000, hash: 'mid' })],
+      'new',
+      10_000 + 5 * 60_000
+    )
+  )
+
+  group('版本快照：展示文案')
+
+  eq('字节（B）', formatBytes(512), '512 B')
+  eq('字节（KB）', formatBytes(2048), '2.0 KB')
+  eq('字节（MB）', formatBytes(3 * 1024 * 1024), '3.0 MB')
+  eq('字节（零）', formatBytes(0), '0 B')
+  eq('手动来源标签', snapshotReasonLabel('manual'), '手动')
+  eq('恢复前来源标签', snapshotReasonLabel('before-restore'), '恢复前')
+  eq('有备注时优先显示备注', snapshotLabel(snap({ id: 'n1', note: '发布前' })), '发布前')
+  eq('没备注时用来源加文档名', snapshotLabel(snap({ id: 'n2', title: '甲' })), '自动 · 甲')
+  eq('没有标题也能给出文案', snapshotLabel(snap({ id: 'n3', title: '' })), '自动版本')
+}
+
+/* ------------------------------------------------------------------ */
+/* 亿图脑图（.emmx）                                                   */
+/* ------------------------------------------------------------------ */
+
+const VER2_DOC = {
+  ver: 2,
+  contents: [
+    {
+      id: 'sheet-1',
+      title: '',
+      type: 'mind',
+      config: { template: 'right' },
+      root: {
+        id: 'r1',
+        data: { text: 'Pandas进阶\n', richText: { ops: [{ insert: 'Pandas进阶\n' }] } },
+        children: {
+          normal: [
+            {
+              id: 'a1',
+              data: { text: '文件读取\n', background: '#ffcc00' },
+              children: { normal: [{ id: 'a11', data: { text: 'csv文件' } }] }
+            },
+            {
+              id: 'a2',
+              data: {
+                text: '颜色示例',
+                richText: { ops: [{ insert: '普通' }, { insert: '红色', attributes: { color: '#f44f3b' } }] }
+              }
+            }
+          ],
+          summary: [{ id: 's1', data: { text: '不常用', type: 'summary', startId: 'a1', endId: 'a2' } }]
+        }
+      },
+      relativeLinks: [{ id: 'l1', text: '等价\n', start: { nodeId: 'a1' }, end: { nodeId: 'a11' } }]
+    }
+  ]
+}
+
+function testEmmx(): void {
+  group('亿图脑图：ver:2 结构化格式')
+
+  const parsed = parseEmmxDocument(VER2_DOC, 'Pandas进阶.emmx')
+  check('能识别 ver:2 文档', parsed !== null)
+  if (!parsed) return
+
+  const sheet = parsed.workbook.sheets[0]
+  eq('中心主题去掉结尾换行', sheet.rootTopic.title, 'Pandas进阶')
+  eq('画布名回退到中心主题', sheet.title, 'Pandas进阶')
+  eq('结构按模板映射', sheet.rootTopic.structureClass, 'org.xmind.ui.logic.right')
+  eq('一级子节点数', sheet.rootTopic.children.length, 2)
+  eq('二级节点也接上了', sheet.rootTopic.children[0].children[0].title, 'csv文件')
+  eq('节点底色进到 style', sheet.rootTopic.children[0].style?.properties?.['svg:fill'], '#ffcc00')
+  eq('概要登记成区间', sheet.summaries[0].range, '(a1,a2)')
+  eq('概要标题', sheet.summaries[0].title, '不常用')
+  check(
+    '概要不再作为普通子节点（避免被画两次）',
+    !sheet.rootTopic.children.some((child) => child.id === 's1')
+  )
+  eq(
+    '关系线两端',
+    [sheet.relationships[0].end1Id, sheet.relationships[0].end2Id],
+    ['a1', 'a11']
+  )
+  eq('关系线标题去掉换行', sheet.relationships[0].title, '等价')
+  eq(
+    '富文本颜色被保留',
+    sheet.rootTopic.children[1].titleRich?.paragraphs[0]?.runs?.[1]?.color,
+    '#f44f3b'
+  )
+  check('纯文字节点不产生富文本（不写冗余数据）', sheet.rootTopic.children[0].titleRich === undefined)
+  check('有告知兼容性处理', parsed.warnings.some((line) => line.includes('亿图脑图')))
+
+  group('亿图脑图：格式识别')
+
+  check('Xmind 的 content.json 不会被误判', parseEmmxDocument([{ id: 'x', rootTopic: {} }]) === null)
+  check('空对象返回 null', parseEmmxDocument({}) === null)
+  check('contents 里没有 root 时返回 null', parseEmmxDocument({ ver: 2, contents: [{ id: 'a' }] }) === null)
+  check('非对象返回 null', parseEmmxDocument('nope') === null)
+  check('内容项为空数组返回 null', parseEmmxDocument({ ver: 2, contents: [] }) === null)
+
+  group('亿图脑图：专有二进制的文字提取')
+
+  const header = new Uint8Array(600).fill(0x01)
+  const body = Buffer.from(
+    ['这里是正文内容', 'Vw0E', 'Tool', 'XtD', 'DataFrame', 'fhj', 'coze', 'Python3', 'self-Host'].join('\u0000'),
+    'utf8'
+  )
+  const bin = new Uint8Array([...header, ...body])
+  const texts = extractEmmxTexts(bin)
+
+  check('提取到中文正文', texts.includes('这里是正文内容'), texts.join('|'))
+  check('提取到真实英文词', texts.includes('Tool') && texts.includes('DataFrame'), texts.join('|'))
+  check('带数字的真实词没被误伤', texts.includes('Python3'), texts.join('|'))
+  check('保留带连字符的词', texts.includes('self-Host'), texts.join('|'))
+  check('滤掉只有一个小写字母的噪音', !texts.includes('Vw0E'), texts.join('|'))
+  check('滤掉没有元音的短噪音', !texts.includes('XtD') && !texts.includes('fhj'), texts.join('|'))
+
+  const flat = buildEmmxWorkbook(texts, '我的图.emmx')
+  const flatSheet = flat.workbook.sheets[0]
+  eq('兜底导入的中心主题取文件名', flatSheet.rootTopic.title, '我的图')
+  eq('提取结果全部挂成子节点', flatSheet.rootTopic.children.length, texts.length)
+  check(
+    '明确告知层级无法还原',
+    flat.warnings.some((line) => line.includes('层级结构无法还原')),
+    flat.warnings.join(' / ')
+  )
+}
+
+/** 用仓库里真实的 .emmx 样本验证（样本不存在时自动跳过） */
+async function testEmmxSamples(): Promise<void> {
+  group('亿图脑图：真实样本')
+
+  if (!existsSync('samples')) {
+    check('样本目录不存在，跳过', true)
+    return
+  }
+  const files = readdirSync('samples').filter((name) => name.toLowerCase().endsWith('.emmx'))
+  if (files.length === 0) {
+    check('没有 .emmx 样本，跳过', true)
+    return
+  }
+
+  for (const name of files) {
+    const bytes = new Uint8Array(readFileSync(`samples/${name}`))
+    try {
+      const result = await parseXmind(bytes, { fileName: name })
+      const sheet = result.workbook.sheets[0]
+      let total = 0
+      const walk = (topic: Topic): void => {
+        total += 1
+        for (const child of topic.children) walk(child)
+      }
+      walk(sheet.rootTopic)
+      check(`${name}：能打开且有内容`, total >= 2, String(total))
+      check(`${name}：中心主题有名字`, sheet.rootTopic.title.trim().length > 0, sheet.rootTopic.title)
+      // 打开之后必须还能存回去，否则只是"看起来能开"
+      const again = await parseXmind(await serializeXmind({ workbook: result.workbook, resources: result.resources }))
+      let roundTrip = 0
+      const count = (topic: Topic): void => {
+        roundTrip += 1
+        for (const child of topic.children) count(child)
+      }
+      count(again.workbook.sheets[0].rootTopic)
+      check(`${name}：再保存后节点数一致`, roundTrip === total, `${roundTrip} vs ${total}`)
+    } catch (error) {
+      check(`${name}：能打开`, false, (error as Error).message)
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
   console.log('编辑器内核自检开始\n' + '='.repeat(56))
@@ -3281,6 +4355,7 @@ async function main(): Promise<void> {
   testUndoRedo()
   testDelete()
   testMove()
+  testNodeDrag()
   testMisc()
   testSnapshot()
   testRichText()
@@ -3300,6 +4375,10 @@ async function main(): Promise<void> {
   testAi()
   testImport()
   testNaming()
+  testHistory()
+  testSnapshots()
+  testEmmx()
+  await testEmmxSamples()
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  AlignStartVertical,
   Braces,
   ChevronDown,
   CircleHelp,
@@ -10,6 +11,7 @@ import {
   FileText,
   FolderOpen,
   Frame,
+  History as HistoryIcon,
   ImageDown,
   ListTree,
   Maximize,
@@ -60,6 +62,8 @@ export interface ToolbarActions {
   onAiExpand(): void
   onAiPolish(): void
   onAiSettings(): void
+  /** 历史记录 / 常用 / 默认保存位置 */
+  onHistory(): void
 }
 
 interface Props {
@@ -302,38 +306,49 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         <ToolMenu
           icon={<FileOutput size={16} />}
           label="导出"
-          title="导出图片、PDF 或大纲"
+          title="导出图片、PDF、Markdown 等"
           items={[
             {
               key: 'export-image',
-              label: 'PNG / SVG / PDF…',
+              label: '图片 / PDF（PNG、SVG、PDF）',
               hint: '可选清晰度与背景',
               icon: <ImageDown size={15} />,
               onSelect: actions.onExport
             },
             {
-              key: 'export-txt',
-              label: '大纲 · TXT',
-              hint: '纯文本',
-              icon: <FileText size={15} />,
-              onSelect: () => actions.onExportOutline('txt')
-            },
-            {
               key: 'export-md',
-              label: '大纲 · Markdown',
-              hint: '.md',
+              label: 'Markdown（.md）',
+              hint: '标题 + 列表 + 备注引用块，可直接粘进笔记软件',
               icon: <FileText size={15} />,
               onSelect: () => actions.onExportOutline('md')
             },
             {
+              key: 'export-txt',
+              label: '纯文本（.txt）',
+              hint: '缩进式大纲',
+              icon: <FileText size={15} />,
+              onSelect: () => actions.onExportOutline('txt')
+            },
+            {
               key: 'export-opml',
-              label: '大纲 · OPML',
+              label: 'OPML（.opml）',
               hint: '可导入其它导图软件',
               icon: <FileText size={15} />,
               onSelect: () => actions.onExportOutline('opml')
             }
           ]}
         />
+
+        {/* Markdown 是最常用的导出，直接给个按钮，不用翻菜单 */}
+        <button
+          type="button"
+          className="tool-btn tool-btn--labeled"
+          title="一键导出 Markdown（.md）：根主题作标题、层级作列表、备注作引用块"
+          onClick={() => actions.onExportOutline('md')}
+        >
+          <FileText size={15} />
+          Markdown
+        </button>
       </div>
 
       <div className="toolbar__divider" />
@@ -534,6 +549,13 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           title="更多功能"
           items={[
             {
+              key: 'history',
+              label: '历史记录与常用',
+              hint: '最近打开 / 固定常用 / 默认保存位置',
+              icon: <HistoryIcon size={15} />,
+              onSelect: actions.onHistory
+            },
+            {
               key: 'nodes',
               label: '节点属性',
               hint: '标记 / 标签 / 备注 / 超链接 / 附件 / 公式',
@@ -553,6 +575,13 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
               hint: hasFreePosition ? '把自由摆放的主题放回自动位置' : '选中自由摆放的主题后可用',
               icon: <RotateCcw size={15} />,
               onSelect: () => selectedId && store().clearPosition(selectedId)
+            },
+            {
+              key: 'reset-all-layout',
+              label: '全部恢复自动布局',
+              hint: '把这张画布上所有自由摆放的主题一次性放回去',
+              icon: <AlignStartVertical size={15} />,
+              onSelect: () => store().clearAllPositions()
             },
             {
               key: 'shortcuts',

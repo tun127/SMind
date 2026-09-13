@@ -14,6 +14,9 @@ import {
   type SaveResult
 } from '@shared/ipc'
 import type { AiConfigView, AiMessage } from '@shared/ai'
+import type { HistoryEntry } from '@shared/history'
+import type { SnapshotItem, SnapshotReason } from '@shared/snapshot'
+import type { SnapshotRestoreResult } from '@shared/ipc'
 import type { Workbook } from '@shared/model/types'
 import type { ImageExportFormat } from '@shared/export/types'
 import type { OutlineFormat } from '@shared/outline'
@@ -99,7 +102,41 @@ const api: MindApi = {
   aiTest: () => ipcRenderer.invoke(IPC.aiTest) as Promise<AiTestResult>,
 
   importText: (kind: 'markdown' | 'opml') =>
-    ipcRenderer.invoke(IPC.importText, kind) as Promise<ImportedTextFile | null>
+    ipcRenderer.invoke(IPC.importText, kind) as Promise<ImportedTextFile | null>,
+
+  historyList: () => ipcRenderer.invoke(IPC.historyList) as Promise<HistoryEntry[]>,
+
+  historyTogglePin: (path: string) => ipcRenderer.invoke(IPC.historyTogglePin, path) as Promise<HistoryEntry[]>,
+
+  historyRemove: (path: string) => ipcRenderer.invoke(IPC.historyRemove, path) as Promise<HistoryEntry[]>,
+
+  historyClear: () => ipcRenderer.invoke(IPC.historyClear) as Promise<HistoryEntry[]>,
+
+  historySaveDir: () => ipcRenderer.invoke(IPC.historySaveDir) as Promise<string>,
+
+  historyChooseSaveDir: () => ipcRenderer.invoke(IPC.historyChooseSaveDir) as Promise<string | null>,
+
+  revealInFolder: (path: string) => ipcRenderer.invoke(IPC.historyReveal, path) as Promise<void>,
+
+  snapshotList: (path: string | null) =>
+    ipcRenderer.invoke(IPC.snapshotList, path) as Promise<SnapshotItem[]>,
+
+  snapshotCreate: (input: {
+    workbook: Workbook
+    path: string | null
+    title: string
+    reason: SnapshotReason
+    note?: string
+  }) => ipcRenderer.invoke(IPC.snapshotCreate, input) as Promise<SnapshotItem[]>,
+
+  snapshotRestore: (id: string) =>
+    ipcRenderer.invoke(IPC.snapshotRestore, id) as Promise<SnapshotRestoreResult>,
+
+  snapshotRemove: (id: string, path: string | null) =>
+    ipcRenderer.invoke(IPC.snapshotRemove, id, path) as Promise<SnapshotItem[]>,
+
+  snapshotClear: (path: string | null) =>
+    ipcRenderer.invoke(IPC.snapshotClear, path) as Promise<SnapshotItem[]>
 }
 
 contextBridge.exposeInMainWorld('api', api)
