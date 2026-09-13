@@ -43,7 +43,7 @@
 | P8 | AI 一键生成导图 / 扩写子主题 / 润色标题（OpenAI 兼容，Key 只存本机） | 工具栏「AI」下拉菜单 |
 | P9+ | **历史记录**：最近文件 + 常用 + 默认保存位置（4.12 节）**以及版本快照**（4.13 节） | 「更多 → 历史记录与常用」(`Ctrl+H`) |
 | 兼容 | **亿图脑图 `.emmx`**：ver:2 结构化格式**完整还原**；专有二进制格式做**文字提取**（4.14 节） | 「导入 → 打开 .xmind 文件」，直接选 `.emmx` |
-| **P9** | **打包分发**：安装版 + 免安装版、自绘图标、应用名 Mind（第六章） | `npm run dist` → `release/` |
+| **P9** | **打包分发**：安装版 + 免安装版、自绘图标、应用名 SMind（第六章） | `npm run dist` → `release/` |
 | 交互 | **拖拽节点**：拖到兄弟上排序 / 拖到其它节点上成为子主题 / 拖到空白自由摆放；原连接线断开 + **插入位置预览**（4.16 节） | 在节点上按住拖拽 |
 | 交互 | **拖拽重做**：默认结构改逻辑图（向右）、多选整群拖、边缘自动滚动、`Esc` 取消（4.21 节） | 在节点上按住拖拽 |
 | 交互 | **拖拽吸附修复**：判定改「分轴区域」（生长方向放宽、同级方向只留缝），并修掉「成为子主题」恒失效的缺陷（4.22 节） | 在节点上按住拖拽 |
@@ -62,7 +62,7 @@
 应用**已经启动并在运行中**。如需重新启动：
 
 ```powershell
-cd d:/Mind
+cd d:/SMind
 npm run dev
 ```
 
@@ -86,7 +86,7 @@ npm run dev
 ### 命令行自检
 
 ```powershell
-cd d:/Mind
+cd d:/SMind
 npm run typecheck   # TypeScript 全量类型检查
 npm run verify      # .xmind 解析 → 序列化 → 再解析 往返一致性校验
 ```
@@ -993,24 +993,24 @@ TXT：                    Markdown：                    OPML：
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `release/Mind-0.1.0-x64-setup.exe` | 107.7 MB | **安装版**（NSIS）：可选安装目录，自动创建桌面与开始菜单快捷方式，带卸载程序 |
-| `release/Mind-0.1.0-x64-portable.exe` | 107.5 MB | **免安装版**：双击即用，不写注册表、不留安装痕迹 |
+| `release/SMind-0.1.0-x64-setup.exe` | 107.7 MB | **安装版**（NSIS）：可选安装目录，自动创建桌面与开始菜单快捷方式，带卸载程序 |
+| `release/SMind-0.1.0-x64-portable.exe` | 107.5 MB | **免安装版**：双击即用，不写注册表、不留安装痕迹 |
 | `release/win-unpacked/` | — | 未打包的目录形态，便于排查问题 |
 
 一条命令产出全部：`npm run dist`（= `electron-vite build` + `electron-builder`）。
 
 ### 应用名与图标
 
-- **应用名统一为 `Mind`**：窗口标题（`中心主题 - Mind`）、安装后的快捷方式名、exe 文件名、卸载列表里的名称。
+- **应用名统一为 `SMind`**：窗口标题（`中心主题 - SMind`）、安装后的快捷方式名、exe 文件名、卸载列表里的名称。
 - **图标是自绘的**（`scripts/make-icon.mjs`，`npm run icon` 可重新生成）：
-  - 造型仿 Typora（叠放的纸张 + 大写字母 + 左下角蓝色徽标），字母用 **M**（对应 Mind）；
+  - 造型仿 Typora（叠放的纸张 + 大写字母 + 左下角蓝色徽标），字母用 **M**（对应 SMind）；
   - **不依赖任何图形库**，也没有用图片生成：在放大 6 倍（小尺寸）/ 3 倍（大尺寸）的画布上逐像素绘制再降采样得到抗锯齿，PNG 编码与 ICO 打包都按规范自己实现（zlib 用 Node 内置的）；
   - 产出 **7 个尺寸**（16/24/32/48/64/128/256）的多尺寸 `.ico`，以及各尺寸的 PNG 备用。
 
 ### 怎么验收
 
-1. **安装版**：双击 `release/Mind-0.1.0-x64-setup.exe` → 可自选安装目录 → 完成后桌面与开始菜单出现「Mind」→ 双击能打开、图标是叠纸 + M。
-2. **免安装版**：双击 `release/Mind-0.1.0-x64-portable.exe` → 直接打开应用，不弹安装向导。
+1. **安装版**：双击 `release/SMind-0.1.0-x64-setup.exe` → 可自选安装目录 → 完成后桌面与开始菜单出现「SMind」→ 双击能打开、图标是叠纸 + M。
+2. **免安装版**：双击 `release/SMind-0.1.0-x64-portable.exe` → 直接打开应用，不弹安装向导。
 3. **图标正确性**：在资源管理器里把查看方式切到「大图标」，exe 的图标应是**清晰的叠纸 + M + 蓝色徽标**（多尺寸 ico，不会糊成一团）。
 4. **应用内功能**：装好后再验证一遍核心闭环——新建 / `Ctrl+O` 打开 `.xmind` 与 **`.emmx`** / 编辑 / `Ctrl+S` 保存 / 导出 PNG、SVG、PDF / 大纲 / 搜索 / AI / 历史记录与版本快照。
 5. **不需要开发环境**：确认是打包版（而非 `npm run dev`）也能跑完整功能。
@@ -1024,8 +1024,8 @@ TXT：                    Markdown：                    OPML：
 | `npm run verify` | 21 个 `.xmind` 样本 + 4 个 `.emmx` 样本往返一致 |
 | 生产构建 | 通过 |
 | 开发模式运行 | 渲染进程零报错 |
-| **打包产物运行** | 免安装版与 `win-unpacked` 版**均成功启动**，窗口标题为「中心主题 - Mind」 |
-| **图标已嵌入 exe** | 从 `Mind.exe` **反向提取图标**核对，确认就是自绘的那张（32×32 资源） |
+| **打包产物运行** | 免安装版与 `win-unpacked` 版**均成功启动**，窗口标题为「中心主题 - SMind」 |
+| **图标已嵌入 exe** | 从 `SMind.exe` **反向提取图标**核对，确认就是自绘的那张（32×32 资源） |
 | 运行时依赖 | 确认 `node_modules/jszip` **已打进 app.asar**（`jszip` 是被外部化的依赖，缺了会在启动时崩） |
 
 ### 本轮发现并修掉的打包缺陷
@@ -1033,7 +1033,7 @@ TXT：                    Markdown：                    OPML：
 | 现象 | 根因 | 修复 |
 |---|---|---|
 | 安装版被**免安装版覆盖**，`release/` 里只剩一个 exe | 两个 target 都用了 `artifactName: ${productName}-${version}-${arch}.${ext}`，**文件名完全相同**，后构建的把前一个覆盖掉 | 分别指定 `-setup` / `-portable` 后缀 |
-| electron-builder 警告 `author is missed` | `package.json` 没有 `author` 字段 | 补上 `"author": "Mind"`（可改成你自己的名字） |
+| electron-builder 警告 `author is missed` | `package.json` 没有 `author` 字段 | 补上 `"author": "SMind"`（可改成你自己的名字） |
 
 ### 已知限制
 
@@ -1050,9 +1050,9 @@ TXT：                    Markdown：                    OPML：
 
 | 产物 | 路径 | 体积 |
 |---|---|---|
-| 安装版（NSIS） | `release/Mind-0.1.1-x64-setup.exe` | 107.7 MB |
-| 免安装版（绿色版） | `release/Mind-0.1.1-x64-portable.exe` | 107.5 MB |
-| 免安装目录形态 | `release/win-unpacked/Mind.exe` | — |
+| 安装版（NSIS） | `release/SMind-0.1.1-x64-setup.exe` | 107.7 MB |
+| 免安装版（绿色版） | `release/SMind-0.1.1-x64-portable.exe` | 107.5 MB |
+| 免安装目录形态 | `release/win-unpacked/SMind.exe` | — |
 
 **为什么升版本号**：上一版 P9 产物也叫 `0.1.0`。两个同名同版本的 exe 放在一起分不清新旧，安装版也不会被识别为"升级"（卸载列表里仍写着 0.1.0）。同时把 `CREATOR`（写进 `.xmind` 的生成者标记）一并升到 0.1.1；自检与往返校验都不依赖这两个值。
 
@@ -1067,7 +1067,7 @@ TXT：                    Markdown：                    OPML：
 
 > **测试前须知**：应用与打包版**共用单实例锁**。若 `npm run dev` 还在运行，双击打包版会因"已有实例"立刻退出（看起来像点了没反应）。请先关掉开发版窗口再测。
 >
-> `release/` 里仍留着上一版 `Mind-0.1.0-*.exe`，确认 0.1.1 可用后可以删掉，避免选错文件。
+> `release/` 里仍留着上一版 `SMind-0.1.0-*.exe`，确认 0.1.1 可用后可以删掉，避免选错文件。
 >
 > **要把软件发给别人**（免安装版能否直接用、数据存在哪、未签名提示怎么处理、可直接复制的一段话）见 [`distribution.md`](./distribution.md)。
 
@@ -1084,9 +1084,9 @@ TXT：                    Markdown：                    OPML：
 
 | 产物 | 路径 | 体积 |
 |---|---|---|
-| 安装版（NSIS） | `release/Mind-0.2.0-x64-setup.exe` | 107.7 MB |
-| 免安装版（绿色版） | `release/Mind-0.2.0-x64-portable.exe` | 107.5 MB |
-| 免安装目录形态 | `release/win-unpacked/Mind.exe` | — |
+| 安装版（NSIS） | `release/SMind-0.2.0-x64-setup.exe` | 107.7 MB |
+| 免安装版（绿色版） | `release/SMind-0.2.0-x64-portable.exe` | 107.5 MB |
+| 免安装目录形态 | `release/win-unpacked/SMind.exe` | — |
 
 **为什么走次版本号（0.1.1 → 0.2.0）**：这一版带**新增功能**（视角锁定、选中即打字进入编辑、`Ctrl+/` 折叠），不是纯修补；`CREATOR`（写进 `.xmind` 的生成者标记）同步升到 `0.2.0`。安装版这样才会被识别为**升级**（卸载列表里不再写着 0.1.1）。
 
@@ -1110,9 +1110,9 @@ TXT：                    Markdown：                    OPML：
 
 | 产物 | 路径 | 体积 |
 |---|---|---|
-| 安装版（NSIS） | `release/Mind-0.2.1-x64-setup.exe` | 107.7 MB |
-| 免安装版（绿色版） | `release/Mind-0.2.1-x64-portable.exe` | 107.5 MB |
-| 免安装目录形态 | `release/win-unpacked/Mind.exe` | 版本元数据 `0.2.1` ✅ |
+| 安装版（NSIS） | `release/SMind-0.2.1-x64-setup.exe` | 107.7 MB |
+| 免安装版（绿色版） | `release/SMind-0.2.1-x64-portable.exe` | 107.5 MB |
+| 免安装目录形态 | `release/win-unpacked/SMind.exe` | 版本元数据 `0.2.1` ✅ |
 
 `CREATOR`（写进 `.xmind` 的生成者标记）与 `distribution.md` 里的文件名同步到 0.2.1。交付前核对（本次实测）：
 
@@ -1130,9 +1130,9 @@ Tiptap 的 `EditorContent` 多出来的一层 `div`，所以这次是**必须重
 
 | 产物 | 路径 | 体积 |
 |---|---|---|
-| 安装版（NSIS） | `release/Mind-0.2.2-x64-setup.exe` | 107.7 MB |
-| 免安装版（绿色版） | `release/Mind-0.2.2-x64-portable.exe` | 107.5 MB |
-| 免安装目录形态 | `release/win-unpacked/Mind.exe` | 版本元数据 `0.2.2` ✅ |
+| 安装版（NSIS） | `release/SMind-0.2.2-x64-setup.exe` | 107.7 MB |
+| 免安装版（绿色版） | `release/SMind-0.2.2-x64-portable.exe` | 107.5 MB |
+| 免安装目录形态 | `release/win-unpacked/SMind.exe` | 版本元数据 `0.2.2` ✅ |
 
 `CREATOR`（写进 `.xmind` 的生成者标记）与 `distribution.md` 里的文件名同步到 0.2.2；
 README 补了「长文本自动折行」的宽度上限说明（普通主题 **240px** / 中心主题 **320px**）。
@@ -1146,6 +1146,36 @@ README 补了「长文本自动折行」的宽度上限说明（普通主题 **2
 
 **`release/` 已整理**：删掉 `0.1.0` / `0.1.1` / `0.2.0` / `0.2.1` 四版共 12 个文件（约 861 MB），
 现在只剩 `0.2.2` 一套 + `win-unpacked/`，避免发错版本。
+
+### 复打（2026-09-13）：版本升到 0.2.3（从文件管理器打开）
+
+补上 4.27 的三条入口（`.xmind` 关联 / 命令行参数 / 拖进窗口）后重新打包，
+`release/Mind-0.2.3-x64-setup.exe`（107.7 MB）与 `Mind-0.2.3-x64-portable.exe`（107.5 MB）。
+
+### 复打（2026-09-13）：**产品名改为 SMind**，版本升到 0.3.0
+
+**产品名由 Mind 改为 SMind**（作者署名改为 Wentun）。改名动到的地方：
+`electron-builder.yml`（productName / shortcutName / appId）、`package.json`（name / description / author / version）、
+主进程 `APP_NAME`、窗口标题后缀、以及写进 `.xmind` 的 `CREATOR`（现在是 `{ name: 'SMind', version: '0.3.0' }`）。
+文档里的产品名用**词边界**批量替换（`\bMind\b` → `SMind`），`MindMaster` 等第三方商标名未被误伤；
+`.xmind`、Xmind 这类**格式与商标引用**一律保持原样。
+
+| 产物 | 路径 | 体积 |
+|---|---|---|
+| 安装版（NSIS） | `release/SMind-0.3.0-x64-setup.exe` | 107.7 MB |
+| 免安装版（绿色版） | `release/SMind-0.3.0-x64-portable.exe` | 107.5 MB |
+| 解压形态 | `release/win-unpacked/SMind.exe` | 实测窗口标题「中心主题 - SMind」 ✅ |
+
+> ⚠️ **用户数据目录跟着换了**：`%APPDATA%\Mind` → **`%APPDATA%\SMind`**。
+> 主题、最近打开、版本快照、AI Key 都在旧目录里；想沿用旧的，把 `%APPDATA%\Mind` 里的东西
+> 拷进 `%APPDATA%\SMind` 即可（先启动一次生成新目录，或拷完再启动）。
+>
+> 图标里的大字母仍是 **M**（`scripts/make-icon.mjs` 是零依赖手绘多边形，S 的曲线要另画一组点）——要换随时说。
+>
+> `.xmind` 关联：装一次新 setup 就会注册成 SMind；旧的 Mind 条目可在「设置 → 应用 → 默认应用」里清掉。
+
+交付前核对（本次实测）：typecheck 零错误 / 自检 1167 项全绿 / 样本往返一致 /
+`app.asar` 内 `jszip` 与 out 三件套齐备 ✅；exe 元数据 `ProductName: SMind`、`FileVersion: 0.3.0` ✅。
 
 ---
 
@@ -1585,7 +1615,7 @@ README 补了「长文本自动折行」的宽度上限说明（普通主题 **2
 ## 4.27、从文件管理器打开：双击 .xmind / 拖拽 / 命令行
 
 > 用户反馈：「为什么无法打开本地的 xmind 文件？」
-> （附「打开方式」对话框截图：默认应用是别家软件，列表里虽有 Mind，选了也没反应）
+> （附「打开方式」对话框截图：默认应用是别家软件，列表里虽有 SMind，选了也没反应）
 
 ### 排查结论：文件没有任何问题，缺的是「入口」
 
@@ -1598,7 +1628,7 @@ Xmind 新引擎 Vana 导出，包内 content.json + content.xml + 3 张图片）
 | 入口 | 之前的现状 | 现在 |
 |---|---|---|
 | 资源管理器里**双击 `.xmind`** | 安装包没注册关联，双击被系统推给别的软件，或直接报「无法打开」 | 安装版注册 `.xmind` 关联（`fileAssociations`），双击即开 |
-| 「打开方式 → Mind」/ 把文件拖到 exe 上 | 路径确实在命令行里，但主进程不认：`second-instance` 只做了聚焦窗口，文件被默默丢掉 | 新增 `pickDocumentArg`（`shared/openfile.ts`）从 argv 里认出文档路径；首次启动先存着、渲染进程就绪后取走；已开着窗口则经 `second-instance` 推给当前窗口 |
+| 「打开方式 → SMind」/ 把文件拖到 exe 上 | 路径确实在命令行里，但主进程不认：`second-instance` 只做了聚焦窗口，文件被默默丢掉 | 新增 `pickDocumentArg`（`shared/openfile.ts`）从 argv 里认出文档路径；首次启动先存着、渲染进程就绪后取走；已开着窗口则经 `second-instance` 推给当前窗口 |
 | **把文件拖进窗口** | 没拦默认行为，Chromium 会**导航到那个文件**——整个应用界面被替换掉 | `will-navigate` 一律拦截：是本软件的文档（.xmind/.emmx/.emm）就转成"打开"，其他文件忽略 |
 
 ### 实现要点
@@ -1613,11 +1643,11 @@ Xmind 新引擎 Vana 导出，包内 content.json + content.xml + 3 张图片）
 
 ### 怎么验收
 
-1. **（已实测 ✅）**`release/win-unpacked/Mind.exe "D:\MachineLearning\机器学习\机器学习大纲.xmind"` →
-   窗口标题变为「机器学习大纲.xmind - Mind」，文件随启动自动打开。
-2. 安装 0.2.3 的 setup 后，资源管理器里双击任意 `.xmind` → 直接用 Mind 打开。
-3. Mind 开着时再双击另一个文件 → 开在当前窗口，不另起进程。
-4. 把一张**图片**拖进 Mind 窗口 → 界面不再被替换（忽略该文件）。
+1. **（已实测 ✅）**`release/win-unpacked/SMind.exe "D:\MachineLearning\机器学习\机器学习大纲.xmind"` →
+   窗口标题变为「机器学习大纲.xmind - SMind」，文件随启动自动打开。
+2. 安装 0.2.3 的 setup 后，资源管理器里双击任意 `.xmind` → 直接用 SMind 打开。
+3. SMind 开着时再双击另一个文件 → 开在当前窗口，不另起进程。
+4. 把一张**图片**拖进 SMind 窗口 → 界面不再被替换（忽略该文件）。
 5. `selfcheck` **8.5d 组**：认出 .xmind/.emmx、跳过开关与不存在的文件、exe 自身不算文档、多文档取最后一个等 8 条断言 ✅
 
 ---

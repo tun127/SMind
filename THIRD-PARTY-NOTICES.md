@@ -1,6 +1,6 @@
 # 第三方组件与许可声明（THIRD-PARTY NOTICES）
 
-本项目（Mind）使用了下列优秀的开源组件，向这些项目的作者与贡献者致谢。
+本项目（SMind）使用了下列优秀的开源组件，向这些项目的作者与贡献者致谢。
 本文件用于满足各许可证的署名要求；**各组件的完整许可证文本以对应 npm 包内的
 LICENSE / README 文件为准**，版本号以仓库的 `package.json` / `package-lock.json` 为准。
 

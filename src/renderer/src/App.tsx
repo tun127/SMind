@@ -498,7 +498,7 @@ export default function App(): ReactElement {
     const name = filePath
       ? (fileNameOf(filePath) ?? '未命名导图')
       : defaultDocumentName(useEditor.getState().workbook)
-    window.api.setTitle(`${dirty ? '● ' : ''}${name} - Mind`)
+    window.api.setTitle(`${dirty ? '● ' : ''}${name} - SMind`)
     // rootTitle 参与依赖：改名后标题栏要立刻跟着变
   }, [filePath, dirty, rootTitle])
 

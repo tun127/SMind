@@ -1,5 +1,5 @@
-appId: com.mindmap.local
-productName: Mind
+appId: com.smind.local
+productName: SMind
 # 把 .xmind 关联到本软件：装完之后在资源管理器里双击 .xmind 就能直接打开
 # （只有**安装版**会注册关联，免安装版没有这一步；不注册的话双击会被系统推给别人或直接报"无法打开"）
 fileAssociations:
@@ -44,7 +44,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Mind
+  shortcutName: SMind
 portable:
   # 免安装版（绿色版），与安装版分开放，否则后构建的会覆盖前一个
   artifactName: ${productName}-${version}-${arch}-portable.${ext}

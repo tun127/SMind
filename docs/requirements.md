@@ -1,7 +1,7 @@
 # 思维导图软件（对标 Xmind）· 需求确认书
 
 > 状态：**待你最终确认**。确认后我才会开始写代码。
-> 项目工作区：`d:/Mind`
+> 项目工作区：`d:/SMind`
 > 生成时间：2026-09-12
 
 ---
@@ -81,7 +81,7 @@
 ## 三、架构设计
 
 ```
-d:/Mind
+d:/SMind
 ├── electron/                 # 主进程
 │   ├── main.ts               # 窗口、生命周期、崩溃恢复
 │   ├── menu.ts               # 原生菜单 + 快捷键
@@ -173,7 +173,7 @@ Theme        { id, name, structureColors[], nodeStyles, lineStyles, background }
 
 ## 六、开始前需要你做的一件事
 
-请提供 **3–5 个真实的 `.xmind` 文件**（放到 `d:/Mind/samples/` 即可），用于 P6 的兼容性验证。
+请提供 **3–5 个真实的 `.xmind` 文件**（放到 `d:/SMind/samples/` 即可），用于 P6 的兼容性验证。
 如果暂时没有，我可以先从零生成标准 `.xmind` 结构推进开发，兼容性验证留到最后。
 
 ---
