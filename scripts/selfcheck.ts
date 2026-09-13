@@ -4037,8 +4037,9 @@ function testImport(): void {
   eq('没有标题时第一个列表项当根', noHeading.root?.title, '根')
   eq('没有标题也能嵌套', noHeading.root?.children[0].children.map((c) => c.title), ['孙'])
 
-  const fenced = parseMarkdownOutline('# 标题\n```\n- 代码里的不算\n```\n- 真正的项')
-  check('代码块内容不被当成节点', !JSON.stringify(fenced.root).includes('代码里的不算'))
+  const fenced = parseMarkdownOutline('# 标题\n```ts\n- 代码里的不算\n```\n- 真正的项')
+  eq('代码块挂到所属标题', fenced.root?.code?.text, '- 代码里的不算')
+  eq('代码块的语言标注也带上', fenced.root?.code?.language, 'ts')
   eq('代码块外的列表正常', fenced.count, 2)
 
   const frontMatter = parseMarkdownOutline('---\ntitle: x\n tags: [a]\n---\n# 真标题\n- 项')
@@ -4046,7 +4047,26 @@ function testImport(): void {
   eq('front-matter 后节点数正确', frontMatter.count, 2)
 
   const noisy = parseMarkdownOutline('# 标题\n> 引用不是节点\n| a | b |\n| - | - |\n---\n- 项')
-  eq('引用/表格/水平线都被跳过', noisy.count, 2)
+  eq('表格数据行变成子主题', noisy.root?.children.map((c) => c.title), ['a / b', '项'])
+  eq('引用块进备注', noisy.root?.notes, '引用不是节点')
+  eq('引用/表格/水平线处理后的节点数', noisy.count, 3)
+
+  const codeFallback = parseMarkdownOutline('# T\n```\na\n```\n```\nb\n```')
+  eq('第二个代码块生成「代码」子主题', codeFallback.root?.children.map((c) => c.title), ['代码'])
+  eq('「代码」子主题带内容', codeFallback.root?.children[0].code?.text, 'b')
+
+  const taskList = parseMarkdownOutline('# 任务\n- [x] 已完成\n- [ ] 待办')
+  eq('任务列表剥掉勾选框', taskList.root?.children.map((c) => c.title), ['已完成', '待办'])
+
+  const richList = parseMarkdownOutline('- **重点**内容\n- *斜*体\n- `code` 说明')
+  eq('粗体进富文本', richList.root?.children[0].rich?.paragraphs[0]?.runs[0]?.bold, true)
+  eq('斜体进富文本', richList.root?.children[1].rich?.paragraphs[0]?.runs[0]?.italic, true)
+  eq('行内代码用等宽字体', typeof richList.root?.children[2].rich?.paragraphs[0]?.runs[0]?.fontFamily, 'string')
+  eq('纯文本标题不受影响', richList.root?.children[0].title, '重点内容')
+
+  const linked = parseMarkdownOutline('# 链接\n- [文档](https://example.com) 首页')
+  eq('链接 url 挂到节点超链接', linked.root?.children[0]?.href, 'https://example.com')
+  check('链接文字带下划线样式', linked.root?.children[0]?.rich?.paragraphs[0]?.runs[0]?.underline === true)
 
   const numbered = parseMarkdownOutline('# 步骤\n1. 第一\n2. 第二\n   1. 第二点一')
   eq('数字列表可解析', numbered.root?.children.map((c) => c.title), ['第一', '第二'])

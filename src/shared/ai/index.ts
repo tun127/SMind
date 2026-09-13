@@ -13,7 +13,7 @@
 /* ------------------------------------------------------------------ */
 
 import { createTopic } from '../model/factory'
-import type { Topic } from '../model/types'
+import type { RichText, Topic, TopicCode } from '../model/types'
 
 export interface AiConfig {
   /** 形如 https://api.deepseek.com/v1 或 https://api.openai.com/v1 */
@@ -189,8 +189,14 @@ export function buildPolishMessages(input: { title: string; style?: string }): A
 export interface OutlineNode {
   title: string
   children: OutlineNode[]
-  /** 备注（OPML 的 _note 等），导入时一并带进模型 */
+  /** 备注（OPML 的 _note、Markdown 的引用块/段落），导入时一并带进节点 */
   notes?: string
+  /** 行内 Markdown 格式解析出的富文本（粗体/斜体/删除线/行内代码/链接），导入时带进节点 */
+  rich?: RichText
+  /** Markdown 链接的 url（第一个 [文字](url)），导入时挂到节点超链接 */
+  href?: string
+  /** Markdown 围栏代码块 → 节点代码块 */
+  code?: TopicCode
 }
 
 export interface ParsedOutline {
@@ -321,6 +327,9 @@ export function countOutlineNodes(node: OutlineNode | null): number {
 export function outlineToTopic(node: OutlineNode, structureClass?: string): Topic {
   const topic = createTopic(node.title, structureClass)
   topic.children = node.children.map((child) => outlineToTopic(child))
+  if (node.rich) topic.titleRich = node.rich
+  if (node.href) topic.href = node.href
+  if (node.code) topic.code = { language: node.code.language, text: node.code.text }
   if (node.notes && node.notes.trim().length > 0) {
     topic.notes = node.notes
     topic.notesHtml = `<p>${escapeHtmlForNotes(node.notes).replace(/\n/g, '<br/>')}</p>`
