@@ -11,7 +11,18 @@
  */
 
 import type { AccessoryItem, LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
-import { BLOCK_GAP, imageBoxSize } from '@shared/layout/accessory'
+import {
+  BLOCK_GAP,
+  CODE_FONT_FAMILY,
+  CODE_FONT_SIZE,
+  CODE_HEADER,
+  CODE_LINE_RATIO,
+  CODE_MAX_LINES,
+  CODE_PADDING_X,
+  CODE_PADDING_Y,
+  codeBoxSize,
+  imageBoxSize
+} from '@shared/layout/accessory'
 import type { ThemeColors, Topic } from '@shared/model/types'
 import { formulaSize } from '../render/formula'
 import { markerVisualOf, type MarkerGlyph } from '../render/markers'
@@ -379,6 +390,41 @@ function nodeOps(
       color: visual.color
     })
     cursorY += formulaBox.height
+  }
+
+  // 代码块：底色圆角框 + 等宽文本逐行画（导出里不做语法高亮，保持可读即可）
+  const codeBox = topic.code ? node.codeBox ?? codeBoxSize(topic.code) : { width: 0, height: 0 }
+  if (topic.code && codeBox.height > 0) {
+    cursorY += BLOCK_GAP
+    const x = node.x + (node.width - codeBox.width) / 2
+    ops.push({
+      kind: 'rect',
+      x,
+      y: cursorY,
+      w: codeBox.width,
+      h: codeBox.height,
+      r: 6,
+      fill: 'rgba(15, 23, 42, 0.06)'
+    })
+    const codeLines = topic.code.text.length > 0 ? topic.code.text.split('\n') : ['']
+    const lineH = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
+    let textY = cursorY + CODE_HEADER + CODE_PADDING_Y + CODE_FONT_SIZE * 0.8
+    for (const line of codeLines.slice(0, CODE_MAX_LINES)) {
+      ops.push({
+        kind: 'text',
+        x: x + CODE_PADDING_X,
+        y: textY,
+        text: line,
+        fontSize: CODE_FONT_SIZE,
+        fontWeight: 400,
+        fill: '#334155',
+        anchor: 'start',
+        baseline: 'alphabetic',
+        fontFamily: CODE_FONT_FAMILY
+      })
+      textY += lineH
+    }
+    cursorY += codeBox.height
   }
 
   if (node.labelRow.items.length > 0) {

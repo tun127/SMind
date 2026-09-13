@@ -74,6 +74,8 @@ export interface MeasureResult extends Size {
   imageBox?: Size
   /** 公式块的显示框（0 表示没有公式） */
   formulaBox?: Size
+  /** 代码块的显示框（0 表示没有代码） */
+  codeBox?: Size
 }
 
 /** 由渲染层注入的文本测量函数（依赖 Canvas measureText） */
@@ -98,9 +100,10 @@ export interface NodeLayout {
   paddingY: number
   accessory: AccessoryRow
   labelRow: LabelRow
-  /** 来自测量结果的图片/公式显示框，渲染层用它摆放这两块内容 */
+  /** 来自测量结果的图片/公式/代码显示框，渲染层用它摆放这些内容 */
   imageBox?: Size
   formulaBox?: Size
+  codeBox?: Size
 }
 
 export interface EdgeLayout {

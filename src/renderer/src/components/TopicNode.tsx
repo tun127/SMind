@@ -1,6 +1,6 @@
 import { memo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
 import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
-import { BLOCK_GAP, imageBoxSize } from '@shared/layout/accessory'
+import { BLOCK_GAP, codeBoxSize, imageBoxSize } from '@shared/layout/accessory'
 import type { RichText, ThemeColors } from '@shared/model/types'
 import { richFromPlain } from '@shared/richtext'
 import { formulaHtml, formulaSize } from '../render/formula'
@@ -103,6 +103,9 @@ function TopicNodeInner({
   const imageFailed = Boolean(image && failedImagePath === image.path)
 
   const formula = node.topic.formula
+
+  const code = node.topic.code
+  const codeBox = code ? node.codeBox ?? codeBoxSize(code) : null
   // 正常情况下尺寸来自布局测量结果；个别测量实现没给时退回同一套公式尺寸函数
   const formulaBox = formula ? node.formulaBox ?? formulaSize(formula, node.fontSize) : null
 
@@ -238,6 +241,17 @@ function TopicNodeInner({
           // KaTeX 的输出是我们自己生成的 HTML，不来自用户输入的原样注入
           dangerouslySetInnerHTML={{ __html: formulaHtml(formula) }}
         />
+      )}
+
+      {/* 代码块：等宽排版，尺寸来自布局测量；超出行数内部滚动 */}
+      {code && codeBox && (
+        <div
+          className="topic__code"
+          style={{ width: codeBox.width, height: codeBox.height, marginTop: BLOCK_GAP }}
+        >
+          <span className="topic__code-lang">{code.language || 'text'}</span>
+          <pre className="topic__code-pre">{code.text}</pre>
+        </div>
       )}
 
       {/* 底部标签行 */}

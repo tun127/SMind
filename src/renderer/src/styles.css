@@ -1295,6 +1295,43 @@ textarea {
   margin: 0;
 }
 
+/* 代码块：与 shared/layout/accessory.ts 的 codeBoxSize 共用常量，
+   尺寸来自布局测量，超出行数内部滚动 */
+.topic__code {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+  text-align: left;
+}
+
+.topic__code-lang {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  font-size: 9px;
+  line-height: 13px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  pointer-events: none;
+  user-select: none;
+}
+
+.topic__code-pre {
+  margin: 0;
+  padding: 8px 10px;
+  padding-top: 17px;
+  font-family: Consolas, 'JetBrains Mono', Menlo, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+  white-space: pre;
+  overflow: auto;
+  min-height: 0;
+}
+
 /* 用于量公式真实尺寸的隐藏容器（不参与显示） */
 .formula-measure {
   position: fixed;

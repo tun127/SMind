@@ -105,8 +105,12 @@ function parseImage(raw: unknown): Topic['image'] {
 }
 
 /** 从 extensions 里读回本软件自己的字段 */
-function readOurExtensions(raw: unknown): { titleRich?: Topic['titleRich']; formula?: string } {
-  const out: { titleRich?: Topic['titleRich']; formula?: string } = {}
+function readOurExtensions(raw: unknown): {
+  titleRich?: Topic['titleRich']
+  formula?: string
+  code?: Topic['code']
+} {
+  const out: { titleRich?: Topic['titleRich']; formula?: string; code?: Topic['code'] } = {}
   for (const item of asArray(raw)) {
     if (!isRecord(item)) continue
     if (item.provider !== OUR_PROVIDER) continue
@@ -116,6 +120,9 @@ function readOurExtensions(raw: unknown): { titleRich?: Topic['titleRich']; form
         out.titleRich = content.titleRich as unknown as Topic['titleRich']
       }
       if (typeof content.formula === 'string') out.formula = content.formula
+      if (isRecord(content.code) && typeof content.code.text === 'string') {
+        out.code = content.code as unknown as Topic['code']
+      }
     }
   }
   return out
@@ -161,6 +168,7 @@ function parseTopic(raw: unknown): Topic | null {
   if (raw.branch === 'folded') topic.collapsed = true
   if (ours.titleRich) topic.titleRich = ours.titleRich
   if (ours.formula) topic.formula = ours.formula
+  if (ours.code) topic.code = ours.code
   if (isRecord(raw.position)) {
     const px = asNumber(raw.position.x)
     const py = asNumber(raw.position.y)
@@ -169,7 +177,7 @@ function parseTopic(raw: unknown): Topic | null {
     }
   }
 
-  // 本软件自己的扩展字段已经在上面还原成 titleRich / formula，
+  // 本软件自己的扩展字段已经在上面还原成 titleRich / formula / code，
   // 这里必须把它们剔除，否则「打开→另存」会凭空多出一份重复数据。
   if (Array.isArray(raw.extensions)) {
     const external = raw.extensions.filter((ext) => !(isRecord(ext) && ext.provider === OUR_PROVIDER))

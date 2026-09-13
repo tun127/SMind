@@ -244,6 +244,8 @@ export interface EditorState {
   setHref(id: string, href: string): void
   /** 设置 LaTeX 公式源码（传空字符串即移除） */
   setFormula(id: string, formula: string): void
+  /** 设置/移除节点里的代码块（language + text 都为空即移除） */
+  setCode(id: string, code: { language: string; text: string } | null): void
   /** 设置/移除节点内图片（字节由主进程存进包内资源） */
   setImage(id: string, image: TopicImage | null): void
   addAttachment(id: string, attachment: Attachment): void
@@ -1133,6 +1135,21 @@ export const useEditor = create<EditorState>()((set, get) => ({
       if (topic.formula === next) return
       topic.formula = next
     }, '修改公式')
+  },
+
+  setCode: (id, code) => {
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      const next = code && (code.text.length > 0 || code.language.length > 0) ? code : null
+      if (!next) {
+        if (topic.code === undefined) return
+        topic.code = undefined
+        return
+      }
+      if (topic.code?.text === next.text && topic.code?.language === next.language) return
+      topic.code = { language: next.language, text: next.text }
+    }, '修改代码块')
   },
 
   setImage: (id, image) => {

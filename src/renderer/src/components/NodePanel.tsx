@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { Download, ExternalLink, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sigma, X } from 'lucide-react'
+import { Code2, Download, ExternalLink, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sigma, X } from 'lucide-react'
 import { activeRoot, activeSheet, findTopic } from '@shared/model/tree'
 import { imageBoxSize } from '@shared/layout/accessory'
 import { MARKER_GROUPS, markerVisualOf } from '../render/markers'
@@ -7,6 +7,25 @@ import { formulaHtml } from '../render/formula'
 import { resourceUrl } from '../render/resource'
 import { useEditor } from '../store/editor'
 import MarkerIcon from './MarkerIcon'
+
+/** 代码块可选语言（纯文本兜底） */
+const CODE_LANGUAGES = [
+  'text',
+  'javascript',
+  'typescript',
+  'python',
+  'java',
+  'csharp',
+  'cpp',
+  'go',
+  'rust',
+  'sql',
+  'json',
+  'yaml',
+  'bash',
+  'html',
+  'css'
+] as const
 
 interface Props {
   onClose(): void
@@ -31,6 +50,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const setNotes = useEditor((s) => s.setNotes)
   const setHref = useEditor((s) => s.setHref)
   const setFormula = useEditor((s) => s.setFormula)
+  const setCode = useEditor((s) => s.setCode)
   const setImage = useEditor((s) => s.setImage)
   const addAttachment = useEditor((s) => s.addAttachment)
   const removeAttachment = useEditor((s) => s.removeAttachment)
@@ -50,6 +70,8 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const [notesDraft, setNotesDraft] = useState('')
   const [hrefDraft, setHrefDraft] = useState('')
   const [formulaDraft, setFormulaDraft] = useState('')
+  const [codeDraft, setCodeDraft] = useState('')
+  const [codeLangDraft, setCodeLangDraft] = useState('text')
 
   // 只在「切换所选节点」时同步草稿，输入过程中绝不覆盖用户正在敲的内容
   useEffect(() => {
@@ -57,6 +79,8 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
     setNotesDraft(topic?.notes ?? '')
     setHrefDraft(topic?.href ?? '')
     setFormulaDraft(topic?.formula ?? '')
+    setCodeDraft(topic?.code?.text ?? '')
+    setCodeLangDraft(topic?.code?.language || 'text')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -111,6 +135,13 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
   const commitFormula = (): void => {
     if ((topic.formula ?? '') !== formulaDraft.trim()) setFormula(topicId, formulaDraft)
+  }
+
+  const commitCode = (): void => {
+    const text = codeDraft.replace(/\s+$/, '')
+    const language = codeLangDraft
+    if ((topic.code?.text ?? '') === text && (topic.code?.language ?? 'text') === language) return
+    setCode(topicId, text.length === 0 && language === 'text' ? null : { language, text })
   }
 
   const insertImage = async (): Promise<void> => {
@@ -467,6 +498,52 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
             >
               <X size={14} />
               移除公式
+            </button>
+          </div>
+        )}
+
+        <div className="side-panel__title">
+          <Code2 size={13} /> 代码块
+        </div>
+        <div className="side-panel__row">
+          <select
+            className="select"
+            value={codeLangDraft}
+            onChange={(event) => {
+              setCodeLangDraft(event.target.value)
+              setCode(topicId, { language: event.target.value, text: codeDraft })
+            }}
+          >
+            {CODE_LANGUAGES.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang === 'text' ? '纯文本' : lang}
+              </option>
+            ))}
+          </select>
+        </div>
+        <textarea
+          className="input input--area input--mono"
+          rows={6}
+          placeholder={'粘贴或输入代码，例如：\nconst sum = (a, b) => a + b'}
+          value={codeDraft}
+          onChange={(event) => setCodeDraft(event.target.value)}
+          onBlur={commitCode}
+        />
+        <div className="side-panel__hint">离开输入框即保存；节点里会按等宽字体排版，超出部分可滚动</div>
+        {(topic.code || codeDraft.length > 0) && (
+          <div className="side-panel__row">
+            <button
+              type="button"
+              className="btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setCodeDraft('')
+                setCodeLangDraft('text')
+                setCode(topicId, null)
+              }}
+            >
+              <X size={14} />
+              移除代码块
             </button>
           </div>
         )}

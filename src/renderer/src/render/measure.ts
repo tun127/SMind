@@ -8,7 +8,7 @@ import type {
   StyledSegment
 } from '@shared/layout/types'
 import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/model/types'
-import { BLOCK_GAP, imageBoxSize, type Size } from '@shared/layout/accessory'
+import { BLOCK_GAP, codeBoxSize, imageBoxSize, type Size } from '@shared/layout/accessory'
 import { richFromPlain } from '@shared/richtext'
 import { formulaSize } from './formula'
 
@@ -148,6 +148,7 @@ function accessoryKey(topic: Topic): string {
     Boolean(topic.href) ||
     Boolean(topic.formula) ||
     Boolean(topic.image) ||
+    Boolean(topic.code) ||
     (topic.attachments?.length ?? 0) > 0
   if (!hasAny) return ''
 
@@ -156,9 +157,10 @@ function accessoryKey(topic: Topic): string {
     (topic.labels ?? []).join('\u0001'),
     topic.notes ? 'n' : '',
     topic.href ? 'h' : '',
-    // 公式与图片会直接影响节点尺寸，必须把内容本身写进缓存键
+    // 公式与图片、代码会直接影响节点尺寸，必须把内容本身写进缓存键
     topic.formula ?? '',
     topic.image ? `${topic.image.path}:${topic.image.width ?? ''}x${topic.image.height ?? ''}` : '',
+    topic.code ? `${topic.code.language}\u0002${topic.code.text}` : '',
     (topic.attachments?.length ?? 0) > 0 ? 'a' : ''
   ].join('|')
 }
@@ -394,17 +396,26 @@ function compute(topic: Topic, depth: number): MeasureResult {
   // 图片块与公式块：尺寸规则与渲染层共用（图片用纯函数算，公式量 KaTeX 的真实排版结果）
   const imageBox: Size = imageBoxSize(topic.image)
   const formulaBox: Size = topic.formula ? formulaSize(topic.formula, base.fontSize) : { width: 0, height: 0 }
+  const codeBox: Size = codeBoxSize(topic.code)
   const imageBlock = imageBox.height > 0 ? imageBox.height + BLOCK_GAP : 0
   const formulaBlock = formulaBox.height > 0 ? formulaBox.height + BLOCK_GAP : 0
+  const codeBlock = codeBox.height > 0 ? codeBox.height + BLOCK_GAP : 0
 
   let maxLineWidth = 0
   for (const line of lines) if (line.width > maxLineWidth) maxLineWidth = line.width
 
-  // 图标行 / 标签行 / 图片 / 公式都可能比文字宽，节点宽度取它们的最大值
-  const contentWidth = Math.max(maxLineWidth, accessory.width, labelRow.width, imageBox.width, formulaBox.width)
+  // 图标行 / 标签行 / 图片 / 公式 / 代码都可能比文字宽，节点宽度取它们的最大值
+  const contentWidth = Math.max(
+    maxLineWidth,
+    accessory.width,
+    labelRow.width,
+    imageBox.width,
+    formulaBox.width,
+    codeBox.width
+  )
   const width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2, base.minWidth)
 
-  let height = base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + labelRow.height
+  let height = base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + codeBlock + labelRow.height
   for (const line of lines) height += line.height
 
   return {
@@ -418,7 +429,8 @@ function compute(topic: Topic, depth: number): MeasureResult {
     accessory,
     labelRow,
     imageBox,
-    formulaBox
+    formulaBox,
+    codeBox
   }
 }
 

@@ -56,6 +56,18 @@ export interface TopicImage {
   height?: number
 }
 
+/**
+ * 节点里的一段代码。
+ *
+ * 为什么不用富文本凑：代码块要**等宽字体、保留缩进与换行、语法高亮**，
+ * 富文本的富样式是"逐段逐字"的、行内还可能混排，做不到整块等宽。
+ */
+export interface TopicCode {
+  /** 语言标识（ts / js / python / json / sql …）；空串＝当作纯文本排版 */
+  language: string
+  text: string
+}
+
 /** 节点样式（properties 的键沿用 Xmind 的 svg:* / fo:* 命名） */
 export interface NodeStyle {
   id?: string
@@ -84,6 +96,8 @@ export interface Topic {
   image?: TopicImage
   /** LaTeX 公式源码（P4） */
   formula?: string
+  /** 节点里的一段代码（P7）：等宽排版 + 语法高亮 */
+  code?: TopicCode
   attachments: Attachment[]
   style?: NodeStyle
   /** 是否折叠子节点 */

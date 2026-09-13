@@ -120,6 +120,13 @@ import { parseMarkdownOutline } from '../src/shared/import/markdown'
 import { parseOpmlOutline } from '../src/shared/import/opml'
 import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
 import {
+  CODE_FONT_SIZE,
+  CODE_HEADER,
+  CODE_LINE_RATIO,
+  CODE_MAX_LINES,
+  CODE_PADDING_X,
+  CODE_PADDING_Y,
+  codeBoxSize,
   IMAGE_FALLBACK,
   IMAGE_MAX_HEIGHT,
   imageBoxSize,
@@ -2146,6 +2153,42 @@ async function testMediaElements(): Promise<void> {
   check('公式估算高度与字号相关', pureFormulaSize('x', 28).height > pureFormulaSize('x', 14).height)
   check('长公式不超过宽度上限', longFormula.width <= 260, JSON.stringify(longFormula))
   eq('空公式按最小宽度处理', pureFormulaSize('', 14).width, 36)
+
+  group('代码块：尺寸规则')
+
+  eq('没有代码时尺寸为 0', codeBoxSize(undefined), { width: 0, height: 0 })
+  const oneLine = codeBoxSize({ language: 'ts', text: 'const a = 1' })
+  const lineH = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
+  eq(
+    '单行高度 = 语言标签 + 上下内边距 + 一行',
+    oneLine.height,
+    CODE_HEADER + CODE_PADDING_Y * 2 + lineH
+  )
+  eq(
+    '宽度按等宽字符数估算',
+    oneLine.width,
+    Math.round(11 * CODE_FONT_SIZE * 0.6) + CODE_PADDING_X * 2
+  )
+  const many = codeBoxSize({
+    language: '',
+    text: Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
+  })
+  check(
+    '行数封顶，节点不会无限变高',
+    many.height === CODE_HEADER + CODE_PADDING_Y * 2 + CODE_MAX_LINES * lineH,
+    JSON.stringify(many)
+  )
+  const longLine = codeBoxSize({ language: '', text: 'x'.repeat(200) })
+  check('超宽行受宽度上限约束', longLine.width <= 320, JSON.stringify(longLine))
+  const cjk = codeBoxSize({ language: '', text: '中文变量名测试' })
+  const ascii = codeBoxSize({ language: '', text: 'abcdefgabcdefg' })
+  check(
+    'CJK 记双宽：7 个中文字符 == 14 个 ASCII 字符',
+    cjk.width === ascii.width && cjk.width > 96,
+    `${cjk.width} vs ${ascii.width}`
+  )
+  const empty = codeBoxSize({ language: 'text', text: '' })
+  check('空文本也保留一行的最小框', empty.height === CODE_HEADER + CODE_PADDING_Y * 2 + lineH, JSON.stringify(empty))
 
   group('资源：路径与 MIME')
 
