@@ -6,7 +6,7 @@
  * 保证界面上看到的顺序与导出文件里的顺序永远一致。
  */
 
-import type { Sheet, Topic, Workbook } from '../model/types'
+import type { RichText, Sheet, Topic, Workbook } from '../model/types'
 
 export type OutlineFormat = 'txt' | 'md' | 'opml'
 
@@ -107,26 +107,59 @@ export function toPlainText(root: Topic): string {
   )
 }
 
-/** Markdown：根主题作为一级标题，其余用列表；备注以引用块跟在后面 */
-export function toMarkdown(root: Topic): string {
-  const lines = linesOf(root)
-  const out: string[] = []
-  const rootLine = lines[0]
-  if (!rootLine) return ''
-
-  out.push(`# ${rootLine.title}`)
-  if (rootLine.notes) out.push('', `> ${rootLine.notes.replace(/\r?\n/g, '\n> ')}`)
-  out.push('')
-
-  for (const line of lines.slice(1)) {
-    const indent = '  '.repeat(Math.max(0, line.depth - 1))
-    out.push(`${indent}- ${line.title}`)
-    if (line.notes) {
-      const noteIndent = `${indent}  `
-      for (const noteLine of line.notes.split(/\r?\n/)) out.push(`${noteIndent}> ${noteLine}`)
+/** 富文本 → 行内 Markdown（粗体/斜体/删除线/行内代码）；没有格式变化时原样返回 */
+function richToInlineMarkdown(rich: RichText): string {
+  const parts: string[] = []
+  for (const paragraph of rich.paragraphs) {
+    for (const run of paragraph.runs) {
+      if (run.text.length === 0) continue
+      let text = run.text
+      const mono = typeof run.fontFamily === 'string' && /mono/i.test(run.fontFamily)
+      if (mono) text = `\`${text}\``
+      if (run.bold) text = `**${text}**`
+      else if (run.italic) text = `*${text}*`
+      if (run.strike) text = `~~${text}~~`
+      parts.push(text)
     }
   }
+  return parts.join('')
+}
 
+/**
+ * Markdown：根主题作为一级标题，其余用列表。
+ * 节点上的代码块导出成**缩进围栏块**（跟随列表层级，归属不乱）、
+ * 图片导出成 `![图片](包内路径)`、公式导出成 `$$…$$`、备注以引用块跟在后面；
+ * 与 4.32 的 Markdown 导入器正好构成往返。
+ */
+export function toMarkdown(root: Topic): string {
+  const out: string[] = []
+  const walk = (topic: Topic, depth: number): void => {
+    const indent = depth === 0 ? '' : '  '.repeat(depth - 1)
+    const itemIndent = depth === 0 ? '' : `${indent}  `
+
+    let title = topic.titleRich ? richToInlineMarkdown(topic.titleRich) : topic.title
+    if (!topic.titleRich && topic.href && topic.title.length > 0) {
+      title = `[${topic.title}](${topic.href})`
+    }
+    out.push(depth === 0 ? `# ${title}` : `${indent}- ${title}`)
+
+    if (topic.image) out.push(`${itemIndent}![图片](${topic.image.path})`)
+    if (topic.formula) out.push(`${itemIndent}$$${topic.formula}$$`)
+    if (topic.code) {
+      out.push(`${itemIndent}\`\`\`${topic.code.language}`)
+      for (const codeLine of topic.code.text.split(/\r?\n/)) {
+        out.push(codeLine.length > 0 ? `${itemIndent}${codeLine}` : '')
+      }
+      out.push(`${itemIndent}\`\`\``)
+    }
+    if (topic.notes) {
+      for (const noteLine of topic.notes.split(/\r?\n/)) out.push(`${itemIndent}> ${noteLine}`)
+    }
+
+    for (const child of topic.children) walk(child, depth + 1)
+    for (const floating of topic.detachedChildren) walk(floating, depth + 1)
+  }
+  walk(root, 0)
   return out.join('\n') + '\n'
 }
 

@@ -176,7 +176,7 @@ import {
   tiptapToRich,
   type TipTapDoc
 } from '../src/shared/richtext'
-import type { MeasureResult, NodeLayout } from '../src/shared/layout/types'
+import type { LayoutResult, MeasureResult, NodeLayout } from '../src/shared/layout/types'
 import type { MindPackage, RichText, Topic, Workbook } from '../src/shared/model/types'
 
 /* ------------------------------------------------------------------ */
@@ -1304,6 +1304,140 @@ function testUndoSelectionAndRelayout(): void {
   store().undo()
   check('恢复布局可撤销（偏移回来了）', findTopic(root(), a)?.position !== undefined)
   eq('撤销恢复布局也不丢选择', store().selection, [a])
+}
+
+/* ------------------------------------------------------------------ */
+/* 8.5h 布局正确性：自动布局绝不允许节点重叠                            */
+/* ------------------------------------------------------------------ */
+
+/** 模拟真实测量的「多行换行」：宽度封顶、行数随标题长度增长 */
+const multilineMeasure = (topic: Topic, depth: number): MeasureResult => {
+  const base = fakeMeasure(topic, depth)
+  const maxTextWidth = depth === 0 ? 320 : 240
+  const textWidth = 90 + topic.title.length * 9
+  const lines = Math.max(1, Math.ceil(textWidth / maxTextWidth))
+  return {
+    ...base,
+    width: Math.max(Math.min(textWidth, maxTextWidth) + base.paddingX * 2, 76),
+    height: (depth === 0 ? 44 : 30) + (lines - 1) * base.lineHeight
+  }
+}
+
+/** 两个节点盒是否相交（各收缩 1px 容忍取整误差） */
+function boxesOverlap(a: NodeLayout, b: NodeLayout): boolean {
+  return (
+    a.x + 1 < b.x + b.width &&
+    b.x + 1 < a.x + a.width &&
+    a.y + 1 < b.y + b.height &&
+    b.y + 1 < a.y + a.height
+  )
+}
+
+/** 全树两两检查节点盒，返回第一对相交的节点（无则 null） */
+function firstOverlap(layout: LayoutResult): [string, string] | null {
+  for (let i = 0; i < layout.nodes.length; i += 1) {
+    for (let j = i + 1; j < layout.nodes.length; j += 1) {
+      if (boxesOverlap(layout.nodes[i], layout.nodes[j])) {
+        return [
+          `${layout.nodes[i].topic.title}(${Math.round(layout.nodes[i].x)},${Math.round(layout.nodes[i].y)})`,
+          `${layout.nodes[j].topic.title}(${Math.round(layout.nodes[j].x)},${Math.round(layout.nodes[j].y)})`
+        ]
+      }
+    }
+  }
+  return null
+}
+
+function testLayoutNoOverlap(): void {
+  group('布局正确性：自动布局无节点重叠（多行长文本）')
+  const titles = [
+    '这是一个相当长的标题用来模拟真实场景中多行换行的节点内容',
+    '短标题',
+    '另一个也很长的标题，负责把节点撑成三行甚至更多行来暴露布局问题',
+    '中等长度的标题大概两行左右的宽度测试用'
+  ]
+  for (const def of STRUCTURES) {
+    reset()
+    const rootId = root().id
+    const branches = ['A 分支', 'B 分支', 'C 分支'].map((label) => {
+      const branch = addChildOf(rootId, `${label}：${titles[0]}`)
+      addChildOf(branch, titles[1])
+      const child = addChildOf(branch, titles[2])
+      addChildOf(child, titles[3])
+      return branch
+    })
+    void branches
+    store().setStructure(def.class)
+    const layout = layoutSheet(root(), multilineMeasure)
+    const hit = firstOverlap(layout)
+    check(`结构「${def.label}」无节点重叠`, hit === null, hit ? hit.join(' ⨯ ') : '')
+  }
+
+  // 分支级组合：逻辑图根 + 分支各自声明鱼骨 / 组织架构 / 矩阵
+  reset()
+  const rootId = root().id
+  const f = addChildOf(rootId, `鱼骨分支：${titles[0]}`)
+  const o = addChildOf(rootId, `组织分支：${titles[3]}`)
+  const m = addChildOf(rootId, `矩阵分支：${titles[2]}`)
+  for (const [parent, count] of [
+    [f, 3],
+    [o, 2],
+    [m, 3]
+  ] as const) {
+    for (let i = 1; i <= count; i += 1) addChildOf(parent, `子项 ${i}：${titles[2]}`)
+  }
+  store().setStructure('org.xmind.ui.logic.right', rootId)
+  store().setStructure('org.xmind.ui.fishbone.leftHeaded', f)
+  store().setStructure('org.xmind.ui.org-chart.down', o)
+  store().setStructure('org.xmind.ui.matrix', m)
+  const mixed = layoutSheet(root(), multilineMeasure)
+  const mixedHit = firstOverlap(mixed)
+  check('分支级组合（鱼骨+组织+矩阵）无节点重叠', mixedHit === null, mixedHit ? mixedHit.join(' ⨯ ') : '')
+}
+
+/* ------------------------------------------------------------------ */
+/* 8.5i Markdown 导出 → 导入往返                                       */
+/* ------------------------------------------------------------------ */
+
+function testMarkdownRoundTrip(): void {
+  group('Markdown 导出 → 导入往返')
+  reset()
+  const rootId = root().id
+  const plan = addChildOf(rootId, '计划')
+  const codeChild = addChildOf(plan, '示例代码')
+  const richChild = addChildOf(plan, '忽略我')
+
+  store().mutate((draft) => {
+    const codeTopic = findTopic(activeRoot(draft), codeChild)
+    if (codeTopic) codeTopic.code = { language: 'ts', text: 'const a = 1\nconst b = 2' }
+    const richTopic = findTopic(activeRoot(draft), richChild)
+    if (richTopic) {
+      richTopic.title = '重点内容'
+      richTopic.titleRich = {
+        paragraphs: [{ runs: [{ text: '重点', bold: true }, { text: '内容' }] }]
+      }
+    }
+  }, '造往返测试数据')
+  store().setHref(plan, 'https://example.com/doc')
+  store().setNotes(plan, '这是备注')
+
+  const md = toMarkdown(root())
+  check('代码围栏带语言标注', md.includes('```ts'))
+  check('链接导出为 Markdown 链接', md.includes('[计划](https://example.com/doc)'))
+
+  const parsed = parseMarkdownOutline(md)
+  // 默认文档自带两个分支，按标题定位「计划」而不是按下标
+  const importedPlan = parsed.root?.children.find((child) => child.title === '计划')
+  eq('往返：根标题一致', parsed.root?.title, root().title)
+  eq('往返：链接挂回节点', importedPlan?.href, 'https://example.com/doc')
+  eq('往返：备注保留', importedPlan?.notes, '这是备注')
+  const importedCode = importedPlan?.children.find((child) => child.code)
+  eq('往返：代码块挂回原节点', importedCode?.title, '示例代码')
+  eq('往返：代码块语言', importedCode?.code?.language, 'ts')
+  eq('往返：代码块内容', importedCode?.code?.text, 'const a = 1\nconst b = 2')
+  const importedRich = importedPlan?.children.find((child) => child.rich)
+  check('往返：粗体进富文本', importedRich?.rich?.paragraphs[0]?.runs[0]?.bold === true)
+  eq('往返：节点数一致', parsed.count, countTopics(root()))
 }
 
 function testBranchFamiliesMore(): void {
@@ -4725,6 +4859,8 @@ async function main(): Promise<void> {
   testBranchStructure()
   testBranchFamiliesMore()
   testUndoSelectionAndRelayout()
+  testLayoutNoOverlap()
+  testMarkdownRoundTrip()
   testPickDocumentArg()
   testViewLock()
   testSnapshot()

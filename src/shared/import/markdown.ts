@@ -189,6 +189,7 @@ function scanMarkdown(source: string): MdEvent[] {
   const events: MdEvent[] = []
   let inFence = false
   let fenceLanguage = ''
+  let fenceIndent = ''
   let fenceLines: string[] = []
   let inFrontMatter = false
 
@@ -206,6 +207,8 @@ function scanMarkdown(source: string): MdEvent[] {
       if (!inFence) {
         inFence = true
         fenceLanguage = trimmed.replace(/^(```|~~~)\s*/, '').trim()
+        // 记下围栏自身的缩进：列表里的围栏，内部代码行要剥掉这层缩进
+        fenceIndent = line.slice(0, line.length - line.trimStart().length)
         fenceLines = []
       } else {
         inFence = false
@@ -214,7 +217,7 @@ function scanMarkdown(source: string): MdEvent[] {
       return
     }
     if (inFence) {
-      fenceLines.push(line)
+      fenceLines.push(line.startsWith(fenceIndent) ? line.slice(fenceIndent.length) : line)
       return
     }
     if (/^([-*_])\1{2,}$/.test(trimmed)) return // 水平线
