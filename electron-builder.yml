@@ -1,5 +1,13 @@
 appId: com.mindmap.local
 productName: Mind
+# 把 .xmind 关联到本软件：装完之后在资源管理器里双击 .xmind 就能直接打开
+# （只有**安装版**会注册关联，免安装版没有这一步；不注册的话双击会被系统推给别人或直接报"无法打开"）
+fileAssociations:
+  - ext: xmind
+    name: Mind 思维导图
+    description: Mind 思维导图（Xmind 兼容格式）
+    icon: build/icon.ico
+    role: Editor
 directories:
   buildResources: build
   output: release

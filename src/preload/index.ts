@@ -27,6 +27,14 @@ const api: MindApi = {
 
   openPath: (path) => ipcRenderer.invoke(IPC.openPath, path) as Promise<OpenResult>,
 
+  openFilePending: () => ipcRenderer.invoke(IPC.openFilePending) as Promise<string | null>,
+
+  onFileOpenRequest: (handler: (path: string) => void) => {
+    const listener = (_e: unknown, path: string): void => handler(path)
+    ipcRenderer.on(IPC.fileOpenRequest, listener)
+    return () => ipcRenderer.removeListener(IPC.fileOpenRequest, listener)
+  },
+
   saveToPath: (path, workbook: Workbook) =>
     ipcRenderer.invoke(IPC.saveToPath, path, workbook) as Promise<SaveResult>,
 

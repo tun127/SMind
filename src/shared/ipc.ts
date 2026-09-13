@@ -47,6 +47,8 @@ export interface RecoveryInfo {
 export const IPC = {
   openDialog: 'file:open-dialog',
   openPath: 'file:open-path',
+  openFilePending: 'file:open-pending',
+  fileOpenRequest: 'file:open-request',
   saveToPath: 'file:save-to-path',
   saveAs: 'file:save-as',
   autosave: 'file:autosave',
@@ -128,6 +130,13 @@ export type MenuCommand =
 export interface MindApi {
   openDialog(): Promise<OpenResult | null>
   openPath(path: string): Promise<OpenResult>
+  /**
+   * 启动时命令行里带的文档（双击 `.xmind`、把文件拖到 exe 上、右键「打开方式 → Mind」都走这里）。
+   * 取一次即清空，没有则返回 null。
+   */
+  openFilePending(): Promise<string | null>
+  /** 窗口已经开着时又打开了一个文档：主进程把它推过来（返回取消订阅） */
+  onFileOpenRequest(handler: (path: string) => void): () => void
   saveToPath(path: string, workbook: Workbook): Promise<SaveResult>
   saveAs(workbook: Workbook, suggestedName: string): Promise<SaveResult | null>
   autosave(workbook: Workbook, originalPath: string | null, title: string): Promise<void>

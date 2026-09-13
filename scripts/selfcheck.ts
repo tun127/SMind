@@ -14,6 +14,7 @@ import {
   useEditor
 } from '../src/renderer/src/store/editor'
 import { withAlpha } from '../src/renderer/src/render/theme'
+import { pickDocumentArg } from '../src/shared/openfile'
 import {
   clearTypedChar,
   stageTypedChar,
@@ -1209,6 +1210,33 @@ function testTypedChar(): void {
 
   stageTypedChar('a', ' ')
   eq('空格也能原样回放（由上层决定落不落）', takeTypedChar('a'), ' ')
+}
+
+/* ------------------------------------------------------------------ */
+/* 8.5d 「从文件管理器打开」：命令行参数识别                             */
+/* ------------------------------------------------------------------ */
+
+function testPickDocumentArg(): void {
+  group('从文件管理器打开：命令行参数识别')
+  const exists = (path: string): boolean =>
+    path === 'D:\\A\\plan.xmind' || path === 'D:\\B\\灵感.emmx'
+
+  eq('认出 .xmind', pickDocumentArg(['Mind.exe', 'D:\\A\\plan.xmind'], exists), 'D:\\A\\plan.xmind')
+  eq('也认 .emmx', pickDocumentArg(['Mind.exe', 'D:\\B\\灵感.emmx'], exists), 'D:\\B\\灵感.emmx')
+  eq('文件不存在就不认', pickDocumentArg(['Mind.exe', 'D:\\A\\missing.xmind'], exists), null)
+  eq('没有文档参数时返回 null', pickDocumentArg(['electron.exe', '.'], exists), null)
+  eq(
+    '跳过开关参数',
+    pickDocumentArg(['-r', '--inspect', 'D:\\A\\plan.xmind'], exists),
+    'D:\\A\\plan.xmind'
+  )
+  eq('exe 自己不会被当作文档', pickDocumentArg(['D:\\Mind\\Mind.exe'], exists), null)
+  eq('别的格式不认', pickDocumentArg(['D:\\A\\notes.txt'], exists), null)
+  eq(
+    '同时给了多个就取最后一个（用户双击的那个）',
+    pickDocumentArg(['Mind.exe', 'D:\\A\\plan.xmind', 'D:\\B\\灵感.emmx'], exists),
+    'D:\\B\\灵感.emmx'
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -4492,6 +4520,7 @@ async function main(): Promise<void> {
   testNodeDrag()
   testMisc()
   testTypedChar()
+  testPickDocumentArg()
   testViewLock()
   testSnapshot()
   testRichText()

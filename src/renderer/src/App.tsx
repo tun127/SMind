@@ -377,6 +377,22 @@ export default function App(): ReactElement {
     showToast
   ])
 
+  /**
+   * 从文件管理器打开本地文档。
+   *
+   * - **启动时**（双击 `.xmind` / 把文件拖到 exe 上 / 右键「打开方式 → Mind」）：路径在命令行里，
+   *   主进程替我们存着，这里就绪后取一次（取走即清空）；
+   * - **窗口已经开着时**再打开一个：主进程通过 `fileOpenRequest` 推过来。
+   *
+   * 两条路都走 `guard`，避免在"有未保存改动"时静默替换掉当前文档。
+   */
+  useEffect(() => {
+    void window.api.openFilePending().then((path) => {
+      if (path) guard(() => void openPath(path))
+    })
+    return window.api.onFileOpenRequest((path) => guard(() => void openPath(path)))
+  }, [guard, openPath])
+
   /* ------------------------------------------------------------------ */
   /* 关闭窗口                                                            */
   /* ------------------------------------------------------------------ */

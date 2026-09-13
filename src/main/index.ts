@@ -16,6 +16,7 @@ import {
   type SaveResult,
   type SnapshotRestoreResult
 } from '@shared/ipc'
+import { pickDocumentArg } from '@shared/openfile'
 import {
   DEFAULT_AI_CONFIG,
   chatCompletionsUrl,
@@ -328,6 +329,23 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  /**
+   * 把文件拖进窗口：Chromium 的默认行为是**导航到那个文件**——整个应用界面会被替换成
+   * 一张图片或一个 PDF，看起来就像"软件坏了"。这里一律拦下：
+   * 拖进来的是本软件的文档（.xmind/.emmx/.emm）就**直接打开**，别的文件忽略。
+   */
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault()
+    if (!url.startsWith('file://')) return
+    try {
+      const pathname = decodeURIComponent(new URL(url).pathname)
+      const target = pickDocumentArg([pathname.replace(/^\//, '')], existsSync)
+      if (target) mainWindow?.webContents.send(IPC.fileOpenRequest, target)
+    } catch {
+      /* 解析不了就当作普通拖拽，忽略 */
+    }
+  })
+
   // 关闭前交由渲染进程判断是否有未保存内容
   mainWindow.on('close', (e) => {
     if (allowClose) return
@@ -378,7 +396,24 @@ function registerResourceProtocol(): void {
   })
 }
 
+/**
+ * 启动时命令行里带的文档路径（双击 `.xmind`、把文件拖到 exe 上、右键「打开方式 → Mind」都会走这里）。
+ *
+ * 刻意**不在启动流程里直接推给渲染进程**：那一刻 React 可能还没挂载、监听还没注册上，
+ * 推过去就丢了。渲染进程就绪后自己来取一次（取走即清空），时序上稳。
+ */
+let pendingOpenPath: string | null = pickDocumentArg(process.argv, existsSync)
+
 function registerIpc(): void {
+  /**
+   * 渲染进程就绪后取「启动时带的那个文件」，取一次即清空。
+   */
+  ipcMain.handle(IPC.openFilePending, async (): Promise<string | null> => {
+    const target = pendingOpenPath
+    pendingOpenPath = null
+    return target
+  })
+
   ipcMain.handle(IPC.openDialog, async (): Promise<OpenResult | null> => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: '打开思维导图',
@@ -849,10 +884,14 @@ function registerIpc(): void {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
+    // 窗口已经开着时又双击了一个 .xmind：新实例把路径塞在 argv 里传过来，
+    // 认出来直接交给渲染进程打开（否则只会"闪一下窗口"，看起来像没反应）
+    const target = pickDocumentArg(argv, existsSync)
+    if (target) mainWindow.webContents.send(IPC.fileOpenRequest, target)
   })
 
   void app.whenReady().then(() => {
