@@ -555,7 +555,28 @@ export default function App(): ReactElement {
           store.copySelection()
         } else if (key === 'v') {
           e.preventDefault()
-          store.paste()
+          // 先试剪贴板里的图片（截图后直接 Ctrl+V 贴到选中的主题上）；没有图片再按「粘贴节点」处理
+          void (async () => {
+            if (!store.editingId && selectedId) {
+              try {
+                const image = await window.api.pasteImage()
+                if (image) {
+                  useEditor
+                    .getState()
+                    .setImage(selectedId, { path: image.path, width: image.width, height: image.height })
+                  showToast(
+                    image.width > 0
+                      ? `已把剪贴板图片贴到选中的主题（${image.width}×${image.height}）`
+                      : '已把剪贴板图片贴到选中的主题（未取到像素尺寸，按默认大小显示）'
+                  )
+                  return
+                }
+              } catch {
+                /* 读不到就当剪贴板里没有图片 */
+              }
+            }
+            useEditor.getState().paste()
+          })()
         } else if (key === 'f') {
           // Ctrl+F：打开搜索面板（与 Xmind 一致）
           e.preventDefault()
@@ -636,6 +657,60 @@ export default function App(): ReactElement {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  /* ------------------------------------------------------------------ */
+  /* 拖拽图片文件到窗口：贴到选中的主题                                     */
+  /* ------------------------------------------------------------------ */
+
+  useEffect(() => {
+    // 文档文件（.xmind 等）不拦：不 preventDefault，让 Chromium 的默认导航发生，
+    // 主进程的 will-navigate 拦截器才能接住并走「打开文档」流程
+    const DOCUMENT_RE = /\.(xmind|emmx|emm)$/i
+    const pickImageFile = (files: FileList | null): File | null => {
+      if (!files) return null
+      for (const file of Array.from(files)) {
+        if (DOCUMENT_RE.test(file.name)) return null // 混着文档时整体交给文档流程
+        if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i.test(file.name)) {
+          return file
+        }
+      }
+      return null
+    }
+    const onDragOver = (event: DragEvent): void => {
+      if (pickImageFile(event.dataTransfer?.files ?? null)) event.preventDefault()
+    }
+    const onDrop = (event: DragEvent): void => {
+      const file = pickImageFile(event.dataTransfer?.files ?? null)
+      if (!file) return
+      event.preventDefault()
+      void (async () => {
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          const image = await window.api.addImage(file.name, bytes)
+          const store = useEditor.getState()
+          const id = store.selection[0]
+          if (!image || !id) {
+            showToast('请先选中一个主题，再把图片拖进来')
+            return
+          }
+          store.setImage(id, { path: image.path, width: image.width, height: image.height })
+          showToast(
+            image.width > 0
+              ? `已插入图片 ${file.name}（${image.width}×${image.height}）`
+              : `已插入图片 ${file.name}（未取到像素尺寸，按默认大小显示）`
+          )
+        } catch (error) {
+          showToast(`插入图片失败：${(error as Error).message}`)
+        }
+      })()
+    }
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [showToast])
 
   /* ------------------------------------------------------------------ */
 

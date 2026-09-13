@@ -70,6 +70,8 @@ export const IPC = {
   themesExport: 'themes:export',
   /* ---- 图片与附件（P4） ---- */
   pickImage: 'resource:pick-image',
+  pasteImage: 'resource:paste-image',
+  addImage: 'resource:add-image',
   pickAttachment: 'resource:pick-attachment',
   openAttachment: 'resource:open-attachment',
   saveAttachmentAs: 'resource:save-attachment-as',
@@ -170,6 +172,10 @@ export interface MindApi {
   /* ---- 图片与附件（P4） ---- */
   /** 选择一张图片并读进当前文档的资源里，取消返回 null */
   pickImage(): Promise<PickedImage | null>
+  /** 读取系统剪贴板里的图片，剪贴板中没有图片返回 null */
+  pasteImage(): Promise<PickedImage | null>
+  /** 把一段图片字节登记进当前文档资源（拖拽图片文件用） */
+  addImage(name: string, bytes: Uint8Array): Promise<PickedImage | null>
   /** 选择一个文件作为附件，取消返回 null */
   pickAttachment(): Promise<PickedAttachment | null>
   /** 用系统默认程序打开附件（name 用于生成可读的临时文件名），失败返回 false */

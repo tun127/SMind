@@ -86,6 +86,11 @@ const api: MindApi = {
 
   pickImage: () => ipcRenderer.invoke(IPC.pickImage) as Promise<PickedImage | null>,
 
+  pasteImage: () => ipcRenderer.invoke(IPC.pasteImage) as Promise<PickedImage | null>,
+
+  addImage: (name: string, bytes: Uint8Array) =>
+    ipcRenderer.invoke(IPC.addImage, name, bytes) as Promise<PickedImage | null>,
+
   pickAttachment: () => ipcRenderer.invoke(IPC.pickAttachment) as Promise<PickedAttachment | null>,
 
   openAttachment: (path: string, name: string) =>

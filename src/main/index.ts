@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
 import { createHash } from 'node:crypto'
 import { promises as fs, existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -592,6 +592,57 @@ function registerIpc(): void {
     }
 
     return { path, name: safeResourceName(file), width, height, size: buf.byteLength }
+  })
+
+  /** 把一段图片字节登记进当前会话资源（与 pickImage 同一条路，保存时打进包里） */
+  const registerImageBytes = (name: string, buf: Buffer): PickedImage => {
+    if (buf.byteLength === 0) throw new Error('这张图片是空文件，无法插入')
+    const path = resourcePathFor(createId('img'), name)
+    loadedResources[path] = new Uint8Array(buf)
+    sessionResources.add(path)
+
+    let width = 0
+    let height = 0
+    try {
+      const size = nativeImage.createFromBuffer(buf).getSize()
+      width = size.width
+      height = size.height
+    } catch {
+      width = 0
+      height = 0
+    }
+    return { path, name: safeResourceName(name), width, height, size: buf.byteLength }
+  }
+
+  // 读取系统剪贴板里的图片（截图后直接 Ctrl+V 贴到选中的主题上）；没有图片返回 null
+  ipcMain.handle(IPC.pasteImage, async (): Promise<PickedImage | null> => {
+    let items: Electron.ClipboardItem[] = []
+    try {
+      items = await clipboard.read()
+    } catch {
+      return null
+    }
+    for (const item of items) {
+      const mime = item.types.find((type) => type.startsWith('image/'))
+      if (!mime) continue
+      try {
+        const payload = await item.getType(mime)
+        if (!(payload instanceof Blob)) continue
+        const buf = Buffer.from(await payload.arrayBuffer())
+        if (buf.byteLength === 0) continue
+        const extension = mime === 'image/jpeg' ? 'jpg' : 'png'
+        return registerImageBytes(`剪贴板图片.${extension}`, buf)
+      } catch {
+        continue
+      }
+    }
+    return null
+  })
+
+  // 渲染进程拖入 / 粘贴得到的图片字节（拖拽文件走这里）
+  ipcMain.handle(IPC.addImage, async (_e, name: string, bytes: Uint8Array): Promise<PickedImage | null> => {
+    if (!bytes || bytes.byteLength === 0) return null
+    return registerImageBytes(name, Buffer.from(bytes))
   })
 
   ipcMain.handle(IPC.pickAttachment, async (): Promise<PickedAttachment | null> => {

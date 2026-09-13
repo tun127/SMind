@@ -364,7 +364,13 @@ function charsOfParagraph(paragraph: RichTextParagraph, base: BaseStyle): Styled
 function compute(topic: Topic, depth: number): MeasureResult {
   const base = baseOf(depth)
   const rich: RichText = topic.titleRich ?? richFromPlain(topic.title)
-  const paragraphs: RichTextParagraph[] = rich.paragraphs.length > 0 ? rich.paragraphs : [{ runs: [] }]
+  // 图片节点（P8）：标题为空且带图片时，不再给空标题行留高度，图片就是节点的全部内容
+  const imageOnly = Boolean(topic.image) && topic.title.length === 0 && !topic.titleRich
+  const paragraphs: RichTextParagraph[] = imageOnly
+    ? []
+    : rich.paragraphs.length > 0
+      ? rich.paragraphs
+      : [{ runs: [] }]
 
   const lines: MeasuredLine[] = []
   for (const paragraph of paragraphs) {
@@ -386,7 +392,7 @@ function compute(topic: Topic, depth: number): MeasureResult {
     }
   }
 
-  if (lines.length === 0) {
+  if (lines.length === 0 && !imageOnly) {
     lines.push({ segments: [], width: 0, height: Math.round(base.fontSize * LINE_HEIGHT_RATIO), align: 'center' })
   }
 
