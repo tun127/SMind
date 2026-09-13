@@ -3,7 +3,7 @@ import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } 
 import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
 import { createId, createSheet, createTopic, createWorkbook } from '@shared/model/factory'
 import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
-import { hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
+import { appendToRich, hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
 import {
   EMPTY_FILTER,
   countOccurrences,
@@ -127,6 +127,16 @@ export interface EditorState {
   setZoom(zoom: number): void
   zoomBy(factor: number): void
   setPan(pan: { x: number; y: number }): void
+  /**
+   * 视角锁定：开启后画布始终把**选中的主题**按在视口中央。
+   *
+   * 方向键在主题间移动、点大纲、搜索跳转、拖完重排……视角都会跟过去，
+   * 长导图里不必再手动拖画布去找"现在到底选到哪了"。
+   */
+  viewLock: boolean
+  setViewLock(on: boolean): void
+  /** 切换视角锁定，返回切换后的状态（提示语要用） */
+  toggleViewLock(): boolean
 
   /* ---- 文档 ---- */
   newDocument(): void
@@ -150,7 +160,12 @@ export interface EditorState {
 
   /* ---- 选择与编辑态 ---- */
   select(id: string | null, additive?: boolean): void
-  beginEdit(id: string): void
+  /**
+   * 进入编辑。
+   * `insertText` 用于「选中主题后直接打字」：把这一下敲的字符**接到末尾**再进入编辑
+   * （是追加不是覆盖——误按一个字母就把整句标题冲掉太危险）。
+   */
+  beginEdit(id: string, insertText?: string): void
   updateEditingText(text: string): void
   updateEditingRich(rich: RichText): void
   /**
@@ -187,6 +202,14 @@ export interface EditorState {
    * - `→`：降级，成为前一个兄弟的最后一个子主题
    */
   moveSelectionByKey(key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End'): boolean
+  /**
+   * 按方向键在主题之间移动**选择**（← 父级、→ 第一个子级、↑↓ 同级）。
+   *
+   * 抽到 store 里是因为**编辑态**也要用它：刚建出来的空主题里按方向键，
+   * 应当退出编辑并移到相邻主题，而不是把光标在一个空格子里挪来挪去（看起来像"方向键失灵"）。
+   * 另外它有兜底：选择指向已不存在的主题时自动回到根，键盘永远不会"死掉"。
+   */
+  navigateSelection(key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'): void
   /**
    * 把一级主题对调到中心主题的另一侧（知犀 / Xmind 的「左右位置调整」）。
    * 平衡结构默认按顺序交替分配左右，这里写入的是显式覆盖。
@@ -317,6 +340,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   zoom: 1,
   pan: { x: 0, y: 0 },
+  viewLock: false,
 
   search: { ...EMPTY_SEARCH },
   filter: { ...EMPTY_FILTER },
@@ -333,6 +357,14 @@ export const useEditor = create<EditorState>()((set, get) => ({
   zoomBy: (factor) => set((s) => ({ zoom: clampZoom(s.zoom * factor) })),
 
   setPan: (pan) => set({ pan }),
+
+  setViewLock: (on) => set({ viewLock: on }),
+
+  toggleViewLock: () => {
+    const next = !get().viewLock
+    set({ viewLock: next })
+    return next
+  },
 
   /* ------------------------------------------------------------------ */
   /* 检索与筛选                                                          */
@@ -667,9 +699,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
         : { selection: [...s.selection, id] }
     }),
 
-  beginEdit: (id) => {
+  beginEdit: (id, insertText) => {
     const topic = findTopic(activeRoot(get().workbook), id)
-    const rich = topic?.titleRich ? normalizeRich(topic.titleRich) : richFromPlain(topic?.title ?? '')
+    const base = topic?.titleRich ? normalizeRich(topic.titleRich) : richFromPlain(topic?.title ?? '')
+    const rich = insertText ? appendToRich(base, insertText) : base
     set({ editingId: id, editingText: plainTextOf(rich), editingRich: rich, selection: [id] })
   },
 
@@ -761,13 +794,38 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const root = activeRoot(workbook)
     const targets = selection.filter((id) => id !== root.id && findTopic(root, id))
     if (targets.length === 0) return
+
+    // 删完必须把选择落到一个**还存在**的主题上：否则选择指向"空"，
+    // 方向键、Delete、Tab/Enter 全都失灵，用户只能先拿鼠标点一下才能继续用键盘
+    // （这就是反馈里的「删除节点后选择失效，必须鼠标点击才能生效」）。
+    // 落点顺序：原位置**之后**的下一个未删除兄弟 → **之前**的上一个 → 父级。
+    const first = targets[0]
+    const parent = findParent(root, first)
+    let nextId: string | null = null
+    if (parent) {
+      const firstIndex = parent.children.findIndex((child) => child.id === first)
+      const after = parent.children
+        .slice(firstIndex + 1)
+        .find((child) => !targets.includes(child.id))
+      const before = parent.children
+        .slice(0, Math.max(firstIndex, 0))
+        .reverse()
+        .find((child) => !targets.includes(child.id))
+      nextId = after?.id ?? before?.id ?? parent.id
+    }
+
     get().mutate((draft) => {
       const draftRoot = activeRoot(draft)
       for (const id of targets) detachTopic(draftRoot, id)
       // 指向已删除主题的关系线/边界/概要会变成悬空元素，必须一起清掉
       pruneOverlays(activeSheet(draft))
     }, '删除主题')
-    set({ selection: [], editingId: null, editingText: '', editingRich: null })
+    set({
+      selection: nextId ? [nextId] : [],
+      editingId: null,
+      editingText: '',
+      editingRich: null
+    })
   },
 
   setTitle: (id, title) => {
@@ -851,6 +909,35 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const previous = index > 0 ? parent.children[index - 1] : undefined
     if (!previous) return false
     return state.moveNode(id, previous.id)
+  },
+
+  navigateSelection: (key) => {
+    const state = get()
+    const root = activeRoot(state.workbook)
+    const selectedId = state.selection[0]
+    const selected = selectedId ? findTopic(root, selectedId) : null
+    // 选择可能已经失效（比如它刚被删掉、或撤销回到了另一个版本）→ 先把选择收回根，
+    // 保证"键盘永远可用"，不再出现按了没反应、只能拿鼠标点一下的死状态。
+    if (selectedId && !selected) set({ selection: [root.id] })
+    const currentId = selected ? selected.id : root.id
+
+    if (key === 'ArrowLeft') {
+      const parent = findParent(root, currentId)
+      if (parent) set({ selection: [parent.id] })
+      return
+    }
+    if (key === 'ArrowRight') {
+      const node = findTopic(root, currentId)
+      if (node && node.children.length > 0) set({ selection: [node.children[0].id] })
+      return
+    }
+    const parent = findParent(root, currentId) ?? root
+    const index = parent.children.findIndex((child) => child.id === currentId)
+    if (index < 0) return
+    const nextIndex = key === 'ArrowUp' ? index - 1 : index + 1
+    if (nextIndex >= 0 && nextIndex < parent.children.length) {
+      set({ selection: [parent.children[nextIndex].id] })
+    }
   },
 
   setStructure: (structureClass, targetId) => {

@@ -66,6 +66,11 @@ export function buildAppMenu(): void {
         { label: '缩小', accelerator: 'CmdOrCtrl+-', click: () => send('view:zoom-out') },
         { label: '实际大小', accelerator: 'CmdOrCtrl+0', click: () => send('view:zoom-reset') },
         { label: '适应画布', accelerator: 'CmdOrCtrl+1', click: () => send('view:fit') },
+        {
+          label: '视角锁定：跟住选中的主题 / 取消',
+          accelerator: 'CmdOrCtrl+Shift+L',
+          click: () => send('view:lock')
+        },
         { type: 'separator' },
         { label: '切换结构类型…', click: () => send('view:toggle-structure') },
         { type: 'separator' },

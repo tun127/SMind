@@ -13,6 +13,8 @@ export default function StatusBar(): ReactElement {
   const filePath = useEditor((s) => s.filePath)
   const dirty = useEditor((s) => s.dirty)
   const zoom = useEditor((s) => s.zoom)
+  const viewLock = useEditor((s) => s.viewLock)
+  const toggleViewLock = useEditor((s) => s.toggleViewLock)
 
   const sheet = activeSheet(workbook)
   const root = sheet.rootTopic
@@ -46,6 +48,19 @@ export default function StatusBar(): ReactElement {
         <span>字数 {chars}</span>
         <span className="statusbar__sep">|</span>
         <span>缩放 {Math.round(zoom * 100)}%</span>
+        {viewLock && (
+          <>
+            <span className="statusbar__sep">|</span>
+            <button
+              type="button"
+              className="statusbar__link"
+              title="视角锁定中：视角始终跟住选中的主题（点击取消）"
+              onClick={() => toggleViewLock()}
+            >
+              视角锁定
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

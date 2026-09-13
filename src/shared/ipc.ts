@@ -112,6 +112,7 @@ export type MenuCommand =
   | 'view:zoom-out'
   | 'view:zoom-reset'
   | 'view:fit'
+  | 'view:lock'
   | 'view:toggle-structure'
   | 'help:shortcuts'
   | 'file:import-theme'

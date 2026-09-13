@@ -15,6 +15,11 @@ import {
 } from '../src/renderer/src/store/editor'
 import { withAlpha } from '../src/renderer/src/render/theme'
 import {
+  clearTypedChar,
+  stageTypedChar,
+  takeTypedChar
+} from '../src/renderer/src/editor/typedChar'
+import {
   BUILTIN_THEMES,
   DEFAULT_THEME,
   getThemeColors,
@@ -155,6 +160,7 @@ import {
   snippetOf
 } from '../src/shared/search'
 import {
+  appendToRich,
   hasFormatting,
   plainTextOf,
   richFromPlain,
@@ -465,6 +471,71 @@ function testDelete(): void {
   const before = countTopics(root())
   store().deleteSelection()
   check('根主题不可被删除', countTopics(root()) === before)
+
+  group('删除后必须把选择落到还在的主题上（否则方向键/Delete 全体失灵）')
+
+  // 注意：默认工作簿自带「分支主题 1 / 2」两个子节点，断言要按真实结构来
+  reset()
+  const dRoot = root()
+  const d1 = addChildOf(dRoot.id, '甲')
+  const d2 = addChildOf(dRoot.id, '乙')
+  const d3 = addChildOf(dRoot.id, '丙')
+
+  store().select(d2)
+  store().deleteSelection()
+  eq('删中间那个 → 选择落到它后面的兄弟', store().selection, [d3])
+
+  store().select(d3)
+  store().deleteSelection()
+  eq('删最后一个 → 选择落到前一个兄弟', store().selection, [d1])
+
+  store().select(d1)
+  store().deleteSelection()
+  check(
+    '同级自己造的都删光了 → 选择落到其它兄弟上，绝不留下空选择',
+    store().selection.length === 1 && find(store().selection[0]) !== null,
+    JSON.stringify(store().selection)
+  )
+  check('删完之后方向键仍然可用（← 能回到父级）', (() => {
+    store().navigateSelection('ArrowLeft')
+    return store().selection[0] === dRoot.id
+  })())
+
+  group('方向键导航：选择失效时兜底回到根，键盘不会"死掉"')
+
+  reset()
+  const nRoot = root()
+  const n1 = addChildOf(nRoot.id, '一')
+  const n2 = addChildOf(nRoot.id, '二')
+  addChildOf(n1, '一-1')
+  // 根的子节点实际是 [分支主题 1, 分支主题 2, 一, 二]
+  const kids = (): string[] => (find(nRoot.id)?.children ?? []).map((c) => c.id)
+
+  check('选择指向不存在的主题时会先收回根', (() => {
+    store().select('不存在的-id')
+    store().navigateSelection('ArrowDown')
+    return store().selection[0] === nRoot.id
+  })())
+
+  store().select(nRoot.id)
+  store().navigateSelection('ArrowRight')
+  eq('→ 进入第一个子级', store().selection, [kids()[0]])
+
+  store().navigateSelection('ArrowDown')
+  eq('↓ 走到下一个同级', store().selection, [kids()[1]])
+
+  store().select(n1)
+  store().navigateSelection('ArrowDown')
+  eq('↓ 走到自己后面的兄弟', store().selection, [n2])
+
+  store().navigateSelection('ArrowUp')
+  eq('↑ 走回上一个同级', store().selection, [n1])
+
+  store().navigateSelection('ArrowLeft')
+  eq('← 回到父级', store().selection, [nRoot.id])
+
+  store().navigateSelection('ArrowUp')
+  eq('同级到头就不再动（不会跑到别处）', store().selection, [nRoot.id])
 }
 
 /* ------------------------------------------------------------------ */
@@ -1119,6 +1190,55 @@ function testMisc(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 8.5c 「直接打字即编辑」注入字符的寄存（输入法让位用）                 */
+/* ------------------------------------------------------------------ */
+
+function testTypedChar(): void {
+  group('直接打字：注入字符的寄存')
+  stageTypedChar('n1', 'w')
+  eq('同一节点可取回', takeTypedChar('n1'), 'w')
+  eq('取走即清空', takeTypedChar('n1'), null)
+
+  stageTypedChar('n1', 'w')
+  eq('换了节点就不认', takeTypedChar('n2'), null)
+  eq('认错一次即作废，不会再落进别的节点', takeTypedChar('n1'), null)
+
+  stageTypedChar('n1', '字')
+  clearTypedChar()
+  eq('显式放弃后取不回', takeTypedChar('n1'), null)
+
+  stageTypedChar('a', ' ')
+  eq('空格也能原样回放（由上层决定落不落）', takeTypedChar('a'), ' ')
+}
+
+/* ------------------------------------------------------------------ */
+/* 8.5b 视角锁定（视图状态，与文档内容无关）                            */
+/* ------------------------------------------------------------------ */
+
+function testViewLock(): void {
+  group('视角锁定')
+  reset()
+  check('默认不锁定', store().viewLock === false)
+  eq('打开时返回新状态', store().toggleViewLock(), true)
+  check('已锁定', store().viewLock === true)
+  eq('再切一次即关掉', store().toggleViewLock(), false)
+  check('已解锁', store().viewLock === false)
+
+  // 它是"视图状态"：只影响看，不该污染文档
+  const dirty = store().dirty
+  const undo = store().undoStack.length
+  store().setViewLock(true)
+  check('锁定不写撤销栈', store().undoStack.length === undo)
+  check('锁定不影响「未保存」标记', store().dirty === dirty)
+
+  // 新建 / 打开文档会把视角拉回中心，但"锁不锁"是用户的偏好，得留着
+  store().newDocument()
+  check('新建文档后仍保持锁定', store().viewLock === true, String(store().viewLock))
+  store().setViewLock(false)
+  check('可以显式关掉', store().viewLock === false)
+}
+
+/* ------------------------------------------------------------------ */
 /* 8.5 落盘快照：正在输入的文本不能丢                                   */
 /* ------------------------------------------------------------------ */
 
@@ -1160,6 +1280,20 @@ function testRichText(): void {
     '• 条目'
   )
   eq('格式不影响纯文本', plainTextOf({ paragraphs: [{ runs: [{ text: 'abc', bold: true, color: '#f00' }] }] }), 'abc')
+
+  group('富文本：末尾追加（选中主题后直接打字的入口）')
+  eq('追加到单段落末尾', plainTextOf(appendToRich(richFromPlain('abc'), ' ')), 'abc ')
+  eq('多段落时追加到最后一段', plainTextOf(appendToRich(richFromPlain('a\nb'), 'x')), 'a\nbx')
+  eq('空文本也能追加', plainTextOf(appendToRich(richFromPlain(''), '字')), '字')
+  check(
+    '追加不会覆盖原有文字（误按键不会把标题冲掉）',
+    plainTextOf(appendToRich(richFromPlain('别删我'), 'x')).startsWith('别删我')
+  )
+  check(
+    '追加的 run 不继承上一段格式',
+    appendToRich({ paragraphs: [{ runs: [{ text: 'a', bold: true }] }] }, 'b').paragraphs[0].runs[1]
+      ?.bold === undefined
+  )
 
   group('富文本：格式判定')
   check('无格式不判为富文本', hasFormatting(richFromPlain('普通文本')) === false)
@@ -4357,6 +4491,8 @@ async function main(): Promise<void> {
   testMove()
   testNodeDrag()
   testMisc()
+  testTypedChar()
+  testViewLock()
   testSnapshot()
   testRichText()
   testTheme()

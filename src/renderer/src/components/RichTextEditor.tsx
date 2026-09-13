@@ -7,14 +7,25 @@ import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
 import { readFormatState, useFormatStore } from '../editor/formatStore'
+import { takeTypedChar } from '../editor/typedChar'
 
 export interface RichTextEditorProps {
   node: NodeLayout
   rich: RichText
   onChange(rich: RichText): void
   onCancel(): void
+  /** 提交本次编辑并退出（编辑中按 `Enter`）：**不**顺便新建同级主题 */
+  onCommit(): void
   onAddChild(): void
   onAddSibling(): void
+  /**
+   * 在**空主题**里按方向键：退出编辑并移动到相邻主题。
+   *
+   * 刚用 `Tab` / `Enter` 建出来的主题是空的，此时按方向键若只是让光标在空段里挪，
+   * 用户看到的就是"方向键失灵"。空主题本来也没有"段落内导航"可言，
+   * 所以直接把这次按键交给选择导航（与 Xmind 的手感一致）。
+   */
+  onNavigate(key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'): void
 }
 
 export default function RichTextEditor(props: RichTextEditorProps): ReactElement {
@@ -48,7 +59,7 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     shouldRerenderOnTransaction: true,
     editorProps: {
       attributes: { class: 'rich-editor__content', spellcheck: 'false' },
-      handleKeyDown: (_view, event) => {
+      handleKeyDown: (view, event) => {
         // 中文输入法组词期间的按键交还输入法
         if (event.isComposing || event.keyCode === 229) return false
 
@@ -63,10 +74,33 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
           handlers.current.onAddChild()
           return true
         }
-        // 与 Xmind 一致：Enter 新建同级主题；Shift+Enter 在段内换行
+        // Enter：**只提交并退出编辑**，不顺便新建同级主题（想接着建，再按一次 Enter 即可，
+        // 那时已不在编辑态，走的是"添加同级主题"）。Shift+Enter 仍是在段内换行。
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault()
-          handlers.current.onAddSibling()
+          handlers.current.onCommit()
+          return true
+        }
+
+        // 空主题上的方向键 = 退出编辑并移动选择（见 RichTextEditorProps.onNavigate）
+        const arrow =
+          event.key === 'ArrowUp' ||
+          event.key === 'ArrowDown' ||
+          event.key === 'ArrowLeft' ||
+          event.key === 'ArrowRight'
+            ? event.key
+            : null
+        if (
+          arrow &&
+          !event.shiftKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          view.state.doc.childCount <= 1 &&
+          view.state.doc.textContent === ''
+        ) {
+          event.preventDefault()
+          handlers.current.onNavigate(arrow)
           return true
         }
         return false
@@ -90,6 +124,62 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     setState(readFormatState(editor))
     return () => setEditor(null)
   }, [editor, setEditor, setState])
+
+  useEffect(() => {
+    if (!editor) return
+    // 进入编辑时把光标放到**末尾**：从「选中主题后直接打字」进来时，
+    // 刚敲的那个字符就接在末尾，光标自然也该在末尾（否则会"打在别处"的错觉）。
+    editor.commands.focus('end')
+
+    /**
+     * 「选中后直接打字」那一下塞进来的字符是**可让位**的。
+     *
+     * 中文输入法组词时，拼音的第一个字母（比如 `wo` 的 `w`）会先来一个看不出任何
+     * 组词迹象的 keydown，我们据此把 `w` 写进了节点；紧接着输入法才 `compositionstart`。
+     * 不处理的话，用户就会在空白框里看到一个凭空多出来的 `w`。
+     *
+     * 处理办法：
+     * - 组词一开始，就把那个字符**选起来**——输入法的组词会直接替换掉它，
+     *   文档不动（不打断正在进行的组词）；
+     * - 组词结束时它若还赖着没被替换（有的输入法不替换选区），再兜底删掉。
+     *
+     * 判断依据是"那个区间里还是不是当初那个字符"：用户只要自己改过文本，区间对不上，
+     * 我们就绝不插手——宁可留着一个字符，也不能误删用户刚打的东西。
+     */
+    const injected = takeTypedChar(node.id)
+    if (!injected) return
+    const view = editor.view
+    const dom = view.dom
+    const rangeOf = (): { from: number; to: number } | null => {
+      const to = editor.state.doc.content.size - 1
+      const from = to - injected.length
+      if (from < 0) return null
+      if (editor.state.doc.textBetween(from, to) !== injected) return null
+      return { from, to }
+    }
+    if (!rangeOf()) return
+
+    const onCompositionStart = (): void => {
+      const range = rangeOf()
+      if (!range) return
+      editor.commands.setTextSelection(range)
+    }
+    const onCompositionEnd = (): void => {
+      window.setTimeout(() => {
+        if (editor.isDestroyed) return
+        const range = rangeOf()
+        if (!range) return
+        editor.commands.deleteRange(range)
+      }, 0)
+    }
+
+    dom.addEventListener('compositionstart', onCompositionStart, true)
+    dom.addEventListener('compositionend', onCompositionEnd, true)
+    return () => {
+      dom.removeEventListener('compositionstart', onCompositionStart, true)
+      dom.removeEventListener('compositionend', onCompositionEnd, true)
+    }
+  }, [editor, node.id])
 
   return (
     <div

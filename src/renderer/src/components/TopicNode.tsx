@@ -41,8 +41,15 @@ export interface TopicNodeProps {
   onDoubleClick: (id: string) => void
   onRichChange: (id: string, rich: RichText) => void
   onCancelEdit: () => void
+  /** 提交编辑并退出（编辑中按 Enter）——只退出，不新建 */
+  onCommitEdit: () => void
   onCommitAndAddChild: () => void
   onCommitAndAddSibling: () => void
+  /**
+   * 空主题里按方向键：交给上层「提交本次编辑 + 移动选择」。
+   * 不做这件事的话，刚建出来的空节点上按方向键会"像失灵一样"毫无反应。
+   */
+  onNavigateEdit: (key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight') => void
   onToggleCollapse: (id: string) => void
 }
 
@@ -79,8 +86,10 @@ function TopicNodeInner({
   onDoubleClick,
   onRichChange,
   onCancelEdit,
+  onCommitEdit,
   onCommitAndAddChild,
   onCommitAndAddSibling,
+  onNavigateEdit,
   onToggleCollapse
 }: TopicNodeProps): ReactElement {
   const visual = visualFor(colors, node, layout)
@@ -166,8 +175,10 @@ function TopicNodeInner({
           rich={editingRich ?? node.topic.titleRich ?? richFromPlain(node.topic.title)}
           onChange={(rich) => onRichChange(node.id, rich)}
           onCancel={onCancelEdit}
+          onCommit={onCommitEdit}
           onAddChild={onCommitAndAddChild}
           onAddSibling={onCommitAndAddSibling}
+          onNavigate={onNavigateEdit}
         />
       ) : (
         <div className="topic__text">

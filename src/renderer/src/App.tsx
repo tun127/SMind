@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import type { OpenResult, RecoveryInfo } from '@shared/ipc'
 import type { OutlineFormat } from '@shared/outline'
-import { activeRoot, findParent, findTopic } from '@shared/model/tree'
+import { activeRoot } from '@shared/model/tree'
 import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
 import { parseMarkdownOutline } from '@shared/import/markdown'
 import { parseOpmlOutline } from '@shared/import/opml'
@@ -20,6 +20,7 @@ import AiSettingsDialog from './components/AiSettingsDialog'
 import ExportDialog from './components/ExportDialog'
 import HistoryDialog from './components/HistoryDialog'
 import { viewportActions } from './render/viewport'
+import { stageTypedChar } from './editor/typedChar'
 import { snapshotForSave, useEditor } from './store/editor'
 
 function fileNameOf(path: string | null): string | null {
@@ -327,6 +328,12 @@ export default function App(): ReactElement {
         case 'view:fit':
           viewportActions.fit()
           break
+        case 'view:lock':
+          // 视角锁定：开着的时候视角始终把选中的主题按在视口正中
+          showToast(
+            store.toggleViewLock() ? '视角锁定：已开启，视角会跟住选中的主题' : '视角锁定：已关闭'
+          )
+          break
         case 'help:shortcuts':
           setShowShortcuts(true)
           break
@@ -359,7 +366,16 @@ export default function App(): ReactElement {
       }
     })
     return off
-  }, [guard, newDocument, openDocument, saveDocument, importTheme, importOutlineFile, exportOutlineAs])
+  }, [
+    guard,
+    newDocument,
+    openDocument,
+    saveDocument,
+    importTheme,
+    importOutlineFile,
+    exportOutlineAs,
+    showToast
+  ])
 
   /* ------------------------------------------------------------------ */
   /* 关闭窗口                                                            */
@@ -475,28 +491,9 @@ export default function App(): ReactElement {
   /* ------------------------------------------------------------------ */
 
   useEffect(() => {
-    const navigate = (key: string, selectedId: string | undefined): void => {
-      const store = useEditor.getState()
-      const root = activeRoot(store.workbook)
-      const currentId = selectedId ?? root.id
-      if (key === 'ArrowLeft') {
-        const parent = findParent(root, currentId)
-        if (parent) store.select(parent.id)
-        return
-      }
-      if (key === 'ArrowRight') {
-        const node = findTopic(root, currentId)
-        if (node && node.children.length > 0) store.select(node.children[0].id)
-        return
-      }
-      const parent = findParent(root, currentId) ?? root
-      const index = parent.children.findIndex((c) => c.id === currentId)
-      if (index < 0) return
-      const nextIndex = key === 'ArrowUp' ? index - 1 : index + 1
-      if (nextIndex >= 0 && nextIndex < parent.children.length) store.select(parent.children[nextIndex].id)
-    }
-
     const onKeyDown = (e: KeyboardEvent): void => {
+      // 已经被内层处理掉的按键不再重复处理（例如富文本编辑器自己的快捷键）
+      if (e.defaultPrevented) return
       // 输入法组词过程中的按键交给输入法处理
       if (e.isComposing || e.keyCode === 229) return
 
@@ -513,6 +510,13 @@ export default function App(): ReactElement {
 
       const store = useEditor.getState()
       const selectedId = store.selection[0]
+
+      /**
+       * 仍在编辑态时（焦点可能因为点了底部格式栏而离开编辑器），**单键动作一律不接管**：
+       * 否则"想输入空格"会被当成折叠主题、想输入字符会被当成删除/新建节点。
+       * Ctrl 组合键（保存、撤销、搜索…）照旧放行。
+       */
+      if (store.editingId && !(e.ctrlKey || e.metaKey)) return
 
       // Alt+↑ / ↓：同级上移 / 下移（知犀的写法，和 Ctrl+Shift+方向键等价）
       if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
@@ -540,7 +544,13 @@ export default function App(): ReactElement {
           // Ctrl+F：打开搜索面板（与 Xmind 一致）
           e.preventDefault()
           setSidePanel('search')
+        } else if (e.key === '/') {
+          // Ctrl+/：折叠 / 展开。空格已经让给"直接输入空格"（选中后直接打字即进入编辑）
+          e.preventDefault()
+          if (selectedId) store.toggleCollapse(selectedId)
         } else if (
+          // 编辑态里 Ctrl+Shift+方向键交给浏览器/编辑器（选词），不要去挪节点
+          !store.editingId &&
           e.shiftKey &&
           (e.key === 'ArrowUp' ||
             e.key === 'ArrowDown' ||
@@ -576,20 +586,33 @@ export default function App(): ReactElement {
           e.preventDefault()
           store.deleteSelection()
           break
-        case ' ':
-          if (selectedId) {
-            e.preventDefault()
-            store.toggleCollapse(selectedId)
-          }
-          break
         case 'ArrowUp':
         case 'ArrowDown':
         case 'ArrowLeft':
         case 'ArrowRight':
           e.preventDefault()
-          navigate(e.key, selectedId)
+          store.navigateSelection(e.key)
           break
         default:
+          /**
+           * 选中主题后**直接打字就进入编辑**（Xmind 的手感）。
+           *
+           * 两条防呆：
+           * 1. 空格只用来"进入编辑"，**不落字**——输入法用空格选词、用户也可能只是
+           *    习惯性按一下，在空白框里留下一个前导空格没有任何意义；
+           * 2. 其它字符落字后**寄存**一笔（`stageTypedChar`）：它可能只是拼音的第一个
+           *    字母（输入法组词时的第一个 keydown 完全看不出组词迹象），
+           *    编辑器发现真正的组词开始后会把这个字符让给输入法，避免空框里冒出 `w` 这种怪字符。
+           */
+          if (selectedId && !e.altKey && e.key.length === 1) {
+            e.preventDefault()
+            if (e.key === ' ') {
+              store.beginEdit(selectedId)
+            } else {
+              store.beginEdit(selectedId, e.key)
+              stageTypedChar(selectedId, e.key)
+            }
+          }
           break
       }
     }

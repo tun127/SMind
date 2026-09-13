@@ -1,6 +1,6 @@
 {
   "name": "mind",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Mind —— 本地思维导图软件（对标 Xmind）",
   "author": "Mind",
   "main": "./out/main/index.js",

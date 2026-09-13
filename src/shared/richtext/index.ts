@@ -31,6 +31,21 @@ export function richFromPlain(text: string): RichText {
   }
 }
 
+/**
+ * 把一段文本**接到富文本末尾**（用于「选中主题后直接打字就进入编辑」）。
+ *
+ * 刻意**不覆盖**原有文字：误按一个字母就把整句标题冲掉太危险，所以是追加。
+ * 追加的 run 不带任何格式，避免凭空继承上一段的加粗 / 颜色。
+ */
+export function appendToRich(rich: RichText, text: string): RichText {
+  const paragraphs =
+    rich.paragraphs.length > 0
+      ? rich.paragraphs.map((paragraph) => ({ ...paragraph, runs: [...paragraph.runs] }))
+      : [{ runs: [] }]
+  paragraphs[paragraphs.length - 1].runs.push({ text })
+  return { paragraphs }
+}
+
 export function paragraphText(paragraph: RichTextParagraph): string {
   return paragraph.runs.map((run) => run.text).join('')
 }

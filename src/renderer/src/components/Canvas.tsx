@@ -101,6 +101,7 @@ export default function Canvas(): ReactElement {
   const docSeq = useEditor((s) => s.docSeq)
   const zoom = useEditor((s) => s.zoom)
   const pan = useEditor((s) => s.pan)
+  const viewLock = useEditor((s) => s.viewLock)
   const selection = useEditor((s) => s.selection)
   const editingId = useEditor((s) => s.editingId)
   const editingText = useEditor((s) => s.editingText)
@@ -431,6 +432,92 @@ export default function Canvas(): ReactElement {
     const frame = window.requestAnimationFrame(() => viewportActions.ensureVisible(target))
     return () => window.cancelAnimationFrame(frame)
   }, [editingId])
+
+  /**
+   * 视角锁定要盯住的那个主题。
+   *
+   * - 选择为空（点了画布空白处）→ 什么都不跟，镜头留给用户自己摆；
+   * - 选择指向一个**已经不存在的主题**（刚删完、撤销回到另一个版本）→ 退回中心主题，
+   *   而不是"盯不到就彻底不动"——那正是用户看到的「删除后视角不跟随」；
+   * - 其余情况就是当前选中的主题。
+   */
+  const focusId = useMemo(() => {
+    if (selection.length === 0) return ''
+    const rootTopic = activeRoot(workbook)
+    const picked = selection[0]
+    return picked && findTopic(rootTopic, picked) ? picked : rootTopic.id
+  }, [selection, workbook])
+
+  /**
+   * 被盯住的主题在布局里的**位置与尺寸**（拼成字符串，方便直接当依赖）。
+   *
+   * 用它而不是"布局对象变了"来驱动镜头：删掉一整条主题、改文字让节点变大变小、
+   * 拖拽重排、撤销重做……只要**被选中的主题自己动了**，镜头就跟上；
+   * 跟它无关的布局变化（别的分支在动）则不会带着镜头乱跑。
+   */
+  const focusKey = useMemo(() => {
+    if (!focusId) return ''
+    const node = layout.nodeMap.get(focusId)
+    if (!node) return `${focusId}|?`
+    return (
+      `${focusId}|${Math.round(node.x)},${Math.round(node.y)},` +
+      `${Math.round(node.width)},${Math.round(node.height)}`
+    )
+  }, [focusId, layout])
+
+  /* ---- 视角锁定：把选中的主题稳稳按在视口中央 ---- */
+  useEffect(() => {
+    // 正在拖主题时不跟：镜头要是同时在移，指针下的画面会跟着滑，落点就抓不准了。
+    // 松手（dragVisual 归零）后视野再咬住它。
+    if (!viewLock || dragVisual || !focusId || !focusKey) return
+    const id = focusId
+    const el = containerRef.current
+    if (!el) return
+    if (el.clientWidth === 0 || el.clientHeight === 0) return
+
+    let raf = 0
+    /** 目标一时还没出现在布局里（刚删完、刚打开）就先等几帧，别急着放弃 */
+    let misses = 0
+
+    /**
+     * 逐帧向"该有的平移量"收敛，而不是一步跳过去：
+     * 一步到位时整张图会「啪」地闪一下，眼睛跟不住到底是哪个主题被选中了；
+     * 缓动过去才像镜头跟着走。收敛到亚像素就停手，不再空转。
+     *
+     * 依赖里带上 `zoom`：按住 Ctrl 滚轮缩放时视角会钉在选中的主题上（以它为中心缩放），
+     * 而不是把主题缩放跑出屏幕。手动拖动画布则不会触发这里——想让镜头暂停跟随时
+     * 直接拖就是了，下一次选择或位置变化它才重新咬住。
+     */
+    const step = (): void => {
+      const node = layoutRef.current?.nodeMap.get(id)
+      const width = el.clientWidth
+      const height = el.clientHeight
+      if (width === 0 || height === 0) return
+      if (!node) {
+        if (misses < 30) {
+          misses += 1
+          raf = window.requestAnimationFrame(step)
+        }
+        return
+      }
+      const z = zoomRef.current
+      const wantX = width / 2 - (node.x + node.width / 2) * z
+      const wantY = height / 2 - (node.y + node.height / 2) * z
+      const current = panRef.current
+      const dx = wantX - current.x
+      const dy = wantY - current.y
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+        setPan({ x: wantX, y: wantY })
+        return
+      }
+      setPan({ x: current.x + dx * 0.22, y: current.y + dy * 0.22 })
+      raf = window.requestAnimationFrame(step)
+    }
+
+    raf = window.requestAnimationFrame(step)
+    return () => window.cancelAnimationFrame(raf)
+    // focusKey 里已经含了被盯主题的 id 与几何，用它做依赖即可（不写进函数体会被 lint 挑刺）
+  }, [viewLock, dragVisual, focusId, focusKey, zoom, size.width, size.height, setPan])
 
   /* ---- 新文档打开后居中 ---- */
   const centeredSeqRef = useRef(-1)
@@ -1630,8 +1717,15 @@ export default function Canvas(): ReactElement {
               if (store.editingId === id) store.updateEditingRich(rich)
             }}
             onCancelEdit={() => useEditor.getState().cancelEdit()}
+            onCommitEdit={() => useEditor.getState().commitEdit()}
             onCommitAndAddChild={() => useEditor.getState().commitAndAddChild()}
             onCommitAndAddSibling={() => useEditor.getState().commitAndAddSibling()}
+            onNavigateEdit={(key) => {
+              // 空主题上的方向键：先提交（空内容不会进撤销栈），再移动选择
+              const store = useEditor.getState()
+              if (store.editingId) store.commitEdit()
+              store.navigateSelection(key)
+            }}
             onToggleCollapse={(id) => useEditor.getState().toggleCollapse(id)}
           />
         ))}

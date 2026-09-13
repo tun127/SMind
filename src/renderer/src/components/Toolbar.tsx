@@ -5,6 +5,7 @@ import {
   Braces,
   ChevronDown,
   CircleHelp,
+  Crosshair,
   FileInput,
   FileOutput,
   FilePlus,
@@ -197,6 +198,7 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
   const zoom = useEditor((s) => s.zoom)
+  const viewLock = useEditor((s) => s.viewLock)
   const canUndo = useEditor((s) => s.undoStack.length > 0)
   const canRedo = useEditor((s) => s.redoStack.length > 0)
 
@@ -535,6 +537,18 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         </button>
         <button type="button" className="tool-btn" title="适应画布 (Ctrl+1)" onClick={() => viewportActions.fit()}>
           <Maximize size={17} />
+        </button>
+        <button
+          type="button"
+          className={viewLock ? 'tool-btn tool-btn--active' : 'tool-btn'}
+          title={
+            viewLock
+              ? '视角锁定：视角正跟住选中的主题（再点一次取消，Ctrl+Shift+L）'
+              : '视角锁定：让视角始终跟住选中的主题（Ctrl+Shift+L）'
+          }
+          onClick={() => store().toggleViewLock()}
+        >
+          <Crosshair size={17} />
         </button>
       </div>
 
