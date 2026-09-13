@@ -1388,6 +1388,8 @@ textarea {
 .topic__editor {
   position: relative;
   width: 100%;
+  /* 允许在节点宽度内收缩：否则 flex 子项的 min-width:auto 会把节点撑破（见下方说明） */
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1397,9 +1399,16 @@ textarea {
 .rich-editor__content {
   position: relative;
   width: 100%;
+  /* 关键：flex 子项默认 min-width:auto，下限是"最长不可断片段"，
+     一串没有空格的 `aaaa…` / 长 URL 会据此把节点撑破、文字排成一条长线，
+     看上去就是「输入时不换行、按 Enter 提交后才换行」。这两行让它能在节点宽度内断行。 */
+  min-width: 0;
   outline: none;
   /* ProseMirror 的基础排版要求，缺了会导致换行与光标定位异常 */
   white-space: pre-wrap;
+  /* anywhere 与 break-word 的区别：anywhere 会参与"最小内容宽度"计算，
+     所以长串无空格文字才会真的在容器内断行 */
+  overflow-wrap: anywhere;
   word-wrap: break-word;
   user-select: text;
   -webkit-user-select: text;
