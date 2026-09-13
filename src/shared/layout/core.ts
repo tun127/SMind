@@ -8,7 +8,8 @@
  * 这样拆分的原因是连线是 SVG path 字符串，无法随坐标平移，
  * 必须在最终坐标确定后再生成，才能避免反复换算偏移量。
  */
-import type { Topic } from '../model/types'
+import type { StructureClass, Topic } from '../model/types'
+import { DEFAULT_STRUCTURE, getStructureDef } from '../xmind/constants'
 import type {
   Decoration,
   EdgeLayout,
@@ -89,6 +90,8 @@ export class LayoutBuilder {
   private readonly sizes = new Map<string, MeasureResult>()
   private readonly verticalCache = new Map<string, number>()
   private readonly horizontalCache = new Map<string, number>()
+  private readonly subtreeExtentCache = new Map<string, { width: number; height: number }>()
+  private readonly finishHooks: Array<(result: LayoutResult) => void> = []
 
   constructor(
     private readonly measure: MeasureFn,
@@ -190,6 +193,65 @@ export class LayoutBuilder {
     return total
   }
 
+  /** 注册一个「坐标归一化之后」执行的钩子：嵌套结构的装饰与连线要在最终坐标上补画 */
+  onFinish(hook: (result: LayoutResult) => void): void {
+    this.finishHooks.push(hook)
+  }
+
+  /**
+   * 家族感知的子树占用：按 topic 声明的结构家族计算宽高。
+   *
+   * 与 verticalExtent / horizontalExtent 的区别：当分支自己声明了不同结构时，
+   * 它的子树可能是横向铺行（组织架构图）或沿主脊展开（鱼骨图），
+   * 占用不能再套用「垂直堆叠」的公式——否则兄弟分支会与它重叠。
+   *
+   * @param cls 从父链继承下来的有效结构（topic 自己的 structureClass 优先）
+   */
+  subtreeExtent(topic: Topic, cls: StructureClass | undefined): { width: number; height: number } {
+    const key = topic.id + '\u0000' + (cls ?? '')
+    const cached = this.subtreeExtentCache.get(key)
+    if (cached) return cached
+
+    const effective = topic.structureClass ?? cls ?? DEFAULT_STRUCTURE
+    const family = getStructureDef(effective).family
+    const size = this.size(topic.id)
+    const kids = this.visibleChildren(topic)
+
+    let extent: { width: number; height: number }
+    if (kids.length === 0) {
+      extent = { width: size.width, height: size.height }
+    } else if (family === 'orgchart') {
+      // 横向铺行：宽 = 各子树宽之和；高 = 自身 + 一行里最高的子树
+      let width = 0
+      let childHeight = 0
+      kids.forEach((child, index) => {
+        width += this.horizontalExtent(child) + (index > 0 ? this.gapX : 0)
+        childHeight = Math.max(childHeight, this.subtreeExtent(child, effective).height)
+      })
+      extent = { width: Math.max(size.width, width), height: size.height + this.gapY + childHeight }
+    } else if (family === 'fishbone') {
+      // 沿主脊向右展开：宽 = 自身 + 各分支横向占用；高 = 上下骨刺 + 最深一列
+      const boneOffset = Math.max(size.height / 2 + this.gapY * 3, 46)
+      let width = size.width + this.gapX * 2
+      let columnHeight = 0
+      for (const child of kids) {
+        width += this.horizontalExtent(child) + this.gapX
+        columnHeight = Math.max(columnHeight, this.verticalExtent(child))
+      }
+      extent = { width, height: size.height + boneOffset * 2 + columnHeight + this.gapY * 2 }
+    } else {
+      // 垂直堆叠家族（以及暂不支持的家族按逻辑图回落）
+      let height = 0
+      kids.forEach((child, index) => {
+        height += this.subtreeExtent(child, effective).height + (index > 0 ? this.gapY : 0)
+      })
+      extent = { width: size.width, height: Math.max(size.height, height) }
+    }
+
+    this.subtreeExtentCache.set(key, extent)
+    return extent
+  }
+
   /** 归一化坐标、计算边界与分支配色索引 */
   finish(root: Topic): LayoutResult {
     let minX = Number.POSITIVE_INFINITY
@@ -233,7 +295,7 @@ export class LayoutBuilder {
       mark(child)
     })
 
-    return {
+    const result: LayoutResult = {
       nodes: this.nodes,
       nodeMap: this.nodeMap,
       edges: [],
@@ -244,6 +306,9 @@ export class LayoutBuilder {
       boundaries: [],
       summaries: []
     }
+    // 嵌套结构（如分支上的鱼骨图）的主脊、骨刺要在最终坐标上补画
+    for (const hook of this.finishHooks) hook(result)
+    return result
   }
 }
 

@@ -6,10 +6,11 @@
  *  - 是否用括号等装饰（括号图）
  *  - x 坐标是相对父节点还是按层级对齐（树状表格）
  */
-import type { Topic } from '../model/types'
+import type { StructureClass, Topic } from '../model/types'
 import { TOPIC_SIDE_KEY } from '../xmind/constants'
 import type { LayoutResult, MeasureResult, NodeLayout } from './types'
 import { LayoutBuilder, addDecoration, addEdge, bracePath, connectTree, horizontalAnchors, round } from './core'
+import { anchorsForChild, declaresOwnStructure, placeSubtree } from './subtree'
 
 export type XResolver = (
   child: Topic,
@@ -26,31 +27,42 @@ export function placeVerticalChildren(
   kids: Topic[],
   dir: 1 | -1,
   depth: number,
-  xResolver?: XResolver
+  xResolver?: XResolver,
+  inherited?: StructureClass
 ): void {
   if (kids.length === 0) return
 
   let total = 0
   for (let i = 0; i < kids.length; i += 1) {
-    total += builder.verticalExtent(kids[i]) + (i > 0 ? builder.gapY : 0)
+    total += builder.subtreeExtent(kids[i], inherited).height + (i > 0 ? builder.gapY : 0)
   }
 
   let cursor = parentNode.y + parentNode.height / 2 - total / 2
   for (const child of kids) {
-    const extent = builder.verticalExtent(child)
+    const extent = builder.subtreeExtent(child, inherited).height
     const size = builder.size(child.id)
     const centerY = cursor + extent / 2
     const defaultX =
       dir === 1 ? parentNode.x + parentNode.width + builder.gapX : parentNode.x - builder.gapX - size.width
     const x = xResolver ? xResolver(child, size, parentNode, dir, depth) : defaultX
-    const node = builder.add(
-      child,
-      x + (child.position?.x ?? 0),
-      centerY - size.height / 2 + (child.position?.y ?? 0),
-      depth,
-      dir === 1 ? 'right' : 'left'
-    )
-    placeVerticalChildren(builder, node, builder.visibleChildren(child), dir, depth + 1, xResolver)
+    const px = x + (child.position?.x ?? 0)
+    const py = centerY - size.height / 2 + (child.position?.y ?? 0)
+
+    // 分支自己声明了别的结构 → 这棵子树交给对应家族去排
+    if (declaresOwnStructure(builder, child, inherited)) {
+      placeSubtree(builder, child, px, py, depth, dir === 1 ? 'right' : 'left', inherited)
+    } else {
+      const node = builder.add(child, px, py, depth, dir === 1 ? 'right' : 'left')
+      placeVerticalChildren(
+        builder,
+        node,
+        builder.visibleChildren(child),
+        dir,
+        depth + 1,
+        xResolver,
+        inherited
+      )
+    }
     cursor += extent + builder.gapY
   }
 }
@@ -123,23 +135,30 @@ export function layoutMindmap(root: Topic, builder: LayoutBuilder): LayoutResult
     else if (index % 2 === 0) rightSet.add(topic.id)
   })
 
+  const inherited = root.structureClass
   placeVerticalChildren(
     builder,
     rootNode,
     entries.filter((topic) => rightSet.has(topic.id)),
     1,
-    1
+    1,
+    undefined,
+    inherited
   )
   placeVerticalChildren(
     builder,
     rootNode,
     entries.filter((topic) => !rightSet.has(topic.id)),
     -1,
-    1
+    1,
+    undefined,
+    inherited
   )
 
   const result = builder.finish(root)
-  connectTree(result, root, 'bezier', horizontalAnchors)
+  connectTree(result, root, 'bezier', (parent, child) =>
+    anchorsForChild(parent, child, horizontalAnchors(parent, child))
+  )
   return result
 }
 
@@ -147,9 +166,19 @@ export function layoutMindmap(root: Topic, builder: LayoutBuilder): LayoutResult
 export function layoutLogic(root: Topic, builder: LayoutBuilder, dir: 1 | -1): LayoutResult {
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
-  placeVerticalChildren(builder, rootNode, builder.visibleChildren(root), dir, 1)
+  placeVerticalChildren(
+    builder,
+    rootNode,
+    builder.visibleChildren(root),
+    dir,
+    1,
+    undefined,
+    root.structureClass
+  )
   const result = builder.finish(root)
-  connectTree(result, root, 'bezier', horizontalAnchors)
+  connectTree(result, root, 'bezier', (parent, child) =>
+    anchorsForChild(parent, child, horizontalAnchors(parent, child))
+  )
   return result
 }
 
@@ -157,9 +186,19 @@ export function layoutLogic(root: Topic, builder: LayoutBuilder, dir: 1 | -1): L
 export function layoutTree(root: Topic, builder: LayoutBuilder, dir: 1 | -1): LayoutResult {
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
-  placeVerticalChildren(builder, rootNode, builder.visibleChildren(root), dir, 1)
+  placeVerticalChildren(
+    builder,
+    rootNode,
+    builder.visibleChildren(root),
+    dir,
+    1,
+    undefined,
+    root.structureClass
+  )
   const result = builder.finish(root)
-  connectTree(result, root, 'elbow-h', horizontalAnchors)
+  connectTree(result, root, 'elbow-h', (parent, child) =>
+    anchorsForChild(parent, child, horizontalAnchors(parent, child))
+  )
   return result
 }
 
@@ -170,7 +209,15 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
 
   const resolver: XResolver = (_child, _size, parentNode) => parentNode.x + parentNode.width + lead * 2
-  placeVerticalChildren(builder, rootNode, builder.visibleChildren(root), 1, 1, resolver)
+  placeVerticalChildren(
+    builder,
+    rootNode,
+    builder.visibleChildren(root),
+    1,
+    1,
+    resolver,
+    root.structureClass
+  )
 
   const result = builder.finish(root)
 
@@ -231,10 +278,20 @@ export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutRe
   const rootNode = builder.add(root, colX[0] ?? 0, -rootSize.height / 2, 0, 'root')
 
   const resolver: XResolver = (_child, _size, _parent, _dir, depth) => colX[depth] ?? 0
-  placeVerticalChildren(builder, rootNode, builder.visibleChildren(root), 1, 1, resolver)
+  placeVerticalChildren(
+    builder,
+    rootNode,
+    builder.visibleChildren(root),
+    1,
+    1,
+    resolver,
+    root.structureClass
+  )
 
   const result = builder.finish(root)
   // 表格用直角横线连接，接近表格的行列感
-  connectTree(result, root, 'line', horizontalAnchors)
+  connectTree(result, root, 'line', (parent, child) =>
+    anchorsForChild(parent, child, horizontalAnchors(parent, child))
+  )
   return result
 }

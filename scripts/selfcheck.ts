@@ -1213,6 +1213,53 @@ function testTypedChar(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 8.5e 分支级结构：分支自己声明的结构要真正生效                        */
+/* ------------------------------------------------------------------ */
+
+function testBranchStructure(): void {
+  group('分支级结构')
+  reset()
+  const rootId = root().id
+  const a = addChildOf(rootId, '逻辑分支')
+  const b = addChildOf(rootId, '组织分支')
+  const c = addChildOf(rootId, '鱼骨分支')
+  const a1 = addChildOf(a, '甲')
+  const b1 = addChildOf(b, '乙一')
+  const b2 = addChildOf(b, '乙二')
+  const c1 = addChildOf(c, '丙一')
+  const c2 = addChildOf(c, '丙二')
+
+  store().setStructure('org.xmind.ui.logic.right', rootId)
+  store().setStructure('org.xmind.ui.org-chart.down', b)
+  store().setStructure('org.xmind.ui.fishbone.leftHeaded', c)
+
+  const layout = layoutSheet(root(), fakeMeasure)
+  const boxA = layout.nodeMap.get(a)!
+  const boxB = layout.nodeMap.get(b)!
+  const boxC = layout.nodeMap.get(c)!
+  const nodeA1 = layout.nodeMap.get(a1)!
+  const nodeB1 = layout.nodeMap.get(b1)!
+  const nodeB2 = layout.nodeMap.get(b2)!
+  const nodeC1 = layout.nodeMap.get(c1)!
+  const nodeC2 = layout.nodeMap.get(c2)!
+
+  const mine = [rootId, a, b, c, a1, b1, b2, c1, c2]
+  check(
+    '新建的主题都进了布局',
+    mine.every((id) => layout.nodeMap.has(id)),
+    String(layout.nodes.length) + ' 个节点'
+  )
+  check('没声明结构的分支：子节点仍在右侧', nodeA1.x > boxA.x + boxA.width - 1)
+  check('组织架构分支：子节点排到下方', nodeB1.y > boxB.y + boxB.height - 1)
+  check('组织架构分支：两个子节点同排', Math.abs(nodeB1.y - nodeB2.y) < 2)
+  check(
+    '鱼骨分支：子节点分居主脊上下',
+    nodeC1.y < boxC.y && nodeC2.y > boxC.y,
+    `${Math.round(nodeC1.y)} / ${Math.round(nodeC2.y)} vs ${Math.round(boxC.y)}`
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* 8.5d 「从文件管理器打开」：命令行参数识别                             */
 /* ------------------------------------------------------------------ */
 
@@ -4520,6 +4567,7 @@ async function main(): Promise<void> {
   testNodeDrag()
   testMisc()
   testTypedChar()
+  testBranchStructure()
   testPickDocumentArg()
   testViewLock()
   testSnapshot()
