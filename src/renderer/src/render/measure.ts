@@ -18,8 +18,9 @@ export const FONT_FAMILY =
 export const NODE_FONT_SIZES = [19, 15, 14] as const
 const NODE_FONT_WEIGHTS = [700, 600, 500] as const
 
-const TEXT_MAX_ROOT = 320
-const TEXT_MAX = 240
+/** 文字宽度上限（中心主题更宽）。导出给编辑态用：编辑区的宽度必须与这里一致，断行位置才对得上 */
+export const TEXT_MAX_ROOT = 320
+export const TEXT_MAX = 240
 const MIN_WIDTH_ROOT = 120
 const MIN_WIDTH = 76
 const PADDING_X_ROOT = 24

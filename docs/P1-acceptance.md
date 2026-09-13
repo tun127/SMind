@@ -1120,7 +1120,31 @@ TXT：                    Markdown：                    OPML：
 | `typecheck` / `selfcheck` / `verify` | 零错误 / **1159 项断言全绿** / 全部样本往返一致 |
 | `app.asar`（5.52 MB） | `package.json`、`out/main`、`out/preload`、`out/renderer`、被外部化的 **`jszip`** 全部在包内 ✅ |
 
-> `release/` 现在有 `0.1.0` / `0.1.1` / `0.2.0` / `0.2.1` 四个版本；确认 0.2.1 好用后建议只留这一版。
+> `release/` 当时并存 `0.1.0` / `0.1.1` / `0.2.0` / `0.2.1` 四版；**发布 0.2.2 时已统一清理，只留最新版**。
+
+### 复打（2026-09-13）：版本升到 0.2.2
+
+4.26 的**第二版修法**（给编辑区写死像素宽度）落地后重新打包。0.2.1 那版只改了 CSS，收不住
+Tiptap 的 `EditorContent` 多出来的一层 `div`，所以这次是**必须重打**的一次：
+
+| 产物 | 路径 | 体积 |
+|---|---|---|
+| 安装版（NSIS） | `release/Mind-0.2.2-x64-setup.exe` | 107.7 MB |
+| 免安装版（绿色版） | `release/Mind-0.2.2-x64-portable.exe` | 107.5 MB |
+| 免安装目录形态 | `release/win-unpacked/Mind.exe` | 版本元数据 `0.2.2` ✅ |
+
+`CREATOR`（写进 `.xmind` 的生成者标记）与 `distribution.md` 里的文件名同步到 0.2.2；
+README 补了「长文本自动折行」的宽度上限说明（普通主题 **240px** / 中心主题 **320px**）。
+
+交付前核对（本次实测）：
+
+| 检查项 | 结果 |
+|---|---|
+| `typecheck` / `selfcheck` / `verify` | 零错误 / **1159 项断言全绿** / 全部样本往返一致 |
+| `app.asar`（5.52 MB） | `package.json`、`out/main`、`out/preload`、`out/renderer`、被外部化的 **`jszip`** 全部在包内 ✅ |
+
+**`release/` 已整理**：删掉 `0.1.0` / `0.1.1` / `0.2.0` / `0.2.1` 四版共 12 个文件（约 861 MB），
+现在只剩 `0.2.2` 一套 + `win-unpacked/`，避免发错版本。
 
 ---
 
@@ -1522,23 +1546,32 @@ TXT：                    Markdown：                    OPML：
 
 ### 根因
 
-编辑态的文字由 ProseMirror 直接排版，尺寸全靠 CSS；而 `.topic__editor` / `.rich-editor__content` 都是
-**flex 子项**，flex 子项默认 `min-width: auto`，下限是**最长不可断片段**——一串没有空格的 `aaaa…`（或长 URL）
-于是把内容撑到比节点还宽，浏览器自然就失去了换行的机会。
+编辑态的文字由 ProseMirror 直接排版，尺寸全靠 CSS。从 `.topic__editor` 到内容区，中间每一层都是
+**flex 子项**（Tiptap 的 `EditorContent` 还会再多渲一层无样式的 `div`），而 flex 子项默认
+`min-width: auto`，下限是**最长不可断片段**——一串没有空格的 `aaaa…`（长 URL 同理）把内层顶得比节点还宽，
+浏览器自然就失去了换行的机会。
 
 `word-wrap: break-word`（= `overflow-wrap: break-word`）只决定"怎么断"，**不参与最小内容宽度的计算**，
 所以过去写了也没拦住。提交后走的是另一条路：静态文本用**测量阶段算好的行**（`node.lines` 逐行渲染），
-所以一按 Enter 就"自动换行"了 —— 这正是"输入时不换行、提交才换行"的来源。
+所以一按 `Enter` 就"自动换行"了 —— 这正是"输入时不换行、提交才换行"的来源。
 
-### 怎么修（`styles.css`，纯 CSS）
+### 第一版修法为什么没够（0.2.1 那版）
 
-| 声明 | 作用 |
+只改了 CSS：`.topic__editor` / `.rich-editor__content` 加 `min-width: 0`，内容加 `overflow-wrap: anywhere`。
+它治住了**已知的两层**，但 Tiptap 的 `EditorContent` 会在 `.topic__editor` 里**再包一层 div**
+（见 `@tiptap/react` 的 `EditorContent` 实现：`div` + 把内容搬进去），那一层同样是 flex 子项、
+同样带 `min-width: auto` —— 长串照样把它顶宽，内层于是又变回一条长线。**只靠 CSS 收不住所有中间层。**
+
+### 真正的修法：给编辑区一个确定的像素宽度
+
+| 位置 | 改动 |
 |---|---|
-| `.topic__editor { min-width: 0 }`、`.rich-editor__content { min-width: 0 }` | 让 flex 子项能在节点宽度内收缩，不再被 min-content 顶宽 |
-| `.rich-editor__content { overflow-wrap: anywhere }` | 任意位置可断行，**且参与最小内容宽度计算**（`break-word` 不参与，这就是它过去没生效的原因） |
+| `render/measure.ts` | 把文字宽度上限 `TEXT_MAX_ROOT`(320) / `TEXT_MAX`(240) 导出，编辑态复用同一套常量 |
+| `RichTextEditor.tsx` | 挂载与尺寸变化时把 `editor.view.dom.style.width` 设成 `min(上限, 节点宽度 − 左右内边距) + 1px`（末尾 +1px 是小数宽度的余量，免得最后一个字被挤到下一行） |
+| `styles.css`（0.2.1 那两处保留） | `min-width: 0` + `overflow-wrap: anywhere` 继续兜底：宽度写死之后，超长无空格的串仍需要"任意位置可断" |
 
-节点高度在编辑态本来就是 `height: auto` + `minHeight: 测量值`（见 `TopicNode`），宽度由测量结果给出
-（长文本封顶：普通主题 240、中心主题 320），所以断行之后**边打字边自适应**，与提交后的排版一致。
+宽度用的是与 `measureTopic` **同一个值**，所以**编辑态的断行位置 = 提交后的断行位置**，提交时不会"跳一下"；
+节点高度在编辑态本来就是 `height: auto` + `minHeight: 测量值`（见 `TopicNode`），于是真正做到**边打字边换行、边变高**。
 
 ### 怎么验收
 

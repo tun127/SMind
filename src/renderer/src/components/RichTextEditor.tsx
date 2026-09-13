@@ -7,6 +7,7 @@ import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
 import { readFormatState, useFormatStore } from '../editor/formatStore'
+import { TEXT_MAX, TEXT_MAX_ROOT } from '../render/measure'
 import { takeTypedChar } from '../editor/typedChar'
 
 export interface RichTextEditorProps {
@@ -124,6 +125,27 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     setState(readFormatState(editor))
     return () => setEditor(null)
   }, [editor, setEditor, setState])
+
+  /**
+   * 把编辑区的宽度**写死成测量出来的文字宽度**。
+   *
+   * 为什么非写死不可：从 `.topic__editor` 到内容区，中间每一层都是 flex 子项
+   * （Tiptap 的 `EditorContent` 还会再包一层 div），而 flex 子项的 `min-width: auto`
+   * 以「最长不可断片段」为下限——一串没有空格的 `aaaa…`（长 URL 同理）会把内层顶得比节点还宽，
+   * 文字于是排成一条长线、一路冲出节点外框。只改 CSS 收不住所有中间层（试过，不行）。
+   *
+   * 给了确定宽度还顺带保证**断行位置与 `measureTopic` 一致**（它就是按这个宽度贪心断行的），
+   * 所以编辑态与提交后的排版不会"跳一下"。末尾 +1px 是留给小数宽度的余量，
+   * 免得最后一个字被挤到下一行去。
+   */
+  useEffect(() => {
+    if (!editor) return
+    const cap = node.depth === 0 ? TEXT_MAX_ROOT : TEXT_MAX
+    const textWidth = Math.min(cap, Math.ceil(Math.max(24, node.width - node.paddingX * 2))) + 1
+    const dom = editor.view.dom
+    dom.style.width = `${textWidth}px`
+    dom.style.maxWidth = '100%'
+  }, [editor, node.width, node.paddingX, node.depth])
 
   useEffect(() => {
     if (!editor) return
