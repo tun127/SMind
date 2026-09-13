@@ -580,6 +580,16 @@ export default function App(): ReactElement {
         return
       }
 
+      // Alt+C：给选中主题打开代码块编辑（面板聚焦到代码输入框）
+      if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault()
+        if (selectedId) {
+          setSidePanel('node')
+          useEditor.getState().requestCodeFocus()
+        }
+        return
+      }
+
       if (e.ctrlKey || e.metaKey) {
         const key = e.key.toLowerCase()
         if (key === 'z') {
@@ -765,6 +775,7 @@ export default function App(): ReactElement {
           onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node')),
           onOutline: () => setShowOutline((current) => !current),
           onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
+          onRelayout: () => useEditor.getState().relayoutAll(),
           onExport: () => setShowExport(true),
           onImportTheme: () => void importTheme(),
           onImportMarkdown: () => void importOutlineFile('markdown'),

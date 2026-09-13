@@ -427,11 +427,13 @@ export default function Canvas(): ReactElement {
 
   /* ---- 进入编辑态时保证节点可见（新建主题可能超出视口） ---- */
   useEffect(() => {
-    if (!editingId) return
+    // 视角锁定开着时交给下面的跟随循环处理：它会把编辑中的节点居中，
+    // ensureVisible 只保证可见不居中，两套逻辑同时跑会互相打架
+    if (!editingId || viewLock) return
     const target = editingId
     const frame = window.requestAnimationFrame(() => viewportActions.ensureVisible(target))
     return () => window.cancelAnimationFrame(frame)
-  }, [editingId])
+  }, [editingId, viewLock])
 
   /**
    * 视角锁定要盯住的那个主题。
@@ -478,6 +480,7 @@ export default function Canvas(): ReactElement {
     let raf = 0
     /** 目标一时还没出现在布局里（刚删完、刚打开）就先等几帧，别急着放弃 */
     let misses = 0
+    const MAX_MISSES = 90
 
     /**
      * 逐帧向"该有的平移量"收敛，而不是一步跳过去：
@@ -494,7 +497,7 @@ export default function Canvas(): ReactElement {
       const height = el.clientHeight
       if (width === 0 || height === 0) return
       if (!node) {
-        if (misses < 30) {
+        if (misses < MAX_MISSES) {
           misses += 1
           raf = window.requestAnimationFrame(step)
         }
@@ -517,7 +520,7 @@ export default function Canvas(): ReactElement {
     raf = window.requestAnimationFrame(step)
     return () => window.cancelAnimationFrame(raf)
     // focusKey 里已经含了被盯主题的 id 与几何，用它做依赖即可（不写进函数体会被 lint 挑刺）
-  }, [viewLock, dragVisual, focusId, focusKey, zoom, size.width, size.height, setPan])
+  }, [viewLock, dragVisual, focusId, focusKey, editingId, zoom, size.width, size.height, setPan])
 
   /* ---- 新文档打开后居中 ---- */
   const centeredSeqRef = useRef(-1)

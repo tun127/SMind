@@ -18,6 +18,7 @@ import {
   Maximize,
   MoreHorizontal,
   Palette,
+  PanelRight,
   Plus,
   Redo2,
   RotateCcw,
@@ -65,6 +66,8 @@ export interface ToolbarActions {
   onAiSettings(): void
   /** 历史记录 / 常用 / 默认保存位置 */
   onHistory(): void
+  /** 全部恢复自动布局（清空手动位置偏移） */
+  onRelayout(): void
 }
 
 interface Props {
@@ -466,6 +469,20 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           onClick={actions.onOutline}
         >
           <ListTree size={17} />
+        </button>
+        <button type="button" className="tool-btn" title="节点属性（备注 / 图片 / 代码块 / 标记…）" onClick={actions.onNodes}>
+          <PanelRight size={17} />
+        </button>
+        <button type="button" className="tool-btn" title="主题（换配色 / 边框样式）" onClick={actions.onThemes}>
+          <Palette size={17} />
+        </button>
+        <button
+          type="button"
+          className="tool-btn"
+          title="全部恢复自动布局：清空手动拖拽的位置偏移（含悬浮主题），可撤销"
+          onClick={actions.onRelayout}
+        >
+          <Wand2 size={17} />
         </button>
         <button
           type="button"

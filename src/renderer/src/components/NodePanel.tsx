@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { Code2, Download, ExternalLink, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sigma, X } from 'lucide-react'
 import { activeRoot, activeSheet, findTopic } from '@shared/model/tree'
 import { imageBoxSize } from '@shared/layout/accessory'
@@ -7,25 +7,7 @@ import { formulaHtml } from '../render/formula'
 import { resourceUrl } from '../render/resource'
 import { useEditor } from '../store/editor'
 import MarkerIcon from './MarkerIcon'
-
-/** 代码块可选语言（纯文本兜底） */
-const CODE_LANGUAGES = [
-  'text',
-  'javascript',
-  'typescript',
-  'python',
-  'java',
-  'csharp',
-  'cpp',
-  'go',
-  'rust',
-  'sql',
-  'json',
-  'yaml',
-  'bash',
-  'html',
-  'css'
-] as const
+import { CODE_LANGUAGES } from '@shared/code-language'
 
 interface Props {
   onClose(): void
@@ -51,6 +33,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const setHref = useEditor((s) => s.setHref)
   const setFormula = useEditor((s) => s.setFormula)
   const setCode = useEditor((s) => s.setCode)
+  const codeFocusTick = useEditor((s) => s.codeFocusTick)
   const setImage = useEditor((s) => s.setImage)
   const addAttachment = useEditor((s) => s.addAttachment)
   const removeAttachment = useEditor((s) => s.removeAttachment)
@@ -72,6 +55,12 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const [formulaDraft, setFormulaDraft] = useState('')
   const [codeDraft, setCodeDraft] = useState('')
   const [codeLangDraft, setCodeLangDraft] = useState('text')
+  const codeAreaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // Alt+C 的落点：面板一打开（或已打开时收到信号）就把焦点交给代码输入框
+  useEffect(() => {
+    if (codeFocusTick > 0) codeAreaRef.current?.focus()
+  }, [codeFocusTick])
 
   // 只在「切换所选节点」时同步草稿，输入过程中绝不覆盖用户正在敲的内容
   useEffect(() => {
@@ -522,6 +511,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
           </select>
         </div>
         <textarea
+          ref={codeAreaRef}
           className="input input--area input--mono"
           rows={6}
           placeholder={'粘贴或输入代码，例如：\nconst sum = (a, b) => a + b'}

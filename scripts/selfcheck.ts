@@ -1270,6 +1270,42 @@ function testBranchStructure(): void {
 /* 8.5f 分支级结构：矩阵 / 括号 / 时间轴 / 树状表格                     */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* 8.5g 撤销保留框选 / 恢复自动布局                                    */
+/* ------------------------------------------------------------------ */
+
+function testUndoSelectionAndRelayout(): void {
+  group('撤销保留框选 / 恢复自动布局')
+  reset()
+  const rootId = root().id
+  const a = addChildOf(rootId, '甲')
+  const b = addChildOf(rootId, '乙')
+  const c = addChildOf(rootId, '丙')
+
+  // 框选 [甲, 乙] → 做一次真实修改（选择变成 [丙]）→ 撤销 → 选择应还原成 [甲, 乙]
+  store().setSelection([a, b])
+  store().offsetPositions([{ id: c, dx: 6, dy: 6 }])
+  store().setSelection([c])
+  store().undo()
+  eq('撤销还原修改前的框选', store().selection, [a, b])
+  store().redo()
+  eq('重做还原「撤销那一刻」的选择', store().selection, [c])
+  store().undo()
+  eq('再撤销仍能回到框选', store().selection, [a, b])
+
+  // 恢复自动布局：手动偏移被清空、可撤销、选择保留
+  store().setSelection([a])
+  store().offsetPositions([{ id: a, dx: 40, dy: 30 }])
+  const node = findTopic(root(), a)
+  check('偏移已写入', node?.position !== undefined)
+  store().relayoutAll()
+  check('恢复布局后偏移清空', findTopic(root(), a)?.position === undefined)
+  eq('恢复布局不动选择', store().selection, [a])
+  store().undo()
+  check('恢复布局可撤销（偏移回来了）', findTopic(root(), a)?.position !== undefined)
+  eq('撤销恢复布局也不丢选择', store().selection, [a])
+}
+
 function testBranchFamiliesMore(): void {
   group('分支级结构：矩阵 / 括号 / 时间轴 / 树状表格')
   reset()
@@ -4688,6 +4724,7 @@ async function main(): Promise<void> {
   testTypedChar()
   testBranchStructure()
   testBranchFamiliesMore()
+  testUndoSelectionAndRelayout()
   testPickDocumentArg()
   testViewLock()
   testSnapshot()

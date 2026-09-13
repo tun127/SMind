@@ -1311,14 +1311,24 @@ textarea {
 
 .topic__code-lang {
   position: absolute;
-  top: 2px;
-  right: 6px;
+  top: 1px;
+  right: 3px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  font-family: inherit;
   font-size: 9px;
-  line-height: 13px;
+  line-height: 15px;
   letter-spacing: 0.04em;
   color: var(--text-dim);
-  pointer-events: none;
+  cursor: pointer;
+  padding: 0 2px;
   user-select: none;
+}
+
+.topic__code-lang:hover {
+  color: var(--accent);
 }
 
 .topic__code-pre {

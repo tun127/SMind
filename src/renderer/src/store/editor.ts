@@ -48,6 +48,16 @@ interface HistoryEntry {
   /** 连续同类操作（例如拖动调色）合并为一步撤销 */
   coalesceKey?: string
   time: number
+  /** 这次修改**之前**的选择（框选/多选）。撤销时恢复它，框选才不会凭空丢掉 */
+  selectionBefore?: string[]
+  /** 撤销那一刻的选择，重做时恢复 */
+  selectionAtUndo?: string[]
+}
+
+/** 过滤掉已经不存在的节点，选择绝不指向幽灵 id */
+function liveSelection(root: Topic, ids: string[] | undefined): string[] {
+  if (!ids || ids.length === 0) return []
+  return ids.filter((id) => findTopic(root, id) !== null)
 }
 
 /** 合并窗口：同一个 coalesceKey 在此时间内的连续操作算作一步 */
@@ -215,6 +225,8 @@ export interface EditorState {
    * 平衡结构默认按顺序交替分配左右，这里写入的是显式覆盖。
    */
   setTopicSide(id: string, side: 'left' | 'right'): void
+  /** 全部恢复自动布局：清空当前画布所有手动位置偏移（含悬浮主题），一步撤销 */
+  relayoutAll(): void
   /**
    * 拖拽节点释放。落点一律由 `resolveDrop` 裁决（在 shared/model/drop 里，
    * 与画布上的落点预览共用同一套规则）：
@@ -269,6 +281,10 @@ export interface EditorState {
   resetRelationshipCurve(id: string): void
   /** 框选用：一次性设置选中集合 */
   setSelection(ids: string[]): void
+  /** 请求节点面板聚焦到代码输入框（Alt+C 用）；面板未打开时会随打开自动聚焦 */
+  requestCodeFocus(): void
+  /** 代码聚焦信号（自增值），NodePanel 监听它 */
+  codeFocusTick: number
   /** 把关系线的某一端改接到另一个主题（拖拽端点用） */
   setRelationshipEnd(id: string, end: 'end1Id' | 'end2Id', topicId: string): void
   setRelationshipTitle(id: string, title: string): void
@@ -619,7 +635,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   /* ------------------------------------------------------------------ */
 
   mutate: (recipe, label, coalesceKey) => {
-    const { workbook, undoStack } = get()
+    const { workbook, undoStack, selection: selectionBefore } = get()
     const [next, patches, inverse] = produceWithPatches(workbook, recipe)
     if (patches.length === 0) return false
 
@@ -633,7 +649,14 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
     if (canMerge) {
       // 合并成一步撤销：重做用最新的 patches，撤销仍然回到最早那次修改之前
-      const merged: HistoryEntry = { label, patches, inverse: last.inverse, coalesceKey, time: now }
+      const merged: HistoryEntry = {
+        label,
+        patches,
+        inverse: last.inverse,
+        coalesceKey,
+        time: now,
+        selectionBefore: last.selectionBefore ?? selectionBefore
+      }
       set({
         workbook: next,
         dirty: true,
@@ -646,7 +669,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     set({
       workbook: next,
       dirty: true,
-      undoStack: [...undoStack, { label, patches, inverse, coalesceKey, time: now }].slice(-HISTORY_LIMIT),
+      undoStack: [...undoStack, { label, patches, inverse, coalesceKey, time: now, selectionBefore }].slice(-HISTORY_LIMIT),
       redoStack: []
     })
     return true
@@ -658,6 +681,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!entry) return
     const next = applyPatches(workbook, entry.inverse) as Workbook
     const root = activeRoot(next)
+    // 撤销连选择一起还原：框选了几个节点，撤销后还是那几个
+    entry.selectionAtUndo = get().selection
     set({
       workbook: next,
       dirty: true,
@@ -666,7 +691,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       editingId: null,
       editingText: '',
       editingRich: null,
-      selection: get().selection.filter((id) => findTopic(root, id) !== null)
+      selection: liveSelection(root, entry.selectionBefore)
     })
   },
 
@@ -676,6 +701,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!entry) return
     const next = applyPatches(workbook, entry.patches) as Workbook
     const root = activeRoot(next)
+    // 重做还原「撤销那一刻」的选择。注意不要覆盖 entry.selectionBefore——
+    // 条目回到撤销栈后，再撤销仍要用它还原到「这次修改之前」的框选
     set({
       workbook: next,
       dirty: true,
@@ -684,7 +711,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       editingId: null,
       editingText: '',
       editingRich: null,
-      selection: get().selection.filter((id) => findTopic(root, id) !== null)
+      selection: liveSelection(root, entry.selectionAtUndo)
     })
   },
 
@@ -878,6 +905,18 @@ export const useEditor = create<EditorState>()((set, get) => ({
       properties[TOPIC_SIDE_KEY] = side
       topic.style = { ...(topic.style ?? {}), properties }
     }, '调整分支左右')
+  },
+
+  /** 全部恢复自动布局：清掉当前画布所有手动位置偏移（含悬浮主题），整批算一步撤销 */
+  relayoutAll: () => {
+    get().mutate((draft) => {
+      const walk = (topic: Topic): void => {
+        if (topic.position !== undefined) topic.position = undefined
+        topic.children.forEach(walk)
+        topic.detachedChildren.forEach(walk)
+      }
+      walk(activeRoot(draft))
+    }, '恢复自动布局')
   },
 
   moveSelectionByKey: (key) => {
@@ -1281,6 +1320,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const valid = Array.from(new Set(ids)).filter((id) => Boolean(findTopic(root, id)))
     set({ selection: valid, editingId: null, editingText: '', editingRich: null })
   },
+
+  codeFocusTick: 0,
+  requestCodeFocus: () => set((s) => ({ codeFocusTick: s.codeFocusTick + 1 })),
 
   removeRelationship: (id) => {
     get().mutate((draft) => {

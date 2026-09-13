@@ -1,6 +1,8 @@
 import { memo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
 import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
 import { BLOCK_GAP, codeBoxSize, imageBoxSize } from '@shared/layout/accessory'
+import { CODE_LANGUAGES } from '@shared/code-language'
+import { useEditor } from '../store/editor'
 import type { RichText, ThemeColors } from '@shared/model/types'
 import { richFromPlain } from '@shared/richtext'
 import { formulaHtml, formulaSize } from '../render/formula'
@@ -243,13 +245,28 @@ function TopicNodeInner({
         />
       )}
 
-      {/* 代码块：等宽排版，尺寸来自布局测量；超出行数内部滚动 */}
+      {/* 代码块：等宽排版，尺寸来自布局测量；超出行数内部滚动；语言小标可直接切换 */}
       {code && codeBox && (
         <div
           className="topic__code"
           style={{ width: codeBox.width, height: codeBox.height, marginTop: BLOCK_GAP }}
         >
-          <span className="topic__code-lang">{code.language || 'text'}</span>
+          <select
+            className="topic__code-lang"
+            value={code.language || 'text'}
+            title="切换代码语言"
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onChange={(event) =>
+              useEditor.getState().setCode(node.id, { language: event.target.value, text: code.text })
+            }
+          >
+            {CODE_LANGUAGES.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang === 'text' ? 'text' : lang}
+              </option>
+            ))}
+          </select>
           <pre className="topic__code-pre">{code.text}</pre>
         </div>
       )}
