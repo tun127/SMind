@@ -9,6 +9,8 @@ export interface FormatState {
   italic: boolean
   underline: boolean
   strike: boolean
+  /** 上标 / 下标（互斥，都没有时为 null） */
+  script: 'super' | 'sub' | null
   color: string | null
   fontSize: number | null
   align: 'left' | 'center' | 'right'
@@ -20,6 +22,7 @@ const INITIAL: FormatState = {
   italic: false,
   underline: false,
   strike: false,
+  script: null,
   color: null,
   fontSize: null,
   align: 'center',
@@ -56,6 +59,11 @@ export function readFormatState(editor: RichEditor): FormatState {
     italic: editor.isActive('italic'),
     underline: editor.isActive('underline'),
     strike: editor.isActive('strike'),
+    script: editor.isActive('superscript')
+      ? 'super'
+      : editor.isActive('subscript')
+        ? 'sub'
+        : null,
     color: typeof attributes.color === 'string' ? attributes.color : null,
     fontSize: Number.isFinite(parsedSize) ? parsedSize : null,
     align,

@@ -8,6 +8,8 @@ import {
   Italic,
   List,
   Strikethrough,
+  Subscript as SubscriptIcon,
+  Superscript as SuperscriptIcon,
   Underline
 } from 'lucide-react'
 import { useFormatStore, type RichEditor } from '../editor/formatStore'
@@ -89,6 +91,22 @@ export default function RichFormatBar(): ReactElement | null {
           onClick={() => applyInline((c) => c.toggleStrike())}
         >
           <Strikethrough size={15} />
+        </button>
+        <button
+          type="button"
+          className={state.script === 'super' ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
+          title="上标（也可以打 ^x^，如 a^2^）"
+          onClick={() => applyInline((c) => c.toggleMark('superscript'))}
+        >
+          <SuperscriptIcon size={15} />
+        </button>
+        <button
+          type="button"
+          className={state.script === 'sub' ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
+          title="下标（也可以打 ~x~，如 a~1~）"
+          onClick={() => applyInline((c) => c.toggleMark('subscript'))}
+        >
+          <SubscriptIcon size={15} />
         </button>
       </div>
 

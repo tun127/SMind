@@ -38,9 +38,10 @@ const Superscript = Mark.create({
   renderHTML: () => ['sup', 0],
   addInputRules() {
     return [
-      // `^上标^`，以及脚注引用 `[^1]`（导入时也按上标渲染，这里保持一致）
-      markInputRule({ find: /(?:^|\s)((?:\^)((?:[^\s^]+))(?:\^))$/, type: this.type }),
-      markInputRule({ find: /(?:^|\s)(\[\^[^\]]+\])$/, type: this.type })
+      // `^上标^`，以及脚注引用 `[^1]`（导入时也按上标渲染，这里保持一致）。
+      // 用 lookbehind 而不是吞掉前缀字符：`a^2^` 这种**紧贴在字后面**的写法也要生效
+      markInputRule({ find: /(?<=^|\s)((?:\^)((?:[^\s^]+))(?:\^))$/, type: this.type }),
+      markInputRule({ find: /(?<=^|\s)(\[\^[^\]]+\])$/, type: this.type })
     ]
   }
 })
@@ -51,7 +52,8 @@ const Subscript = Mark.create({
   parseHTML: () => [{ tag: 'sub' }],
   renderHTML: () => ['sub', 0],
   addInputRules() {
-    return [markInputRule({ find: /(?:^|\s)((?:~)((?:[^\s~]+))(?:~))$/, type: this.type })]
+    // 同上：`a~1~` 紧贴写法（`~~删除线~~` 不受影响——下标规则匹配不到它）
+    return [markInputRule({ find: /(?<=^|\s)((?:~)((?:[^\s~]+))(?:~))$/, type: this.type })]
   }
 })
 

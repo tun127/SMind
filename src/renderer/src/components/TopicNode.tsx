@@ -427,8 +427,8 @@ function TopicNodeInner({
           type="button"
           className={`topic__collapse topic__collapse--${node.side === 'left' ? 'left' : 'right'}`}
           title={node.topic.collapsed ? '展开子主题' : '折叠子主题'}
-          // 底色＝分支配色；外圈用**画布底色**描一圈，压在连线上也不会糊在一起
-          style={{ background: color, boxShadow: `0 0 0 1.5px ${colors.canvas}, 0 1px 2px rgba(16, 24, 40, 0.18)` }}
+          // 平面样式：只有分支配色的底，不再描白圈/投影（那圈白边看着像高光，用户反馈去掉）
+          style={{ background: color }}
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.preventDefault()}
           onClick={(event) => {
