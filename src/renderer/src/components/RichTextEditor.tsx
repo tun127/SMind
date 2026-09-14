@@ -34,6 +34,9 @@ const Highlight = Mark.create({
 const Superscript = Mark.create({
   name: 'superscript',
   excludes: 'subscript',
+  // inclusive: false —— 光标停在上下标文字**后面**继续打字时不再继承这个格式，
+  // 否则 a₁ 之后永远打出下标，写不回正常内容（用户实测反馈）
+  inclusive: false,
   parseHTML: () => [{ tag: 'sup' }],
   renderHTML: () => ['sup', 0],
   addInputRules() {
@@ -49,6 +52,7 @@ const Superscript = Mark.create({
 const Subscript = Mark.create({
   name: 'subscript',
   excludes: 'superscript',
+  inclusive: false,
   parseHTML: () => [{ tag: 'sub' }],
   renderHTML: () => ['sub', 0],
   addInputRules() {
