@@ -117,7 +117,7 @@ import {
   parseOutline,
   toConfigView
 } from '../src/shared/ai'
-import { parseMarkdownOutline } from '../src/shared/import/markdown'
+import { parseInlineMarkdown, parseMarkdownOutline } from '../src/shared/import/markdown'
 import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../src/shared/formula'
 import { estimateOverlayLabelSize, overlayTitleLines } from '../src/shared/layout/overlays'
 import { LABEL_ELLIPSIS, fitLabelText } from '../src/shared/layout/label-fit'
@@ -130,7 +130,6 @@ import {
   CODE_FONT_SIZE,
   CODE_HEADER,
   CODE_LINE_RATIO,
-  CODE_MAX_LINES,
   CODE_PADDING_X,
   CODE_PADDING_Y,
   MARKER_STRIP_GAP,
@@ -1432,6 +1431,128 @@ function testLayoutNoOverlap(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 8.5h Markdown：Typora 全格式行内语法                                 */
+/* ------------------------------------------------------------------ */
+
+function testMarkdownFullFormat(): void {
+  group('Markdown：Typora 全格式行内语法')
+
+  // 高亮 / 上下标
+  const highlight = parseInlineMarkdown('这是 ==重点== 内容')
+  eq('高亮：文字保留（标记不显示）', highlight.text, '这是 重点 内容')
+  check('高亮：标记成 highlight', highlight.runs.some((run) => run.highlight === true && run.text === '重点'))
+
+  const sup = parseInlineMarkdown('E=mc^2^')
+  eq('上标：文字正确', sup.text, 'E=mc2')
+  check('上标：script=super', sup.runs.some((run) => run.script === 'super' && run.text === '2'))
+
+  const sub = parseInlineMarkdown('H~2~O')
+  check('下标：script=sub', sub.runs.some((run) => run.script === 'sub' && run.text === '2'))
+  check('删除线仍走 ~~', parseInlineMarkdown('~~删掉~~').runs.some((run) => run.strike === true))
+  check('加粗/斜体/行内代码仍生效', (() => {
+    const runs = parseInlineMarkdown('**粗** *斜* `码`').runs
+    return (
+      runs.some((run) => run.bold) &&
+      runs.some((run) => run.italic) &&
+      runs.some((run) => run.mono === true)
+    )
+  })())
+
+  // 孤立的符号不能被当成格式开关（否则 `2 * 3` 之后的文字会整段变斜）
+  eq('孤立的 * 保持原样', parseInlineMarkdown('2 * 3 = 6').text, '2 * 3 = 6')
+  check('孤立的 * 不产生斜体', !parseInlineMarkdown('2 * 3 = 6').runs.some((run) => run.italic))
+
+  // 转义与实体
+  eq('反斜杠转义', parseInlineMarkdown('\\*不是斜体\\*').text, '*不是斜体*')
+  eq('HTML 实体解码', parseInlineMarkdown('A &amp; B &lt;C&gt;').text, 'A & B <C>')
+  eq('数值实体解码', parseInlineMarkdown('&#65;').text, 'A')
+
+  // 行内 HTML
+  check(
+    '行内 <u> → 下划线',
+    parseInlineMarkdown('<u>下划线</u>').runs.some((run) => run.underline === true && run.text === '下划线')
+  )
+  check(
+    '行内 <sup> → 上标',
+    parseInlineMarkdown('x<sup>2</sup>').runs.some((run) => run.script === 'super' && run.text === '2')
+  )
+  check(
+    '行内 <mark> → 高亮',
+    parseInlineMarkdown('a<mark>亮</mark>b').runs.some((run) => run.highlight === true && run.text === '亮')
+  )
+  eq('不认识的标签被剥掉', parseInlineMarkdown('a<span class="x">b</span>').text, 'ab')
+
+  // 脚注
+  const footnote = parseInlineMarkdown('结论[^1]')
+  eq('脚注引用：进入脚注列表', footnote.usedFootnotes, ['1'])
+  check(
+    '脚注引用：渲染成上标',
+    footnote.runs.some((run) => run.script === 'super' && run.text === '[^1]')
+  )
+
+  // 整篇：脚注定义进备注、[TOC] 跳过、引用式链接解析
+  const doc = [
+    '# 标题',
+    '',
+    '[TOC]',
+    '',
+    '- 正文引用[^note]',
+    '- 也支持 [引用式链接][ref]',
+    '',
+    '[^note]: 脚注的说明文字',
+    '[ref]: https://example.com/ref'
+  ].join('\n')
+  const parsed = parseMarkdownOutline(doc)
+  eq('三个节点（[TOC] 与定义行不生成节点）', parsed.count, 3)
+  const footnoteItem = parsed.root?.children.find((child) => child.title.includes('正文引用'))
+  check('脚注定义补进该节点备注', Boolean(footnoteItem?.notes?.includes('脚注的说明文字')), footnoteItem?.notes)
+  const refItem = parsed.root?.children.find((child) => child.title.includes('引用式链接'))
+  eq('引用式链接挂到节点超链接', refItem?.href, 'https://example.com/ref')
+
+  // 段落（非标题/列表）里的脚注，也要把定义带进备注
+  const bodyDoc = parseMarkdownOutline('# 标题\n\n正文里提到一句[^a]\n\n[^a]: 段落脚注说明')
+  check(
+    '段落里的脚注也把定义带进备注',
+    Boolean(bodyDoc.root?.notes?.includes('段落脚注说明')),
+    bodyDoc.root?.notes
+  )
+
+  // 导出 → 导入往返：高亮与上下标都不能丢
+  const richTopic: Topic = {
+    id: 't-chem',
+    title: '化学式 H2O',
+    titleRich: {
+      paragraphs: [
+        {
+          runs: [
+            { text: '化学式 H' },
+            { text: '2', script: 'sub' },
+            { text: 'O 与 ' },
+            { text: '重点', highlight: true },
+            { text: ' 与 x' },
+            { text: '2', script: 'super' }
+          ]
+        }
+      ]
+    },
+    children: [],
+    detachedChildren: [],
+    labels: [],
+    markers: [],
+    attachments: []
+  }
+  const md = toMarkdown(richTopic)
+  check('下标导出为 ~2~', md.includes('~2~'), md)
+  check('上标导出为 ^2^', md.includes('^2^'), md)
+  check('高亮导出为 ==重点==', md.includes('==重点=='), md)
+  const back = parseMarkdownOutline(md)
+  const backRuns = back.root?.rich?.paragraphs[0]?.runs ?? []
+  check('往返：下标回到富文本', backRuns.some((run) => run.script === 'sub' && run.text === '2'))
+  check('往返：上标回到富文本', backRuns.some((run) => run.script === 'super' && run.text === '2'))
+  check('往返：高亮回到富文本', backRuns.some((run) => run.highlight === true && run.text === '重点'))
+}
+
+/* ------------------------------------------------------------------ */
 /* 8.5i Markdown 导出 → 导入往返                                       */
 /* ------------------------------------------------------------------ */
 
@@ -2501,12 +2622,16 @@ async function testMediaElements(): Promise<void> {
     text: Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
   })
   check(
-    '行数封顶，节点不会无限变高',
-    many.height === CODE_HEADER + CODE_PADDING_Y * 2 + CODE_MAX_LINES * lineH,
+    '行数不封顶：30 行就按 30 行算高（完整展示，不滚动）',
+    many.height === CODE_HEADER + CODE_PADDING_Y * 2 + 30 * lineH,
     JSON.stringify(many)
   )
   const longLine = codeBoxSize({ language: '', text: 'x'.repeat(200) })
-  check('超宽行受宽度上限约束', longLine.width <= 320, JSON.stringify(longLine))
+  check(
+    '超宽行按内容铺开（不截断、不省略）',
+    longLine.width === Math.round(200 * CODE_FONT_SIZE * 0.6) + CODE_PADDING_X * 2,
+    JSON.stringify(longLine)
+  )
   const cjk = codeBoxSize({ language: '', text: '中文变量名测试' })
   const ascii = codeBoxSize({ language: '', text: 'abcdefgabcdefg' })
   check(
@@ -5294,6 +5419,7 @@ async function main(): Promise<void> {
   testBranchStructure()
   testBranchFamiliesMore()
   testMultiWindow()
+  testMarkdownFullFormat()
   testUndoSelectionAndRelayout()
   testLayoutNoOverlap()
   testMarkdownRoundTrip()

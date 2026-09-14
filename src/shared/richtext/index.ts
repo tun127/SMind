@@ -72,6 +72,15 @@ export function isExplicitAlign(align: RichTextParagraph['align']): boolean {
   return align === 'left' || align === 'right'
 }
 
+/** 高亮底色：画布、编辑框、导出三处共用同一份颜色 */
+export const HIGHLIGHT_BG = 'rgba(255, 214, 0, 0.35)'
+
+/**
+ * 上下标相对正文的字号比例。
+ * 测量与渲染必须一致：测量按这个比例算宽高，渲染直接把缩小后的字号交给字体。
+ */
+export const SCRIPT_FONT_RATIO = 0.72
+
 /** 是否带有任何格式；为 false 时可以不用保存 titleRich，保持 .xmind 干净 */
 export function hasFormatting(rich: RichText): boolean {
   if (rich.paragraphs.length > 1) return true
@@ -80,6 +89,7 @@ export function hasFormatting(rich: RichText): boolean {
     if (isExplicitAlign(paragraph.align)) return true
     for (const run of paragraph.runs) {
       if (run.bold || run.italic || run.underline || run.strike) return true
+      if (run.highlight || run.script) return true
       if (run.color || run.fontSize || run.fontFamily) return true
     }
   }
@@ -133,6 +143,10 @@ function runToMarks(run: RichTextRun): TipTapMark[] {
   if (run.italic) marks.push({ type: 'italic' })
   if (run.underline) marks.push({ type: 'underline' })
   if (run.strike) marks.push({ type: 'strike' })
+  // 高亮 / 上下标：用自定义 mark（渲染层与编辑器共用同一套名字）
+  if (run.highlight) marks.push({ type: 'highlight' })
+  if (run.script === 'super') marks.push({ type: 'superscript' })
+  if (run.script === 'sub') marks.push({ type: 'subscript' })
   const attrs: Record<string, unknown> = {}
   if (run.color) attrs.color = run.color
   if (run.fontSize) attrs.fontSize = `${run.fontSize}px`
@@ -199,6 +213,9 @@ function marksToStyle(marks: TipTapMark[] | undefined): Partial<RichTextRun> {
     else if (mark.type === 'italic') style.italic = true
     else if (mark.type === 'underline') style.underline = true
     else if (mark.type === 'strike') style.strike = true
+    else if (mark.type === 'highlight') style.highlight = true
+    else if (mark.type === 'superscript') style.script = 'super'
+    else if (mark.type === 'subscript') style.script = 'sub'
     else if (mark.type === 'textStyle' && mark.attrs) {
       if (typeof mark.attrs.color === 'string') style.color = mark.attrs.color
       if (typeof mark.attrs.fontFamily === 'string') style.fontFamily = mark.attrs.fontFamily

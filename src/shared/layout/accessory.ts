@@ -108,10 +108,8 @@ export function markerStripSize(count: number): Size {
 
 export const CODE_FONT_SIZE = 12
 export const CODE_FONT_FAMILY = 'Consolas, "JetBrains Mono", Menlo, "Courier New", monospace'
-export const CODE_MAX_WIDTH = 320
+/** 只保留一个下限：代码块**不封顶**，长宽都随内容自适应（用户要求完整展示） */
 export const CODE_MIN_WIDTH = 96
-/** 节点里最多平铺的行数，超出的部分滚动查看（高度仍按封顶行数算，节点不会无限变高） */
-export const CODE_MAX_LINES = 14
 export const CODE_LINE_RATIO = 1.45
 export const CODE_PADDING_X = 10
 export const CODE_PADDING_Y = 8
@@ -129,7 +127,8 @@ export function codeUnitLength(line: string): number {
 export const CODE_CHAR_WIDTH = CODE_FONT_SIZE * 0.6
 
 /**
- * 代码块显示框：等宽字体按字符数估宽，行数封顶。
+ * 代码块显示框：等宽字体按字符数估宽，**行数与列宽都不封顶**——
+ * 代码块要完整展示整段代码（滚动条会让"代码被截断"，用户明确要求长宽不限）。
  * 渲染层（TopicNode / 导出绘制）的字号、内边距、行高全部取这里的常量，
  * 保证「测量 = 显示」。
  */
@@ -138,11 +137,7 @@ export function codeBoxSize(code: TopicCode | undefined): Size {
   const lines = code.text.length > 0 ? code.text.split('\n') : ['']
   let maxUnits = 8
   for (const line of lines) maxUnits = Math.max(maxUnits, codeUnitLength(line))
-  const width = Math.min(
-    CODE_MAX_WIDTH,
-    Math.max(CODE_MIN_WIDTH, Math.round(maxUnits * CODE_CHAR_WIDTH) + CODE_PADDING_X * 2)
-  )
-  const shown = Math.min(lines.length, CODE_MAX_LINES)
-  const height = CODE_HEADER + CODE_PADDING_Y * 2 + shown * Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
+  const width = Math.max(CODE_MIN_WIDTH, Math.round(maxUnits * CODE_CHAR_WIDTH) + CODE_PADDING_X * 2)
+  const height = CODE_HEADER + CODE_PADDING_Y * 2 + lines.length * Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
   return { width, height }
 }

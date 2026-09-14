@@ -6,6 +6,7 @@
  */
 
 import { FONT_FAMILY } from '../render/measure'
+import { HIGHLIGHT_BG } from '@shared/richtext'
 import type { Drawing, DrawOp } from './drawing'
 
 const FONT_STACK = `${FONT_FAMILY.replace(/"/g, "'")}`
@@ -81,23 +82,46 @@ function opToSvg(op: DrawOp): string {
     }
 
     case 'lineText': {
+      // 每段都带绝对 x（位置在构建指令时按字符宽度算好），所以父级用 start 对齐；
+      // 这样高亮矩形的坐标与文字严格对齐，不依赖浏览器的分段排版
       const tspans = op.segments
         .map(
           (segment) =>
             `<tspan${attrs([
+              ['x', segment.x],
               ['font-size', segment.fontSize],
               ['font-weight', segment.weight ?? 400],
               ['font-style', segment.italic ? 'italic' : undefined],
+              // 上下标交给 SVG 自己偏移（baseline-shift 不会影响后续 tspan 的基线）
+              [
+                'baseline-shift',
+                segment.script === 'super' ? 'super' : segment.script === 'sub' ? 'sub' : undefined
+              ],
               ['fill', segment.color ?? op.color],
               ['text-decoration', segment.underline || segment.strike ? 'underline' : undefined]
             ])}>${escapeText(segment.text)}</tspan>`
         )
         .join('')
-      return `<text${attrs([
+      // 高亮底色：先铺矩形再画文字
+      const highlights = op.segments
+        .filter((segment) => segment.highlight && typeof segment.width === 'number')
+        .map(
+          (segment) =>
+            `<rect${attrs([
+              ['x', segment.x],
+              ['y', op.baseline - segment.fontSize * 0.95],
+              ['width', segment.width],
+              ['height', segment.fontSize * 1.25],
+              ['rx', 2],
+              ['fill', HIGHLIGHT_BG]
+            ])}/>`
+        )
+        .join('')
+      return `${highlights}<text${attrs([
         ['x', op.x],
         ['y', op.baseline],
         ['font-family', FONT_STACK],
-        ['text-anchor', op.align === 'center' ? 'middle' : op.align === 'right' ? 'end' : 'start'],
+        ['text-anchor', 'start'],
         ['xml:space', 'preserve']
       ])}>${tspans}</text>`
     }

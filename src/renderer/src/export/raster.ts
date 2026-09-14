@@ -6,6 +6,7 @@
  */
 
 import { FONT_FAMILY } from '../render/measure'
+import { HIGHLIGHT_BG } from '@shared/richtext'
 import type { Drawing, DrawOp, LineTextOp } from './drawing'
 
 /** 统一的字体串：粗斜体 + 字号 + 字体栈 */
@@ -55,9 +56,14 @@ function roundRectPath(ctx: CanvasRenderingContext2D, op: Extract<DrawOp, { kind
 }
 
 function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
-  // 先量总宽，再按对齐方式决定起点——Canvas 的 textAlign 对多段富文本不好用
+  // 构建指令时已经按字符宽度算好了每段的绝对 x/宽度（画高亮底色要用），有就直接用；
+  // 没有（老数据/兜底）再自己量一遍——Canvas 的 textAlign 对多段富文本不好用
   let total = 0
   for (const segment of op.segments) {
+    if (typeof segment.width === 'number') {
+      total += segment.width
+      continue
+    }
     ctx.font = fontOf(segment.fontSize, segment.weight ?? 400, Boolean(segment.italic), segment.fontFamily)
     total += ctx.measureText(segment.text).width
   }
@@ -67,10 +73,30 @@ function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
   ctx.textBaseline = 'alphabetic'
 
   for (const segment of op.segments) {
+    const width =
+      typeof segment.width === 'number'
+        ? segment.width
+        : ((): number => {
+            ctx.font = fontOf(segment.fontSize, segment.weight ?? 400, Boolean(segment.italic), segment.fontFamily)
+            return ctx.measureText(segment.text).width
+          })()
+
+    // 高亮底色画在文字下面
+    if (segment.highlight) {
+      ctx.save()
+      ctx.fillStyle = HIGHLIGHT_BG
+      ctx.fillRect(x - 1, op.baseline - segment.fontSize * 0.95, width + 2, segment.fontSize * 1.25)
+      ctx.restore()
+    }
+
+    // 上下标：字号已经在测量里缩小过，这里只做基线偏移（画布上是 vertical-align）
+    const shift =
+      segment.script === 'super' ? -segment.fontSize * 0.35 : segment.script === 'sub' ? segment.fontSize * 0.15 : 0
+
     ctx.font = fontOf(segment.fontSize, segment.weight ?? 400, Boolean(segment.italic), segment.fontFamily)
     ctx.fillStyle = segment.color ?? op.color
-    ctx.fillText(segment.text, x, op.baseline)
-    x += ctx.measureText(segment.text).width
+    ctx.fillText(segment.text, x, op.baseline + shift)
+    x += width
   }
 }
 

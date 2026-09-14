@@ -201,6 +201,8 @@ export default function App(): ReactElement {
     [commitPending, applyOpenResult, showToast]
   )
 
+  /** 直接打开某个路径（历史记录里点一条走这里） */
+
   /**
    * 恢复到某个历史版本。
    *
@@ -309,6 +311,42 @@ export default function App(): ReactElement {
   )
 
   /* ------------------------------------------------------------------ */
+  /* 多窗口（一个窗口 = 一份文档）                                        */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * 开一个**新窗口**（一份新文档）。
+   * 不需要未保存确认：新窗口是空的，不动当前文档。
+   */
+  const openNewWindow = useCallback((): void => {
+    void window.api.newWindow()
+  }, [])
+
+  /**
+   * 在**新窗口打开当前画布**——并排看两张画布的唯一办法（画布是文档内部的标签页）。
+   *
+   * 走 `guard`：新窗口打开的是**磁盘上的那份文件**，所以先把未保存内容问一遍，
+   * 免得"并排看到的另一张画布"其实是旧内容。
+   */
+  const openSheetWindow = useCallback((): void => {
+    const sheetId = useEditor.getState().workbook.activeSheetId
+    guard(() => {
+      void (async () => {
+        const result = await window.api.openSheetInNewWindow(sheetId)
+        if (result === 'no-file') {
+          showToast('这个文档还没保存过：先 Ctrl+S 存成 .xmind，才能在新窗口里打开它的画布')
+          return
+        }
+        if (result === 'failed') {
+          showToast('新窗口打开失败，请重试')
+          return
+        }
+        showToast('已在新窗口打开这张画布（在新窗口里可以切到别的画布）')
+      })()
+    })
+  }, [guard, showToast])
+
+  /* ------------------------------------------------------------------ */
   /* 导入 / 导出（工具栏与菜单共用）                                      */
   /* ------------------------------------------------------------------ */
 
@@ -394,6 +432,9 @@ export default function App(): ReactElement {
         case 'file:save-as':
           void saveDocument(true)
           break
+        case 'file:open-sheet-window':
+          openSheetWindow()
+          break
         case 'edit:undo':
           store.undo()
           break
@@ -467,6 +508,7 @@ export default function App(): ReactElement {
     importTheme,
     importOutlineFile,
     exportOutlineAs,
+    openSheetWindow,
     showToast
   ])
 
@@ -480,9 +522,18 @@ export default function App(): ReactElement {
    * 两条路都走 `guard`，避免在"有未保存改动"时静默替换掉当前文档。
    */
   useEffect(() => {
-    void window.api.openFilePending().then((path) => {
-      if (path) guard(() => void openPath(path))
-    })
+    void (async () => {
+      const path = await window.api.openFilePending()
+      if (!path) return
+      guard(() => {
+        void (async () => {
+          await openPath(path)
+          // 这个窗口如果是「在新窗口打开某张画布」开出来的，打开文档后定位到那张画布
+          const sheetId = await window.api.pendingSheet()
+          if (sheetId) useEditor.getState().setActiveSheet(sheetId)
+        })()
+      })
+    })()
     return window.api.onFileOpenRequest((path) => guard(() => void openPath(path)))
   }, [guard, openPath])
 
@@ -859,7 +910,9 @@ export default function App(): ReactElement {
           onAiExpand: () => setAiTask('expand'),
           onAiPolish: () => setAiTask('polish'),
           onAiSettings: () => setShowAiSettings(true),
-          onHistory: () => setShowHistory(true)
+          onHistory: () => setShowHistory(true),
+          onNewWindow: openNewWindow,
+          onOpenSheetWindow: openSheetWindow
         }}
       />
 

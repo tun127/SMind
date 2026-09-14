@@ -3,12 +3,41 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
+import { Mark } from '@tiptap/core'
 import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
 import { readFormatState, useFormatStore } from '../editor/formatStore'
 import { TEXT_MAX, TEXT_MAX_ROOT } from '../render/measure'
 import { takeTypedChar } from '../editor/typedChar'
+
+/**
+ * 高亮 / 上标 / 下标三个 mark。
+ *
+ * 为什么要自己定义：内核富文本里有 `highlight` 与 `script` 两个属性
+ * （Markdown 的 `==高亮==`、`^上标^`、`~下标~` 导入后就是它们），
+ * TipTap 不认识这几个 mark 时会在编辑过程中**把它们丢掉**——
+ * 用户一改标题，高亮和上下标就没了。这里用最小实现补上。
+ */
+const Highlight = Mark.create({
+  name: 'highlight',
+  parseHTML: () => [{ tag: 'mark' }],
+  renderHTML: () => ['mark', { class: 'rt-highlight' }, 0]
+})
+
+const Superscript = Mark.create({
+  name: 'superscript',
+  excludes: 'subscript',
+  parseHTML: () => [{ tag: 'sup' }],
+  renderHTML: () => ['sup', 0]
+})
+
+const Subscript = Mark.create({
+  name: 'subscript',
+  excludes: 'superscript',
+  parseHTML: () => [{ tag: 'sub' }],
+  renderHTML: () => ['sub', 0]
+})
 
 export interface RichTextEditorProps {
   node: NodeLayout
@@ -52,7 +81,10 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
       TextStyle,
       Color,
       FontSize,
-      TextAlign.configure({ types: ['paragraph'] })
+      TextAlign.configure({ types: ['paragraph'] }),
+      Highlight,
+      Superscript,
+      Subscript
     ],
     content: richToTiptap(rich),
     autofocus: true,

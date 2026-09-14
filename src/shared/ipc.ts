@@ -82,6 +82,10 @@ export const IPC = {
   setTitle: 'window:set-title',
   /** 新开一个窗口（= 新的一份文档） */
   newWindow: 'window:new',
+  /** 在新窗口打开「当前文档的某张画布」（同一文件，用于并排看两张画布） */
+  openSheetWindow: 'window:open-sheet',
+  /** 新窗口启动后要定位到哪张画布（取一次即清空） */
+  pendingSheet: 'window:pending-sheet',
   /** 渲染进程报告「这个窗口现在打开的是哪个文件」（新建＝null） */
   documentPath: 'window:document-path',
   showInFolder: 'shell:show-in-folder',
@@ -135,6 +139,8 @@ export type MenuCommand =
   | 'file:open'
   | 'file:save'
   | 'file:save-as'
+  /** 在新窗口打开当前画布（并排看两张画布） */
+  | 'file:open-sheet-window'
   | 'edit:undo'
   | 'edit:redo'
   | 'edit:delete'
@@ -183,6 +189,15 @@ export interface MindApi {
   setTitle(title: string): void
   /** 开一个新窗口（= 新的一份文档）；每个窗口各自独立文档与撤销栈 */
   newWindow(): Promise<void>
+  /**
+   * 在新窗口打开**当前文档**的某张画布（同一份文件，各自独立视图）。
+   *
+   * 用来并排看两张画布——多窗口的意义就在这里。
+   * 返回 `no-file` 表示这个文档还没保存过（没有磁盘路径，开不了新窗口）。
+   */
+  openSheetInNewWindow(sheetId: string): Promise<'ok' | 'no-file' | 'failed'>
+  /** 新窗口启动时要定位的画布 id（取一次即清空） */
+  pendingSheet(): Promise<string | null>
   /**
    * 告诉主进程「这个窗口现在打开的是哪个文件」（新建文档传 null）。
    * 主进程用它判断「双击的那个文件是不是已经开着」，从而聚焦已有窗口而不是重复开一个。

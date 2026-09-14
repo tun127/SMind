@@ -148,6 +148,8 @@ interface DocWindow {
   allowClose: boolean
   /** 启动/二实例带的文件，渲染进程就绪后取走 */
   pendingPath: string | null
+  /** 这个窗口打开文档后要定位到哪张画布（「在新窗口打开当前画布」用） */
+  pendingSheet: string | null
 }
 
 const windows = new Map<number, DocWindow>()
@@ -371,7 +373,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `options.path` 只在「启动时带文件 / 双击文件 / 二实例传参」时给：
  * 那一刻 React 可能还没挂载，所以路径先存在窗口状态里，渲染进程就绪后自己来取一次。
  */
-function createWindow(options: { path?: string | null } = {}): DocWindow {
+function createWindow(options: { path?: string | null; sheetId?: string | null } = {}): DocWindow {
   windowSeq += 1
   const slot = autosaveSlotName(windowSeq)
 
@@ -401,7 +403,8 @@ function createWindow(options: { path?: string | null } = {}): DocWindow {
     inserted: new Set(),
     docPath: null,
     allowClose: false,
-    pendingPath: options.path ?? null
+    pendingPath: options.path ?? null,
+    pendingSheet: options.sheetId ?? null
   }
   windows.set(state.id, state)
 
@@ -567,6 +570,33 @@ function registerIpc(): void {
   /** 新建一个窗口（菜单「新建窗口」/ Ctrl+Shift+N） */
   ipcMain.handle(IPC.newWindow, async (): Promise<void> => {
     createWindow()
+  })
+
+  /**
+   * 在新窗口打开**当前文档的某张画布**：多窗口最常见的诉求是「并排看两张画布」，
+   * 而画布是文档内部的标签页，只有再开一个窗口才能并排。
+   *
+   * 新窗口打开的是**磁盘上的那份文件**（当前窗口的未保存改动不会带过去，
+   * 所以渲染层会先走一遍"要不要保存"的确认）。
+   */
+  ipcMain.handle(IPC.openSheetWindow, async (e, sheetId: string): Promise<'ok' | 'no-file' | 'failed'> => {
+    const state = stateOf(e.sender)
+    if (!state?.docPath) return 'no-file'
+    try {
+      createWindow({ path: state.docPath, sheetId })
+      return 'ok'
+    } catch {
+      return 'failed'
+    }
+  })
+
+  /** 新窗口启动后取「要定位到哪张画布」，取一次即清空 */
+  ipcMain.handle(IPC.pendingSheet, async (e): Promise<string | null> => {
+    const state = stateOf(e.sender)
+    if (!state) return null
+    const target = state.pendingSheet
+    state.pendingSheet = null
+    return target
   })
 
   ipcMain.handle(IPC.openDialog, async (e): Promise<OpenResult | null> => {

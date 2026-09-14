@@ -25,6 +25,11 @@ export function buildAppMenu(actions: MenuActions): void {
       submenu: [
         { label: '新建', accelerator: 'CmdOrCtrl+N', click: () => send('file:new') },
         { label: '新建窗口', accelerator: 'CmdOrCtrl+Shift+N', click: () => actions.newWindow() },
+        {
+          // 画布（标签页）是文档内部的，想**并排**看两张画布就得再开一个窗口
+          label: '在新窗口打开当前画布',
+          click: () => send('file:open-sheet-window')
+        },
         { label: '打开 / 导入 .xmind…', accelerator: 'CmdOrCtrl+O', click: () => send('file:open') },
         {
           label: '导入',

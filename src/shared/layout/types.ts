@@ -18,6 +18,10 @@ export interface StyledSegment {
   color?: string
   fontSize: number
   fontFamily?: string
+  /** 高亮底色（Markdown `==…==` / HTML `<mark>`） */
+  highlight?: boolean
+  /** 上标 / 下标（`^…^` / `~…~` / `<sup>` / `<sub>`） */
+  script?: 'super' | 'sub'
 }
 
 export interface MeasuredLine {

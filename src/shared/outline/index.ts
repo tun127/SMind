@@ -119,6 +119,10 @@ function richToInlineMarkdown(rich: RichText): string {
       if (run.bold) text = `**${text}**`
       else if (run.italic) text = `*${text}*`
       if (run.strike) text = `~~${text}~~`
+      // 高亮 / 上下标：与导入器读的语法一致，往返不丢
+      if (run.highlight) text = `==${text}==`
+      if (run.script === 'super') text = `^${text}^`
+      if (run.script === 'sub' && !run.strike) text = `~${text}~`
       parts.push(text)
     }
   }

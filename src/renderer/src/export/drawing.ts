@@ -18,7 +18,6 @@ import {
   CODE_FONT_SIZE,
   CODE_HEADER,
   CODE_LINE_RATIO,
-  CODE_MAX_LINES,
   CODE_PADDING_X,
   CODE_PADDING_Y,
   MARKER_GAP,
@@ -34,6 +33,8 @@ import type { ThemeColors, Topic } from '@shared/model/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import { readOverlayTextStyle } from '@shared/model/overlay-style'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
+import { measureTextWidth } from '../render/measure'
+import { HIGHLIGHT_BG } from '@shared/richtext'
 import { formulaSize } from '../render/formula'
 import { markerVisualOf, type MarkerGlyph } from '../render/markers'
 import { branchColorOf, visualFor } from '../render/theme'
@@ -106,7 +107,11 @@ export interface LineTextOp {
   align: 'left' | 'center' | 'right'
   /** 该行文字的基线 y */
   baseline: number
-  segments: Array<StyledSegment & { text: string }>
+  /**
+   * 分段。`x`/`width` 是构建时按字符宽度算出的**绝对位置**：
+   * 高亮底色要按段画矩形，两个后端都要用（SVG 那边没有 canvas 可量）。
+   */
+  segments: Array<StyledSegment & { text: string; x?: number; width?: number }>
   /** 兜底颜色（分段没指定 color 时用） */
   color: string
 }
@@ -324,21 +329,50 @@ function nodeOps(
           : line.align === 'right'
             ? node.x + node.width - node.paddingX
             : node.x + node.paddingX
-      ops.push({
-        kind: 'lineText',
-        x: anchorX,
-        y: cursorY,
-        align: line.align,
-        baseline: baselineIn(cursorY, line.height, fontSize),
-        // 行内公式（标题里的 $…$）在导出里以源码文本斜体呈现：
-        // 导出后端只画文字/图形，塞不进 KaTeX 的 HTML；画布上仍是渲染后的公式
-        segments: line.segments.map((segment) =>
+      const baseline = baselineIn(cursorY, line.height, fontSize)
+
+      // 行内公式（标题里的 $…$）在导出里以源码文本斜体呈现：
+      // 导出后端只画文字/图形，塞不进 KaTeX 的 HTML；画布上仍是渲染后的公式
+      const segments: Array<StyledSegment & { text: string; x?: number; width?: number }> = line.segments.map(
+        (segment) =>
           segment.formula
             ? { ...segment, text: segment.formula, formula: undefined, italic: true }
             : { ...segment }
-        ),
-        color: visual.color
+      )
+
+      // 逐段算绝对位置：高亮底色要按段画矩形，位置必须和文字严格对齐
+      const widths = segments.map((segment) =>
+        measureTextWidth(segment.text, {
+          fontSize: segment.fontSize,
+          weight: segment.weight,
+          italic: segment.italic,
+          fontFamily: segment.fontFamily
+        })
+      )
+      const total = widths.reduce((sum, width) => sum + width, 0)
+      let cursorX = line.align === 'center' ? anchorX - total / 2 : line.align === 'right' ? anchorX - total : anchorX
+      segments.forEach((segment, index) => {
+        segment.x = cursorX
+        segment.width = widths[index]
+        cursorX += widths[index]
       })
+
+      // 高亮底色：先铺矩形，再让文字压在上面
+      for (const segment of segments) {
+        if (!segment.highlight) continue
+        const box = segment.fontSize * 1.25
+        ops.push({
+          kind: 'rect',
+          x: segment.x ?? 0,
+          y: baseline - segment.fontSize * 0.95,
+          w: segment.width ?? 0,
+          h: box,
+          r: 2,
+          fill: HIGHLIGHT_BG
+        })
+      }
+
+      ops.push({ kind: 'lineText', x: anchorX, y: cursorY, align: line.align, baseline, segments, color: visual.color })
     }
     cursorY += line.height
   }
@@ -410,7 +444,7 @@ function nodeOps(
     const codeLines = highlightCode(topic.code.text, topic.code.language)
     const lineH = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
     let textY = cursorY + CODE_HEADER + CODE_PADDING_Y + CODE_FONT_SIZE * 0.8
-    for (const line of codeLines.slice(0, CODE_MAX_LINES)) {
+    for (const line of codeLines) {
       let offset = 0
       for (const token of line.tokens) {
         ops.push({

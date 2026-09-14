@@ -19,6 +19,16 @@ export interface RichTextRun {
   italic?: boolean
   underline?: boolean
   strike?: boolean
+  /**
+   * 高亮（Markdown 的 `==文字==` / HTML 的 `<mark>`）。
+   * 渲染成底色，让重点在画布上一眼可见。
+   */
+  highlight?: boolean
+  /**
+   * 上标 / 下标（Markdown 的 `^上标^` 与 `~下标~`，也来自 HTML 的 `<sup>` / `<sub>`）。
+   * 渲染时字号会缩小并上/下偏移。
+   */
+  script?: 'super' | 'sub'
   color?: string
   fontSize?: number
   fontFamily?: string

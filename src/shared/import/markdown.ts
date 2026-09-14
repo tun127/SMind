@@ -26,82 +26,344 @@ interface InlineRun {
   bold?: boolean
   italic?: boolean
   strike?: boolean
+  underline?: boolean
+  /** 高亮（`==…==` / `<mark>`） */
+  highlight?: boolean
+  /** 上标 / 下标（`^…^` / `~…~` / `<sup>` / `<sub>`） */
+  script?: 'super' | 'sub'
   mono?: boolean
   link?: boolean
 }
 
-const INLINE_PATTERN =
-  /(\*\*|__)(.+?)\1|(\*|_)(.+?)\3|~~(.+?)~~|`([^`]+)`|!\[([^\]]*)\]\(([^)]*)\)|\[([^\]]*)\]\(([^)]*)\)/g
+/** 行内解析需要的外部上下文：链接引用定义、脚注定义、引用到的脚注 id */
+export interface InlineContext {
+  /** `[id]: url` 形式的链接引用定义 */
+  linkRefs?: Map<string, string>
+  /** `[^id]: 说明` 形式的脚注定义 */
+  footnotes?: Map<string, string>
+  /** 本次解析用到的脚注 id（按出现顺序，去重） */
+  usedFootnotes?: string[]
+}
 
 export interface ParsedInline {
   runs: InlineRun[]
   text: string
   href?: string
+  /** 这一行引用到的脚注 id（导入时把定义补进节点备注） */
+  usedFootnotes?: string[]
 }
 
-/** 行内 Markdown → 富文本 run 序列；第一个链接的 url 单独带回 */
-export function parseInlineMarkdown(raw: string): ParsedInline {
+/** 需要转义的字符（CommonMark 的可转义字符集） */
+const ESCAPABLE = '\\`*_{}[]()#+-.!~^=<>|'
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  copy: '©',
+  reg: '®',
+  trade: '™',
+  hellip: '…',
+  mdash: '—',
+  ndash: '–',
+  times: '×',
+  divide: '÷',
+  laquo: '«',
+  raquo: '»',
+  middot: '·',
+  bull: '•',
+  deg: '°',
+  plusmn: '±',
+  ne: '≠',
+  le: '≤',
+  ge: '≥',
+  rarr: '→',
+  larr: '←',
+  harr: '↔',
+  check: '✓',
+  cross: '✗',
+  star: '★',
+  heart: '♥'
+}
+
+function decodeEntity(name: string): string {
+  if (name.startsWith('#')) {
+    const code = name[1] === 'x' || name[1] === 'X' ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10)
+    return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : `&${name};`
+  }
+  return ENTITIES[name.toLowerCase()] ?? `&${name};`
+}
+
+/** 行内 HTML 标签 → 它对应的富文本样式（不认识的一律剥掉） */
+function inlineTagStyle(tag: string): Partial<InlineRun> | 'close' | 'break' | null {
+  const name = tag.replace(/[<>/]/g, '').toLowerCase()
+  switch (name) {
+    case 'u':
+    case 'ins':
+      return { underline: true }
+    case 'b':
+    case 'strong':
+      return { bold: true }
+    case 'i':
+    case 'em':
+      return { italic: true }
+    case 's':
+    case 'del':
+    case 'strike':
+      return { strike: true }
+    case 'mark':
+      return { highlight: true }
+    case 'sup':
+      return { script: 'super' }
+    case 'sub':
+      return { script: 'sub' }
+    case 'code':
+      return { mono: true }
+    case 'br':
+      return 'break'
+    default:
+      return null
+  }
+}
+
+interface InlineStyle {
+  bold?: boolean
+  italic?: boolean
+  strike?: boolean
+  underline?: boolean
+  highlight?: boolean
+  script?: 'super' | 'sub'
+  mono?: boolean
+  link?: boolean
+}
+
+/**
+ * 行内 Markdown → run 序列（**扫描器**实现，不是一个大正则）。
+ *
+ * 支持 Typora 用到的全部行内语法：
+ * `**粗体**`、`*斜体*`、`~~删除线~~`、`==高亮==`、`^上标^`、`~下标~`、
+ * `` `行内代码` ``、`![alt](url)`、`[文字](url)`、`[文字][引用]`、`[^脚注]`、
+ * 行内 HTML（`<u>`/`<sup>`/`<sub>`/`<mark>`/`<br>`/`<b>`/`<i>`…，不认识的剥掉）、
+ * 实体（`&amp;` / `&#39;`）、反斜杠转义。
+ *
+ * 采用「找配对闭合符」而不是「见到就切换状态」：这样 `2 * 3` 里那个孤立的 `*`
+ * 不会被误当成斜体开关（否则后面的文字会整段变斜）。
+ */
+export function parseInlineMarkdown(raw: string, context: InlineContext = {}): ParsedInline {
   const runs: InlineRun[] = []
-  let plain = ''
   let href: string | undefined
-  let last = 0
+  /** 这一行引用到的脚注（去重，按出现顺序） */
+  const usedFootnotes: string[] = []
+  const scanContext: InlineContext = { ...context, usedFootnotes }
 
-  const pushPlain = (segment: string): void => {
-    if (segment.length === 0) return
-    plain += segment
+  const push = (text: string, style: InlineStyle): void => {
+    if (text.length === 0) return
     const previous = runs[runs.length - 1]
-    if (
+    const sameAsPrevious =
       previous &&
-      !previous.bold &&
-      !previous.italic &&
-      !previous.strike &&
-      !previous.mono &&
-      !previous.link
-    ) {
-      previous.text += segment
-    } else {
-      runs.push({ text: segment })
-    }
+      Boolean(previous.bold) === Boolean(style.bold) &&
+      Boolean(previous.italic) === Boolean(style.italic) &&
+      Boolean(previous.strike) === Boolean(style.strike) &&
+      Boolean(previous.underline) === Boolean(style.underline) &&
+      Boolean(previous.highlight) === Boolean(style.highlight) &&
+      previous.script === style.script &&
+      Boolean(previous.mono) === Boolean(style.mono) &&
+      Boolean(previous.link) === Boolean(style.link)
+    if (sameAsPrevious) previous.text += text
+    else runs.push({ text, ...style })
   }
 
-  for (const match of raw.matchAll(INLINE_PATTERN)) {
-    const start = match.index ?? 0
-    pushPlain(raw.slice(last, start))
-    let visible = ''
-    if (match[2] !== undefined) {
-      runs.push({ text: match[2], bold: true })
-      visible = match[2]
-    } else if (match[4] !== undefined) {
-      runs.push({ text: match[4], italic: true })
-      visible = match[4]
-    } else if (match[5] !== undefined) {
-      runs.push({ text: match[5], strike: true })
-      visible = match[5]
-    } else if (match[6] !== undefined) {
-      runs.push({ text: match[6], mono: true })
-      visible = match[6]
-    } else if (match[7] !== undefined) {
-      // 图片：保留替代文字
-      runs.push({ text: match[7] })
-      visible = match[7]
-    } else if (match[9] !== undefined) {
-      // 链接：文字留下，url 挂到节点超链接
-      if (!href) href = match[10]
-      runs.push({ text: match[9], link: true })
-      visible = match[9]
+  /** 逐字符扫描；`style` 是当前生效的样式（由外层递归传入） */
+  const walk = (source: string, style: InlineStyle): void => {
+    let i = 0
+    let buffer = ''
+    const flush = (): void => {
+      if (buffer.length === 0) return
+      push(buffer, style)
+      buffer = ''
     }
-    plain += visible
-    last = start + match[0].length
-  }
-  pushPlain(raw.slice(last))
 
-  const text = plain.trim()
-  if (text.length !== plain.length) {
-    // 去掉首尾空白后，同步修剪首尾 run，避免留下纯空白的 run
+    while (i < source.length) {
+      const ch = source[i]
+
+      // 1) 反斜杠转义
+      if (ch === '\\' && i + 1 < source.length && ESCAPABLE.includes(source[i + 1])) {
+        buffer += source[i + 1]
+        i += 2
+        continue
+      }
+
+      // 2) HTML 实体
+      if (ch === '&') {
+        const entity = /^&([a-zA-Z]+|#[0-9]+|#x[0-9a-fA-F]+);/.exec(source.slice(i))
+        if (entity) {
+          buffer += decodeEntity(entity[1])
+          i += entity[0].length
+          continue
+        }
+      }
+
+      // 3) 行内 HTML
+      if (ch === '<') {
+        // 允许带属性（`<span class="x">` 这种也要被识别出来才有机会剥掉）
+        const tag = /^<\/?[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?\/?>/.exec(source.slice(i))
+        if (tag) {
+          const isClose = tag[0].startsWith('</')
+          const mapped = inlineTagStyle(tag[0])
+          i += tag[0].length
+          if (mapped === 'break') {
+            buffer += '\n'
+            continue
+          }
+          if (mapped === null || mapped === 'close' || isClose) continue // 剥掉 / 结束标签
+          const tagStyle: Partial<InlineRun> = mapped
+          // 开标签：找到配对的结束标签，区间内套用样式
+          const name = /^<([a-zA-Z0-9]+)/.exec(tag[0])![1]
+          const closer = new RegExp(`</${name}\\s*>`, 'i')
+          const rest = source.slice(i)
+          const end = rest.search(closer)
+          if (end < 0) {
+            walk(rest, { ...style, ...tagStyle })
+            i = source.length
+          } else {
+            walk(rest.slice(0, end), { ...style, ...tagStyle })
+            const closed = closer.exec(rest)!
+            i += end + closed[0].length
+          }
+          continue
+        }
+      }
+
+      // 4) 行内代码（内部不做任何解析）
+      if (ch === '`') {
+        const end = source.indexOf('`', i + 1)
+        if (end > i) {
+          flush()
+          push(source.slice(i + 1, end), { ...style, mono: true })
+          i = end + 1
+          continue
+        }
+      }
+
+      // 5) 图片（保留替代文字）
+      if (ch === '!' && source[i + 1] === '[') {
+        const image = /^!\[([^\]]*)\]\(([^)]*)\)/.exec(source.slice(i))
+        if (image) {
+          flush()
+          push(image[1], style)
+          i += image[0].length
+          continue
+        }
+      }
+
+      // 6) 脚注引用 `[^id]`
+      if (ch === '[' && source[i + 1] === '^') {
+        const footnote = /^\[\^([^\]]+)\]/.exec(source.slice(i))
+        if (footnote) {
+          flush()
+          const id = footnote[1]
+          if (!scanContext.usedFootnotes!.includes(id)) scanContext.usedFootnotes!.push(id)
+          push(footnote[0], { ...style, link: true, script: 'super' })
+          i += footnote[0].length
+          continue
+        }
+      }
+
+      // 7) 链接 `[文字](url)` 与引用式链接 `[文字][id]`
+      if (ch === '[') {
+        const inlineLink = /^\[([^\]]*)\]\(([^)]*)\)/.exec(source.slice(i))
+        if (inlineLink) {
+          flush()
+          if (!href && inlineLink[2].length > 0) href = inlineLink[2]
+          push(inlineLink[1], { ...style, link: true })
+          i += inlineLink[0].length
+          continue
+        }
+        const refLink = /^\[([^\]]*)\]\[([^\]]*)\]/.exec(source.slice(i))
+        if (refLink) {
+          const id = refLink[2].length > 0 ? refLink[2] : refLink[1]
+          const url = context.linkRefs?.get(id.toLowerCase())
+          flush()
+          if (!href && url) href = url
+          push(refLink[1], { ...style, link: true })
+          i += refLink[0].length
+          continue
+        }
+        // 快捷引用式 `[id]`
+        const shortcut = /^\[([^\]^][^\]]*)\]/.exec(source.slice(i))
+        const shortcutUrl = shortcut ? context.linkRefs?.get(shortcut[1].toLowerCase()) : undefined
+        if (shortcut && shortcutUrl) {
+          flush()
+          if (!href) href = shortcutUrl
+          push(shortcut[1], { ...style, link: true })
+          i += shortcut[0].length
+          continue
+        }
+      }
+
+      // 8) 强调类：找配对闭合符，找到才当格式，否则按字面字符
+      const emphasis = matchEmphasis(source, i)
+      if (emphasis) {
+        flush()
+        walk(emphasis.inner, { ...style, ...emphasis.style })
+        i = emphasis.end
+        continue
+      }
+
+      buffer += ch
+      i += 1
+    }
+    flush()
+  }
+
+  walk(raw, {})
+  const text = runs.map((run) => run.text).join('')
+  const trimmed = text.trim()
+  if (trimmed.length !== text.length) {
     while (runs.length > 0 && runs[0].text.trim().length === 0) runs.shift()
     while (runs.length > 0 && runs[runs.length - 1].text.trim().length === 0) runs.pop()
   }
-  return { runs, text, href }
+  return { runs, text: trimmed, href, usedFootnotes: usedFootnotes.length > 0 ? usedFootnotes : undefined }
+}
+
+interface EmphasisMatch {
+  inner: string
+  style: InlineStyle
+  /** 闭合符之后的下标 */
+  end: number
+}
+
+/**
+ * 从 `index` 起尝试匹配一段强调语法。
+ *
+ * 闭合符必须存在且内部非空、不以空白开头结尾——否则返回 null，
+ * 让调用方把当前字符当普通文字（`2 * 3`、`a~b` 这类不会误伤）。
+ */
+function matchEmphasis(source: string, index: number): EmphasisMatch | null {
+  const tryMatch = (marker: string, style: InlineStyle): EmphasisMatch | null => {
+    if (!source.startsWith(marker, index)) return null
+    const rest = source.slice(index + marker.length)
+    const end = rest.indexOf(marker)
+    if (end <= 0) return null
+    const inner = rest.slice(0, end)
+    if (inner.trim().length === 0) return null
+    if (/^\s/.test(inner) || /\s$/.test(inner)) return null
+    return { inner, style, end: index + marker.length + end + marker.length }
+  }
+
+  // 顺序要紧：长的标记在前（`**` 先于 `*`，`~~` 先于 `~`）
+  return (
+    tryMatch('**', { bold: true }) ??
+    tryMatch('__', { bold: true }) ??
+    tryMatch('~~', { strike: true }) ??
+    tryMatch('==', { highlight: true }) ??
+    tryMatch('*', { italic: true }) ??
+    tryMatch('_', { italic: true }) ??
+    tryMatch('^', { script: 'super' }) ??
+    tryMatch('~', { script: 'sub' })
+  )
 }
 
 /** 行内 run → 节点富文本；全部都是普通文字时返回 undefined（没必要存 rich） */
@@ -113,12 +375,14 @@ export function inlineRunsToRich(runs: InlineRun[]): RichText | undefined {
       bold: run.bold || undefined,
       italic: run.italic || undefined,
       strike: run.strike || undefined,
-      underline: run.link || undefined,
+      underline: run.underline || run.link || undefined,
+      highlight: run.highlight || undefined,
+      script: run.script,
       fontFamily: run.mono ? MD_MONO_FONT : undefined
     }))
   if (mapped.length === 0) return undefined
   const hasFormat = mapped.some(
-    (run) => run.bold || run.italic || run.strike || run.underline || run.fontFamily
+    (run) => run.bold || run.italic || run.strike || run.underline || run.highlight || run.script || run.fontFamily
   )
   if (!hasFormat) return undefined
   return { paragraphs: [{ runs: mapped }] }
@@ -139,10 +403,12 @@ interface MarkdownLine {
   href?: string
   /** 整句就是数学（`$…$` / `$$…$$`）时，这里放公式源码，标题留空 */
   formula?: string
+  /** 这一行里引用到的脚注 id（导入时把定义补进该节点的备注） */
+  footnotes?: string[]
 }
 
 /** 解析一行；不是标题/列表则返回 null */
-export function parseMarkdownLine(line: string): MarkdownLine | null {
+export function parseMarkdownLine(line: string, context: InlineContext = {}): MarkdownLine | null {
   if (line.trim().length === 0) return null
 
   const heading = /^(#{1,6})\s+(.*)$/.exec(line.trim())
@@ -151,7 +417,7 @@ export function parseMarkdownLine(line: string): MarkdownLine | null {
     // 整句是数学 → 变成节点的公式
     const math = matchWholeLineMath(body)
     if (math) return { kind: 'heading', depth: heading[1].length, level: heading[1].length, text: '', formula: math }
-    const inline = parseInlineMarkdown(body)
+    const inline = parseInlineMarkdown(body, context)
     if (inline.text.length === 0) return null
     const level = heading[1].length
     return {
@@ -160,7 +426,8 @@ export function parseMarkdownLine(line: string): MarkdownLine | null {
       level,
       text: inline.text,
       rich: inlineRunsToRich(inline.runs),
-      href: inline.href
+      href: inline.href,
+      footnotes: inline.usedFootnotes
     }
   }
 
@@ -173,7 +440,7 @@ export function parseMarkdownLine(line: string): MarkdownLine | null {
     // 整句是数学 → 变成节点的公式（节点标题留空，公式自成一块）
     const math = matchWholeLineMath(body)
     if (math) return { kind: 'list', depth, level: 0, text: '', formula: math }
-    const inline = parseInlineMarkdown(body)
+    const inline = parseInlineMarkdown(body, context)
     if (inline.text.length === 0) return null
     return {
       kind: 'list',
@@ -181,11 +448,38 @@ export function parseMarkdownLine(line: string): MarkdownLine | null {
       level: 0,
       text: inline.text,
       rich: inlineRunsToRich(inline.runs),
-      href: inline.href
+      href: inline.href,
+      footnotes: inline.usedFootnotes
     }
   }
 
   return null
+}
+
+/**
+ * 收集 `[^脚注]: 说明` 与 `[链接名]: url` 这两类**定义行**。
+ * 它们不是内容，主扫描里要跳过；但行内解析需要它们做查表。
+ */
+function collectDefinitions(source: string): { footnotes: Map<string, string>; linkRefs: Map<string, string> } {
+  const footnotes = new Map<string, string>()
+  const linkRefs = new Map<string, string>()
+  for (const line of source.split(/\r?\n/)) {
+    const footnote = /^\s*\[\^([^\]]+)\]:\s*(.*)$/.exec(line)
+    if (footnote) {
+      footnotes.set(footnote[1], footnote[2].trim())
+      continue
+    }
+    const linkRef = /^\s*\[([^\]^][^\]]*)\]:\s*(\S+)(?:\s+["'(].*)?$/.exec(line)
+    if (linkRef) linkRefs.set(linkRef[1].trim().toLowerCase(), linkRef[2].trim())
+  }
+  return { footnotes, linkRefs }
+}
+
+/** 定义行（脚注 / 链接引用）：主扫描要跳过 */
+function isDefinitionLine(line: string): boolean {
+  const trimmed = line.trim()
+  if (/^\[\^[^\]]+\]:/.test(trimmed)) return true
+  return /^\[[^\]^][^\]]*\]:\s*\S+/.test(trimmed)
 }
 
 type MdEvent =
@@ -195,9 +489,17 @@ type MdEvent =
   | { type: 'note'; text: string }
   | { type: 'tableRow'; cells: string[] }
 
+interface ScanResult {
+  events: MdEvent[]
+  /** 脚注定义（行内引用到的会补进该节点的备注） */
+  footnotes: Map<string, string>
+}
+
 /** 把全文扫成事件流：节点 / 代码块 / 备注 / 表格行 */
-function scanMarkdown(source: string): MdEvent[] {
+function scanMarkdown(source: string): ScanResult {
   const events: MdEvent[] = []
+  const { footnotes, linkRefs } = collectDefinitions(source)
+  const context: InlineContext = { footnotes, linkRefs }
   let inFence = false
   let fenceLanguage = ''
   let fenceIndent = ''
@@ -232,6 +534,12 @@ function scanMarkdown(source: string): MdEvent[] {
       return
     }
     if (/^([-*_])\1{2,}$/.test(trimmed)) return // 水平线
+    // 目录占位（Typora 的 [TOC]）：不是内容，跳过
+    if (/^\[toc\]$/i.test(trimmed)) return
+    // 脚注 / 链接引用的定义行：内容在解析时已查表用掉，这里不生成节点
+    if (isDefinitionLine(line)) return
+    // 整行是纯 HTML 标签（<div>、</div>、<br> 之类）：不是内容
+    if (/^<\/?[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?\/?>$/.test(trimmed)) return
     if (trimmed.startsWith('>')) {
       const quote = cleanInlineMarkdown(trimmed.replace(/^>\s?/, ''))
       if (quote.length > 0) events.push({ type: 'note', text: quote })
@@ -253,23 +561,31 @@ function scanMarkdown(source: string): MdEvent[] {
       events.push({ type: 'formula', text: math })
       return
     }
-    const item = parseMarkdownLine(line)
+    const item = parseMarkdownLine(line, context)
     if (item) {
       events.push({ type: 'node', line: item })
       return
     }
-    // 普通段落 → 最近节点的备注
-    const plain = cleanInlineMarkdown(line)
-    if (plain.length > 0) events.push({ type: 'note', text: plain })
+    // 普通段落 → 最近节点的备注。
+    // 段落里也会有脚注引用：把对应定义一并写进备注，免得"脚注内容不见了"。
+    const inline = parseInlineMarkdown(line, context)
+    if (inline.text.length > 0) {
+      let text = inline.text
+      for (const id of inline.usedFootnotes ?? []) {
+        const definition = footnotes.get(id)
+        text += `\n[^${id}]${definition ? ` ${definition}` : ''}`
+      }
+      events.push({ type: 'note', text })
+    }
   })
 
-  return events
+  return { events, footnotes }
 }
 
 export function parseMarkdownOutline(text: string, fallbackTitle = '导入的大纲'): ParsedOutline {
   const warnings: string[] = []
   const source = (text ?? '').replace(/^\ufeff/, '')
-  const events = scanMarkdown(source)
+  const { events, footnotes } = scanMarkdown(source)
 
   const roots: OutlineNode[] = []
   const headingStack: Array<{ level: number; node: OutlineNode }> = []
@@ -343,6 +659,15 @@ export function parseMarkdownOutline(text: string, fallbackTitle = '导入的大
     if (item.rich) node.rich = item.rich
     if (item.href) node.href = item.href
     if (item.formula) node.formula = item.formula
+    // 这一行引用了脚注：把定义补进该节点的备注（`[^1] 说明文字`），
+    // 免得"导入后脚注内容不见了"
+    if (item.footnotes && item.footnotes.length > 0) {
+      const lines = item.footnotes.map((id) => {
+        const text = footnotes.get(id)
+        return text ? `[^${id}] ${text}` : `[^${id}]`
+      })
+      node.notes = node.notes ? `${node.notes}\n${lines.join('\n')}` : lines.join('\n')
+    }
 
     if (item.kind === 'heading') {
       while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= item.level) {

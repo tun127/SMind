@@ -18,7 +18,7 @@ import {
   type Size
 } from '@shared/layout/accessory'
 import { fitLabelText } from '@shared/layout/label-fit'
-import { richFromPlain } from '@shared/richtext'
+import { SCRIPT_FONT_RATIO, richFromPlain } from '@shared/richtext'
 import { splitInlineMath } from '@shared/formula'
 import { formulaSize } from './formula'
 import { defaultTextAlignOf } from './defaults'
@@ -205,6 +205,8 @@ interface ResolvedStyle {
   fontSize: number
   weight: number
   fontFamily: string
+  highlight?: boolean
+  script?: 'super' | 'sub'
 }
 
 interface StyledChar {
@@ -324,6 +326,8 @@ function sameStyle(segment: StyledSegment, style: ResolvedStyle): boolean {
     Boolean(segment.italic) === style.italic &&
     Boolean(segment.underline) === style.underline &&
     Boolean(segment.strike) === style.strike &&
+    Boolean(segment.highlight) === Boolean(style.highlight) &&
+    segment.script === style.script &&
     segment.color === style.color &&
     segment.fontSize === style.fontSize &&
     segment.fontFamily === style.fontFamily
@@ -339,7 +343,9 @@ function segmentOf(text: string, style: ResolvedStyle): StyledSegment {
     strike: style.strike || undefined,
     color: style.color,
     fontSize: style.fontSize,
-    fontFamily: style.fontFamily
+    fontFamily: style.fontFamily,
+    highlight: style.highlight,
+    script: style.script
   }
 }
 
@@ -376,15 +382,18 @@ function baseResolved(base: BaseStyle): ResolvedStyle {
 
 function resolveRun(run: RichTextRun, base: BaseStyle): ResolvedStyle {
   const bold = Boolean(run.bold)
+  const raw = run.fontSize && run.fontSize > 0 ? run.fontSize : base.fontSize
   return {
     bold,
     italic: Boolean(run.italic),
     underline: Boolean(run.underline),
     strike: Boolean(run.strike),
-    color: run.color,
-    fontSize: run.fontSize && run.fontSize > 0 ? run.fontSize : base.fontSize,
+    // 上下标按比例缩小字号参与排版：渲染端直接画这个字号，只是再上下偏移
+    fontSize: run.script ? Math.max(8, Math.round(raw * SCRIPT_FONT_RATIO)) : raw,
     weight: bold ? Math.max(base.weight, 700) : base.weight,
-    fontFamily: run.fontFamily && run.fontFamily.length > 0 ? run.fontFamily : FONT_FAMILY
+    fontFamily: run.fontFamily && run.fontFamily.length > 0 ? run.fontFamily : FONT_FAMILY,
+    highlight: run.highlight || undefined,
+    script: run.script
   }
 }
 
@@ -564,6 +573,40 @@ export function bumpMeasureEpoch(): void {
  * 有格式的节点走对象身份缓存，避免 JSON.stringify 带来的开销。
  * 附加元素（标记/标签/备注等）也必须进键，否则改了它们尺寸不会更新。
  */
+/**
+ * 量一段文字的宽度。
+ *
+ * 导出时画「高亮底色」需要按段算出精确位置，所以这里把内部那套字符宽度缓存
+ * 开放出来——和节点测量共用同一份缓存，导出的宽度与画布上完全一致。
+ *
+ * 没有 DOM 时（自检在 Node 里跑导出指令）退回按字符类别的估算：
+ * 估算只影响高亮底色的宽窄，不影响"能不能构建出指令"。
+ */
+export function measureTextWidth(
+  text: string,
+  style: { fontSize: number; weight?: number; italic?: boolean; fontFamily?: string }
+): number {
+  const resolved: ResolvedStyle = {
+    bold: false,
+    italic: Boolean(style.italic),
+    underline: false,
+    strike: false,
+    fontSize: style.fontSize,
+    weight: style.weight ?? 400,
+    fontFamily: style.fontFamily && style.fontFamily.length > 0 ? style.fontFamily : FONT_FAMILY
+  }
+
+  if (typeof document === 'undefined') {
+    let estimate = 0
+    for (const ch of text) estimate += ch.charCodeAt(0) > 0xff ? resolved.fontSize : resolved.fontSize * 0.55
+    return estimate
+  }
+
+  let width = 0
+  for (const ch of text) width += widthOf({ ch, style: resolved })
+  return width
+}
+
 export function measureTopic(topic: Topic, depth: number): MeasureResult {
   const extra = accessoryKey(topic)
   const rich = topic.titleRich

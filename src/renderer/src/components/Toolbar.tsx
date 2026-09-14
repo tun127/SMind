@@ -74,6 +74,10 @@ export interface ToolbarActions {
   onFormula(): void
   /** 插入/编辑代码块（打开节点面板并聚焦代码输入框） */
   onCode(): void
+  /** 开一个新窗口（一份新文档） */
+  onNewWindow(): void
+  /** 在新窗口打开当前画布（并排看两张画布） */
+  onOpenSheetWindow(): void
 }
 
 interface Props {
@@ -601,6 +605,20 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           label="更多"
           title="更多功能"
           items={[
+            {
+              key: 'new-window',
+              label: '新建窗口',
+              hint: '一个窗口一份文档（Ctrl+Shift+N）',
+              icon: <Frame size={15} />,
+              onSelect: actions.onNewWindow
+            },
+            {
+              key: 'open-sheet-window',
+              label: '在新窗口打开当前画布',
+              hint: '并排看两张画布',
+              icon: <PanelRight size={15} />,
+              onSelect: actions.onOpenSheetWindow
+            },
             {
               key: 'history',
               label: '历史记录与常用',

@@ -1375,8 +1375,9 @@ textarea {
   margin: 0;
 }
 
-/* 代码块：与 shared/layout/accessory.ts 的 codeBoxSize 共用常量，
-   尺寸来自布局测量，超出行数内部滚动 */
+/* 代码块：与 shared/layout/accessory.ts 的 codeBoxSize 共用常量。
+   尺寸完全由布局测量给出（不封顶），这里**不做裁剪、不出滚动条**——
+   代码必须完整显示。 */
 .topic__code {
   position: relative;
   display: flex;
@@ -1385,7 +1386,7 @@ textarea {
   /* 实色浅色卡片：不管节点/主题是什么配色，代码都清晰可读 */
   background: #f6f8fa;
   border: 1px solid rgba(15, 23, 42, 0.14);
-  overflow: hidden;
+  overflow: visible;
   text-align: left;
 }
 
@@ -1420,8 +1421,8 @@ textarea {
   line-height: 1.45;
   color: #24292f;
   white-space: pre;
-  overflow: auto;
-  min-height: 0;
+  /* 不滚动、不省略：整段代码铺开显示 */
+  overflow: visible;
 }
 
 /* 用于量公式真实尺寸的隐藏容器（不参与显示） */
@@ -1564,33 +1565,55 @@ textarea {
   content: '\00a0';
 }
 
+/* 高亮 / 上标 / 下标：与画布上的呈现保持一致（==高亮==、^上标^、~下标~） */
+.rich-editor__content mark,
+.rich-editor__content .rt-highlight {
+  background: rgba(255, 214, 0, 0.35);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.rich-editor__content sup {
+  font-size: 0.72em;
+  vertical-align: super;
+  line-height: 1;
+}
+
+.rich-editor__content sub {
+  font-size: 0.72em;
+  vertical-align: sub;
+  line-height: 1;
+}
+
+/* 折叠徽标：整个移到节点**外侧**（带一点间距），不再压在节点边框与连线上。
+   底衬颜色由渲染层按当前画布底色注入（见 TopicNode 的 boxShadow），
+   这样压在连线上也读得清。 */
 .topic__collapse {
   position: absolute;
   top: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 15px;
-  height: 15px;
-  margin-top: -7.5px;
-  padding: 0 3px;
-  border: 1.5px solid #ffffff;
-  border-radius: 9px;
+  min-width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  padding: 0 4px;
+  border-radius: 999px;
   color: #ffffff;
-  font-size: 11px;
+  font-size: 10.5px;
+  font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.22);
-  box-sizing: content-box;
+  box-sizing: border-box;
 }
 
 .topic__collapse--right {
-  right: -8px;
+  left: calc(100% + 6px);
 }
 
 .topic__collapse--left {
-  left: -8px;
+  right: calc(100% + 6px);
 }
 
 /* ------------------------------------------------------------------ */

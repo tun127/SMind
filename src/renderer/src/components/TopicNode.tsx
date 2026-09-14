@@ -10,6 +10,7 @@ import {
 } from '@shared/layout/accessory'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
+import { HIGHLIGHT_BG } from '@shared/richtext'
 import { countDescendants } from '@shared/model/tree'
 import { useEditor } from '../store/editor'
 import type { RichText, ThemeColors } from '@shared/model/types'
@@ -76,6 +77,16 @@ function segmentStyle(segment: StyledSegment): CSSProperties {
   if (decoration) style.textDecoration = decoration
   if (segment.color) style.color = segment.color
   if (segment.fontFamily) style.fontFamily = segment.fontFamily
+  // 高亮：底色（与自检里的 HIGHLIGHT_BG 一致，导出也用同一份颜色）
+  if (segment.highlight) {
+    style.background = HIGHLIGHT_BG
+    style.borderRadius = 2
+  }
+  // 上下标：字号已经在测量里缩小过，这里只做上下偏移（line-height: 1 避免把行高撑开）
+  if (segment.script === 'super' || segment.script === 'sub') {
+    style.verticalAlign = segment.script === 'super' ? 'super' : 'sub'
+    style.lineHeight = 1
+  }
   return style
 }
 
@@ -395,7 +406,8 @@ function TopicNodeInner({
           type="button"
           className={`topic__collapse topic__collapse--${node.side === 'left' ? 'left' : 'right'}`}
           title={node.topic.collapsed ? '展开子主题' : '折叠子主题'}
-          style={{ background: color }}
+          // 底色＝分支配色；外圈用**画布底色**描一圈，压在连线上也不会糊在一起
+          style={{ background: color, boxShadow: `0 0 0 2px ${colors.canvas}, 0 1px 3px rgba(16, 24, 40, 0.22)` }}
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.preventDefault()}
           onClick={(event) => {
