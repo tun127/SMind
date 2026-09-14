@@ -5,6 +5,7 @@
  * 所有坐标都是最终坐标（含 padding 偏移），渲染层直接使用，不再做任何换算。
  */
 import type { NodeStyle, Relationship, Sheet, Topic } from '../model/types'
+import { readOverlayFontSize } from '../model/overlay-style'
 import { RELATIONSHIP_CURVE_KEY } from '../xmind/constants'
 import { round } from './core'
 import type { BoundaryLayout, LayoutResult, RelationshipLayout, SummaryLayout } from './types'
@@ -321,7 +322,7 @@ export function roundedRectPath(
 }
 
 function boundaryOf(
-  boundary: { id: string; range: string; title?: string },
+  boundary: { id: string; range: string; title?: string; style?: NodeStyle },
   result: LayoutResult,
   index: TreeIndex
 ): BoundaryLayout | null {
@@ -334,6 +335,7 @@ function boundaryOf(
   const y = round(bounds.minY - BOUNDARY_PAD - titleBand)
   const width = round(bounds.maxX - bounds.minX + BOUNDARY_PAD * 2)
   const height = round(bounds.maxY - bounds.minY + BOUNDARY_PAD * 2 + titleBand)
+  const labelSize = estimateOverlayLabelSize(boundary.title, readOverlayFontSize(boundary.style, BOUNDARY_FONT_SIZE))
 
   return {
     id: boundary.id,
@@ -344,13 +346,19 @@ function boundaryOf(
     width,
     height,
     d: roundedRectPath(x, y, width, height, BOUNDARY_RADIUS),
-    label: { x: round(x + 12), y: round(y + titleBand / 2 + 2) }
+    label: { x: round(x + 12), y: round(y + titleBand / 2 + 2) },
+    labelSize,
+    style: boundary.style,
+    bounds: { x, y, width, height }
   }
 }
 
 const SUMMARY_GAP = 12
 const SUMMARY_SPINE = 10
 const SUMMARY_NIB = 20
+/** 概要与边界标题的默认字号（与画布上的默认值一致，样式里写了就以样式为准） */
+const SUMMARY_FONT_SIZE = 13
+const BOUNDARY_FONT_SIZE = 12
 /** 概要 / 边界标题的行高（多行时按它排布，画布与导出共用） */
 export const OVERLAY_TITLE_LINE_HEIGHT = 15
 
@@ -360,8 +368,63 @@ export function overlayTitleLines(title: string | undefined): string[] {
   return title.split(/\r?\n/)
 }
 
+/**
+ * 标题文字块的**尺寸估算**。
+ *
+ * 布局层拿不到 DOM（不能真要一次文本测量，否则布局就依赖渲染了），
+ * 这里按「CJK 记双宽 × 字号的 0.55」粗估——它只用于**命中区与选中框**，
+ * 不参与排版，所以粗一点没关系；标题为空时给一个最小占位尺寸，
+ * 保证「删空文字后仍能点到概要」。
+ */
+export function estimateOverlayLabelSize(
+  title: string | undefined,
+  fontSize: number,
+  minWidth = 48
+): { width: number; height: number } {
+  const lines = overlayTitleLines(title)
+  if (lines.length === 0) return { width: minWidth, height: OVERLAY_TITLE_LINE_HEIGHT }
+  let units = 0
+  for (const line of lines) {
+    let count = 0
+    for (const ch of line) count += ch.charCodeAt(0) > 0xff ? 2 : 1
+    units = Math.max(units, count)
+  }
+  return {
+    width: Math.max(minWidth, Math.round(units * fontSize * 0.55) + 8),
+    height: lines.length * OVERLAY_TITLE_LINE_HEIGHT
+  }
+}
+
+/** 由若干矩形求并集包围盒 */
+function unionBounds(
+  boxes: Array<{ x: number; y: number; width: number; height: number }>
+): { x: number; y: number; width: number; height: number } | undefined {
+  if (boxes.length === 0) return undefined
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x)
+    minY = Math.min(minY, box.y)
+    maxX = Math.max(maxX, box.x + box.width)
+    maxY = Math.max(maxY, box.y + box.height)
+  }
+  return { x: round(minX), y: round(minY), width: round(maxX - minX), height: round(maxY - minY) }
+}
+
+/** 以锚点方式摆放的标题所占矩形 */
+function labelRectOf(
+  label: { x: number; y: number },
+  anchor: 'start' | 'middle' | 'end',
+  size: { width: number; height: number }
+): { x: number; y: number; width: number; height: number } {
+  const left = anchor === 'start' ? label.x : anchor === 'end' ? label.x - size.width : label.x - size.width / 2
+  return { x: left, y: label.y - size.height / 2, width: size.width, height: size.height }
+}
+
 function summaryOf(
-  summary: { id: string; topicId: string; range: string; title?: string },
+  summary: { id: string; topicId: string; range: string; title?: string; style?: NodeStyle },
   result: LayoutResult,
   index: TreeIndex
 ): SummaryLayout | null {
@@ -375,6 +438,8 @@ function summaryOf(
   // 这样用户把文字清空（空串）时就是空，不会又冒出主题的文字。
   const topicTitle = summary.topicId ? index.byId.get(summary.topicId)?.title : undefined
   const title = summary.title !== undefined ? summary.title : topicTitle
+  const fontSize = readOverlayFontSize(summary.style, SUMMARY_FONT_SIZE)
+  const labelSize = estimateOverlayLabelSize(title, fontSize)
 
   // 朝哪个方向放括号：由「父节点 -> 区间中心」的主导轴决定
   const parentId = index.parentOf.get(topics[0].id)
@@ -405,14 +470,22 @@ function summaryOf(
     const base = forward ? bounds.maxX + SUMMARY_GAP : bounds.minX - SUMMARY_GAP
     const spine = forward ? base + SUMMARY_SPINE : base - SUMMARY_SPINE
     const nib = forward ? base + SUMMARY_NIB : base - SUMMARY_NIB
+    // 括号朝右时文字接在右侧，朝左时接在左侧——否则文字会压在括号上
+    const label = { x: round(forward ? nib + 10 : nib - 10), y: round((spanStart + spanEnd) / 2) }
+    const anchor = forward ? 'start' : 'end'
     return {
       id: summary.id,
       title,
       branchId: topics[0].id,
       d: bracePath('v', spanStart, spanEnd, base, spine, nib),
-      // 括号朝右时文字接在右侧，朝左时接在左侧——否则文字会压在括号上
-      label: { x: round(forward ? nib + 10 : nib - 10), y: round((spanStart + spanEnd) / 2) },
-      anchor: forward ? 'start' : 'end'
+      label,
+      anchor,
+      labelSize,
+      style: summary.style,
+      bounds: unionBounds([
+        { x: Math.min(base, nib), y: spanStart, width: Math.abs(nib - base) + 4, height: spanEnd - spanStart },
+        labelRectOf(label, anchor, labelSize)
+      ])
     }
   }
 
@@ -421,13 +494,20 @@ function summaryOf(
   const base = forward ? bounds.maxY + SUMMARY_GAP : bounds.minY - SUMMARY_GAP
   const spine = forward ? base + SUMMARY_SPINE : base - SUMMARY_SPINE
   const nib = forward ? base + SUMMARY_NIB : base - SUMMARY_NIB
+  const label = { x: round((spanStart + spanEnd) / 2), y: round(forward ? nib + 16 : nib - 8) }
   return {
     id: summary.id,
     title,
     branchId: topics[0].id,
     d: bracePath('h', spanStart, spanEnd, base, spine, nib),
-    label: { x: round((spanStart + spanEnd) / 2), y: round(forward ? nib + 16 : nib - 8) },
-    anchor: 'middle'
+    label,
+    anchor: 'middle',
+    labelSize,
+    style: summary.style,
+    bounds: unionBounds([
+      { x: spanStart, y: Math.min(base, nib), width: spanEnd - spanStart, height: Math.abs(nib - base) + 4 },
+      labelRectOf(label, 'middle', labelSize)
+    ])
   }
 }
 

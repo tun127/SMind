@@ -30,6 +30,7 @@ import {
 } from '@shared/layout/accessory'
 import type { ThemeColors, Topic } from '@shared/model/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
+import { readOverlayTextStyle } from '@shared/model/overlay-style'
 import { formulaSize } from '../render/formula'
 import { markerVisualOf, type MarkerGlyph } from '../render/markers'
 import { branchColorOf, visualFor } from '../render/theme'
@@ -86,6 +87,8 @@ export interface TextOp {
   anchor: 'start' | 'middle' | 'end'
   /** middle 表示文字垂直居中于 y（SVG 的 dominant-baseline） */
   baseline: 'middle' | 'alphabetic'
+  /** 斜体（画布元素的标题样式用得上） */
+  italic?: boolean
   fontFamily?: string
   /** 描边（概要/关系线标题为了在别的图形上也读得清而描底色） */
   stroke?: string
@@ -498,14 +501,16 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
         strokeOpacity: 0.6
       })
       if (boundary.title) {
+        const boundaryStyle = readOverlayTextStyle(boundary.style, { fontSize: 12, bold: true })
         ops.push({
           kind: 'text',
           x: boundary.label.x,
           y: boundary.label.y,
           text: boundary.title,
-          fontSize: 12,
-          fontWeight: 600,
-          fill: color,
+          fontSize: boundaryStyle.fontSize,
+          fontWeight: boundaryStyle.bold ? 700 : 400,
+          italic: boundaryStyle.italic || undefined,
+          fill: boundaryStyle.color ?? color,
           anchor: 'start',
           baseline: 'middle'
         })
@@ -525,6 +530,7 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
       if (summary.title) {
         // 多行标题逐行画，整体以 label.y 为中线居中（与画布上的 tspan 排法一致）
         const lines = overlayTitleLines(summary.title)
+        const textStyle = readOverlayTextStyle(summary.style, { fontSize: 13, bold: true })
         const startY = summary.label.y - ((lines.length - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2
         lines.forEach((line, index) => {
           if (line.length === 0) return
@@ -533,9 +539,10 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
             x: summary.label.x,
             y: startY + index * OVERLAY_TITLE_LINE_HEIGHT,
             text: line,
-            fontSize: 13,
-            fontWeight: 600,
-            fill: color,
+            fontSize: textStyle.fontSize,
+            fontWeight: textStyle.bold ? 700 : 400,
+            italic: textStyle.italic || undefined,
+            fill: textStyle.color ?? color,
             anchor: textAnchorOf(
               summary.anchor === 'middle' ? 'center' : summary.anchor === 'end' ? 'right' : 'left'
             ),

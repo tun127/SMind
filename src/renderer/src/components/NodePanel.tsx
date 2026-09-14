@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { Code2, Download, ExternalLink, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sigma, X } from 'lucide-react'
+import {
+  Bold,
+  Code2,
+  Download,
+  Eraser,
+  ExternalLink,
+  FolderOpen,
+  Image as ImageIcon,
+  Italic,
+  Paperclip,
+  Plus,
+  Sigma,
+  X
+} from 'lucide-react'
 import { activeRoot, activeSheet, findTopic } from '@shared/model/tree'
 import { imageBoxSize } from '@shared/layout/accessory'
 import { MARKER_GROUPS, markerVisualOf } from '../render/markers'
@@ -8,6 +21,11 @@ import { resourceUrl } from '../render/resource'
 import { useEditor } from '../store/editor'
 import MarkerIcon from './MarkerIcon'
 import { CODE_LANGUAGES } from '@shared/code-language'
+import { readOverlayTextStyle, type OverlayKind } from '@shared/model/overlay-style'
+
+/** 画布元素标题的字体控制（与主题的格式栏同一套观感） */
+const OVERLAY_FONT_SIZES = [12, 13, 14, 16, 18, 22, 28]
+const OVERLAY_COLORS = ['#1f2328', '#EB5757', '#F2994A', '#27AE60', '#2D9CDB', '#2F6BFF', '#9B51E0']
 import { normalizeFormulaInput } from '@shared/formula'
 
 interface Props {
@@ -52,6 +70,21 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const id = selection[0] ?? null
   const topic = useMemo(() => (id ? findTopic(activeRoot(workbook), id) : null), [workbook, id])
 
+  // 选中的是画布级元素（概要 / 边界 / 关系线）：它也有文字与字体，照样能改
+  const selectedOverlay = useEditor((s) => s.selectedOverlay)
+  const setOverlayStyle = useEditor((s) => s.setOverlayStyle)
+  const overlayItem = useMemo(() => {
+    const target = selectedOverlay
+    if (!target) return null
+    const list =
+      target.kind === 'summary'
+        ? sheet.summaries
+        : target.kind === 'boundary'
+          ? sheet.boundaries
+          : sheet.relationships
+    return list.find((item) => item.id === target.id) ?? null
+  }, [selectedOverlay, sheet])
+
   const [labelDraft, setLabelDraft] = useState('')
   const [notesDraft, setNotesDraft] = useState('')
   const [hrefDraft, setHrefDraft] = useState('')
@@ -90,6 +123,128 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
       </button>
     </div>
   )
+
+  /**
+   * 画布级元素的属性：文字 + 字体（字号/加粗/斜体/颜色）+ 删除。
+   *
+   * 概要此前「文字删空就只剩一个框、点不到也改不了」——现在它和主题一样可选中、可改样式，
+   * 文字清空后依然保留点击区（画布上有占位提示）。
+   */
+  if (selectedOverlay && overlayItem) {
+    const kind: OverlayKind = selectedOverlay.kind
+    const label = kind === 'summary' ? '概要' : kind === 'boundary' ? '边界' : '关系线'
+    const styleText = readOverlayTextStyle(
+      overlayItem.style,
+      kind === 'summary' ? { fontSize: 13, bold: true } : { fontSize: 12, bold: true }
+    )
+    const setTitle =
+      kind === 'summary' ? setSummaryTitle : kind === 'boundary' ? setBoundaryTitle : setRelationshipTitle
+    const remove = kind === 'summary' ? removeSummary : kind === 'boundary' ? removeBoundary : removeRelationship
+
+    return (
+      <div className="side-panel">
+        {header}
+        <div className="side-panel__body">
+          <div className="side-panel__empty">
+            已选中画布上的「{label}」：文字与字体都能改，和主题一样支持撤销。
+          </div>
+
+          <div className="side-panel__title">{label}文字</div>
+          <textarea
+            key={`${overlayItem.id}-${overlayItem.title ?? ''}`}
+            className="input input--area overlay-row__multi"
+            rows={3}
+            defaultValue={overlayItem.title ?? ''}
+            placeholder="输入文字（Enter 换行；清空后画布上仍留有可点击的占位）"
+            onBlur={(event) => setTitle(overlayItem.id, event.currentTarget.value)}
+          />
+
+          <div className="side-panel__title">字体</div>
+          <div className="side-panel__row">
+            <select
+              className="select"
+              value={styleText.fontSize}
+              onChange={(event) =>
+                setOverlayStyle(kind, overlayItem.id, { fontSize: Number(event.target.value) })
+              }
+            >
+              {OVERLAY_FONT_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={styleText.bold ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
+              title="加粗"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setOverlayStyle(kind, overlayItem.id, { bold: !styleText.bold })}
+            >
+              <Bold size={15} />
+            </button>
+            <button
+              type="button"
+              className={styleText.italic ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
+              title="斜体"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setOverlayStyle(kind, overlayItem.id, { italic: !styleText.italic })}
+            >
+              <Italic size={15} />
+            </button>
+            <button
+              type="button"
+              className="fmt-btn"
+              title="恢复默认字体"
+              onMouseDown={(e) => e.preventDefault()}
+              /* 传 0 / false / 空串＝把对应属性删掉，恢复元素本身的默认外观 */
+              onClick={() =>
+                setOverlayStyle(kind, overlayItem.id, {
+                  fontSize: 0,
+                  bold: false,
+                  italic: false,
+                  color: ''
+                })
+              }
+            >
+              <Eraser size={14} />
+            </button>
+          </div>
+          <div className="side-panel__row">
+            <span className="side-panel__hint">颜色</span>
+            {OVERLAY_COLORS.map((color) => (
+              <button
+                key={color}
+                type="button"
+                className={styleText.color === color ? 'color-dot color-dot--active' : 'color-dot'}
+                style={{ background: color }}
+                title={color}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setOverlayStyle(kind, overlayItem.id, { color })}
+              />
+            ))}
+          </div>
+
+          <div className="side-panel__hint">
+            双击画布上的文字也能直接编辑；选中后按 Delete 删除这个{label}。
+          </div>
+          <div className="side-panel__row">
+            <button
+              type="button"
+              className="btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                remove(overlayItem.id)
+                useEditor.getState().clearOverlaySelection()
+              }}
+            >
+              <X size={14} /> 删除{label}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (!topic || !id) {
     return (

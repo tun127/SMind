@@ -119,7 +119,8 @@ import {
 } from '../src/shared/ai'
 import { parseMarkdownOutline } from '../src/shared/import/markdown'
 import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../src/shared/formula'
-import { overlayTitleLines } from '../src/shared/layout/overlays'
+import { estimateOverlayLabelSize, overlayTitleLines } from '../src/shared/layout/overlays'
+import { readOverlayFontSize, readOverlayTextStyle, withOverlayTextStyle } from '../src/shared/model/overlay-style'
 import { parseOpmlOutline } from '../src/shared/import/opml'
 import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
 import {
@@ -2552,6 +2553,74 @@ async function testMediaElements(): Promise<void> {
   setDefaultTextAlign('center')
   eq('改回居中', defaultTextAlignOf(), 'center')
 
+  group('概要：可选中、可改字体、空文字仍可点（一等公民）')
+
+  {
+    // 纯函数：标题样式读写往返
+    const styled = withOverlayTextStyle(undefined, {
+      fontSize: 18,
+      bold: false,
+      italic: true,
+      color: '#EB5757'
+    })
+    const read = readOverlayTextStyle(styled, { fontSize: 13, bold: true })
+    eq('字号写进去读得回来', read.fontSize, 18)
+    eq('显式取消加粗', read.bold, false)
+    eq('斜体', read.italic, true)
+    eq('颜色', read.color, '#EB5757')
+    eq('Xmind 风格的 14px 也能读', readOverlayFontSize({ properties: { 'fo:font-size': '14px' } }, 13), 14)
+    eq(
+      '恢复默认后样式被清空',
+      withOverlayTextStyle(styled, { fontSize: 0, bold: undefined, italic: false, color: '' }),
+      undefined
+    )
+    eq('没写过样式就用元素默认值', readOverlayTextStyle(undefined, { fontSize: 13, bold: true }).bold, true)
+
+    // 空标题也要有可点区域（否则删空文字就再也点不到概要）
+    const emptySize = estimateOverlayLabelSize('', 13)
+    check('空标题也给一块命中区', emptySize.width > 0 && emptySize.height > 0, JSON.stringify(emptySize))
+    check(
+      '多行标题的命中区更高',
+      estimateOverlayLabelSize('一行\n两行', 13).height > emptySize.height
+    )
+
+    // 布局 + 选中 + 改样式 + 撤销 + 删除
+    reset()
+    const ovRoot = root().id
+    const ovA = addChildOf(ovRoot, '甲')
+    const ovB = addChildOf(ovRoot, '乙')
+    store().select(ovA)
+    store().select(ovB, true)
+    const ovSummary = store().addSummary()
+    check('概要创建成功', typeof ovSummary === 'string', String(ovSummary))
+    // 注意：画布元素（概要/边界/关系线）要**把 sheet 传进去**才参与布局
+    const ovLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+    if (!ovSummary) return
+    const ovNode = ovLayout.summaries.find((item) => item.id === ovSummary)!
+    if (!ovNode) return
+    check('概要带包围盒（命中与选中框用）', Boolean(ovNode.bounds && ovNode.bounds.width > 0))
+    check('概要带文字块尺寸', Boolean(ovNode.labelSize && ovNode.labelSize.height > 0))
+
+    store().selectOverlay('summary', ovSummary)
+    eq('画布元素可被选中', store().selectedOverlay?.kind, 'summary')
+    eq('选中的是这条概要', store().selectedOverlay?.id, ovSummary)
+
+    store().setOverlayStyle('summary', ovSummary, { fontSize: 20 })
+    const styledSummary = activeSheet(store().workbook).summaries.find((item) => item.id === ovSummary)!
+    eq('字号写进了概要样式', readOverlayFontSize(styledSummary.style, 13), 20)
+    store().undo()
+    const undone = activeSheet(store().workbook).summaries.find((item) => item.id === ovSummary)!
+    eq('改字体可撤销', readOverlayFontSize(undone.style, 13), 13)
+
+    store().select(ovA)
+    eq('选中主题会取消画布元素的选中', store().selectedOverlay === null, true)
+
+    store().selectOverlay('summary', ovSummary)
+    store().deleteSelection()
+    eq('选中后 Delete 删除这条概要', activeSheet(store().workbook).summaries.length, 0)
+    eq('删除后清掉选中态', store().selectedOverlay === null, true)
+  }
+
   group('概要标题：支持换行')
 
   eq('单行标题就是一行', overlayTitleLines('概要').length, 1)
@@ -2568,10 +2637,12 @@ async function testMediaElements(): Promise<void> {
     store().select(findTopic(root(), wrapRoot)!.children[1].id, true)
     const summaryId = store().addSummary()
     store().setSummaryTitle(summaryId!, '第一行\n第二行\n第三行')
-    const single = layoutSheet(root(), fakeMeasure)
+    // 传 sheet，概要才会真正参与布局（否则这里等于空跑）
+    const single = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
     const summary = single.summaries.find((item) => item.id === summaryId)!
+    check('换行断言用的概要确实在布局里', Boolean(summary), String(single.summaries.length))
     store().setSummaryTitle(summaryId!, '第一行')
-    const oneLine = layoutSheet(root(), fakeMeasure)
+    const oneLine = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
     check(
       '多行概要会撑高画布边界',
       single.bounds.height >= oneLine.bounds.height,

@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } from 'immer'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
+import {
+  withOverlayTextStyle,
+  type OverlayKind,
+  type OverlayTextStylePatch
+} from '@shared/model/overlay-style'
 import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
 import { createId, createSheet, createTopic, createWorkbook } from '@shared/model/factory'
 import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
@@ -284,6 +289,17 @@ export interface EditorState {
   resetRelationshipCurve(id: string): void
   /** 框选用：一次性设置选中集合 */
   setSelection(ids: string[]): void
+  /**
+   * 画布级元素（概要 / 边界 / 关系线）的选中态。
+   *
+   * 选中它们就能在面板里改文字与字体样式——概要因此成为「一等公民」：
+   * 空文字时也点得到、选得中，不再是「删空就只能删掉重建」。
+   */
+  selectedOverlay: { kind: OverlayKind; id: string } | null
+  selectOverlay(kind: OverlayKind, id: string): void
+  clearOverlaySelection(): void
+  /** 改画布级元素标题样式（字号 / 加粗 / 斜体 / 颜色），一步撤销 */
+  setOverlayStyle(kind: OverlayKind, id: string, patch: OverlayTextStylePatch): void
   /** 请求节点面板聚焦到代码输入框（Alt+C 用）；面板未打开时会随打开自动聚焦 */
   requestCodeFocus(): void
   /** 代码聚焦信号（自增值），NodePanel 监听它 */
@@ -605,6 +621,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       redoStack: [],
       // 新文档按「设置」里的默认视角锁定起手
       viewLock: state.appSettings.defaultViewLock,
+      selectedOverlay: null,
       zoom: 1,
       pan: { x: 0, y: 0 }
     })),
@@ -622,6 +639,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       undoStack: [],
       redoStack: [],
       viewLock: state.appSettings.defaultViewLock,
+      selectedOverlay: null,
       zoom: 1,
       pan: { x: 0, y: 0 }
     })),
@@ -734,11 +752,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   select: (id, additive = false) =>
     set((s) => {
-      if (id === null) return { selection: [] }
-      if (!additive) return { selection: [id] }
+      // 动主题就把画布元素的选中取消（两者不同时高亮）
+      if (id === null) return { selection: [], selectedOverlay: null }
+      if (!additive) return { selection: [id], selectedOverlay: null }
       return s.selection.includes(id)
         ? { selection: s.selection.filter((x) => x !== id) }
-        : { selection: [...s.selection, id] }
+        : { selection: [...s.selection, id], selectedOverlay: null }
     }),
 
   beginEdit: (id, insertText) => {
@@ -832,6 +851,17 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   deleteSelection: () => {
+    // 选中的是画布元素（概要 / 边界 / 关系线）时，Delete 删的是它而不是主题
+    const overlay = get().selectedOverlay
+    if (overlay) {
+      const state = get()
+      if (overlay.kind === 'summary') state.removeSummary(overlay.id)
+      else if (overlay.kind === 'boundary') state.removeBoundary(overlay.id)
+      else state.removeRelationship(overlay.id)
+      set({ selectedOverlay: null })
+      return
+    }
+
     const { workbook, selection } = get()
     const root = activeRoot(workbook)
     const targets = selection.filter((id) => id !== root.id && findTopic(root, id))
@@ -1354,7 +1384,32 @@ export const useEditor = create<EditorState>()((set, get) => ({
   setSelection: (ids) => {
     const root = activeRoot(get().workbook)
     const valid = Array.from(new Set(ids)).filter((id) => Boolean(findTopic(root, id)))
-    set({ selection: valid, editingId: null, editingText: '', editingRich: null })
+    // 选主题就取消画布元素的选中（两者不同时高亮）
+    set({ selection: valid, editingId: null, editingText: '', editingRich: null, selectedOverlay: null })
+  },
+
+  selectedOverlay: null,
+
+  selectOverlay: (kind, id) =>
+    set({ selectedOverlay: { kind, id }, selection: [], editingId: null, editingText: '', editingRich: null }),
+
+  clearOverlaySelection: () => set({ selectedOverlay: null }),
+
+  setOverlayStyle: (kind, id, patch) => {
+    get().mutate((draft) => {
+      const sheet = activeSheet(draft)
+      const list =
+        kind === 'summary' ? sheet.summaries : kind === 'boundary' ? sheet.boundaries : sheet.relationships
+      const target = list.find((item) => item.id === id)
+      if (!target) return
+      const next = withOverlayTextStyle(target.style, patch)
+      if (!next) {
+        if (target.style === undefined) return
+        target.style = undefined
+        return
+      }
+      target.style = next
+    }, '修改画布元素样式')
   },
 
   codeFocusTick: 0,

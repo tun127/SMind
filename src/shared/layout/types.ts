@@ -1,4 +1,4 @@
-import type { Topic } from '../model/types'
+import type { NodeStyle, Topic } from '../model/types'
 
 export interface Size {
   width: number
@@ -147,12 +147,27 @@ export interface Decoration {
   dashed?: boolean
 }
 
+/** 标题文字块的尺寸（画布用它做命中区与选中框） */
+export interface OverlayLabelSize {
+  width: number
+  height: number
+}
+
 /** 画布级元素的公共部分 */
 export interface OverlayLayout {
   id: string
   title?: string
   /** 取哪个节点的分支配色；找不到则用中性色 */
   branchId?: string
+  /**
+   * 整个元素（括号/方框/曲线 + 标题）的包围盒：
+   * 画布用它做**点击命中区**与**选中框**——标题为空也要能点到它。
+   */
+  bounds?: { x: number; y: number; width: number; height: number }
+  /** 标题文字块尺寸；标题为空时是占位区的最小尺寸 */
+  labelSize?: OverlayLabelSize
+  /** 标题样式（字号/粗细/斜体/颜色），渲染与导出共用同一份读取 */
+  style?: NodeStyle
 }
 
 /** 关系线：任意两个主题之间的连线，带箭头与可选标题 */

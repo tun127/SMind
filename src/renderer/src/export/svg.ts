@@ -73,6 +73,7 @@ function opToSvg(op: DrawOp): string {
         ['font-family', op.fontFamily ?? FONT_STACK],
         ['font-size', op.fontSize],
         ['font-weight', op.fontWeight],
+        ['font-style', op.italic ? 'italic' : undefined],
         ['fill', op.fill],
         ['text-anchor', op.anchor],
         ['dominant-baseline', op.baseline === 'middle' ? 'middle' : 'auto']

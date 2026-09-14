@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { layoutSheet, LAYOUT_DEFAULTS } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
+import { readOverlayTextStyle } from '@shared/model/overlay-style'
 import type { Topic } from '@shared/model/types'
 import { activeRoot, activeSheet, findParent, findTopic, isSelfOrDescendant } from '@shared/model/tree'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove, type DragMove } from '@shared/model/dragmove'
@@ -104,6 +105,7 @@ export default function Canvas(): ReactElement {
   const pan = useEditor((s) => s.pan)
   const viewLock = useEditor((s) => s.viewLock)
   const selection = useEditor((s) => s.selection)
+  const selectedOverlay = useEditor((s) => s.selectedOverlay)
   const editingId = useEditor((s) => s.editingId)
   const editingText = useEditor((s) => s.editingText)
   const editingRich = useEditor((s) => s.editingRich)
@@ -1562,6 +1564,10 @@ export default function Canvas(): ReactElement {
               className="overlay-boundary-hit"
               d={boundary.d}
               fill="transparent"
+              onPointerDown={(event) => {
+                event.stopPropagation()
+                useEditor.getState().selectOverlay('boundary', boundary.id)
+              }}
               onDoubleClick={() =>
                 setTitleEdit({
                   kind: 'boundary',
@@ -1575,22 +1581,44 @@ export default function Canvas(): ReactElement {
             />
           ))}
 
-          {/* 边界标题单独画，保证文字在填充之上 */}
+          {/* 选中边界的虚线框（与概要一致：选中就能在面板里改文字与字体） */}
           {layout.boundaries.map((boundary) =>
-            boundary.title ? (
+            selectedOverlay?.kind === 'boundary' && selectedOverlay.id === boundary.id && boundary.bounds ? (
+              <rect
+                key={`boundary-selected-${boundary.id}`}
+                className="overlay-selected"
+                x={boundary.bounds.x - 5}
+                y={boundary.bounds.y - 5}
+                width={boundary.bounds.width + 10}
+                height={boundary.bounds.height + 10}
+                rx={6}
+              />
+            ) : null
+          )}
+
+          {/* 边界标题单独画，保证文字在填充之上 */}
+          {layout.boundaries.map((boundary) => {
+            const boundaryText = readOverlayTextStyle(boundary.style, { fontSize: 12, bold: true })
+            return boundary.title ? (
               <text
                 key={`boundary-title-${boundary.id}`}
                 className="overlay-title"
                 x={boundary.label.x}
                 y={boundary.label.y}
-                fontSize={12}
-                fontWeight={600}
+                fontSize={boundaryText.fontSize}
+                fontWeight={boundaryText.bold ? 700 : 400}
+                fontStyle={boundaryText.italic ? 'italic' : undefined}
                 fill={
-                  boundary.branchId
+                  boundaryText.color ??
+                  (boundary.branchId
                     ? branchColorOf(colors, layout, boundary.branchId)
-                    : colors.deepText
+                    : colors.deepText)
                 }
                 dominantBaseline="middle"
+                onPointerDown={(event) => {
+                  event.stopPropagation()
+                  useEditor.getState().selectOverlay('boundary', boundary.id)
+                }}
                 onDoubleClick={() =>
                   setTitleEdit({
                     kind: 'boundary',
@@ -1610,11 +1638,34 @@ export default function Canvas(): ReactElement {
                 ))}
               </text>
             ) : null
-          )}
+          })}
 
-          {/* 概要：覆盖一组同级主题的大括号 + 概要文字 */}
+          {/* 概要：覆盖一组同级主题的大括号 + 概要文字。
+              文字为空时也画占位文字与命中区——否则「把文字删空」之后就再也点不到它了 */}
           {layout.summaries.map((summary) => {
             const color = summary.branchId ? branchColorOf(colors, layout, summary.branchId) : colors.deepText
+            const text = readOverlayTextStyle(summary.style, { fontSize: 13, bold: true })
+            const selected = selectedOverlay?.kind === 'summary' && selectedOverlay.id === summary.id
+            const labelSize = summary.labelSize ?? { width: 48, height: OVERLAY_TITLE_LINE_HEIGHT }
+            const labelLeft =
+              summary.anchor === 'start'
+                ? summary.label.x
+                : summary.anchor === 'end'
+                  ? summary.label.x - labelSize.width
+                  : summary.label.x - labelSize.width / 2
+            const openEditor = (): void =>
+              setTitleEdit({
+                kind: 'summary',
+                id: summary.id,
+                x: summary.label.x,
+                y: summary.label.y,
+                anchor: summary.anchor,
+                value: summary.title ?? ''
+              })
+            const pick = (event: ReactPointerEvent<SVGElement>): void => {
+              event.stopPropagation()
+              useEditor.getState().selectOverlay('summary', summary.id)
+            }
             return (
               <g key={`summary-${summary.id}`}>
                 <path
@@ -1626,43 +1677,70 @@ export default function Canvas(): ReactElement {
                   strokeLinejoin="round"
                   strokeOpacity={0.75}
                 />
-                {summary.title ? (
-                  <text
-                    className="overlay-title"
-                    x={summary.label.x}
-                    y={summary.label.y}
-                    fontSize={13}
-                    fontWeight={600}
-                    fill={color}
-                    textAnchor={summary.anchor}
-                    dominantBaseline="middle"
-                    /* 用画布色给文字描一圈边，即使压到别的内容上也读得清 */
-                    stroke={colors.canvas}
-                    strokeWidth={4}
-                    paintOrder="stroke"
-                    strokeLinejoin="round"
-                    onDoubleClick={() =>
-                      setTitleEdit({
-                        kind: 'summary',
-                        id: summary.id,
-                        x: summary.label.x,
-                        y: summary.label.y,
-                        anchor: summary.anchor,
-                        value: summary.title ?? ''
-                      })
-                    }
-                  >
-                    {/* 支持换行：按行拆 tspan，整体以 label.y 为中线居中 */}
-                    {overlayTitleLines(summary.title).map((line, index, all) => (
-                      <tspan
-                        key={index}
-                        x={summary.label.x}
-                        dy={index === 0 ? -(all.length - 1) * (OVERLAY_TITLE_LINE_HEIGHT / 2) : OVERLAY_TITLE_LINE_HEIGHT}
-                      >
-                        {line.length > 0 ? line : '\u00A0'}
-                      </tspan>
-                    ))}
-                  </text>
+                {/* 命中区：括号线（按描边命中）+ 文字块矩形（空文字时也能点到） */}
+                <path
+                  d={summary.d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={12}
+                  className="overlay-hit"
+                  onPointerDown={pick}
+                  onDoubleClick={openEditor}
+                />
+                <rect
+                  x={labelLeft - 3}
+                  y={summary.label.y - labelSize.height / 2 - 3}
+                  width={labelSize.width + 6}
+                  height={labelSize.height + 6}
+                  fill="transparent"
+                  className="overlay-hit"
+                  onPointerDown={pick}
+                  onDoubleClick={openEditor}
+                />
+                <text
+                  className="overlay-title"
+                  x={summary.label.x}
+                  y={summary.label.y}
+                  fontSize={text.fontSize}
+                  fontWeight={text.bold ? 700 : 400}
+                  fontStyle={text.italic ? 'italic' : undefined}
+                  fill={text.color ?? color}
+                  textAnchor={summary.anchor}
+                  dominantBaseline="middle"
+                  /* 用画布色给文字描一圈边，即使压到别的内容上也读得清 */
+                  stroke={colors.canvas}
+                  strokeWidth={4}
+                  paintOrder="stroke"
+                  strokeLinejoin="round"
+                  /* 空文字时用半透明占位，提示「双击可以输入」 */
+                  opacity={summary.title ? 1 : 0.45}
+                  pointerEvents="none"
+                >
+                  {summary.title
+                    ? overlayTitleLines(summary.title).map((line, index, all) => (
+                        <tspan
+                          key={index}
+                          x={summary.label.x}
+                          dy={
+                            index === 0
+                              ? -(all.length - 1) * (OVERLAY_TITLE_LINE_HEIGHT / 2)
+                              : OVERLAY_TITLE_LINE_HEIGHT
+                          }
+                        >
+                          {line.length > 0 ? line : '\u00A0'}
+                        </tspan>
+                      ))
+                    : '概要（双击输入）'}
+                </text>
+                {selected && summary.bounds ? (
+                  <rect
+                    className="overlay-selected"
+                    x={summary.bounds.x - 5}
+                    y={summary.bounds.y - 5}
+                    width={summary.bounds.width + 10}
+                    height={summary.bounds.height + 10}
+                    rx={4}
+                  />
                 ) : null}
               </g>
             )
@@ -1779,6 +1857,10 @@ export default function Canvas(): ReactElement {
                     strokeWidth={4}
                     paintOrder="stroke"
                     strokeLinejoin="round"
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      useEditor.getState().selectOverlay('relationship', relationship.id)
+                    }}
                     onDoubleClick={() =>
                       setTitleEdit({
                         kind: 'relationship',

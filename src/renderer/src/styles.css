@@ -1072,6 +1072,21 @@ textarea {
 }
 
 /* 画布上可双击改文字的标题 */
+/* 画布级元素的命中区：空标题时也要能点到（光标给出可点提示） */
+.overlay-hit {
+  cursor: pointer;
+}
+
+/* 选中画布级元素（概要 / 边界）时的虚线框 */
+.overlay-selected {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
 .overlay-title {
   pointer-events: all;
   cursor: text;

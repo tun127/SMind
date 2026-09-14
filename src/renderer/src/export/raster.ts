@@ -121,7 +121,7 @@ function drawOp(ctx: CanvasRenderingContext2D, op: DrawOp, images: Map<string, H
 
     case 'text': {
       ctx.save()
-      ctx.font = fontOf(op.fontSize, op.fontWeight, false, op.fontFamily)
+      ctx.font = fontOf(op.fontSize, op.fontWeight, Boolean(op.italic), op.fontFamily)
       ctx.textAlign = op.anchor === 'middle' ? 'center' : op.anchor === 'end' ? 'right' : 'left'
       ctx.textBaseline = op.baseline === 'middle' ? 'middle' : 'alphabetic'
       // 描边先画（等价于 SVG 的 paint-order: stroke），文字压在别的内容上也读得清
