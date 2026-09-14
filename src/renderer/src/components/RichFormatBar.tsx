@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useFormatStore, type RichEditor } from '../editor/formatStore'
 import { patchAppSettings, useEditor } from '../store/editor'
+import { CODE_LANGUAGES } from '@shared/code-language'
 import type { AppSettings } from '@shared/ipc'
 
 /** 默认字体下拉的可选项（null＝跟随主题） */
@@ -166,6 +167,22 @@ function DefaultStylePanel({
       </div>
 
       <div className="default-style__row">
+        <span className="default-style__label">代码块语言</span>
+        <select
+          className="select"
+          value={settings.defaultCodeLanguage ?? 'text'}
+          title="新建代码块时默认选中的语言"
+          onChange={(e) => patch({ defaultCodeLanguage: e.target.value || null })}
+        >
+          {CODE_LANGUAGES.map((lang) => (
+            <option key={lang} value={lang}>
+              {lang === 'text' ? '纯文本' : lang}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="default-style__row">
         <span className="default-style__label">对齐</span>
         {(
           [
@@ -211,7 +228,8 @@ function DefaultStylePanel({
               defaultFontSize: null,
               defaultColor: null,
               defaultAlign: 'center',
-              defaultCodeFontSize: null
+              defaultCodeFontSize: null,
+              defaultCodeLanguage: null
             }).then(onRenderDefaultsChanged)
           }}
         >

@@ -65,6 +65,7 @@ import { imageExportFormatDef, type ImageExportFormat } from '@shared/export/typ
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
 import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '@shared/recovery'
 import { autosaveSlotName, sameDocPath } from '@shared/window'
+import { CODE_LANGUAGES } from '@shared/code-language'
 import { buildAppMenu } from './menu'
 
 /** 应用名：与 electron-builder 的 productName、窗口标题保持一致 */
@@ -844,6 +845,9 @@ function registerIpc(): void {
           parsed.defaultCodeFontSize >= 8
             ? Math.round(parsed.defaultCodeFontSize)
             : null,
+        defaultCodeLanguage: CODE_LANGUAGES.includes(parsed.defaultCodeLanguage as never)
+          ? (parsed.defaultCodeLanguage as string)
+          : null,
         toolbarHidden: Array.isArray(parsed.toolbarHidden)
           ? parsed.toolbarHidden.filter((item): item is string => typeof item === 'string')
           : []
@@ -882,6 +886,9 @@ function registerIpc(): void {
         settings.defaultCodeFontSize >= 8
           ? Math.round(settings.defaultCodeFontSize)
           : null,
+      defaultCodeLanguage: CODE_LANGUAGES.includes(settings?.defaultCodeLanguage as never)
+        ? (settings.defaultCodeLanguage as string)
+        : null,
       toolbarHidden: Array.isArray(settings?.toolbarHidden)
         ? settings.toolbarHidden.filter((item) => typeof item === 'string')
         : []

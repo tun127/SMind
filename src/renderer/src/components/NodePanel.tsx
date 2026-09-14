@@ -27,6 +27,11 @@ import { readOverlayTextStyle, type OverlayKind } from '@shared/model/overlay-st
 /** 画布元素标题的字体控制（与主题的格式栏同一套观感） */
 const OVERLAY_FONT_SIZES = [12, 13, 14, 16, 18, 22, 28]
 const OVERLAY_COLORS = ['#1f2328', '#EB5757', '#F2994A', '#27AE60', '#2D9CDB', '#2F6BFF', '#9B51E0']
+
+/** 新建代码块的默认语言：来自「默认样式」面板的设置（null = 纯文本） */
+function defaultCodeLanguage(): string {
+  return useEditor.getState().appSettings.defaultCodeLanguage || 'text'
+}
 import { normalizeFormulaInput } from '@shared/formula'
 
 interface Props {
@@ -91,7 +96,8 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const [hrefDraft, setHrefDraft] = useState('')
   const [formulaDraft, setFormulaDraft] = useState('')
   const [codeDraft, setCodeDraft] = useState('')
-  const [codeLangDraft, setCodeLangDraft] = useState('text')
+  // 新建代码块的语言初始值：来自「默认样式」面板的设置（null = 纯文本）
+  const [codeLangDraft, setCodeLangDraft] = useState(() => defaultCodeLanguage())
   const codeAreaRef = useRef<HTMLTextAreaElement | null>(null)
   const formulaAreaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -112,7 +118,8 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
     setHrefDraft(topic?.href ?? '')
     setFormulaDraft(topic?.formula ?? '')
     setCodeDraft(topic?.code?.text ?? '')
-    setCodeLangDraft(topic?.code?.language || 'text')
+    // 节点已有代码块用它自己的语言；没有（准备新建）时用默认语言
+    setCodeLangDraft(topic?.code?.language || defaultCodeLanguage())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -729,7 +736,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setCodeDraft('')
-                setCodeLangDraft('text')
+                setCodeLangDraft(defaultCodeLanguage())
                 setCode(topicId, null)
               }}
             >
