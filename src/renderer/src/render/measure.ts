@@ -432,7 +432,14 @@ function compute(topic: Topic, depth: number): MeasureResult {
   const labelRow = labelsOf(topic)
 
   // 图片块与公式块：尺寸规则与渲染层共用（图片用纯函数算，公式量 KaTeX 的真实排版结果）
-  const imageBox: Size = imageBoxSize(topic.image)
+  // 手动拉伸过：图片按节点可用空间等比放大/缩小（默认仍是「小图不放大」）
+  const imageBounds: Size | undefined = override
+    ? {
+        width: Math.max(24, override.width - base.paddingX * 2 - stripWidth),
+        height: Math.max(24, override.height - base.paddingY * 2 - 24)
+      }
+    : undefined
+  const imageBox: Size = imageBoxSize(topic.image, imageBounds)
   const formulaBox: Size = topic.formula ? formulaSize(topic.formula, base.fontSize) : { width: 0, height: 0 }
   const codeBox: Size = codeBoxSize(topic.code)
   const imageBlock = imageBox.height > 0 ? imageBox.height + BLOCK_GAP : 0

@@ -24,11 +24,18 @@ export const FORMULA_MIN_WIDTH = 36
 /** 图片/公式块与上下内容之间的间距 */
 export const BLOCK_GAP = 6
 
+/** 手动拉伸节点时，图片允许放大到自然尺寸的倍数上限（免得糊成马赛克） */
+export const IMAGE_GROW_LIMIT = 3
+
 /**
- * 图片显示框：按宽高比等比缩放，限制在 IMAGE_MAX_* 之内。
+ * 图片显示框：按宽高比等比缩放，限制在给定边界（默认 IMAGE_MAX_*）之内。
  * 只填了一边时，另一边按 4:3 估算。
+ *
+ * - 不给 `bounds`：默认**不放大**（小图保持原样），只做等比缩小；
+ * - 给 `bounds`（节点被手动拉伸时）：按节点可用空间等比**放大或缩小**，
+ *   最多到自然尺寸的 {@link IMAGE_GROW_LIMIT} 倍。
  */
-export function imageBoxSize(image: TopicImage | undefined): Size {
+export function imageBoxSize(image: TopicImage | undefined, bounds?: Size): Size {
   if (!image) return { width: 0, height: 0 }
 
   const hasW = typeof image.width === 'number' && image.width > 0
@@ -37,11 +44,18 @@ export function imageBoxSize(image: TopicImage | undefined): Size {
   let width = hasW ? (image.width as number) : 0
   let height = hasH ? (image.height as number) : 0
 
-  if (!hasW && !hasH) return { ...IMAGE_FALLBACK }
-  if (!hasW) width = (height * 4) / 3
-  if (!hasH) height = (width * 3) / 4
+  if (!hasW && !hasH) {
+    width = IMAGE_FALLBACK.width
+    height = IMAGE_FALLBACK.height
+  } else {
+    if (!hasW) width = (height * 4) / 3
+    if (!hasH) height = (width * 3) / 4
+  }
 
-  const scale = Math.min(1, IMAGE_MAX_WIDTH / width, IMAGE_MAX_HEIGHT / height)
+  const maxWidth = bounds && bounds.width > 0 ? bounds.width : IMAGE_MAX_WIDTH
+  const maxHeight = bounds && bounds.height > 0 ? bounds.height : IMAGE_MAX_HEIGHT
+  const growLimit = bounds ? IMAGE_GROW_LIMIT : 1
+  const scale = Math.min(growLimit, maxWidth / width, maxHeight / height)
   return {
     width: Math.max(IMAGE_MIN.width, Math.round(width * scale)),
     height: Math.max(IMAGE_MIN.height, Math.round(height * scale))

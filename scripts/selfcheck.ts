@@ -1933,16 +1933,28 @@ const fakeMeasure = (topic: Topic, depth: number): MeasureResult => {
   const markerStrip = markerStripSize(markerIds.length)
   const stripWidth = markerStrip.width > 0 ? markerStrip.width + MARKER_STRIP_GAP : 0
 
-  // 手动拉伸的语义与 measure.ts 一致：宽度取给定值（有下限），高度只作下限
+  // 手动拉伸的语义与 measure.ts 一致：宽度取给定值（有下限），高度只作下限；
+  // 图片也按同一套边界等比缩放
   const override = topic.sizeOverride
-  const autoWidth = 90 + topic.title.length * 9 + stripWidth
+  const paddingX = depth === 0 ? 24 : 14
+  const paddingY = depth === 0 ? 15 : 9
+  const imageBounds = override
+    ? {
+        width: Math.max(24, override.width - paddingX * 2 - stripWidth),
+        height: Math.max(24, override.height - paddingY * 2 - 24)
+      }
+    : undefined
+  const imageBox = imageBoxSize(topic.image, imageBounds)
+
+  const autoWidth = Math.max(90 + topic.title.length * 9 + stripWidth, imageBox.width)
   const autoHeight = Math.max(
-    (depth === 0 ? 44 : 30) + accessory.height + labelRow.height,
-    markerStrip.height + (depth === 0 ? 15 : 9) * 2
+    (depth === 0 ? 44 : 30) + accessory.height + labelRow.height + imageBox.height,
+    markerStrip.height + paddingY * 2
   )
 
   return {
-    width: override ? Math.max(override.width, stripWidth + (depth === 0 ? 24 : 14) * 2 + 40) : autoWidth,
+    imageBox,
+    width: override ? Math.max(override.width, stripWidth + paddingX * 2 + 40) : autoWidth,
     height: override ? Math.max(override.height, autoHeight) : autoHeight,
     lines: [
       {
@@ -2500,6 +2512,32 @@ async function testMediaElements(): Promise<void> {
   eq('恢复自动尺寸', restored.width, autoBox.width)
   store().undo()
   check('恢复自动尺寸可撤销', findTopic(root(), resized)?.sizeOverride !== undefined)
+
+  group('手动拉伸：图片跟着等比缩放')
+
+  reset()
+  const imgRoot = root().id
+  const imgNode = addChildOf(imgRoot, '带图节点')
+  store().mutate((draft) => {
+    const topic = findTopic(activeRoot(draft), imgNode)
+    if (topic) topic.image = { path: 'resources/a.png', width: 400, height: 300 }
+  }, '加图片')
+  const autoImage = layoutSheet(root(), fakeMeasure).nodeMap.get(imgNode)!.imageBox!
+  eq('默认不放大（按上限缩到 220×165）', autoImage, { width: 220, height: 165 })
+
+  store().setSizeOverride(imgNode, { width: 560, height: 320 })
+  const grown = layoutSheet(root(), fakeMeasure).nodeMap.get(imgNode)!.imageBox!
+  check('拉伸后图片变大', grown.width > autoImage.width && grown.height > autoImage.height, JSON.stringify(grown))
+  check(
+    '仍然保持 4:3 比例',
+    Math.abs(grown.width / grown.height - 4 / 3) < 0.05,
+    `${grown.width}×${grown.height}`
+  )
+  check('不会超出节点可用宽度', grown.width <= 560 - 14 * 2, String(grown.width))
+
+  store().setSizeOverride(imgNode, { width: 180, height: 180 })
+  const shrunk = layoutSheet(root(), fakeMeasure).nodeMap.get(imgNode)!.imageBox!
+  check('缩小节点时图片跟着变小', shrunk.width < autoImage.width, JSON.stringify(shrunk))
 
   group('标记条：标记竖排在节点左侧（不再占顶部图标行）')
 
