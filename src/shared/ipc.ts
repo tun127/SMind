@@ -19,6 +19,27 @@ export interface SaveResult {
 }
 
 /** 插入图片后返回的元信息（字节已经存进包里，模型只记路径与尺寸） */
+/**
+ * 应用级默认设置（存 %APPDATA%\SMind\settings.json）。
+ *
+ * 所有「默认参数」集中在这里：以后新增默认值直接往这个结构里加字段，
+ * 不再散落进各个面板。
+ */
+export interface AppSettings {
+  /** 新建 / 打开文档时的初始视角锁定 */
+  defaultViewLock: boolean
+  /** 新建文档时套用的主题 id；null = 用内置默认主题 */
+  defaultThemeId: string | null
+  /** 新建主题标题的默认对齐（左 / 居中 / 右） */
+  defaultAlign: 'left' | 'center' | 'right'
+}
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  defaultViewLock: false,
+  defaultThemeId: null,
+  defaultAlign: 'center'
+}
+
 export interface PickedImage {
   /** 包内相对路径，如 resources/img-xxx-photo.png */
   path: string
@@ -69,6 +90,8 @@ export const IPC = {
   themesImport: 'themes:import',
   themesExport: 'themes:export',
   /* ---- 图片与附件（P4） ---- */
+  settingsLoad: 'settings:load',
+  settingsSave: 'settings:save',
   pickImage: 'resource:pick-image',
   pasteImage: 'resource:paste-image',
   addImage: 'resource:add-image',
@@ -103,6 +126,7 @@ export const IPC = {
 } as const
 
 export type MenuCommand =
+  | 'app:settings'
   | 'file:new'
   | 'file:open'
   | 'file:save'
@@ -168,6 +192,12 @@ export interface MindApi {
   themesImport(): Promise<ThemeDefinition | null>
   /** 导出主题到 .json，取消或失败返回 false */
   themesExport(theme: ThemeDefinition): Promise<boolean>
+
+  /* ---- 应用设置 ---- */
+  /** 读取应用级默认设置（文件缺失或损坏时返回默认值） */
+  settingsLoad(): Promise<AppSettings>
+  /** 写回应用级默认设置 */
+  settingsSave(settings: AppSettings): Promise<void>
 
   /* ---- 图片与附件（P4） ---- */
   /** 选择一张图片并读进当前文档的资源里，取消返回 null */

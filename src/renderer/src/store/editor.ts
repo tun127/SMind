@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } from 'immer'
+import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
 import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
 import { createId, createSheet, createTopic, createWorkbook } from '@shared/model/factory'
 import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
@@ -285,6 +286,9 @@ export interface EditorState {
   requestCodeFocus(): void
   /** 代码聚焦信号（自增值），NodePanel 监听它 */
   codeFocusTick: number
+  /** 应用级默认设置（默认视角锁定 / 主题 / 对齐），由「设置」对话框读写 */
+  appSettings: AppSettings
+  setAppSettings(next: AppSettings): void
   /** 把关系线的某一端改接到另一个主题（拖拽端点用） */
   setRelationshipEnd(id: string, end: 'end1Id' | 'end2Id', topicId: string): void
   setRelationshipTitle(id: string, title: string): void
@@ -593,6 +597,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
       editingRich: null,
       undoStack: [],
       redoStack: [],
+      // 新文档按「设置」里的默认视角锁定起手
+      viewLock: state.appSettings.defaultViewLock,
       zoom: 1,
       pan: { x: 0, y: 0 }
     })),
@@ -609,6 +615,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       editingRich: null,
       undoStack: [],
       redoStack: [],
+      viewLock: state.appSettings.defaultViewLock,
       zoom: 1,
       pan: { x: 0, y: 0 }
     })),
@@ -1323,6 +1330,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   codeFocusTick: 0,
   requestCodeFocus: () => set((s) => ({ codeFocusTick: s.codeFocusTick + 1 })),
+
+  appSettings: { ...DEFAULT_APP_SETTINGS },
+  setAppSettings: (next) => set({ appSettings: { ...next } }),
 
   removeRelationship: (id) => {
     get().mutate((draft) => {

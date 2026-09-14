@@ -1373,6 +1373,22 @@ function testLayoutNoOverlap(): void {
     check(`结构「${def.label}」无节点重叠`, hit === null, hit ? hit.join(' ⨯ ') : '')
   }
 
+  // 手动拖过的兄弟 + 新插入的节点：偏移不许压到别人（用户反馈「新节点和老节点重合」）
+  reset()
+  const dragRoot = root().id
+  const dragged = addChildOf(dragRoot, '被拖过的节点')
+  const inserted = addChildOf(dragRoot, '后插入的节点')
+  store().offsetPositions([{ id: dragged, dx: 0, dy: 40 }])
+  const offsetLayout = layoutSheet(root(), multilineMeasure)
+  const draggedBox = offsetLayout.nodeMap.get(dragged)!
+  const insertedBox = offsetLayout.nodeMap.get(inserted)!
+  check(
+    '手动拖过的节点不会被新节点压到',
+    !boxesOverlap(draggedBox, insertedBox),
+    `${JSON.stringify({ dx: Math.round(draggedBox.x), dy: Math.round(draggedBox.y), dh: Math.round(draggedBox.height) })} vs ${JSON.stringify({ ix: Math.round(insertedBox.x), iy: Math.round(insertedBox.y) })}`
+  )
+  check('拖过的节点仍带偏移（不是被强行归位）', Boolean(draggedBox.topic.position))
+
   // 分支级组合：逻辑图根 + 分支各自声明鱼骨 / 组织架构 / 矩阵
   reset()
   const rootId = root().id
@@ -1539,9 +1555,15 @@ function testViewLock(): void {
   check('锁定不写撤销栈', store().undoStack.length === undo)
   check('锁定不影响「未保存」标记', store().dirty === dirty)
 
-  // 新建 / 打开文档会把视角拉回中心，但"锁不锁"是用户的偏好，得留着
+  // 新建 / 打开文档按「设置 → 默认视角锁定」起手
   store().newDocument()
-  check('新建文档后仍保持锁定', store().viewLock === true, String(store().viewLock))
+  check('新建文档按设置里的默认值起手', store().viewLock === store().appSettings.defaultViewLock)
+  store().setAppSettings({ ...store().appSettings, defaultViewLock: true })
+  store().newDocument()
+  check('默认开启时新文档直接锁定', store().viewLock === true, String(store().viewLock))
+  store().setAppSettings({ ...store().appSettings, defaultViewLock: false })
+  store().newDocument()
+  check('默认关闭时新文档不锁定', store().viewLock === false)
   store().setViewLock(false)
   check('可以显式关掉', store().viewLock === false)
 }

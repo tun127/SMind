@@ -4,10 +4,12 @@ import { promises as fs, existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  DEFAULT_APP_SETTINGS,
   IPC,
   type AiChatResult,
   type AiConfigPatch,
   type AiTestResult,
+  type AppSettings,
   type ImportedTextFile,
   type OpenResult,
   type PickedAttachment,
@@ -198,6 +200,9 @@ async function writeThemes(themes: ThemeDefinition[]): Promise<void> {
 /* ------------------------------------------------------------------ */
 /* AI 配置与请求代理（P8）                                             */
 /* ------------------------------------------------------------------ */
+
+/** 应用级默认设置（默认视角锁定 / 默认主题 / 默认对齐） */
+const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
 
 const aiConfigFile = (): string => join(app.getPath('userData'), 'ai-config.json')
 
@@ -511,6 +516,47 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.recoveryDiscard, async (): Promise<void> => {
     await fs.rm(autosaveDir(), { recursive: true, force: true })
+  })
+
+  /* ---- 应用设置（%APPDATA%\SMind\settings.json） ---- */
+
+  ipcMain.handle(IPC.settingsLoad, async (): Promise<AppSettings> => {
+    try {
+      const raw = await fs.readFile(settingsFile(), 'utf8')
+      const parsed = JSON.parse(raw) as Partial<AppSettings>
+      // 与默认值合并：文件缺字段 / 老版本写过的都还能读
+      return {
+        defaultViewLock:
+          typeof parsed.defaultViewLock === 'boolean'
+            ? parsed.defaultViewLock
+            : DEFAULT_APP_SETTINGS.defaultViewLock,
+        defaultThemeId:
+          typeof parsed.defaultThemeId === 'string' && parsed.defaultThemeId.length > 0
+            ? parsed.defaultThemeId
+            : null,
+        defaultAlign:
+          parsed.defaultAlign === 'left' || parsed.defaultAlign === 'right'
+            ? parsed.defaultAlign
+            : DEFAULT_APP_SETTINGS.defaultAlign
+      }
+    } catch {
+      return { ...DEFAULT_APP_SETTINGS }
+    }
+  })
+
+  ipcMain.handle(IPC.settingsSave, async (_e, settings: AppSettings): Promise<void> => {
+    const next: AppSettings = {
+      defaultViewLock: Boolean(settings?.defaultViewLock),
+      defaultThemeId:
+        typeof settings?.defaultThemeId === 'string' && settings.defaultThemeId.length > 0
+          ? settings.defaultThemeId
+          : null,
+      defaultAlign:
+        settings?.defaultAlign === 'left' || settings?.defaultAlign === 'right'
+          ? settings.defaultAlign
+          : 'center'
+    }
+    await fs.writeFile(settingsFile(), JSON.stringify(next, null, 2), 'utf8')
   })
 
   /* ---- 主题 ---- */

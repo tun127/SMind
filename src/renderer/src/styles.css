@@ -1845,6 +1845,21 @@ textarea {
   margin-top: 10px;
 }
 
+/* 设置对话框里的勾选项 */
+.settings-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.settings-check input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
 .side-panel__footer {
   display: flex;
   gap: 6px;

@@ -38,6 +38,16 @@ export function placeVerticalChildren(
   }
 
   let cursor = parentNode.y + parentNode.height / 2 - total / 2
+  /**
+   * 两遍走：先算好每个子节点的最终位置（含手动偏移），再摆子树。
+   *
+   * 为什么要第二遍：子节点可能被**手动拖过**（`position` 偏移），偏移后的盒子
+   * 会越过按占用算出来的槽位、压到相邻兄弟身上（用户看到的「新节点和老节点重合」）。
+   * 这里按「上一个兄弟的底边 + 间距」做一次下推避让：偏移能保留就保留，
+   * 只有真的要撞上时才把它往下让一点——绝不允许兄弟重叠。
+   */
+  const pending: Array<{ child: Topic; x: number; y: number }> = []
+  let floor = Number.NEGATIVE_INFINITY
   for (const child of kids) {
     const extent = builder.subtreeExtent(child, inherited).height
     const size = builder.size(child.id)
@@ -46,24 +56,29 @@ export function placeVerticalChildren(
       dir === 1 ? parentNode.x + parentNode.width + builder.gapX : parentNode.x - builder.gapX - size.width
     const x = xResolver ? xResolver(child, size, parentNode, dir, depth) : defaultX
     const px = x + (child.position?.x ?? 0)
-    const py = centerY - size.height / 2 + (child.position?.y ?? 0)
+    let py = centerY - size.height / 2 + (child.position?.y ?? 0)
+    if (py < floor) py = floor
+    floor = py + size.height + builder.gapY
+    pending.push({ child, x: px, y: py })
+    cursor += extent + builder.gapY
+  }
 
+  for (const item of pending) {
     // 分支自己声明了别的结构 → 这棵子树交给对应家族去排
-    if (declaresOwnStructure(builder, child, inherited)) {
-      placeSubtree(builder, child, px, py, depth, dir === 1 ? 'right' : 'left', inherited)
+    if (declaresOwnStructure(builder, item.child, inherited)) {
+      placeSubtree(builder, item.child, item.x, item.y, depth, dir === 1 ? 'right' : 'left', inherited)
     } else {
-      const node = builder.add(child, px, py, depth, dir === 1 ? 'right' : 'left')
+      const node = builder.add(item.child, item.x, item.y, depth, dir === 1 ? 'right' : 'left')
       placeVerticalChildren(
         builder,
         node,
-        builder.visibleChildren(child),
+        builder.visibleChildren(item.child),
         dir,
         depth + 1,
         xResolver,
         inherited
       )
     }
-    cursor += extent + builder.gapY
   }
 }
 

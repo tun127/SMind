@@ -9,6 +9,7 @@ import {
   type MindApi,
   type OpenResult,
   type PickedAttachment,
+  type AppSettings,
   type PickedImage,
   type RecoveryInfo,
   type SaveResult
@@ -83,6 +84,10 @@ const api: MindApi = {
   themesImport: () => ipcRenderer.invoke(IPC.themesImport) as Promise<ThemeDefinition | null>,
 
   themesExport: (theme: ThemeDefinition) => ipcRenderer.invoke(IPC.themesExport, theme) as Promise<boolean>,
+
+  settingsLoad: () => ipcRenderer.invoke(IPC.settingsLoad) as Promise<AppSettings>,
+
+  settingsSave: (settings: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, settings) as Promise<void>,
 
   pickImage: () => ipcRenderer.invoke(IPC.pickImage) as Promise<PickedImage | null>,
 

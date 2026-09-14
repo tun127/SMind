@@ -22,6 +22,9 @@ import HistoryDialog from './components/HistoryDialog'
 import { viewportActions } from './render/viewport'
 import { stageTypedChar } from './editor/typedChar'
 import { snapshotForSave, useEditor } from './store/editor'
+import SettingsDialog from './components/SettingsDialog'
+import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
+import type { ThemeDefinition } from '@shared/theme'
 
 function fileNameOf(path: string | null): string | null {
   if (!path) return null
@@ -87,6 +90,10 @@ export default function App(): ReactElement {
   /** AI 对话框：生成 / 扩写 / 润色 */
   const [aiTask, setAiTask] = useState<AiTask | null>(null)
   const [showAiSettings, setShowAiSettings] = useState(false)
+  /** 设置对话框（默认视角锁定 / 默认主题 / 默认对齐） */
+  const [showSettings, setShowSettings] = useState(false)
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS)
+  const themesRef = useRef<ThemeDefinition[]>([])
   /** 历史记录 / 常用 / 保存位置 */
   const [showHistory, setShowHistory] = useState(false)
   const toastTimer = useRef<number | null>(null)
@@ -240,8 +247,39 @@ export default function App(): ReactElement {
     })()
   }, [])
 
+  /* 启动时读一次应用设置与主题库：默认参数影响新建文档、主题下拉可选项 */
+  useEffect(() => {
+    void (async () => {
+      try {
+        const loaded = await window.api.settingsLoad()
+        setSettings(loaded)
+        useEditor.getState().setAppSettings(loaded)
+      } catch {
+        /* 读不到就用内置默认值 */
+      }
+      try {
+        themesRef.current = await window.api.themesList()
+      } catch {
+        themesRef.current = []
+      }
+    })()
+  }, [])
+
+  /** 设置对话框改动：即时写进 store（影响后续新建文档）并落盘 */
+  const updateSettings = useCallback((next: AppSettings): void => {
+    setSettings(next)
+    useEditor.getState().setAppSettings(next)
+    void window.api.settingsSave(next).catch(() => undefined)
+  }, [])
+
   const newDocument = useCallback((): void => {
     useEditor.getState().newDocument()
+    // 新建文档时套用「设置」里的默认主题（打开已有文件不动它自己的主题）
+    const preferred = useEditor.getState().appSettings.defaultThemeId
+    if (preferred) {
+      const theme = themesRef.current.find((item) => item.id === preferred)
+      if (theme) useEditor.getState().applyTheme({ id: theme.id, name: theme.name, colors: theme.colors })
+    }
     // 一并清掉上一份文档残留的自动存档与附件资源，
     // 否则旧文件的图片会被写进新文件
     void window.api.documentReset()
@@ -328,6 +366,9 @@ export default function App(): ReactElement {
     const off = window.api.onMenuCommand((command) => {
       const store = useEditor.getState()
       switch (command) {
+        case 'app:settings':
+          setShowSettings(true)
+          break
         case 'file:new':
           guard(newDocument)
           break
@@ -838,6 +879,15 @@ export default function App(): ReactElement {
 
       {showAiSettings && (
         <AiSettingsDialog onClose={() => setShowAiSettings(false)} onNotify={showToast} />
+      )}
+
+      {showSettings && (
+        <SettingsDialog
+          settings={settings}
+          themes={themesRef.current}
+          onChange={updateSettings}
+          onClose={() => setShowSettings(false)}
+        />
       )}
 
       {showHistory && (
