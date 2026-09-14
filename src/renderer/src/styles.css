@@ -1750,6 +1750,71 @@ textarea {
 }
 
 /* ------------------------------------------------------------------ */
+/* 格式栏「默认样式」面板                                               */
+/* ------------------------------------------------------------------ */
+
+.default-style {
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 420px;
+  max-width: calc(100vw - 16px);
+  padding: 12px;
+  border: 1px solid #d8dce3;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.16);
+}
+
+.default-style__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.default-style__label {
+  flex: none;
+  min-width: 34px;
+  color: var(--muted, #5c6672);
+  font-size: 12px;
+}
+
+.default-style__row--actions {
+  padding-top: 4px;
+  border-top: 1px solid #eef0f4;
+}
+
+.default-style__row--actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fmt-btn__text {
+  font-size: 12px;
+}
+
+/* 更多菜单里「移回快捷栏」的小按钮 */
+.tool-menu__pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: 5px;
+  color: var(--muted, #5c6672);
+}
+
+.tool-menu__pin:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------------ */
 /* 状态栏                                                              */
 /* ------------------------------------------------------------------ */
 

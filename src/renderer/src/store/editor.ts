@@ -10,6 +10,7 @@ import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workb
 import { createId, createSheet, createTopic, createWorkbook } from '@shared/model/factory'
 import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
 import { appendToRich, hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
+import type { RichTextRun } from '@shared/model/types'
 import {
   EMPTY_FILTER,
   countOccurrences,
@@ -139,6 +140,9 @@ export interface EditorState {
    * （见 App 的 `openGeneratedInNewWindow`）。
    */
   applyOutlineTree(parentId: string, root: OutlineNode): number
+
+  /** 把当前「默认文字样式」（字体/字号/颜色）一次性应用到全部现有节点（一步撤销） */
+  applyDefaultsToAll(): void
 
   /* ---- 视图 ---- */
   setZoom(zoom: number): void
@@ -379,6 +383,64 @@ function sameRich(a: RichText | undefined, b: RichText | null): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
+/* ------------------------------------------------------------------ */
+/* 默认文字样式（设置里的「默认字体 / 字号 / 颜色」）                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 给一份富文本补上「默认文字样式」（只补缺失的属性，显式格式不被覆盖）。
+ * 返回同一份对象（就地修改）。
+ */
+function stampRichDefaults(rich: RichText, settings: AppSettings): RichText {
+  const { defaultFontFamily, defaultFontSize, defaultColor } = settings
+  if (!defaultFontFamily && !defaultFontSize && !defaultColor) return rich
+  for (const paragraph of rich.paragraphs) {
+    for (const run of paragraph.runs) {
+      if (defaultFontFamily && !run.fontFamily) run.fontFamily = defaultFontFamily
+      if (defaultFontSize && !run.fontSize) run.fontSize = defaultFontSize
+      if (defaultColor && !run.color) run.color = defaultColor
+    }
+  }
+  return rich
+}
+
+/**
+ * 把「默认文字样式」落到一个**新建节点**上（AI 批量建节点等直接带标题的路径）。
+ * 用户手打的节点走 commitEdit 的「首次命名」分支，不在这里处理。
+ */
+function stampNodeDefaults(topic: Topic, settings: AppSettings): void {
+  const hasAny = settings.defaultFontFamily || settings.defaultFontSize || settings.defaultColor
+  if (!hasAny) return
+  if (topic.titleRich && topic.titleRich.paragraphs.length > 0) {
+    topic.titleRich = stampRichDefaults(normalizeRich(topic.titleRich), settings)
+    return
+  }
+  if (!topic.title) return
+  topic.titleRich = stampRichDefaults(richFromPlain(topic.title), settings)
+}
+
+/** 连同整棵子树一起落默认样式（AI 生成 / 应用到全部时用） */
+function walkStampDefaults(topic: Topic, settings: AppSettings): void {
+  stampNodeDefaults(topic, settings)
+  for (const child of topic.children) walkStampDefaults(child, settings)
+  for (const floating of topic.detachedChildren ?? []) walkStampDefaults(floating, settings)
+}
+
+/**
+ * 改应用设置：写进 store 并落盘。所有「默认值」入口（格式栏默认样式面板 /
+ * 主题面板的默认主题 / 工具栏收纳）都走这一个门，保证 settings.json 是唯一真相。
+ */
+export async function patchAppSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+  const next = { ...useEditor.getState().appSettings, ...patch }
+  useEditor.getState().setAppSettings(next)
+  try {
+    await window.api.settingsSave(next)
+  } catch {
+    /* 落盘失败不影响本次会话 */
+  }
+  return next
+}
+
 export const useEditor = create<EditorState>()((set, get) => ({
   workbook: createWorkbook(),
   filePath: null,
@@ -511,6 +573,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       const parent = findTopic(activeRoot(draft), parentId) ?? activeRoot(draft)
       for (const title of cleaned) {
         const node = createTopic(title)
+        stampNodeDefaults(node, get().appSettings)
         parent.children.push(node)
         created.push(node.id)
       }
@@ -536,6 +599,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       for (const item of cleaned) {
         const node = createTopic(item.title.trim())
         if (item.rich) node.titleRich = item.rich
+        stampNodeDefaults(node, get().appSettings)
         parent.children.push(node)
         created.push(node.id)
       }
@@ -552,6 +616,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
     // 挂到已有主题下：根节点的文字成为新的子主题
     const childTopic = outlineToTopic(root)
+    walkStampDefaults(childTopic, get().appSettings)
     get().mutate((draft) => {
       const parent = findTopic(activeRoot(draft), parentId)
       if (!parent) return
@@ -560,6 +625,13 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }, 'AI 生成子主题')
     set({ selection: [childTopic.id] })
     return count
+  },
+
+  applyDefaultsToAll: () => {
+    const settings = get().appSettings
+    get().mutate((draft) => {
+      for (const sheet of draft.sheets) walkStampDefaults(sheet.rootTopic, settings)
+    }, '应用默认样式到全部节点')
   },
 
   /* ------------------------------------------------------------------ */
@@ -741,7 +813,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const topic = findTopic(activeRoot(workbook), editingId)
     const nextTitle = editingText
     const nextRich = editingRich ? normalizeRich(editingRich) : null
-    const keepRich = nextRich && hasFormatting(nextRich) ? nextRich : null
+    // 「首次命名」＝新建节点第一次输入文字：给打的内容补上默认字体/字号/颜色。
+    // 只认「原来标题为空」的节点——改老节点的文字绝不能突然被换样式。
+    const firstNaming = topic !== null && topic.title === ''
+    const stampedRich =
+      nextRich && firstNaming ? stampRichDefaults(nextRich, get().appSettings) : nextRich
+    const keepRich = stampedRich && hasFormatting(stampedRich) ? stampedRich : null
 
     set({ editingId: null, editingText: '', editingRich: null })
     if (!topic) return
@@ -782,6 +859,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const baseId = parentId ?? selection[0] ?? root.id
     const parent = findTopic(root, baseId) ?? root
     const node = createTopic('')
+    stampNodeDefaults(node, get().appSettings)
     get().mutate((draft) => {
       const target = findTopic(activeRoot(draft), parent.id) ?? activeRoot(draft)
       target.children.push(node)
@@ -802,6 +880,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!parent) return get().addChild(root.id)
     const index = parent.children.findIndex((c) => c.id === baseId)
     const node = createTopic('')
+    stampNodeDefaults(node, get().appSettings)
     get().mutate((draft) => {
       const draftParent = findTopic(activeRoot(draft), parent.id)
       if (!draftParent) return

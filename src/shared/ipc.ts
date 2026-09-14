@@ -38,12 +38,24 @@ export interface AppSettings {
   defaultThemeId: string | null
   /** 新建主题标题的默认对齐（左 / 居中 / 右） */
   defaultAlign: 'left' | 'center' | 'right'
+  /** 新建节点的默认字体；null = 跟随主题 */
+  defaultFontFamily: string | null
+  /** 新建节点的默认字号；null = 跟随层级默认 */
+  defaultFontSize: number | null
+  /** 新建节点的默认文字颜色；null = 跟随主题 */
+  defaultColor: string | null
+  /** 收进「更多 ▾」的工具栏功能 id 列表（其余都在快捷栏） */
+  toolbarHidden: string[]
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultViewLock: false,
   defaultThemeId: null,
-  defaultAlign: 'center'
+  defaultAlign: 'center',
+  defaultFontFamily: null,
+  defaultFontSize: null,
+  defaultColor: null,
+  toolbarHidden: []
 }
 
 export interface PickedImage {
@@ -144,7 +156,6 @@ export const IPC = {
 } as const
 
 export type MenuCommand =
-  | 'app:settings'
   | 'file:new'
   | 'file:open'
   | 'file:save'

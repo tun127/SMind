@@ -29,10 +29,9 @@ import { viewportActions } from './render/viewport'
 import { bumpMeasureEpoch } from './render/measure'
 import { setDefaultTextAlign } from './render/defaults'
 import { stageTypedChar } from './editor/typedChar'
-import { snapshotForSave, useEditor } from './store/editor'
+import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
 import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
 import TabBar from './components/TabBar'
-import SettingsDialog from './components/SettingsDialog'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
 import type { ThemeDefinition } from '@shared/theme'
 
@@ -115,9 +114,6 @@ export default function App(): ReactElement {
   /** AI 对话框：生成 / 扩写 / 润色 */
   const [aiTask, setAiTask] = useState<AiTask | null>(null)
   const [showAiSettings, setShowAiSettings] = useState(false)
-  /** 设置对话框（默认视角锁定 / 默认主题 / 默认对齐） */
-  const [showSettings, setShowSettings] = useState(false)
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS)
   const themesRef = useRef<ThemeDefinition[]>([])
   /** 历史记录 / 常用 / 保存位置 */
   const [showHistory, setShowHistory] = useState(false)
@@ -285,7 +281,6 @@ export default function App(): ReactElement {
     void (async () => {
       try {
         const loaded = await window.api.settingsLoad()
-        setSettings(loaded)
         useEditor.getState().setAppSettings(loaded)
         applyRenderDefaults(loaded)
       } catch {
@@ -299,13 +294,29 @@ export default function App(): ReactElement {
     })()
   }, [])
 
-  /** 设置对话框改动：即时写进 store（影响后续新建文档）并落盘 */
-  const updateSettings = useCallback((next: AppSettings): void => {
-    setSettings(next)
-    useEditor.getState().setAppSettings(next)
+  /**
+   * 改「默认对齐 / 默认字体」这类渲染兜底值后，让测量缓存失效。
+   * 设置值本身的写入与落盘统一走 `patchAppSettings`（各面板各自调用）。
+   */
+  const handleRenderDefaults = useCallback((next: AppSettings): void => {
     applyRenderDefaults(next)
-    void window.api.settingsSave(next).catch(() => undefined)
   }, [])
+
+  /** 「默认样式」改动后的统一收尾：渲染兜底值失效 */
+  const onDefaultStyleChanged = useCallback((): void => {
+    applyRenderDefaults(useEditor.getState().appSettings)
+  }, [])
+
+  /** 主题面板：把某个主题设为新文档的默认主题 */
+  const handleSetDefaultTheme = useCallback(
+    (themeId: string): void => {
+      void patchAppSettings({ defaultThemeId: themeId }).then((next) => {
+        applyRenderDefaults(next)
+        showToast('已设为新文档的默认主题')
+      })
+    },
+    [showToast]
+  )
 
   const newDocument = useCallback((): void => {
     commitPending()
@@ -481,9 +492,6 @@ export default function App(): ReactElement {
     const off = window.api.onMenuCommand((command) => {
       const store = useEditor.getState()
       switch (command) {
-        case 'app:settings':
-          setShowSettings(true)
-          break
         case 'file:new':
           // 新标签不动当前文档，不需要未保存确认
           newDocument()
@@ -1043,13 +1051,19 @@ export default function App(): ReactElement {
       <div className={showOutline ? 'app__body app__body--with-outline' : 'app__body'}>
         {showOutline && <OutlinePanel onClose={() => setShowOutline(false)} onNotify={showToast} />}
         <Canvas />
-        {sidePanel === 'theme' && <ThemePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
+        {sidePanel === 'theme' && (
+          <ThemePanel
+            onClose={() => setSidePanel('none')}
+            onNotify={showToast}
+            onSetDefaultTheme={handleSetDefaultTheme}
+          />
+        )}
         {sidePanel === 'node' && <NodePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
         {sidePanel === 'search' && <SearchPanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
       </div>
 
-      {/* 仅在进入编辑态时出现 */}
-      <RichFormatBar />
+      {/* 仅在进入编辑态时出现；「默认样式」面板改渲染兜底值后要让测量缓存失效 */}
+      <RichFormatBar onRenderDefaultsChanged={onDefaultStyleChanged} />
 
       {/* 底部多文档标签栏（浏览器式任务栏）：点标签切换文档 */}
       <TabBar onNewTab={() => newDocument()} onCloseTab={closeTabById} />
@@ -1100,15 +1114,6 @@ export default function App(): ReactElement {
 
       {showAiSettings && (
         <AiSettingsDialog onClose={() => setShowAiSettings(false)} onNotify={showToast} />
-      )}
-
-      {showSettings && (
-        <SettingsDialog
-          settings={settings}
-          themes={themesRef.current}
-          onChange={updateSettings}
-          onClose={() => setShowSettings(false)}
-        />
       )}
 
       {showHistory && (

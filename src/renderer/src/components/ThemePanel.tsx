@@ -24,9 +24,11 @@ const COLOR_FIELDS: Array<{ key: keyof ThemeColors; label: string }> = [
 interface Props {
   onClose(): void
   onNotify(message: string): void
+  /** 把某个主题设为新文档的默认主题（App 层负责写入设置并提示） */
+  onSetDefaultTheme(themeId: string): void
 }
 
-export default function ThemePanel({ onClose, onNotify }: Props): ReactElement {
+export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const applyTheme = useEditor((s) => s.applyTheme)
   const updateThemeColors = useEditor((s) => s.updateThemeColors)
@@ -239,6 +241,14 @@ export default function ThemePanel({ onClose, onNotify }: Props): ReactElement {
         <button type="button" className="btn" onClick={() => void handleExport()}>
           <Download size={14} />
           导出
+        </button>
+        <button
+          type="button"
+          className="btn"
+          title="之后新建的文档都自动套用当前主题"
+          onClick={() => onSetDefaultTheme(currentId)}
+        >
+          设为默认主题
         </button>
         <button type="button" className="btn" onClick={() => applyTheme(DEFAULT_THEME)}>
           恢复默认

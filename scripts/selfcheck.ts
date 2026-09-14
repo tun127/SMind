@@ -1688,6 +1688,83 @@ function testBranchFamiliesMore(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 8.5i 默认文字样式：新建节点套用 / 应用到全部                          */
+/* ------------------------------------------------------------------ */
+
+function testDefaultStyles(): void {
+  group('默认文字样式：新建节点套用')
+
+  reset()
+  const restore = (): void =>
+    store().setAppSettings({
+      ...store().appSettings,
+      defaultFontFamily: null,
+      defaultFontSize: null,
+      defaultColor: null
+    })
+
+  store().setAppSettings({
+    ...store().appSettings,
+    defaultFontFamily: '楷体',
+    defaultFontSize: 18,
+    defaultColor: '#27AE60'
+  })
+
+  const dsRoot = root().id
+  // 模拟真实新建流程：建空节点 → 输入文字 → 提交（首次命名）
+  const fresh = store().addChild(dsRoot)
+  store().updateEditingText('普通新建')
+  store().commitEdit()
+  const dsChild = fresh
+
+  const runOf = (id: string): { fontFamily?: string; fontSize?: number; color?: string } => {
+    const rich = find(id)?.titleRich
+    return rich?.paragraphs[0]?.runs[0] ?? {}
+  }
+
+  eq('首次命名：套用默认字体', runOf(dsChild).fontFamily, '楷体')
+  eq('首次命名：套用默认字号', runOf(dsChild).fontSize, 18)
+  eq('首次命名：套用默认颜色', runOf(dsChild).color, '#27AE60')
+
+  // 改老节点的文字：绝不能突然被换默认样式
+  store().updateEditingText('普通新建（改）')
+  store().commitEdit()
+  eq('改老节点文字不被重盖默认样式', runOf(dsChild).fontFamily, '楷体')
+  eq('（颜色保持用户没动过的默认值即可）', runOf(dsChild).color, '#27AE60')
+
+  const batch = store().addChildTitles(dsChild, ['AI 扩写的'])
+  eq('AI 扩写也套用默认字号', batch, 1)
+
+  const richAdded = store().addRichChildren(dsChild, [
+    {
+      title: '带格式的',
+      rich: { paragraphs: [{ runs: [{ text: '带格式的', color: '#EB5757' }] }] }
+    }
+  ])
+  eq('添加成功', richAdded, 1)
+  const richNode = find(dsChild)?.children[find(dsChild)!.children.length - 1]!
+  eq('显式颜色不被默认覆盖', richNode.titleRich?.paragraphs[0]?.runs[0]?.color, '#EB5757')
+  eq('缺失的字体补上默认值', richNode.titleRich?.paragraphs[0]?.runs[0]?.fontFamily, '楷体')
+
+  group('默认文字样式：应用到全部现有节点')
+
+  // 先清掉默认再建一个「没被盖章」的节点，然后设置默认 + 应用到全部
+  restore()
+  const untouched = store().addChild(dsRoot)
+  store().updateEditingText('没盖章的')
+  store().commitEdit()
+  eq('前置：节点还没被盖章', find(untouched)?.titleRich, undefined)
+  store().setAppSettings({ ...store().appSettings, defaultColor: '#2F6BFF' })
+
+  store().applyDefaultsToAll()
+  eq('应用到全部：节点获得默认颜色', runOf(untouched).color, '#2F6BFF')
+  store().undo()
+  eq('应用到全部可撤销', find(untouched)?.titleRich, undefined)
+
+  restore()
+}
+
+/* ------------------------------------------------------------------ */
 /* 8.5h 多文档标签：快照切换 / 隔离 / 去重 / 排序                        */
 /* ------------------------------------------------------------------ */
 
@@ -5530,6 +5607,7 @@ async function main(): Promise<void> {
   testBranchFamiliesMore()
   testMultiWindow()
   testTabs()
+  testDefaultStyles()
   testMarkdownFullFormat()
   testUndoSelectionAndRelayout()
   testLayoutNoOverlap()

@@ -825,7 +825,22 @@ function registerIpc(): void {
         defaultAlign:
           parsed.defaultAlign === 'left' || parsed.defaultAlign === 'right'
             ? parsed.defaultAlign
-            : DEFAULT_APP_SETTINGS.defaultAlign
+            : DEFAULT_APP_SETTINGS.defaultAlign,
+        defaultFontFamily:
+          typeof parsed.defaultFontFamily === 'string' && parsed.defaultFontFamily.length > 0
+            ? parsed.defaultFontFamily
+            : null,
+        defaultFontSize:
+          typeof parsed.defaultFontSize === 'number' && parsed.defaultFontSize > 0
+            ? parsed.defaultFontSize
+            : null,
+        defaultColor:
+          typeof parsed.defaultColor === 'string' && parsed.defaultColor.length > 0
+            ? parsed.defaultColor
+            : null,
+        toolbarHidden: Array.isArray(parsed.toolbarHidden)
+          ? parsed.toolbarHidden.filter((item): item is string => typeof item === 'string')
+          : []
       }
     } catch {
       return { ...DEFAULT_APP_SETTINGS }
@@ -842,7 +857,22 @@ function registerIpc(): void {
       defaultAlign:
         settings?.defaultAlign === 'left' || settings?.defaultAlign === 'right'
           ? settings.defaultAlign
-          : 'center'
+          : 'center',
+      defaultFontFamily:
+        typeof settings?.defaultFontFamily === 'string' && settings.defaultFontFamily.length > 0
+          ? settings.defaultFontFamily
+          : null,
+      defaultFontSize:
+        typeof settings?.defaultFontSize === 'number' && settings.defaultFontSize > 0
+          ? settings.defaultFontSize
+          : null,
+      defaultColor:
+        typeof settings?.defaultColor === 'string' && settings.defaultColor.length > 0
+          ? settings.defaultColor
+          : null,
+      toolbarHidden: Array.isArray(settings?.toolbarHidden)
+        ? settings.toolbarHidden.filter((item) => typeof item === 'string')
+        : []
     }
     await fs.writeFile(settingsFile(), JSON.stringify(next, null, 2), 'utf8')
   })

@@ -16,11 +16,6 @@ export function buildAppMenu(actions: MenuActions): void {
 
   const template: MenuItemConstructorOptions[] = [
     {
-      // 与「文件」并列的设置入口：所有默认参数都在这里改（默认视角锁定 / 主题 / 对齐）
-      label: '设置',
-      click: () => send('app:settings')
-    },
-    {
       label: '文件',
       submenu: [
         { label: '新建', accelerator: 'CmdOrCtrl+N', click: () => send('file:new') },

@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   Palette,
   PanelRight,
+  PinOff,
   Plus,
   Redo2,
   RotateCcw,
@@ -41,7 +42,7 @@ import { DEFAULT_STRUCTURE, STRUCTURES } from '@shared/xmind/constants'
 import type { OutlineFormat } from '@shared/outline'
 import { activeRoot, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
-import { overlayToggleOf, useEditor } from '../store/editor'
+import { overlayToggleOf, patchAppSettings, useEditor } from '../store/editor'
 
 export interface ToolbarActions {
   onNew(): void
@@ -84,6 +85,10 @@ interface Props {
   actions: ToolbarActions
   /** 大纲面板是否已打开（用于按钮的按下态） */
   outlineOpen?: boolean
+  /** 已被右键收进「更多 ▾」的快捷栏功能 id（设置持久化） */
+  hiddenItems?: string[]
+  /** 收纳 / 移回某个快捷栏功能 */
+  onToggleHidden?(id: string, hidden: boolean): void
 }
 
 /**
@@ -103,7 +108,15 @@ function ToolMenu({
   icon: ReactNode
   label: string
   title: string
-  items: Array<{ key: string; label: string; hint?: string; icon?: ReactNode; onSelect(): void }>
+  items: Array<{
+    key: string
+    label: string
+    hint?: string
+    icon?: ReactNode
+    onSelect(): void
+    /** 提供时在行尾显示「移回快捷栏」小按钮（收纳进来的功能用） */
+    onUnpin?(): void
+  }>
   iconOnly?: boolean
 }): ReactElement {
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
@@ -173,6 +186,19 @@ function ToolMenu({
             {item.label}
             {item.hint ? <em className="tool-menu__hint">{item.hint}</em> : null}
           </span>
+          {item.onUnpin ? (
+            <span
+              className="tool-menu__pin"
+              title="移回快捷栏"
+              onClick={(event) => {
+                event.stopPropagation()
+                item.onUnpin?.()
+                setPosition(null)
+              }}
+            >
+              <PinOff size={13} />
+            </span>
+          ) : null}
         </button>
       ))}
     </div>
@@ -207,11 +233,103 @@ function ToolMenu({
   )
 }
 
-export default function Toolbar({ actions, outlineOpen = false }: Props): ReactElement {
+/**
+ * 快捷栏按钮的「收纳」外壳：**右键**弹出「收进更多 ▾」。
+ *
+ * 被收纳的功能从快捷栏消失、出现在「更多 ▾」菜单的「已收纳」区，行尾有
+ * 「移回快捷栏」按钮——收纳状态持久化在设置里（toolbarHidden）。
+ */
+function PinWrap({
+  id,
+  title,
+  hidden,
+  onToggleHidden,
+  children
+}: {
+  id: string
+  title: string
+  hidden: boolean
+  onToggleHidden(id: string, hidden: boolean): void
+  children: ReactNode
+}): ReactElement | null {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menu) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target as Node | null
+      if (target && listRef.current?.contains(target)) return
+      setMenu(null)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setMenu(null)
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
+
+  // 被收纳的功能不占快捷栏的位置（它活在「更多 ▾」里）
+  if (hidden) return null
+
+  return (
+    <span
+      className="tool-btn-wrap"
+      title={`${title}（右键可收进「更多 ▾」）`}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        setMenu({ x: event.clientX, y: event.clientY })
+      }}
+    >
+      {children}
+      {menu
+        ? createPortal(
+            <div
+              ref={listRef}
+              className="tool-menu__list"
+              style={{ position: 'fixed', top: menu.y, left: menu.x }}
+            >
+              <button
+                type="button"
+                className="tool-menu__item"
+                onClick={() => {
+                  onToggleHidden(id, true)
+                  setMenu(null)
+                }}
+              >
+                <span className="tool-menu__icon">
+                  <PinOff size={15} />
+                </span>
+                <span className="tool-menu__text">
+                  收进「更多 ▾」
+                  <em className="tool-menu__hint">可随时移回快捷栏</em>
+                </span>
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
+    </span>
+  )
+}
+
+/** 快捷栏功能清单：id → 更多菜单里的展示与动作（收纳后用它渲染） */
+interface QuickItemMeta {
+  label: string
+  icon: ReactNode
+  run(): void
+}
+
+export default function Toolbar({ actions, outlineOpen = false, hiddenItems = [], onToggleHidden }: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
   const zoom = useEditor((s) => s.zoom)
   const viewLock = useEditor((s) => s.viewLock)
+  const appSettings = useEditor((s) => s.appSettings)
   const canUndo = useEditor((s) => s.undoStack.length > 0)
   const canRedo = useEditor((s) => s.redoStack.length > 0)
 
@@ -222,6 +340,11 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
   const hasFreePosition = Boolean(selectedTopic?.position)
 
   const store = useEditor.getState
+
+  const toggleHidden = (id: string, hidden: boolean): void => {
+    if (!onToggleHidden) return
+    onToggleHidden(id, hidden)
+  }
 
   // 这三个按钮是「开关」：当前选择已经有对应元素时显示为已按下，再点一次即移除。
   // 必须用 useMemo 包住：selector 每次都返回新对象会导致无限重渲染。
@@ -248,6 +371,53 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         ? '再点一次即取消这个边界'
         : '给选中的同级主题加边界（按住 Ctrl 可多选）'
 
+  /** 收纳进「更多 ▾」的功能：id → 展示与动作（右键移回快捷栏） */
+  const quickMeta: Record<string, QuickItemMeta> = {
+    new: { label: '新建', icon: <FilePlus size={15} />, run: actions.onNew },
+    open: { label: '打开 / 导入 .xmind', icon: <FolderOpen size={15} />, run: actions.onOpen },
+    save: { label: '保存', icon: <Save size={15} />, run: actions.onSave },
+    'save-as': { label: '另存为', icon: <SaveAll size={15} />, run: actions.onSaveAs },
+    'export-md': {
+      label: '一键导出 Markdown',
+      icon: <FileText size={15} />,
+      run: () => actions.onExportOutline('md')
+    },
+    undo: { label: '撤销', icon: <Undo2 size={15} />, run: () => store().undo() },
+    redo: { label: '重做', icon: <Redo2 size={15} />, run: () => store().redo() },
+    'add-child': {
+      label: '添加子主题',
+      icon: <Plus size={15} />,
+      run: () => store().addChild(selectedId ?? root.id)
+    },
+    delete: { label: '删除所选主题', icon: <Trash2 size={15} />, run: () => store().deleteSelection() },
+    relationship: {
+      label: '关系线',
+      icon: <Spline size={15} />,
+      run: () => store().addRelationship()
+    },
+    summary: { label: '概要', icon: <Braces size={15} />, run: () => store().addSummary() },
+    boundary: { label: '边界', icon: <Frame size={15} />, run: () => store().addBoundary() },
+    outline: { label: '大纲视图', icon: <ListTree size={15} />, run: actions.onOutline },
+    'nodes-panel': { label: '节点属性', icon: <PanelRight size={15} />, run: actions.onNodes },
+    'themes-panel': { label: '主题外观', icon: <Palette size={15} />, run: actions.onThemes },
+    formula: { label: '插入 / 编辑公式', icon: <Sigma size={15} />, run: actions.onFormula },
+    code: { label: '插入 / 编辑代码块', icon: <Code2 size={15} />, run: actions.onCode },
+    relayout: { label: '全部恢复自动布局', icon: <Wand2 size={15} />, run: actions.onRelayout },
+    search: { label: '搜索 / 筛选 / 统计', icon: <SearchIcon size={15} />, run: actions.onSearch },
+    'zoom-out': {
+      label: '缩小',
+      icon: <ZoomOut size={15} />,
+      run: () => viewportActions.zoomTo(zoom / 1.2)
+    },
+    'zoom-in': {
+      label: '放大',
+      icon: <ZoomIn size={15} />,
+      run: () => viewportActions.zoomTo(zoom * 1.2)
+    },
+    fit: { label: '适应画布', icon: <Maximize size={15} />, run: () => viewportActions.fit() },
+    'view-lock': { label: '视角锁定', icon: <Crosshair size={15} />, run: () => store().toggleViewLock() }
+  }
+
   // 工具栏按钮不抢焦点：否则点过按钮后按 Enter / Tab 会先被按钮吃掉。
   // 只对按钮生效，下拉框需要保留默认行为才能正常展开。
   const keepFocus = (e: MouseEvent<HTMLDivElement>): void => {
@@ -255,31 +425,50 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
     if (target && target.closest('button')) e.preventDefault()
   }
 
+  /** 快捷栏按钮：pinned 收纳外壳 + 更多菜单里的对应条目 */
+  const quick = (id: keyof typeof quickMeta & string, node: ReactNode): ReactElement | null => (
+    <PinWrap id={id} title={quickMeta[id].label} hidden={hiddenItems.includes(id)} onToggleHidden={toggleHidden}>
+      {node}
+    </PinWrap>
+  )
+
   return (
     <div className="toolbar" onMouseDown={keepFocus}>
       <div className="toolbar__group">
-        <button type="button" className="tool-btn" title="新建 (Ctrl+N)" onClick={actions.onNew}>
-          <FilePlus size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="打开 / 导入 .xmind 文件 (Ctrl+O)"
-          onClick={actions.onOpen}
-        >
-          <FolderOpen size={17} />
-        </button>
-        <button type="button" className="tool-btn" title="保存 (Ctrl+S)" onClick={actions.onSave}>
-          <Save size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="另存为 (Ctrl+Shift+S)"
-          onClick={actions.onSaveAs}
-        >
-          <SaveAll size={17} />
-        </button>
+        {quick(
+          'new',
+          <button type="button" className="tool-btn" title="新建 (Ctrl+N)" onClick={actions.onNew}>
+            <FilePlus size={17} />
+          </button>
+        )}
+        {quick(
+          'open',
+          <button
+            type="button"
+            className="tool-btn"
+            title="打开 / 导入 .xmind 文件 (Ctrl+O)"
+            onClick={actions.onOpen}
+          >
+            <FolderOpen size={17} />
+          </button>
+        )}
+        {quick(
+          'save',
+          <button type="button" className="tool-btn" title="保存 (Ctrl+S)" onClick={actions.onSave}>
+            <Save size={17} />
+          </button>
+        )}
+        {quick(
+          'save-as',
+          <button
+            type="button"
+            className="tool-btn"
+            title="另存为 (Ctrl+Shift+S)"
+            onClick={actions.onSaveAs}
+          >
+            <SaveAll size={17} />
+          </button>
+        )}
 
         {/* 导入 / 导出：常用功能不藏在菜单里 */}
         <ToolMenu
@@ -355,60 +544,75 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         />
 
         {/* Markdown 是最常用的导出，直接给个按钮，不用翻菜单 */}
-        <button
-          type="button"
-          className="tool-btn tool-btn--labeled"
-          title="一键导出 Markdown（.md）：根主题作标题、层级作列表、备注作引用块"
-          onClick={() => actions.onExportOutline('md')}
-        >
-          <FileText size={15} />
-          Markdown
-        </button>
+        {quick(
+          'export-md',
+          <button
+            type="button"
+            className="tool-btn tool-btn--labeled"
+            title="一键导出 Markdown（.md）：根主题作标题、层级作列表、备注作引用块"
+            onClick={() => actions.onExportOutline('md')}
+          >
+            <FileText size={15} />
+            Markdown
+          </button>
+        )}
       </div>
 
       <div className="toolbar__divider" />
 
       <div className="toolbar__group">
-        <button
-          type="button"
-          className="tool-btn"
-          title="撤销 (Ctrl+Z)"
-          disabled={!canUndo}
-          onClick={() => store().undo()}
-        >
-          <Undo2 size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="重做 (Ctrl+Shift+Z)"
-          disabled={!canRedo}
-          onClick={() => store().redo()}
-        >
-          <Redo2 size={17} />
-        </button>
+        {quick(
+          'undo',
+          <button
+            type="button"
+            className="tool-btn"
+            title="撤销 (Ctrl+Z)"
+            disabled={!canUndo}
+            onClick={() => store().undo()}
+          >
+            <Undo2 size={17} />
+          </button>
+        )}
+        {quick(
+          'redo',
+          <button
+            type="button"
+            className="tool-btn"
+            title="重做 (Ctrl+Shift+Z)"
+            disabled={!canRedo}
+            onClick={() => store().redo()}
+          >
+            <Redo2 size={17} />
+          </button>
+        )}
       </div>
 
       <div className="toolbar__divider" />
 
       <div className="toolbar__group">
-        <button
-          type="button"
-          className="tool-btn"
-          title="添加子主题 (Tab)"
-          onClick={() => store().addChild(selectedId ?? root.id)}
-        >
-          <Plus size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="删除所选主题 (Delete)"
-          disabled={!selectedId || selectedId === root.id}
-          onClick={() => store().deleteSelection()}
-        >
-          <Trash2 size={17} />
-        </button>
+        {quick(
+          'add-child',
+          <button
+            type="button"
+            className="tool-btn"
+            title="添加子主题 (Tab)"
+            onClick={() => store().addChild(selectedId ?? root.id)}
+          >
+            <Plus size={17} />
+          </button>
+        )}
+        {quick(
+          'delete',
+          <button
+            type="button"
+            className="tool-btn"
+            title="删除所选主题 (Delete)"
+            disabled={!selectedId || selectedId === root.id}
+            onClick={() => store().deleteSelection()}
+          >
+            <Trash2 size={17} />
+          </button>
+        )}
       </div>
 
       <div className="toolbar__divider" />
@@ -437,7 +641,8 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
       {/* 画布级元素：创建入口放在工具栏。
           只留图标（文字会把工具栏撑长），怎么用写在提示里 */}
       <div className="toolbar__group">
-        <span className="tool-btn-wrap" title={relationshipHint}>
+        {quick(
+          'relationship',
           <button
             type="button"
             className={toggle.relationshipId ? 'tool-btn tool-btn--active' : 'tool-btn'}
@@ -446,8 +651,9 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           >
             <Spline size={17} />
           </button>
-        </span>
-        <span className="tool-btn-wrap" title={summaryHint}>
+        )}
+        {quick(
+          'summary',
           <button
             type="button"
             className={toggle.summaryId ? 'tool-btn tool-btn--active' : 'tool-btn'}
@@ -456,8 +662,9 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           >
             <Braces size={17} />
           </button>
-        </span>
-        <span className="tool-btn-wrap" title={boundaryHint}>
+        )}
+        {quick(
+          'boundary',
           <button
             type="button"
             className={toggle.boundaryId ? 'tool-btn tool-btn--active' : 'tool-btn'}
@@ -466,58 +673,84 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           >
             <Frame size={17} />
           </button>
-        </span>
+        )}
       </div>
 
       <div className="toolbar__divider" />
 
       <div className="toolbar__group">
-        <button
-          type="button"
-          className={outlineOpen ? 'tool-btn tool-btn--active' : 'tool-btn'}
-          title={outlineOpen ? '关闭大纲视图' : '大纲视图（与导图双向实时同步）'}
-          onClick={actions.onOutline}
-        >
-          <ListTree size={17} />
-        </button>
-        <button type="button" className="tool-btn" title="节点属性（备注 / 图片 / 代码块 / 标记…）" onClick={actions.onNodes}>
-          <PanelRight size={17} />
-        </button>
-        <button type="button" className="tool-btn" title="主题（换配色 / 边框样式）" onClick={actions.onThemes}>
-          <Palette size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="插入 / 编辑公式（也支持 $x^2$、$$…$$ 这类 Markdown 写法）"
-          onClick={actions.onFormula}
-        >
-          <Sigma size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="插入 / 编辑代码块（Alt+C；节点上的语言小标可直接切换语言）"
-          onClick={actions.onCode}
-        >
-          <Code2 size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="全部恢复自动布局：清空手动拖拽的位置偏移（含悬浮主题），可撤销"
-          onClick={actions.onRelayout}
-        >
-          <Wand2 size={17} />
-        </button>
-        <button
-          type="button"
-          className="tool-btn"
-          title="搜索 / 筛选 / 统计（Ctrl+F）"
-          onClick={actions.onSearch}
-        >
-          <SearchIcon size={17} />
-        </button>
+        {quick(
+          'outline',
+          <button
+            type="button"
+            className={outlineOpen ? 'tool-btn tool-btn--active' : 'tool-btn'}
+            title={outlineOpen ? '关闭大纲视图' : '大纲视图（与导图双向实时同步）'}
+            onClick={actions.onOutline}
+          >
+            <ListTree size={17} />
+          </button>
+        )}
+        {quick(
+          'nodes-panel',
+          <button
+            type="button"
+            className="tool-btn"
+            title="节点属性（备注 / 图片 / 代码块 / 标记…）"
+            onClick={actions.onNodes}
+          >
+            <PanelRight size={17} />
+          </button>
+        )}
+        {quick(
+          'themes-panel',
+          <button type="button" className="tool-btn" title="主题（换配色 / 边框样式）" onClick={actions.onThemes}>
+            <Palette size={17} />
+          </button>
+        )}
+        {quick(
+          'formula',
+          <button
+            type="button"
+            className="tool-btn"
+            title="插入 / 编辑公式（也支持 $x^2$、$$…$$ 这类 Markdown 写法）"
+            onClick={actions.onFormula}
+          >
+            <Sigma size={17} />
+          </button>
+        )}
+        {quick(
+          'code',
+          <button
+            type="button"
+            className="tool-btn"
+            title="插入 / 编辑代码块（Alt+C；节点上的语言小标可直接切换语言）"
+            onClick={actions.onCode}
+          >
+            <Code2 size={17} />
+          </button>
+        )}
+        {quick(
+          'relayout',
+          <button
+            type="button"
+            className="tool-btn"
+            title="全部恢复自动布局：清空手动拖拽的位置偏移（含悬浮主题），可撤销"
+            onClick={actions.onRelayout}
+          >
+            <Wand2 size={17} />
+          </button>
+        )}
+        {quick(
+          'search',
+          <button
+            type="button"
+            className="tool-btn"
+            title="搜索 / 筛选 / 统计（Ctrl+F）"
+            onClick={actions.onSearch}
+          >
+            <SearchIcon size={17} />
+          </button>
+        )}
       </div>
 
       <div className="toolbar__divider" />
@@ -564,9 +797,12 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
       <div className="toolbar__spacer" />
 
       <div className="toolbar__group">
-        <button type="button" className="tool-btn" title="缩小 (Ctrl+-)" onClick={() => viewportActions.zoomTo(zoom / 1.2)}>
-          <ZoomOut size={17} />
-        </button>
+        {quick(
+          'zoom-out',
+          <button type="button" className="tool-btn" title="缩小 (Ctrl+-)" onClick={() => viewportActions.zoomTo(zoom / 1.2)}>
+            <ZoomOut size={17} />
+          </button>
+        )}
         <button
           type="button"
           className="tool-btn tool-btn--text"
@@ -575,24 +811,33 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         >
           {Math.round(zoom * 100)}%
         </button>
-        <button type="button" className="tool-btn" title="放大 (Ctrl+=)" onClick={() => viewportActions.zoomTo(zoom * 1.2)}>
-          <ZoomIn size={17} />
-        </button>
-        <button type="button" className="tool-btn" title="适应画布 (Ctrl+1)" onClick={() => viewportActions.fit()}>
-          <Maximize size={17} />
-        </button>
-        <button
-          type="button"
-          className={viewLock ? 'tool-btn tool-btn--active' : 'tool-btn'}
-          title={
-            viewLock
-              ? '视角锁定：视角正跟住选中的主题（再点一次取消，Ctrl+Shift+L）'
-              : '视角锁定：让视角始终跟住选中的主题（Ctrl+Shift+L）'
-          }
-          onClick={() => store().toggleViewLock()}
-        >
-          <Crosshair size={17} />
-        </button>
+        {quick(
+          'zoom-in',
+          <button type="button" className="tool-btn" title="放大 (Ctrl+=)" onClick={() => viewportActions.zoomTo(zoom * 1.2)}>
+            <ZoomIn size={17} />
+          </button>
+        )}
+        {quick(
+          'fit',
+          <button type="button" className="tool-btn" title="适应画布 (Ctrl+1)" onClick={() => viewportActions.fit()}>
+            <Maximize size={17} />
+          </button>
+        )}
+        {quick(
+          'view-lock',
+          <button
+            type="button"
+            className={viewLock ? 'tool-btn tool-btn--active' : 'tool-btn'}
+            title={
+              viewLock
+                ? '视角锁定：视角正跟住选中的主题（再点一次取消，Ctrl+Shift+L）'
+                : '视角锁定：让视角始终跟住选中的主题（Ctrl+Shift+L）'
+            }
+            onClick={() => store().toggleViewLock()}
+          >
+            <Crosshair size={17} />
+          </button>
+        )}
       </div>
 
       <div className="toolbar__divider" />
@@ -605,6 +850,17 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
           label="更多"
           title="更多功能"
           items={[
+            // 被右键收纳的快捷栏功能排在最前面，行尾有「移回快捷栏」
+            ...hiddenItems
+              .filter((id) => quickMeta[id])
+              .map((id) => ({
+                key: `pinned-${id}`,
+                label: quickMeta[id].label,
+                hint: '已收纳 · 点击使用',
+                icon: quickMeta[id].icon,
+                onSelect: quickMeta[id].run,
+                onUnpin: () => toggleHidden(id, false)
+              })),
             {
               key: 'new-window',
               label: '新建窗口',
@@ -627,18 +883,11 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
               onSelect: actions.onHistory
             },
             {
-              key: 'nodes',
-              label: '节点属性',
-              hint: '标记 / 标签 / 备注 / 超链接 / 附件 / 公式',
-              icon: <Tag size={15} />,
-              onSelect: actions.onNodes
-            },
-            {
-              key: 'themes',
-              label: '主题外观',
-              hint: '配色与主题库',
-              icon: <Palette size={15} />,
-              onSelect: actions.onThemes
+              key: 'default-view-lock',
+              label: `启动时默认开启视角锁定（当前${appSettings.defaultViewLock ? '开' : '关'}）`,
+              hint: '只影响新开文档的初始状态',
+              icon: <Crosshair size={15} />,
+              onSelect: () => void patchAppSettings({ defaultViewLock: !appSettings.defaultViewLock })
             },
             {
               key: 'reset-layout',

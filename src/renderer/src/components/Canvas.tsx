@@ -1468,10 +1468,31 @@ export default function Canvas(): ReactElement {
     [sheet, filter]
   )
 
-  const visibleEdges = useMemo(
-    () => layout.edges.filter((e) => visibleIds.has(e.toId) || visibleIds.has(e.fromId)),
-    [layout.edges, visibleIds]
-  )
+  /**
+   * 连线裁剪：按**边的包围盒**（两端节点矩形的外接框，外扩余量）与视口求交。
+   *
+   * 之前按「两端节点是否可见」过滤——长连线的两端都被裁掉时，
+   * 即使线身横穿屏幕中央，整条线也会凭空消失（用户报的"连线过长导致连线消失"）。
+   */
+  const visibleEdges = useMemo(() => {
+    if (size.width === 0 || size.height === 0) return layout.edges
+    const margin = 260 / zoom
+    const x0 = -pan.x / zoom - margin
+    const y0 = -pan.y / zoom - margin
+    const x1 = (size.width - pan.x) / zoom + margin
+    const y1 = (size.height - pan.y) / zoom + margin
+    return layout.edges.filter((edge) => {
+      const from = layout.nodeMap.get(edge.fromId)
+      const to = layout.nodeMap.get(edge.toId)
+      if (!from || !to) return false
+      const ex0 = Math.min(from.x, to.x) - margin
+      const ex1 = Math.max(from.x + from.width, to.x + to.width) + margin
+      const ey0 = Math.min(from.y, to.y) - margin
+      const ey1 = Math.max(from.y + from.height, to.y + to.height) + margin
+      // 外接框与可见矩形相交才保留
+      return ex1 >= x0 && ex0 <= x1 && ey1 >= y0 && ey0 <= y1
+    })
+  }, [layout.edges, layout.nodeMap, pan.x, pan.y, zoom, size.width, size.height])
 
   /**
    * 正在被拖拽的主题（多选时是一整群）连同它们的**整棵子树**。
