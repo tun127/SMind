@@ -46,8 +46,11 @@ export interface AccessoryRow {
 }
 
 export interface MeasuredLabel {
+  /** 实际画出来的文字（过长时已经截断并带省略号） */
   text: string
   width: number
+  /** 原始完整文字（被截断时才有）：给 tooltip 用，鼠标悬停能看到全文 */
+  full?: string
 }
 
 export interface LabelRow {

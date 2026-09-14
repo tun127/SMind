@@ -120,6 +120,8 @@ import {
 import { parseMarkdownOutline } from '../src/shared/import/markdown'
 import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../src/shared/formula'
 import { estimateOverlayLabelSize, overlayTitleLines } from '../src/shared/layout/overlays'
+import { LABEL_ELLIPSIS, fitLabelText } from '../src/shared/layout/label-fit'
+import { CODE_TOKEN_COLORS, highlightCode } from '../src/shared/code/highlight'
 import { autosaveSlotName, findWindowForPath, sameDocPath } from '../src/shared/window'
 import { readOverlayFontSize, readOverlayTextStyle, withOverlayTextStyle } from '../src/shared/model/overlay-style'
 import { parseOpmlOutline } from '../src/shared/import/opml'
@@ -2697,6 +2699,132 @@ async function testMediaElements(): Promise<void> {
     JSON.stringify(markerStripSize(10))
   )
   check('标记很多时往高度涨', markerStripSize(10).height > markerStripSize(4).height)
+
+  group('代码块：语法高亮')
+
+  // 铁律：分词首尾拼回去必须与原文逐字节相同（否则画出来和源码不一致）
+  const samples: Array<[string, string]> = [
+    ['python', 'def add(a, b):\n    # 求和\n    return a + b  # 注释\n\nprint("结果:", add(1, 2))'],
+    ['typescript', 'const sum = (a: number, b: number): number => a + b\nexport default class Foo {}\n/* 块注释\n   跨行 */'],
+    ['javascript', '// hi\nconst x = "文本"\nlet n = 1e3 + 0x1f'],
+    ['json', '{\n  "name": "小明",\n  "age": 18,\n  "ok": true\n}'],
+    ['yaml', '# 配置\nname: 小明\nitems:\n  - a\n  - b\nenabled: true'],
+    ['sql', 'SELECT id, name FROM users WHERE age > 18 -- 注释'],
+    ['html', '<div class="box" id="a">文本</div>\n<!-- 注释 -->'],
+    ['css', '.box { color: #fff; margin: 0 auto; /* x */ }'],
+    ['bash', '#!/bin/bash\necho "hi" # 注释'],
+    ['go', 'func main() {\n\tfmt.Println("hi")\n}'],
+    ['rust', 'fn main() {\n    let x: i32 = 1;\n}'],
+    ['java', 'public class Main { public static void main(String[] args) {} }'],
+    ['csharp', 'public class A { public int X() { return 1; } }'],
+    ['cpp', '#include <iostream>\nint main() { return 0; }'],
+    ['c', 'int main(void) { return 0; }'],
+    ['text', '任何内容\n都不高亮'],
+    ['', '未知语言也不高亮']
+  ]
+  for (const [lang, text] of samples) {
+    const lines = highlightCode(text, lang)
+    const name = lang.length > 0 ? lang : '(空)'
+    eq(`${name}：行数一致`, lines.length, text.split('\n').length)
+    eq(
+      `${name}：分词拼回原文逐字节一致`,
+      lines.map((line) => line.tokens.map((token) => token.text).join('')).join('\n'),
+      text
+    )
+  }
+
+  const pyTokens = highlightCode('def add(a, b):  # 求和\n    return a + b', 'python')
+  check('python：def 是关键字', pyTokens[0].tokens.some((t) => t.text === 'def' && t.kind === 'keyword'))
+  check('python：函数名被标出', pyTokens[0].tokens.some((t) => t.text === 'add' && t.kind === 'function'))
+  check(
+    'python：# 起的是注释',
+    pyTokens[0].tokens.some((t) => t.kind === 'comment' && t.text.startsWith('#'))
+  )
+  check('python：return 是关键字', pyTokens[1].tokens.some((t) => t.text === 'return' && t.kind === 'keyword'))
+  check(
+    'python：字符串上色',
+    highlightCode('print("hi")', 'python')[0].tokens.some((t) => t.kind === 'string' && t.text === '"hi"')
+  )
+  check(
+    'python：三引号跨行仍是字符串',
+    highlightCode('"""文档\n第二行"""', 'python')
+      .flatMap((line) => line.tokens)
+      .every((token) => token.kind === 'string')
+  )
+  check('py 别名同样生效', highlightCode('def f(): pass', 'py')[0].tokens.some((t) => t.text === 'def' && t.kind === 'keyword'))
+
+  const tsTokens = highlightCode('const f = (x: string) => new Map<string, number>()', 'typescript')[0].tokens
+  check('ts：const 是关键字', tsTokens.some((t) => t.text === 'const' && t.kind === 'keyword'))
+  check('ts：内建类名上色（Map）', tsTokens.some((t) => t.text === 'Map' && t.kind === 'builtin'))
+  check(
+    'ts：自定义类名按类型上色',
+    highlightCode('const f = (x: Foo) => 1', 'typescript')[0].tokens.some((t) => t.text === 'Foo' && t.kind === 'type')
+  )
+  check(
+    'json：键是 property',
+    highlightCode('{"a": 1}', 'json')[0].tokens.some((t) => t.text === '"a"' && t.kind === 'property')
+  )
+  check(
+    'yaml：键是 property、true 是字面量',
+    (() => {
+      const tokens = highlightCode('enabled: true', 'yaml')[0].tokens
+      return (
+        tokens.some((t) => t.text === 'enabled' && t.kind === 'property') &&
+        tokens.some((t) => t.text === 'true' && t.kind === 'literal')
+      )
+    })()
+  )
+  check(
+    'sql：关键字不区分大小写',
+    highlightCode('SELECT * FROM t', 'sql')[0].tokens.some((t) => t.kind === 'keyword')
+  )
+  check(
+    'html：标签与属性分开上色',
+    (() => {
+      const tokens = highlightCode('<div class="box">', 'html')[0].tokens
+      return (
+        tokens.some((t) => t.text === 'div' && t.kind === 'tag') &&
+        tokens.some((t) => t.text === 'class' && t.kind === 'attr')
+      )
+    })()
+  )
+  check(
+    '不认识的语言＝整行不分词',
+    highlightCode('const a = 1', 'klingon')[0].tokens.every((t) => t.kind === 'plain')
+  )
+  check('空语言＝不高亮', highlightCode('const a = 1', '')[0].tokens.every((t) => t.kind === 'plain'))
+  check(
+    '每种 token 都有颜色',
+    (Object.keys(CODE_TOKEN_COLORS) as Array<keyof typeof CODE_TOKEN_COLORS>).every((kind) =>
+      /^#[0-9a-f]{6}$/i.test(CODE_TOKEN_COLORS[kind])
+    )
+  )
+  check(
+    '空行不产生 token',
+    highlightCode('a\n\nb', 'javascript')[1].tokens.length === 0
+  )
+
+  group('标签：过长按测量宽度截断（不切半个字）')
+
+  {
+    // 注入字宽：ASCII 6px、CJK 12px、省略号 6px
+    const w = (ch: string): number => (ch.charCodeAt(0) > 0xff ? 12 : 6)
+    const short = fitLabelText('短标签', w, 100)
+    eq('放得下就不动它', short.text, '短标签')
+    eq('放得下不标记截断', short.truncated, false)
+
+    const long = fitLabelText('一二三四五六七八九十', w, 61)
+    check('过长时截断并补省略号', long.text.endsWith(LABEL_ELLIPSIS), long.text)
+    check('截断后宽度不超过上限', long.width <= 61, String(long.width))
+    check('标记为已截断', long.truncated)
+    eq('宽度与画出来的文字一致', long.width, [...long.text].reduce((sum, ch) => sum + w(ch), 0))
+
+    const ascii = fitLabelText('abcdefghijklmnop', w, 60)
+    check('ASCII 长标签同样截断', ascii.truncated && ascii.text.endsWith(LABEL_ELLIPSIS), ascii.text)
+
+    const tiny = fitLabelText('一二三', w, 10)
+    eq('极窄时至少留下省略号', tiny.text, LABEL_ELLIPSIS)
+  }
 
   group('资源：路径与 MIME')
 

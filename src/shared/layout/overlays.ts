@@ -281,6 +281,11 @@ function relationshipOf(relationship: Relationship, result: LayoutResult): Relat
   const labelX = round(0.25 * start.x + 0.5 * controlX + 0.25 * end.x)
   const labelY = round(0.25 * start.y + 0.5 * controlY + 0.25 * end.y)
 
+  // 标题那一小块就是这条线的「可选中区域」：点标题能选中它（线身留给拖拽）
+  const labelSize = estimateOverlayLabelSize(
+    relationship.title,
+    readOverlayFontSize(relationship.style, RELATIONSHIP_FONT_SIZE)
+  )
   return {
     id: relationship.id,
     title: relationship.title,
@@ -288,7 +293,10 @@ function relationshipOf(relationship: Relationship, result: LayoutResult): Relat
     d: `M ${round(start.x)} ${round(start.y)} Q ${controlX} ${controlY} ${round(end.x)} ${round(end.y)}`,
     start: { x: start.x, y: start.y },
     arrow: { x: end.x, y: end.y, angle: Math.atan2(end.y - controlY, end.x - controlX) },
-    label: { x: labelX, y: labelY }
+    label: { x: labelX, y: labelY },
+    style: relationship.style,
+    labelSize,
+    bounds: labelRectOf({ x: labelX, y: labelY }, 'middle', labelSize)
   }
 }
 
@@ -359,6 +367,7 @@ const SUMMARY_NIB = 20
 /** 概要与边界标题的默认字号（与画布上的默认值一致，样式里写了就以样式为准） */
 const SUMMARY_FONT_SIZE = 13
 const BOUNDARY_FONT_SIZE = 12
+const RELATIONSHIP_FONT_SIZE = 12
 /** 概要 / 边界标题的行高（多行时按它排布，画布与导出共用） */
 export const OVERLAY_TITLE_LINE_HEIGHT = 15
 

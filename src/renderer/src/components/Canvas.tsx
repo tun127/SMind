@@ -1294,11 +1294,26 @@ export default function Canvas(): ReactElement {
     }
   }, [dragVisual, layout])
 
+  /** 选中画布元素（概要 / 边界 / 关系线）并打开属性面板：文字、字体、删除都在面板里 */
+  const pickOverlay = useCallback(
+    (event: ReactPointerEvent<SVGElement>, kind: 'summary' | 'boundary' | 'relationship', id: string): void => {
+      event.stopPropagation()
+      const store = useEditor.getState()
+      store.selectOverlay(kind, id)
+      store.requestNodePanel()
+    },
+    []
+  )
+
   /* ---- 拖动关系线的线身：整体移动弧线（弯度偏移） ---- */
   const handleCurvePointerDown = useCallback((e: ReactPointerEvent<SVGPathElement>, relationshipId: string): void => {
     if (e.button !== 0) return
     e.stopPropagation()
     const store = useEditor.getState()
+    // 点线身 = 选中这条关系线（顺手把属性面板打开），拖才改弯度：
+    // 否则「点一下线上什么都没有发生」，看起来就像这条线选不中
+    store.selectOverlay('relationship', relationshipId)
+    store.requestNodePanel()
     if (store.editingId) store.commitEdit()
 
     let lastX = e.clientX
@@ -1564,10 +1579,7 @@ export default function Canvas(): ReactElement {
               className="overlay-boundary-hit"
               d={boundary.d}
               fill="transparent"
-              onPointerDown={(event) => {
-                event.stopPropagation()
-                useEditor.getState().selectOverlay('boundary', boundary.id)
-              }}
+              onPointerDown={(event) => pickOverlay(event, 'boundary', boundary.id)}
               onDoubleClick={() =>
                 setTitleEdit({
                   kind: 'boundary',
@@ -1615,10 +1627,7 @@ export default function Canvas(): ReactElement {
                     : colors.deepText)
                 }
                 dominantBaseline="middle"
-                onPointerDown={(event) => {
-                  event.stopPropagation()
-                  useEditor.getState().selectOverlay('boundary', boundary.id)
-                }}
+                onPointerDown={(event) => pickOverlay(event, 'boundary', boundary.id)}
                 onDoubleClick={() =>
                   setTitleEdit({
                     kind: 'boundary',
@@ -1662,10 +1671,8 @@ export default function Canvas(): ReactElement {
                 anchor: summary.anchor,
                 value: summary.title ?? ''
               })
-            const pick = (event: ReactPointerEvent<SVGElement>): void => {
-              event.stopPropagation()
-              useEditor.getState().selectOverlay('summary', summary.id)
-            }
+            const pick = (event: ReactPointerEvent<SVGElement>): void =>
+              pickOverlay(event, 'summary', summary.id)
             return (
               <g key={`summary-${summary.id}`}>
                 <path
@@ -1833,6 +1840,16 @@ export default function Canvas(): ReactElement {
               ? branchColorOf(colors, layout, relationship.branchId)
               : colors.deepText
             const angle = ((relationship.arrow.angle * 180) / Math.PI).toFixed(1)
+            // 标题那一小块就是这条线的可选中区域（空标题也给一块，否则选不中）
+            const size = relationship.labelSize ?? { width: 24, height: 16 }
+            const labelBox = {
+              x: relationship.label.x - size.width / 2 - 4,
+              y: relationship.label.y - size.height / 2 - 4,
+              width: size.width + 8,
+              height: size.height + 8
+            }
+            const active =
+              selectedOverlay?.kind === 'relationship' && selectedOverlay.id === relationship.id
             return (
               <g key={`relationship-${relationship.id}`}>
                 <path d={relationship.d} fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
@@ -1843,6 +1860,39 @@ export default function Canvas(): ReactElement {
                   transform={`translate(${relationship.arrow.x} ${relationship.arrow.y}) rotate(${angle})`}
                   fill={color}
                 />
+
+                {/* 标题区的透明命中区：单击选中、双击改文字 */}
+                <rect
+                  className="overlay-hit"
+                  x={labelBox.x}
+                  y={labelBox.y}
+                  width={labelBox.width}
+                  height={labelBox.height}
+                  rx={4}
+                  fill="transparent"
+                  onPointerDown={(event) => pickOverlay(event, 'relationship', relationship.id)}
+                  onDoubleClick={() =>
+                    setTitleEdit({
+                      kind: 'relationship',
+                      id: relationship.id,
+                      x: relationship.label.x,
+                      y: relationship.label.y,
+                      anchor: 'middle',
+                      value: relationship.title ?? ''
+                    })
+                  }
+                />
+                {active ? (
+                  <rect
+                    className="overlay-selected"
+                    x={labelBox.x}
+                    y={labelBox.y}
+                    width={labelBox.width}
+                    height={labelBox.height}
+                    rx={4}
+                  />
+                ) : null}
+
                 {relationship.title ? (
                   <text
                     className="overlay-title"
@@ -1857,20 +1907,7 @@ export default function Canvas(): ReactElement {
                     strokeWidth={4}
                     paintOrder="stroke"
                     strokeLinejoin="round"
-                    onPointerDown={(event) => {
-                      event.stopPropagation()
-                      useEditor.getState().selectOverlay('relationship', relationship.id)
-                    }}
-                    onDoubleClick={() =>
-                      setTitleEdit({
-                        kind: 'relationship',
-                        id: relationship.id,
-                        x: relationship.label.x,
-                        y: relationship.label.y,
-                        anchor: 'middle',
-                        value: relationship.title ?? ''
-                      })
-                    }
+                    pointerEvents="none"
                   >
                     {relationship.title}
                   </text>

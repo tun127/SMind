@@ -119,11 +119,14 @@ export const CODE_PADDING_Y = 8
 export const CODE_HEADER = 17
 
 /** 显示宽度单位：ASCII 记 1，CJK/全角记 2 */
-function unitLength(line: string): number {
+export function codeUnitLength(line: string): number {
   let units = 0
   for (const ch of line) units += ch.charCodeAt(0) > 0xff ? 2 : 1
   return units
 }
+
+/** 等宽字体里一个「宽度单位」对应多少像素（尺寸估算与导出绘制共用） */
+export const CODE_CHAR_WIDTH = CODE_FONT_SIZE * 0.6
 
 /**
  * 代码块显示框：等宽字体按字符数估宽，行数封顶。
@@ -133,12 +136,11 @@ function unitLength(line: string): number {
 export function codeBoxSize(code: TopicCode | undefined): Size {
   if (!code) return { width: 0, height: 0 }
   const lines = code.text.length > 0 ? code.text.split('\n') : ['']
-  const charW = CODE_FONT_SIZE * 0.6
   let maxUnits = 8
-  for (const line of lines) maxUnits = Math.max(maxUnits, unitLength(line))
+  for (const line of lines) maxUnits = Math.max(maxUnits, codeUnitLength(line))
   const width = Math.min(
     CODE_MAX_WIDTH,
-    Math.max(CODE_MIN_WIDTH, Math.round(maxUnits * charW) + CODE_PADDING_X * 2)
+    Math.max(CODE_MIN_WIDTH, Math.round(maxUnits * CODE_CHAR_WIDTH) + CODE_PADDING_X * 2)
   )
   const shown = Math.min(lines.length, CODE_MAX_LINES)
   const height = CODE_HEADER + CODE_PADDING_Y * 2 + shown * Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)

@@ -298,6 +298,14 @@ export interface EditorState {
   selectedOverlay: { kind: OverlayKind; id: string } | null
   selectOverlay(kind: OverlayKind, id: string): void
   clearOverlaySelection(): void
+  /**
+   * 「请打开节点属性面板」的信号（自增计数）。
+   *
+   * 画布在选中画布元素（概要/边界/关系线）时发一次：那些元素的文字、字体与删除
+   * 全在面板里，选中了却不显示面板，用户会以为「选中没生效」。
+   */
+  nodePanelTick: number
+  requestNodePanel(): void
   /** 改画布级元素标题样式（字号 / 加粗 / 斜体 / 颜色），一步撤销 */
   setOverlayStyle(kind: OverlayKind, id: string, patch: OverlayTextStylePatch): void
   /** 请求节点面板聚焦到代码输入框（Alt+C 用）；面板未打开时会随打开自动聚焦 */
@@ -1394,6 +1402,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
     set({ selectedOverlay: { kind, id }, selection: [], editingId: null, editingText: '', editingRich: null }),
 
   clearOverlaySelection: () => set({ selectedOverlay: null }),
+
+  nodePanelTick: 0,
+
+  requestNodePanel: () => set({ nodePanelTick: get().nodePanelTick + 1 }),
 
   setOverlayStyle: (kind, id, patch) => {
     get().mutate((draft) => {

@@ -17,6 +17,7 @@ import {
   markerStripSize,
   type Size
 } from '@shared/layout/accessory'
+import { fitLabelText } from '@shared/layout/label-fit'
 import { richFromPlain } from '@shared/richtext'
 import { splitInlineMath } from '@shared/formula'
 import { formulaSize } from './formula'
@@ -49,7 +50,7 @@ const LABEL_FONT_SIZE = 11
 const LABEL_HEIGHT = 18
 const LABEL_PADDING_X = 7
 const LABEL_GAP = 4
-const LABEL_MAX_WIDTH = 130
+const LABEL_MAX_WIDTH = 170
 
 /** 一行放不下时换行，返回需要几行 */
 function rowCount(widths: number[], gap: number, maxWidth: number): number {
@@ -124,14 +125,17 @@ function labelsOf(topic: Topic): LabelRow {
   const style = labelStyle()
   const items: MeasuredLabel[] = []
 
+  const maxTextWidth = LABEL_MAX_WIDTH - LABEL_PADDING_X * 2
   for (const raw of topic.labels ?? []) {
-    const text = typeof raw === 'string' ? raw.trim() : ''
-    if (text.length === 0) continue
-    let textWidth = 0
-    for (const ch of text) textWidth += widthOf({ ch, style })
+    const full = typeof raw === 'string' ? raw.trim() : ''
+    if (full.length === 0) continue
+    // 过长就截断成一个**完整的**短文本（带省略号），渲染照抄，不会出现半个字
+    const fitted = fitLabelText(full, (ch) => widthOf({ ch, style }), maxTextWidth)
     items.push({
-      text,
-      width: Math.min(Math.round(textWidth) + LABEL_PADDING_X * 2, LABEL_MAX_WIDTH)
+      text: fitted.text,
+      width: Math.round(fitted.width) + LABEL_PADDING_X * 2,
+      // 截断过就把原文带上：标签 hover 时能看全
+      full: fitted.truncated ? full : undefined
     })
   }
 

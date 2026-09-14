@@ -598,6 +598,15 @@ export default function App(): ReactElement {
     // rootTitle 参与依赖：改名后标题栏要立刻跟着变
   }, [filePath, dirty, rootTitle])
 
+  /**
+   * 画布上选中了画布元素（概要 / 边界 / 关系线）时把节点属性面板打开：
+   * 它们的文字、字体、删除入口都在面板里，选中了却不给看，用户会以为"选中没生效"。
+   */
+  const nodePanelTick = useEditor((state) => state.nodePanelTick)
+  useEffect(() => {
+    if (nodePanelTick > 0) setSidePanel('node')
+  }, [nodePanelTick])
+
   /* ------------------------------------------------------------------ */
   /* 键盘快捷键                                                          */
   /* ------------------------------------------------------------------ */

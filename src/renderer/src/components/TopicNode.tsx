@@ -9,6 +9,7 @@ import {
   imageBoxSize
 } from '@shared/layout/accessory'
 import { CODE_LANGUAGES } from '@shared/code-language'
+import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
 import { countDescendants } from '@shared/model/tree'
 import { useEditor } from '../store/editor'
 import type { RichText, ThemeColors } from '@shared/model/types'
@@ -315,7 +316,25 @@ function TopicNodeInner({
               </option>
             ))}
           </select>
-          <pre className="topic__code-pre">{code.text}</pre>
+          <pre className="topic__code-pre">
+            {highlightCode(code.text, code.language).map((line, lineIndex, all) => (
+              <span key={lineIndex} className="topic__code-line">
+                {line.tokens.map((token, tokenIndex) => (
+                  <span
+                    key={tokenIndex}
+                    style={{
+                      color: CODE_TOKEN_COLORS[token.kind],
+                      // 注释用斜体，和常见编辑器观感一致
+                      fontStyle: token.kind === 'comment' ? 'italic' : undefined
+                    }}
+                  >
+                    {token.text}
+                  </span>
+                ))}
+                {lineIndex < all.length - 1 ? '\n' : null}
+              </span>
+            ))}
+          </pre>
         </div>
       )}
 
@@ -327,7 +346,8 @@ function TopicNodeInner({
               key={`l-${index}-${label.text}`}
               className="topic__label"
               style={{ width: label.width }}
-              title={label.text}
+              // 过长时标签画的是截断后的文字，hover 用完整原文提示
+              title={label.full ?? label.text}
             >
               {label.text}
             </span>

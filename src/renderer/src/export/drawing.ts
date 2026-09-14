@@ -13,6 +13,7 @@
 import type { AccessoryItem, LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
 import {
   BLOCK_GAP,
+  CODE_CHAR_WIDTH,
   CODE_FONT_FAMILY,
   CODE_FONT_SIZE,
   CODE_HEADER,
@@ -21,6 +22,7 @@ import {
   CODE_PADDING_X,
   CODE_PADDING_Y,
   MARKER_GAP,
+  codeUnitLength,
   MARKER_MAX_COLUMNS,
   MARKER_PER_COLUMN,
   MARKER_SIZE,
@@ -31,6 +33,7 @@ import {
 import type { ThemeColors, Topic } from '@shared/model/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import { readOverlayTextStyle } from '@shared/model/overlay-style'
+import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
 import { formulaSize } from '../render/formula'
 import { markerVisualOf, type MarkerGlyph } from '../render/markers'
 import { branchColorOf, visualFor } from '../render/theme'
@@ -386,7 +389,7 @@ function nodeOps(
     cursorY += formulaBox.height
   }
 
-  // 代码块：底色圆角框 + 等宽文本逐行画（导出里不做语法高亮，保持可读即可）
+  // 代码块：底色圆角框 + 等宽文本逐行、逐 token 上色画
   const codeBox = topic.code ? node.codeBox ?? codeBoxSize(topic.code) : { width: 0, height: 0 }
   if (topic.code && codeBox.height > 0) {
     cursorY += BLOCK_GAP
@@ -402,22 +405,29 @@ function nodeOps(
       stroke: 'rgba(15, 23, 42, 0.14)',
       strokeWidth: 1
     })
-    const codeLines = topic.code.text.length > 0 ? topic.code.text.split('\n') : ['']
+    // 逐 token 画：颜色按语法种类取，横向偏移按「等宽字符数 × 单字宽」推进——
+    // 与 codeBoxSize 的宽度估算用同一个单位，保证导出与画布上的换行位置一致
+    const codeLines = highlightCode(topic.code.text, topic.code.language)
     const lineH = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
     let textY = cursorY + CODE_HEADER + CODE_PADDING_Y + CODE_FONT_SIZE * 0.8
     for (const line of codeLines.slice(0, CODE_MAX_LINES)) {
-      ops.push({
-        kind: 'text',
-        x: x + CODE_PADDING_X,
-        y: textY,
-        text: line,
-        fontSize: CODE_FONT_SIZE,
-        fontWeight: 400,
-        fill: '#24292f',
-        anchor: 'start',
-        baseline: 'alphabetic',
-        fontFamily: CODE_FONT_FAMILY
-      })
+      let offset = 0
+      for (const token of line.tokens) {
+        ops.push({
+          kind: 'text',
+          x: x + CODE_PADDING_X + offset,
+          y: textY,
+          text: token.text,
+          fontSize: CODE_FONT_SIZE,
+          fontWeight: 400,
+          fill: CODE_TOKEN_COLORS[token.kind],
+          italic: token.kind === 'comment' || undefined,
+          anchor: 'start',
+          baseline: 'alphabetic',
+          fontFamily: CODE_FONT_FAMILY
+        })
+        offset += codeUnitLength(token.text) * CODE_CHAR_WIDTH
+      }
       textY += lineH
     }
     cursorY += codeBox.height

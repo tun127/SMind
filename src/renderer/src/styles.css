@@ -1071,9 +1071,11 @@ textarea {
   cursor: move;
 }
 
-/* 画布上可双击改文字的标题 */
-/* 画布级元素的命中区：空标题时也要能点到（光标给出可点提示） */
+/* 画布级元素的命中区：空标题时也要能点到（光标给出可点提示）。
+   注意：.canvas__edges / .canvas__overlay 整体是 pointer-events: none，
+   所以命中区**必须**显式打开 pointer-events，否则等于没画。 */
 .overlay-hit {
+  pointer-events: all;
   cursor: pointer;
 }
 
