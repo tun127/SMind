@@ -65,8 +65,6 @@ const api: MindApi = {
   openWorkbookInNewWindow: (docId: string, workbook: Workbook) =>
     ipcRenderer.invoke(IPC.openSheetWindow, docId, workbook) as Promise<'ok' | 'failed'>,
 
-  openPathInNewWindow: (path: string) => ipcRenderer.invoke(IPC.openPathWindow, path) as Promise<'ok' | 'failed'>,
-
   readClipboardText: () => ipcRenderer.invoke(IPC.clipboardText) as Promise<string>,
 
   reportDocument: (docId: string, path: string | null) => ipcRenderer.send(IPC.documentPath, docId, path),

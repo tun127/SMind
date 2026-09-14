@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { isRecord } from '../guards'
 import {
   CREATOR,
   MODEL_VERSION,
@@ -31,10 +32,6 @@ export interface ParseResult extends MindPackage {
 /* ------------------------------------------------------------------ */
 /* 解析辅助                                                            */
 /* ------------------------------------------------------------------ */
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : []

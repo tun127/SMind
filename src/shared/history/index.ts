@@ -8,6 +8,8 @@
  * 4. 文件是否存在由调用方检查后写入 `missing`，这里只负责数据结构。
  */
 
+import { isRecord } from '../guards'
+
 export interface HistoryEntry {
   /** 绝对路径 */
   path: string
@@ -37,10 +39,6 @@ const HISTORY_VERSION = 1
 
 export function emptyHistory(): HistoryFile {
   return { version: HISTORY_VERSION, entries: [], saveDir: null }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** 排序：常用优先，其次按最近打开时间倒序 */

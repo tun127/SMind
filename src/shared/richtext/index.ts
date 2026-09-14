@@ -81,13 +81,19 @@ export const HIGHLIGHT_BG = 'rgba(255, 214, 0, 0.35)'
  */
 export const SCRIPT_FONT_RATIO = 0.72
 
-/** HTML 转义（粘贴 Markdown 片段时要拼成 HTML，不能让内容逃出去） */
-function escapeHtml(text: string): string {
+/**
+ * HTML 转义（粘贴 Markdown 片段、派生备注 HTML 时都要拼成 HTML，不能让内容逃出去）。
+ * 项目里一度有 4 份实现，统一到这里，避免哪天只补了一处、被别的入口绕过去。
+ */
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+    // 单引号也转：原来各处的实现里有的转、有的不转，
+    // 合并后取**超集**——将来若被用进属性值（'…'）也不会漏。
+    .replace(/'/g, '&#39;')
 }
 
 /**

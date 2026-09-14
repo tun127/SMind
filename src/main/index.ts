@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
+import { isRecord } from '../shared/guards'
 import { createHash } from 'node:crypto'
 import { promises as fs, existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -298,9 +299,8 @@ function ensureXmindExt(p: string): string {
 
 const themesFile = (): string => join(app.getPath('userData'), 'themes.json')
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+/** 「是不是普通对象」统一用共享实现（原先这里另写了一份一模一样的），保留旧名免得改一堆调用点 */
+const isPlainRecord = isRecord
 
 async function readThemes(): Promise<ThemeDefinition[]> {
   try {
@@ -405,10 +405,6 @@ async function callAi(
   } finally {
     clearTimeout(timer)
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /* ------------------------------------------------------------------ */
@@ -600,7 +596,7 @@ function registerResourceProtocol(): void {
 }
 
 /**
- * 启动时命令行里带的文档路径（双击 `.xmind`、把文件拖到 exe 上、右键「打开方式 → Mind」都会走这里）。
+ * 启动时命令行里带的文档路径（双击 `.xmind`、把文件拖到 exe 上、右键「打开方式 → SMind」都会走这里）。
  *
  * 刻意**不在启动流程里直接推给渲染进程**：那一刻 React 可能还没挂载、监听还没注册上，
  * 推过去就丢了。所以先挂到窗口状态上，渲染进程就绪后自己来取一次（取走即清空），时序上稳。
@@ -666,20 +662,6 @@ function registerIpc(): void {
       }
     }
   )
-
-  /**
-   * 在**新窗口**打开一个已有文件。
-   * 当前窗口里已经有内容时，「打开 / 导入」走这条路——就地打开会整份替换当前文档
-   * （也就是用户看到的"画布 1 被覆盖"）。
-   */
-  ipcMain.handle(IPC.openPathWindow, async (_e, path: string): Promise<'ok' | 'failed'> => {
-    try {
-      createWindow({ path })
-      return 'ok'
-    } catch {
-      return 'failed'
-    }
-  })
 
   /**
    * 读系统剪贴板里的纯文本。

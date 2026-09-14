@@ -15,6 +15,7 @@
  */
 
 import { createId } from '../model/factory'
+import { isRecord } from '../guards'
 import {
   CREATOR,
   MODEL_VERSION,
@@ -143,10 +144,6 @@ const TEMPLATE_STRUCTURES: Record<string, StructureClass> = {
   brace: 'org.xmind.ui.brace.right',
   matrix: 'org.xmind.ui.matrix',
   spreadsheet: 'org.xmind.ui.spreadsheet'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function asString(value: unknown): string | undefined {

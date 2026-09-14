@@ -4,8 +4,8 @@ productName: SMind
 # （只有**安装版**会注册关联，免安装版没有这一步；不注册的话双击会被系统推给别人或直接报"无法打开"）
 fileAssociations:
   - ext: xmind
-    name: Mind 思维导图
-    description: Mind 思维导图（Xmind 兼容格式）
+    name: SMind 思维导图
+    description: SMind 思维导图（Xmind 兼容格式）
     icon: build/icon.ico
     role: Editor
 directories:

@@ -13,6 +13,8 @@
 /* ------------------------------------------------------------------ */
 
 import { createTopic } from '../model/factory'
+import { isRecord } from '../guards'
+import { escapeHtml } from '../richtext'
 import type { RichText, Topic, TopicCode } from '../model/types'
 
 export interface AiConfig {
@@ -51,10 +53,6 @@ export const AI_PRESETS: Array<{ label: string; baseUrl: string; model: string }
   { label: 'Kimi（月之暗面）', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
   { label: '本地 Ollama', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b' }
 ]
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 /** 校验并补全配置；非法字段退回默认值并给出提示 */
 export function normalizeAiConfig(raw: unknown): { config: AiConfig; warnings: string[] } {
@@ -340,15 +338,8 @@ export function outlineToTopic(node: OutlineNode, structureClass?: string): Topi
   return topic
 }
 
-/** 备注 HTML 由纯文本派生时的转义（与编辑器里的规则一致） */
-function escapeHtmlForNotes(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
+/** 备注 HTML 由纯文本派生时的转义：统一走共享实现，保证与编辑器完全一致 */
+const escapeHtmlForNotes = escapeHtml
 
 /** 解析「一行一个」的列表（扩写结果那种） */
 export function parseFlatList(text: string): string[] {

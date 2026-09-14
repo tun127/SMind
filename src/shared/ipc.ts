@@ -108,8 +108,6 @@ export const IPC = {
   newWindow: 'window:new',
   /** 在新窗口打开一份文档副本（导入大纲 / AI 生成导图 / 「在新窗口打开副本」用） */
   openSheetWindow: 'window:open-copy',
-  /** 在新窗口打开一个已有文件（当前窗口有内容时用它，避免覆盖当前文档） */
-  openPathWindow: 'window:open-path',
   /** 读系统剪贴板里的纯文本（粘贴 Markdown 片段用） */
   clipboardText: 'clipboard:read-text',
   /** 渲染进程报告「某个标签现在打开的是哪个文件」（新建＝null） */
@@ -178,7 +176,6 @@ export type MenuCommand =
   | 'view:zoom-reset'
   | 'view:fit'
   | 'view:lock'
-  | 'view:toggle-structure'
   | 'help:shortcuts'
   | 'file:import-theme'
   | 'file:import-markdown'
@@ -199,7 +196,7 @@ export interface MindApi {
   openDialog(docId: string): Promise<OpenResult | null>
   openPath(docId: string, path: string): Promise<OpenResult>
   /**
-   * 启动时命令行里带的文档（双击 `.xmind`、把文件拖到 exe 上、右键「打开方式 → Mind」都走这里）。
+   * 启动时命令行里带的文档（双击 `.xmind`、把文件拖到 exe 上、右键「打开方式 → SMind」都走这里）。
    * 取一次即清空，没有则返回 null。
    */
   openFilePending(): Promise<string | null>
@@ -238,7 +235,6 @@ export interface MindApi {
    * 当前窗口里已经有内容时，菜单「打开 / 导入 .xmind」走这条路——
    * 直接就地打开会把当前文档（含所有画布）整份换掉，用户会觉得"画布 1 被覆盖了"。
    */
-  openPathInNewWindow(path: string): Promise<'ok' | 'failed'>
   /** 读系统剪贴板里的纯文本（粘贴 Markdown 片段用） */
   readClipboardText(): Promise<string>
   /**

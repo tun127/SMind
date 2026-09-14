@@ -84,8 +84,6 @@ export function buildAppMenu(actions: MenuActions): void {
           click: () => send('view:lock')
         },
         { type: 'separator' },
-        { label: '切换结构类型…', click: () => send('view:toggle-structure') },
-        { type: 'separator' },
         { role: 'togglefullscreen', label: '全屏' },
         { role: 'toggleDevTools', label: '开发者工具' }
       ]

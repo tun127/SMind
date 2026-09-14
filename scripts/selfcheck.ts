@@ -1145,6 +1145,84 @@ function testNodeDrag(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 7.6 撤销粒度统一 + 编辑态同源                                        */
+/* ------------------------------------------------------------------ */
+
+function testUndoGranularity(): void {
+  group('撤销粒度：连续同向的移动合并成一步')
+
+  reset()
+  const gRoot = root()
+  const a = addChildOf(gRoot.id, '甲')
+  const b = addChildOf(gRoot.id, '乙')
+  const c = addChildOf(gRoot.id, '丙')
+  const named = new Set([a, b, c])
+  // 根节点自带默认子节点，只看本用例自己造的
+  const order = (): string[] =>
+    (find(gRoot.id)?.children ?? []).filter((t) => named.has(t.id)).map((t) => t.title)
+
+  // 移动**刻意不合并成一步**：撤销基于 immer patch，数组重排的 patch 带下标，
+  // 把两步的 inverse 合成一个再套到"后来的状态"上会下标错位、改坏 children。
+  // 这条断言就是当初抓到该缺陷的地方（合并后出现过 ["甲","乙","甲"] 这种数组）。
+  store().select(a)
+  const base = store().undoStack.length
+  check('下移一次成功', store().moveSelectionByKey('ArrowDown') === true)
+  eq('每次方向键移动各记一步', store().undoStack.length, base + 1)
+  check('再下移一次成功', store().moveSelectionByKey('ArrowDown') === true)
+  eq('第二次再记一步（不合并）', store().undoStack.length, base + 2)
+  eq('顺序确实挪到了最后', order(), ['乙', '丙', '甲'])
+
+  store().undo()
+  eq('撤销一次回到上一步', order(), ['乙', '甲', '丙'])
+  store().undo()
+  eq('再撤销一次回到最初', order(), ['甲', '乙', '丙'])
+
+  group('撤销粒度：连续同向的折叠合并成一步')
+
+  reset()
+  const cRoot = root()
+  const parent = addChildOf(cRoot.id, '有子节点的')
+  addChildOf(parent, '子')
+
+  const base3 = store().undoStack.length
+  store().setCollapsed(parent, true)
+  eq('折叠记一步', store().undoStack.length, base3 + 1)
+  store().setCollapsed(parent, true)
+  eq('重复同向折叠不再增步（本来就没变化）', store().undoStack.length, base3 + 1)
+  store().setCollapsed(parent, false)
+  eq('展开是另一个方向，另起一步', store().undoStack.length, base3 + 2)
+
+  group('编辑态：纯文本与富文本不会漂移')
+
+  reset()
+  const eRoot = root()
+  const subject = addChildOf(eRoot.id, '原文本')
+
+  store().beginEdit(subject)
+  eq('进入编辑时纯文本取自节点', store().editingText, '原文本')
+  check('进入编辑时富文本也一并备好', store().editingRich !== null)
+
+  store().updateEditingText('改过的')
+  eq('文本入口：纯文本立即更新', store().editingText, '改过的')
+  check('文本入口：富文本同步存在（不会一边有一边空）', store().editingRich !== null)
+
+  store().commitEdit()
+  eq('提交后落到节点上', find(subject)?.title, '改过的')
+
+  const blank = addChildOf(eRoot.id, '待清空')
+  store().beginEdit(blank)
+  store().updateEditingText('')
+  store().commitEdit()
+  eq('清空标题也能提交', find(blank)?.title, '')
+
+  store().beginEdit(subject)
+  store().cancelEdit()
+  eq('取消后 editingId 清空', store().editingId, null)
+  eq('取消后 editingText 清空', store().editingText, '')
+  eq('取消后 editingRich 清空', store().editingRich, null)
+}
+
+/* ------------------------------------------------------------------ */
 /* 8. 复制粘贴 / 折叠 / 结构 / 自由定位                                 */
 /* ------------------------------------------------------------------ */
 
@@ -1323,7 +1401,7 @@ function testUndoSelectionAndRelayout(): void {
   store().offsetPositions([{ id: a, dx: 40, dy: 30 }])
   const node = findTopic(root(), a)
   check('偏移已写入', node?.position !== undefined)
-  store().relayoutAll()
+  store().clearAllPositions()
   check('恢复布局后偏移清空', findTopic(root(), a)?.position === undefined)
   eq('恢复布局不动选择', store().selection, [a])
   store().undo()
@@ -1866,20 +1944,20 @@ function testPickDocumentArg(): void {
   const exists = (path: string): boolean =>
     path === 'D:\\A\\plan.xmind' || path === 'D:\\B\\灵感.emmx'
 
-  eq('认出 .xmind', pickDocumentArg(['Mind.exe', 'D:\\A\\plan.xmind'], exists), 'D:\\A\\plan.xmind')
-  eq('也认 .emmx', pickDocumentArg(['Mind.exe', 'D:\\B\\灵感.emmx'], exists), 'D:\\B\\灵感.emmx')
-  eq('文件不存在就不认', pickDocumentArg(['Mind.exe', 'D:\\A\\missing.xmind'], exists), null)
+  eq('认出 .xmind', pickDocumentArg(['SMind.exe', 'D:\\A\\plan.xmind'], exists), 'D:\\A\\plan.xmind')
+  eq('也认 .emmx', pickDocumentArg(['SMind.exe', 'D:\\B\\灵感.emmx'], exists), 'D:\\B\\灵感.emmx')
+  eq('文件不存在就不认', pickDocumentArg(['SMind.exe', 'D:\\A\\missing.xmind'], exists), null)
   eq('没有文档参数时返回 null', pickDocumentArg(['electron.exe', '.'], exists), null)
   eq(
     '跳过开关参数',
     pickDocumentArg(['-r', '--inspect', 'D:\\A\\plan.xmind'], exists),
     'D:\\A\\plan.xmind'
   )
-  eq('exe 自己不会被当作文档', pickDocumentArg(['D:\\Mind\\Mind.exe'], exists), null)
+  eq('exe 自己不会被当作文档', pickDocumentArg(['D:\\SMind\\SMind.exe'], exists), null)
   eq('别的格式不认', pickDocumentArg(['D:\\A\\notes.txt'], exists), null)
   eq(
     '同时给了多个就取最后一个（用户双击的那个）',
-    pickDocumentArg(['Mind.exe', 'D:\\A\\plan.xmind', 'D:\\B\\灵感.emmx'], exists),
+    pickDocumentArg(['SMind.exe', 'D:\\A\\plan.xmind', 'D:\\B\\灵感.emmx'], exists),
     'D:\\B\\灵感.emmx'
   )
 }
@@ -2179,6 +2257,35 @@ function testTheme(): void {
 
   store().updateThemeColors({ branches: ['#111111', '#222222'] })
   eq('可整体替换分支配色', themeColorsOf(store().workbook).branches, ['#111111', '#222222'])
+}
+
+/* ------------------------------------------------------------------ */
+/* 默认主题：新建文档要能套用                                          */
+/* ------------------------------------------------------------------ */
+
+function testDefaultTheme(): void {
+  group('默认主题：直接烤进文档（新建文档套用）')
+
+  reset()
+  const theme = BUILTIN_THEMES[2]!
+  const undoBefore = store().undoStack.length
+  const dirtyBefore = store().dirty
+  store().primeTheme(theme)
+
+  const baked = store().workbook.sheets[0]!.theme
+  eq('主题 id 写进去了', baked?.id, theme.id)
+  eq('主题名字也写进去了', baked?.name, theme.name)
+  eq('配色已烤进文档', baked?.colors?.canvas, theme.colors.canvas)
+  check('分支配色是拷贝而不是引用', baked?.colors?.branches !== theme.colors.branches)
+  eq('不产生撤销记录（新建文档不该一上来就能撤销）', store().undoStack.length, undoBefore)
+  eq('不改动「未保存」状态', store().dirty, dirtyBefore)
+
+  group('默认主题：applyTheme 才该算一次编辑')
+
+  reset()
+  store().applyTheme({ id: theme.id, name: theme.name, colors: theme.colors })
+  eq('applyTheme 会产生一步撤销', store().undoStack.length, 1)
+  check('applyTheme 会标成未保存', store().dirty === true)
 }
 
 async function testThemeRoundTrip(): Promise<void> {
@@ -5616,6 +5723,7 @@ async function main(): Promise<void> {
   testDelete()
   testMove()
   testNodeDrag()
+  testUndoGranularity()
   testMisc()
   testTypedChar()
   testBranchStructure()
@@ -5632,6 +5740,7 @@ async function main(): Promise<void> {
   testSnapshot()
   testRichText()
   testTheme()
+  testDefaultTheme()
   testLayout()
   testRecovery()
   await testNodeElements()

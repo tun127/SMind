@@ -585,42 +585,70 @@ export default function Canvas(): ReactElement {
   }, [])
 
   /**
-   * 所有「同级节点堆」（同一父级下 ≥2 个子节点）。
-   * 两个用途：在空白处识别"插到这两个之间"，以及推断同级节点的排列方向。
+   * 落点判定用的**一次性索引**，随布局重算（一次遍历）。
+   *
+   * 拖拽时每一帧、每个候选节点都要问「它的子节点往哪排、同级往哪排」，
+   * 而这些答案只跟当前布局有关。原先每次都走 `findTopic` / `findParent` 全树遍历，
+   * 复杂度是 O(每帧候选数 × 节点数)，节点一多就明显掉帧；
+   * 换成查表后运行时全是 O(1)。
+   *
+   * 算法本身一行没改，只是把「现算」换成「预计算」。
    */
-  const siblingStacks = useMemo(() => {
+  const dropIndex = useMemo(() => {
+    const childrenOf = new Map<string, string[]>()
+    const parentOf = new Map<string, string | null>()
+    const stackOf = new Map<string, SiblingStack>()
     const stacks: SiblingStack[] = []
-    const visit = (topic: Topic): void => {
+
+    const visit = (topic: Topic, parentId: string | null): void => {
+      parentOf.set(topic.id, parentId)
+      childrenOf.set(
+        topic.id,
+        topic.children.map((child) => child.id)
+      )
+      for (const child of topic.children) visit(child, topic.id)
+
+      // 同级节点堆：同一父级下 ≥2 个**有坐标**的子节点
       if (topic.children.length >= 2) {
         const children: Array<{ id: string; rect: DropRect }> = []
         for (const child of topic.children) {
           const rect = layout.nodeMap.get(child.id)
           if (rect) children.push({ id: child.id, rect })
         }
-        if (children.length >= 2) stacks.push({ parentId: topic.id, children })
+        if (children.length >= 2) {
+          const stack: SiblingStack = { parentId: topic.id, children }
+          stacks.push(stack)
+          for (const child of children) stackOf.set(child.id, stack)
+        }
       }
-      for (const child of topic.children) visit(child)
     }
-    visit(activeRoot(workbook))
-    return stacks
+    visit(activeRoot(workbook), null)
+
+    return { childrenOf, parentOf, stackOf, stacks }
   }, [workbook, layout])
 
+  /** 所有「同级节点堆」：在空白处识别"插到这两个之间"，以及推断同级排列方向 */
+  const siblingStacks = dropIndex.stacks
+
   /** 目标的子节点往哪个方向排（拿不到就返回 null，交给调用方兜底） */
-  const childGrowth = useCallback((targetId: string): DropAxis | null => {
-    const lay = layoutRef.current
-    const targetRect = lay?.nodeMap.get(targetId)
-    if (!lay || !targetRect) return null
-    const childRects: DropRect[] = []
-    for (const child of findTopic(rootRef.current, targetId)?.children ?? []) {
-      const rect = lay.nodeMap.get(child.id)
-      if (rect) childRects.push(rect)
-    }
-    const last = childRects[childRects.length - 1]
-    const secondLast = childRects[childRects.length - 2]
-    if (last && secondLast) return stackDirection(secondLast, last)
-    if (last) return stackDirection(targetRect, last)
-    return null
-  }, [])
+  const childGrowth = useCallback(
+    (targetId: string): DropAxis | null => {
+      const lay = layoutRef.current
+      const targetRect = lay?.nodeMap.get(targetId)
+      if (!lay || !targetRect) return null
+      const childRects: DropRect[] = []
+      for (const childId of dropIndex.childrenOf.get(targetId) ?? []) {
+        const rect = lay.nodeMap.get(childId)
+        if (rect) childRects.push(rect)
+      }
+      const last = childRects[childRects.length - 1]
+      const secondLast = childRects[childRects.length - 2]
+      if (last && secondLast) return stackDirection(secondLast, last)
+      if (last) return stackDirection(targetRect, last)
+      return null
+    },
+    [dropIndex]
+  )
 
   /**
    * 目标节点周围的两条方向轴，**全部由实际坐标推出**：
@@ -636,9 +664,7 @@ export default function Canvas(): ReactElement {
       if (!lay || !targetRect) return { stack: null, growth: null }
 
       let stack: DropAxis | null = null
-      const owningStack = siblingStacks.find((item) =>
-        item.children.some((child) => child.id === targetId)
-      )
+      const owningStack = dropIndex.stackOf.get(targetId)
       if (owningStack) {
         const index = owningStack.children.findIndex((child) => child.id === targetId)
         const next = owningStack.children[index + 1]
@@ -662,7 +688,7 @@ export default function Canvas(): ReactElement {
 
       return { stack, growth }
     },
-    [siblingStacks, childGrowth]
+    [dropIndex, childGrowth]
   )
 
   /**
@@ -670,20 +696,21 @@ export default function Canvas(): ReactElement {
    * 用在「目标自己还没有子节点、推不出生长方向」的时候：
    * 新子主题会排在目标的兄弟之后，所以父级那一层的排列方向的**垂直方向**才是它生长的方向。
    */
-  const parentStackAxis = useCallback((targetId: string): DropAxis | null => {
-    const rootTopic = rootRef.current
-    const parent = findParent(rootTopic, targetId)
-    if (!parent) return null
-    const parentRect = layoutRef.current?.nodeMap.get(parent.id)
-    if (!parentRect) return null
-    const kids = findTopic(rootTopic, parent.id)?.children ?? []
-    const a = kids.length > 1 ? layoutRef.current?.nodeMap.get(kids[0].id) : undefined
-    const b = kids.length > 1 ? layoutRef.current?.nodeMap.get(kids[1].id) : undefined
-    if (a && b) return stackDirection(a, b)
-    // 只有一个子节点时，用"父 → 子"的方向当这一层的排列方向
-    const only = layoutRef.current?.nodeMap.get(kids[0]?.id ?? '')
-    return only ? stackDirection(parentRect, only) : null
-  }, [])
+  const parentStackAxis = useCallback(
+    (targetId: string): DropAxis | null => {
+      const parentId = dropIndex.parentOf.get(targetId)
+      const parentRect = parentId ? layoutRef.current?.nodeMap.get(parentId) : undefined
+      if (!parentRect) return null
+      const kids = dropIndex.childrenOf.get(parentId ?? '') ?? []
+      const a = kids.length > 1 ? layoutRef.current?.nodeMap.get(kids[0]!) : undefined
+      const b = kids.length > 1 ? layoutRef.current?.nodeMap.get(kids[1]!) : undefined
+      if (a && b) return stackDirection(a, b)
+      // 只有一个子节点时，用"父 → 子"的方向当这一层的排列方向
+      const only = layoutRef.current?.nodeMap.get(kids[0] ?? '')
+      return only ? stackDirection(parentRect, only) : null
+    },
+    [dropIndex]
+  )
 
   /**
    * 「成为它的子主题」时新节点会往哪边长。注意这里**不拿子节点去推**：
@@ -699,9 +726,8 @@ export default function Canvas(): ReactElement {
 
   /** 目标在它那一层有没有同级兄弟（中心主题在深度 0，天然没有）。 */
   const hasSiblings = useCallback(
-    (targetId: string): boolean =>
-      siblingStacks.some((item) => item.children.some((child) => child.id === targetId)),
-    [siblingStacks]
+    (targetId: string): boolean => dropIndex.stackOf.has(targetId),
+    [dropIndex]
   )
 
   /**
@@ -746,7 +772,7 @@ export default function Canvas(): ReactElement {
       const horizontal = growth.axis === 'x'
       const forward = growth.forward
 
-      const owning = siblingStacks.find((item) => item.children.some((c) => c.id === targetId))
+      const owning = dropIndex.stackOf.get(targetId)
       let slackPrev = OUTER_REACH
       let slackNext = OUTER_REACH
       if (owning) {
@@ -957,11 +983,12 @@ export default function Canvas(): ReactElement {
               ? 'free'
               : ''
         const latch = dropLatchRef.current
-        // 迟滞按**世界单位**算：缩放到 50% 时屏幕位移要翻倍，手感才和 100% 时一致
+        // 迟滞按**屏幕像素**算：手感取决于"手走了多远"，与画布缩放无关。
+        // 早先乘了缩放系数，放大时会异常黏、缩小时几乎失效。
         const withinHysteresis =
           Boolean(latch) &&
           Math.hypot(ev.clientX - (latch?.px ?? 0), ev.clientY - (latch?.py ?? 0)) <
-            DROP_HYSTERESIS * z
+            DROP_HYSTERESIS
         if (latch && latch.key !== freshKey && withinHysteresis) {
           // 还在迟滞半径里：保留上一次的裁决，不让提示在分界线上乱跳。
           // 空裁决（停在父级身上＝原地不动）也一起参与，否则提示会一闪一闪。
@@ -988,12 +1015,9 @@ export default function Canvas(): ReactElement {
         setFreeDrop(free)
         setDropBlocked(blocked)
 
-        // 落点是个折叠着的主题时先把它展开：
-        // 否则"新子主题会落在哪儿"完全看不见，只能靠猜，松手才知道对不对。
-        if (plan?.mode === 'child' && !moving.ids.includes(plan.targetId)) {
-          const topic = findTopic(rootRef.current, plan.targetId)
-          if (topic?.collapsed) useEditor.getState().setCollapsed(plan.targetId, false)
-        }
+        // 注意：落点是折叠主题时**不要在这里展开**。
+        // 悬停就改数据，会让一次被 Esc 取消的拖拽也留下改动和撤销记录；
+        // 展开改在真正落下时做，且和移动合并成同一笔（见 store 的 dropNode）。
       }
 
       const detach = (): void => {

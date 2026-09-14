@@ -34,7 +34,7 @@ import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
 import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
 import TabBar from './components/TabBar'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
-import type { ThemeDefinition } from '@shared/theme'
+import { BUILTIN_THEMES, type ThemeDefinition } from '@shared/theme'
 
 /**
  * 把设置里的默认值送到渲染层并让测量缓存失效。
@@ -281,6 +281,20 @@ export default function App(): ReactElement {
     })()
   }, [])
 
+  /**
+   * 按 id 找主题。**内置表也要查**：
+   * `themesList()` 返回的只有自定义主题，如果只查它，
+   * 用户把内置主题设为默认时会静默失效——这正是「默认主题设置无效」的根因。
+   */
+  const resolveTheme = useCallback((id: string | null): ThemeDefinition | null => {
+    if (!id) return null
+    return (
+      BUILTIN_THEMES.find((item) => item.id === id) ??
+      themesRef.current.find((item) => item.id === id) ??
+      null
+    )
+  }, [])
+
   /* 启动时读一次应用设置与主题库：默认参数影响新建文档、主题下拉可选项 */
   useEffect(() => {
     void (async () => {
@@ -296,8 +310,12 @@ export default function App(): ReactElement {
       } catch {
         themesRef.current = []
       }
+      // 启动这一份空白文档也按「默认主题」起手。
+      // 必须等主题库读完再套，否则自定义主题还查不到。
+      const theme = resolveTheme(useEditor.getState().appSettings.defaultThemeId)
+      if (theme) useEditor.getState().primeTheme(theme)
     })()
-  }, [])
+  }, [resolveTheme])
 
   /**
    * 改「默认对齐 / 默认字体」这类渲染兜底值后，让测量缓存失效。
@@ -327,13 +345,11 @@ export default function App(): ReactElement {
     commitPending()
     // 新建＝开一个**新标签**：当前文档原样留在自己的标签里，不需要未保存确认
     useTabs.getState().newTab()
-    // 新文档按「设置」里的默认主题起手（打开已有文件不动它自己的主题）
-    const preferred = useEditor.getState().appSettings.defaultThemeId
-    if (preferred) {
-      const theme = themesRef.current.find((item) => item.id === preferred)
-      if (theme) useEditor.getState().applyTheme({ id: theme.id, name: theme.name, colors: theme.colors })
-    }
-  }, [commitPending])
+    // 新文档按「设置」里的默认主题起手（打开已有文件不动它自己的主题）。
+    // 用 primeTheme 而不是 applyTheme：后者会写撤销历史并把新文档标成未保存。
+    const theme = resolveTheme(useEditor.getState().appSettings.defaultThemeId)
+    if (theme) useEditor.getState().primeTheme(theme)
+  }, [commitPending, resolveTheme])
 
   /** 关闭一个标签（带未保存确认；确认文案里显示这份文档自己的名字） */
   const closeTabById = useCallback(
@@ -593,7 +609,7 @@ export default function App(): ReactElement {
   /**
    * 从文件管理器打开本地文档。
    *
-   * - **启动时**（双击 `.xmind` / 把文件拖到 exe 上 / 右键「打开方式 → Mind」）：路径在命令行里，
+   * - **启动时**（双击 `.xmind` / 把文件拖到 exe 上 / 右键「打开方式 → SMind」）：路径在命令行里，
    *   主进程替我们存着，这里就绪后取一次（取走即清空）；
    * - **窗口已经开着时**再打开一个：主进程通过 `fileOpenRequest` 推过来。
    *
@@ -1039,7 +1055,8 @@ export default function App(): ReactElement {
           onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node')),
           onOutline: () => setShowOutline((current) => !current),
           onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
-          onRelayout: () => useEditor.getState().relayoutAll(),
+          // 与「更多」里的同名入口走同一个实现，避免两套语义
+          onRelayout: () => useEditor.getState().clearAllPositions(),
           onFormula: () => {
             setSidePanel('node')
             useEditor.getState().requestFormulaFocus()

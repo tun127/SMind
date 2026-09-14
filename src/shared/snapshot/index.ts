@@ -13,6 +13,8 @@
  * 4. 版本文件本身可能被手删或半写坏，读取一律走 normalize 兜底，坏数据丢弃而不是崩掉。
  */
 
+import { isRecord } from '../guards'
+
 export type SnapshotReason = 'auto' | 'manual' | 'before-restore'
 
 export interface SnapshotItem {
@@ -54,10 +56,6 @@ const REASONS: SnapshotReason[] = ['auto', 'manual', 'before-restore']
 
 export function emptySnapshotIndex(): SnapshotIndex {
   return { version: SNAPSHOT_VERSION, items: [] }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**

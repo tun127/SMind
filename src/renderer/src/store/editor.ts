@@ -46,6 +46,7 @@ import {
   withCurveOffset
 } from '@shared/layout'
 import { RELATIONSHIP_CURVE_KEY, TOPIC_SIDE_KEY } from '@shared/xmind/constants'
+import { escapeHtml } from '@shared/richtext'
 import { resolveDrop, type DropMode } from '@shared/model/drop'
 
 enablePatches()
@@ -146,7 +147,6 @@ export interface EditorState {
 
   /* ---- 视图 ---- */
   setZoom(zoom: number): void
-  zoomBy(factor: number): void
   setPan(pan: { x: number; y: number }): void
   /**
    * 视角锁定：开启后画布始终把**选中的主题**按在视口中央。
@@ -214,6 +214,15 @@ export interface EditorState {
    */
   setCollapsed(id: string, collapsed: boolean): void
   setStructure(structureClass: string, targetId?: string): void
+  /**
+   * 移动主题。
+   *
+   * 刻意**没有** coalesceKey：移动会重排 children 数组，
+   * 而撤销是基于 immer patch 的，数组重排的 patch 带下标——
+   * 把连续两步的 inverse 合成一个再套到"后来的状态"上会下标错位、改坏数组
+   * （自检里抓到过 `["甲","乙","甲"]` 这种结果）。
+   * 合并只对「替换某个值」类操作安全：折叠、调色、拉伸尺寸。
+   */
   moveNode(id: string, targetId: string, index?: number): boolean
   /**
    * 用快捷键微调选中主题（与亿图脑图一致，适合结构复杂时精确挪动）：
@@ -236,8 +245,6 @@ export interface EditorState {
    * 平衡结构默认按顺序交替分配左右，这里写入的是显式覆盖。
    */
   setTopicSide(id: string, side: 'left' | 'right'): void
-  /** 全部恢复自动布局：清空当前画布所有手动位置偏移（含悬浮主题），一步撤销 */
-  relayoutAll(): void
   /** 手动拉伸节点尺寸；传 null 恢复自动尺寸（拖拽过程中会合并成一步撤销） */
   setSizeOverride(id: string, size: { width: number; height: number } | null): void
   /**
@@ -333,8 +340,32 @@ export interface EditorState {
   /* ---- 主题 ---- */
   /** 应用一整套主题（会把配色写进当前画布） */
   applyTheme(theme: { id: string; name: string; colors: ThemeColors }): void
+  /**
+   * 把主题直接烤进当前文档，**不写撤销历史、不改「未保存」状态**。
+   * 用于「新建文档时套用设置里的默认主题」：那一步是初始化而不是用户的编辑动作，
+   * 走 `applyTheme`（内部是 mutate）会让新文档一建出来就顶着未保存标记。
+   */
+  primeTheme(theme: { id: string; name: string; colors: ThemeColors }): void
   /** 微调当前画布的配色 */
   updateThemeColors(patch: Partial<ThemeColors>, coalesceKey?: string): void
+}
+
+/**
+ * 「编辑态」的空值。
+ * 编辑态＝ editingId + 纯文本 + 富文本三项，而纯文本与富文本本质上是
+ * **同一份内容的两种表示**——以前这里有十几处各自手写这三行，漏一处就会漂移。
+ */
+const NO_EDITING = { editingId: null, editingText: '', editingRich: null }
+
+/**
+ * 编辑内容的两种表示永远从**同一个来源**产出：给富文本，纯文本由它算出来。
+ * 于是"两处不一致"从根上不可能发生，调用方也不必记得同时改两个字段。
+ */
+function editingContent(rich: RichText | null): {
+  editingText: string
+  editingRich: RichText | null
+} {
+  return { editingText: rich ? plainTextOf(rich) : '', editingRich: rich }
 }
 
 /** 取某个画布当前生效的配色 */
@@ -344,6 +375,18 @@ export function themeColorsOf(workbook: Workbook): ThemeColors {
 }
 
 const clampZoom = (z: number): number => Math.min(4, Math.max(0.1, z))
+
+/**
+ * 主题移动之后的统一收尾。`moveNode` 与 `dropNode` 共用，避免两套写法走偏。
+ * 注意必须清掉自由摆放的偏移：留着它，主题会落在"自动布局位置 + 偏移"的地方，
+ * 也就是「落点预览画在这里、松手却出现在别处」，看起来就像没连上。
+ */
+function settleAfterMove(draft: Workbook, id: string): void {
+  const moved = findTopic(activeRoot(draft), id)
+  if (moved) moved.position = undefined
+  // 换了父级后，原本「同级连续区间」可能不再成立，顺手清掉失效的边界/概要
+  pruneOverlays(activeSheet(draft))
+}
 
 /** 删除主题后清理指向它们的画布级元素，避免出现悬空的关系线/边界/概要 */
 function pruneOverlays(sheet: Sheet): void {
@@ -367,15 +410,7 @@ function pruneOverlays(sheet: Sheet): void {
   sheet.summaries = sheet.summaries.filter((item) => rangeAlive(item.range))
 }
 
-/** 备注 HTML 由纯文本派生时用到的转义，避免把用户输入当成标签 */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
+/** 备注 HTML 的转义统一走共享实现（见 shared/richtext） */
 
 function sameRich(a: RichText | undefined, b: RichText | null): boolean {
   if (!a && !b) return true
@@ -448,9 +483,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   docSeq: 0,
 
   selection: [],
-  editingId: null,
-  editingText: '',
-  editingRich: null,
+  ...NO_EDITING,
   clipboard: null,
 
   zoom: 1,
@@ -468,8 +501,6 @@ export const useEditor = create<EditorState>()((set, get) => ({
   /* ------------------------------------------------------------------ */
 
   setZoom: (zoom) => set({ zoom: clampZoom(zoom) }),
-
-  zoomBy: (factor) => set((s) => ({ zoom: clampZoom(s.zoom * factor) })),
 
   setPan: (pan) => set({ pan }),
 
@@ -606,7 +637,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       if (parent.collapsed) parent.collapsed = false
     }, '粘贴 Markdown')
 
-    if (created.length > 0) set({ selection: created, editingId: null, editingText: '', editingRich: null })
+    if (created.length > 0) set({ selection: created, ...NO_EDITING })
     return created.length
   },
 
@@ -645,9 +676,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       dirty: false,
       docSeq: state.docSeq + 1,
       selection: [],
-      editingId: null,
-      editingText: '',
-      editingRich: null,
+      ...NO_EDITING,
       undoStack: [],
       redoStack: [],
       // 新文档按「设置」里的默认视角锁定起手
@@ -666,9 +695,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       dirty: false,
       docSeq: state.docSeq + 1,
       selection: [],
-      editingId: null,
-      editingText: '',
-      editingRich: null,
+      ...NO_EDITING,
       undoStack: [],
       redoStack: [],
       viewLock: state.appSettings.defaultViewLock,
@@ -684,9 +711,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       dirty: true,
       docSeq: state.docSeq + 1,
       selection: [],
-      editingId: null,
-      editingText: '',
-      editingRich: null,
+      ...NO_EDITING,
       // 恢复是一次大跨度替换，撤销栈对它没有意义（恢复前会自动存一份版本兜底）
       undoStack: [],
       redoStack: []
@@ -752,9 +777,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       dirty: true,
       undoStack: undoStack.slice(0, -1),
       redoStack: [...redoStack, entry],
-      editingId: null,
-      editingText: '',
-      editingRich: null,
+      ...NO_EDITING,
       selection: liveSelection(root, entry.selectionBefore)
     })
   },
@@ -772,9 +795,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       dirty: true,
       undoStack: [...undoStack, entry],
       redoStack: redoStack.slice(0, -1),
-      editingId: null,
-      editingText: '',
-      editingRich: null,
+      ...NO_EDITING,
       selection: liveSelection(root, entry.selectionAtUndo)
     })
   },
@@ -797,12 +818,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const topic = findTopic(activeRoot(get().workbook), id)
     const base = topic?.titleRich ? normalizeRich(topic.titleRich) : richFromPlain(topic?.title ?? '')
     const rich = insertText ? appendToRich(base, insertText) : base
-    set({ editingId: id, editingText: plainTextOf(rich), editingRich: rich, selection: [id] })
+    set({ editingId: id, ...editingContent(rich), selection: [id] })
   },
 
-  updateEditingText: (text) => set({ editingText: text, editingRich: richFromPlain(text) }),
+  updateEditingText: (text) => set(editingContent(richFromPlain(text))),
 
-  updateEditingRich: (rich) => set({ editingRich: rich, editingText: plainTextOf(rich) }),
+  updateEditingRich: (rich) => set(editingContent(rich)),
 
   commitEdit: (forId) => {
     const { editingId, editingText, editingRich, workbook } = get()
@@ -820,7 +841,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       nextRich && firstNaming ? stampRichDefaults(nextRich, get().appSettings) : nextRich
     const keepRich = stampedRich && hasFormatting(stampedRich) ? stampedRich : null
 
-    set({ editingId: null, editingText: '', editingRich: null })
+    set(NO_EDITING)
     if (!topic) return
     if (topic.title === nextTitle && sameRich(topic.titleRich, keepRich)) return
 
@@ -833,7 +854,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }, '修改文本')
   },
 
-  cancelEdit: () => set({ editingId: null, editingText: '', editingRich: null }),
+  cancelEdit: () => set(NO_EDITING),
 
   commitAndAddChild: () => {
     const id = get().editingId
@@ -867,7 +888,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       // 否则「打开 → 另存」会因为默认值产生结构性差异
       if (target.collapsed) target.collapsed = false
     }, '新建子主题')
-    set({ selection: [node.id], editingId: node.id, editingText: '', editingRich: richFromPlain('') })
+    set({ selection: [node.id], editingId: node.id, ...editingContent(richFromPlain('')) })
     return node.id
   },
 
@@ -886,7 +907,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       if (!draftParent) return
       draftParent.children.splice(index < 0 ? draftParent.children.length : index + 1, 0, node)
     }, '新建同级主题')
-    set({ selection: [node.id], editingId: node.id, editingText: '', editingRich: richFromPlain('') })
+    set({ selection: [node.id], editingId: node.id, ...editingContent(richFromPlain('')) })
     return node.id
   },
 
@@ -934,9 +955,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }, '删除主题')
     set({
       selection: nextId ? [nextId] : [],
-      editingId: null,
-      editingText: '',
-      editingRich: null
+      ...NO_EDITING
     })
   },
 
@@ -968,15 +987,20 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   setCollapsed: (id, collapsed) => {
-    get().mutate((draft) => {
-      const topic = findTopic(activeRoot(draft), id)
-      if (!topic || topic.children.length === 0) return
-      // 用 undefined 表示展开，让模型中只存在「折叠 / 未设置」两种状态
-      const next = collapsed ? true : undefined
-      if (topic.collapsed === next) return
-      topic.collapsed = next
-      // 标签保持与手动折叠一致：同一个主题的连续折叠/展开才能合并成一步撤销
-    }, '折叠/展开')
+    get().mutate(
+      (draft) => {
+        const topic = findTopic(activeRoot(draft), id)
+        if (!topic || topic.children.length === 0) return
+        // 用 undefined 表示展开，让模型中只存在「折叠 / 未设置」两种状态
+        const next = collapsed ? true : undefined
+        if (topic.collapsed === next) return
+        topic.collapsed = next
+      },
+      '折叠/展开',
+      // 同一个主题、同一个方向的连续折叠（例如连按空格）合并成一步；
+      // 方向一变就是新的一步——否则「折叠又展开」会被并成一次空操作，撤销看起来没反应
+      `collapse:${id}:${collapsed ? 'fold' : 'unfold'}`
+    )
   },
 
   setTopicSide: (id, side) => {
@@ -1044,18 +1068,6 @@ export const useEditor = create<EditorState>()((set, get) => ({
     )
   },
 
-  /** 全部恢复自动布局：清掉当前画布所有手动位置偏移（含悬浮主题），整批算一步撤销 */
-  relayoutAll: () => {
-    get().mutate((draft) => {
-      const walk = (topic: Topic): void => {
-        if (topic.position !== undefined) topic.position = undefined
-        topic.children.forEach(walk)
-        topic.detachedChildren.forEach(walk)
-      }
-      walk(activeRoot(draft))
-    }, '恢复自动布局')
-  },
-
   moveSelectionByKey: (key) => {
     const state = get()
     const id = state.selection[0]
@@ -1069,6 +1081,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (index < 0) return false
     const last = parent.children.length - 1
 
+    // 每次按键各记一步撤销，**刻意不合并**：移动是数组重排，
+    // 合并两步的 inverse 会因为下标错位而改坏 children（见 moveNode 的说明）。
     if (key === 'ArrowUp') return index === 0 ? false : state.moveNode(id, parent.id, index - 1)
     if (key === 'ArrowDown') return index === last ? false : state.moveNode(id, parent.id, index + 1)
     if (key === 'Home') return index === 0 ? false : state.moveNode(id, parent.id, 0)
@@ -1138,15 +1152,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     let ok = false
     get().mutate((draft) => {
       ok = moveTopic(activeRoot(draft), id, targetId, index)
-      if (ok) {
-        // **顺手清掉自由摆放的偏移**：留着它，主题会落在自动布局位置 + 偏移的地方，
-        // 也就是"落点预览画在这里、松手却出现在别处"，看起来就像没连上。
-        // 拖到某个落点上本来就是"把它放回树里的这个位置"的意思。
-        const moved = findTopic(activeRoot(draft), id)
-        if (moved) moved.position = undefined
-        // 换了父级后，原本「同级连续区间」可能不再成立，顺手清掉失效的边界/概要
-        pruneOverlays(activeSheet(draft))
-      }
+      if (ok) settleAfterMove(draft, id)
     }, '移动主题')
     if (ok) set({ selection: [id] })
     return ok
@@ -1157,7 +1163,19 @@ export const useEditor = create<EditorState>()((set, get) => ({
     // 与画布上的落点预览共用同一套裁决规则，避免"预览说这样、落下去却那样"
     const plan = resolveDrop(root, id, targetId, mode)
     if (!plan) return false
-    if (plan.mode === 'child') return get().moveNode(id, plan.targetId)
+
+    if (plan.mode === 'child') {
+      // 落进折叠的目标时顺手展开它，并和移动**合并成同一笔**：
+      // 否则新加的子主题被藏起来看不见，而分成两笔又会让撤销要按两次。
+      const ok = get().mutate((draft) => {
+        const target = findTopic(activeRoot(draft), plan.targetId)
+        if (target?.collapsed) target.collapsed = false
+        moveTopic(activeRoot(draft), id, plan.targetId)
+        settleAfterMove(draft, id)
+      }, '移动主题')
+      if (ok) set({ selection: [id] })
+      return ok
+    }
 
     // 同级插入：下标必须在「先把自己摘掉」的数组上算——
     // moveTopic 是先摘后插，若自己原本排在目标之前，用摘除前的下标
@@ -1456,13 +1474,13 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const root = activeRoot(get().workbook)
     const valid = Array.from(new Set(ids)).filter((id) => Boolean(findTopic(root, id)))
     // 选主题就取消画布元素的选中（两者不同时高亮）
-    set({ selection: valid, editingId: null, editingText: '', editingRich: null, selectedOverlay: null })
+    set({ selection: valid, ...NO_EDITING, selectedOverlay: null })
   },
 
   selectedOverlay: null,
 
   selectOverlay: (kind, id) =>
-    set({ selectedOverlay: { kind, id }, selection: [], editingId: null, editingText: '', editingRich: null }),
+    set({ selectedOverlay: { kind, id }, selection: [], ...NO_EDITING }),
 
   clearOverlaySelection: () => set({ selectedOverlay: null }),
 
@@ -1566,6 +1584,22 @@ export const useEditor = create<EditorState>()((set, get) => ({
   /* 主题                                                                */
   /* ------------------------------------------------------------------ */
 
+  primeTheme: (theme) => {
+    set((state) => ({
+      workbook: produce(state.workbook, (draft) => {
+        for (const sheet of draft.sheets) {
+          // 把配色「烤」进文档，与 applyTheme 保持同一套写法
+          sheet.theme = {
+            ...(sheet.theme ?? {}),
+            id: theme.id,
+            name: theme.name,
+            colors: { ...theme.colors, branches: [...theme.colors.branches] }
+          }
+        }
+      })
+    }))
+  },
+
   applyTheme: (theme) => {
     const current = (() => {
       const { workbook } = get()
@@ -1616,9 +1650,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 /* 派生工具                                                            */
 /* ------------------------------------------------------------------ */
 
-export function currentRoot(state: EditorState): Topic {
-  return activeRoot(state.workbook)
-}
+
 
 /**
  * 工具栏「关系线 / 边界 / 概要」三个开关的当前状态。
@@ -1657,14 +1689,7 @@ export function overlayToggleOf(
   }
 }
 
-export function statsOf(state: EditorState): { nodes: number; chars: number; branches: number } {
-  const root = activeRoot(state.workbook)
-  return {
-    nodes: countTopics(root),
-    chars: countCharacters(root),
-    branches: root.children.length
-  }
-}
+
 
 /**
  * 落盘用的快照。

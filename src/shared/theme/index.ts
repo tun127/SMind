@@ -8,6 +8,7 @@
  *     用于校验导入的主题文件与自定义主题。
  */
 import type { Theme, ThemeColors } from '../model/types'
+import { isRecord } from '../guards'
 
 export interface ThemeDefinition {
   id: string
@@ -127,10 +128,6 @@ export function themeNameOf(theme: Theme | undefined): string {
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function readColor(source: Record<string, unknown>, key: string): string | undefined {
   const value = source[key]
   return typeof value === 'string' && HEX_RE.test(value.trim()) ? value.trim() : undefined
@@ -187,8 +184,6 @@ export function deriveCustomTheme(source: ThemeDefinition, name: string, id: str
   return { id, name, builtin: false, colors: cloneColors(source.colors) }
 }
 
-export function cloneThemeDefinition(source: ThemeDefinition): ThemeDefinition {
-  return { ...source, colors: cloneColors(source.colors) }
-}
+
 
 export { cloneColors }

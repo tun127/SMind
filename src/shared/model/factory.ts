@@ -76,8 +76,6 @@ export function createWorkbook(options: CreateWorkbookOptions = {}): Workbook {
   }
 }
 
-export function emptyTopic(): Topic {
-  return createTopic('')
-}
+
 
 export { MODEL_VERSION, CREATOR }

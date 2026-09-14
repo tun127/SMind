@@ -35,20 +35,6 @@ export function findParent(root: Topic, id: string): Topic | null {
   return found
 }
 
-/** 该节点在父节点 children 中的下标，找不到返回 -1 */
-export function indexInParent(root: Topic, id: string): number {
-  let idx = -1
-  walk(root, (t, parent) => {
-    if (parent) idx = parent.children.findIndex((c) => c.id === id)
-  })
-  return idx
-}
-
-/** 该节点是否为根 */
-export function isRoot(root: Topic, id: string): boolean {
-  return root.id === id
-}
-
 /** 某节点的所有祖先 id（从根到父） */
 export function ancestorsOf(root: Topic, id: string): string[] {
   const chain: string[] = []
@@ -174,13 +160,6 @@ export function cloneTopicDeep(source: Topic): Topic {
   copy.children = source.children.map(cloneTopicDeep)
   copy.detachedChildren = source.detachedChildren.map(cloneTopicDeep)
   return copy
-}
-
-/** 为缺失 id 的节点补 id（解析外部文件时使用） */
-export function ensureIds(root: Topic): void {
-  walk(root, (t) => {
-    if (!t.id) t.id = createId('topic')
-  })
 }
 
 /** 获取当前激活画布 */

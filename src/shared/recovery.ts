@@ -6,16 +6,14 @@
  * 不能只靠人工点。
  */
 
+import { isRecord } from './guards'
+
 export interface RecoveryMeta {
   /** 自动保存时对应的原始文件路径；全新未保存的文档为 null */
   originalPath: string | null
   title: string
   /** 自动保存的时间戳（毫秒） */
   savedAt: number
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** 校验自动存档的元信息；返回 null 表示这份存档不可用 */
