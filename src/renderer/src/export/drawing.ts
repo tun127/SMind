@@ -13,9 +13,8 @@
 import type { AccessoryItem, LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
 import {
   BLOCK_GAP,
-  CODE_CHAR_WIDTH,
+  CODE_CHAR_RATIO,
   CODE_FONT_FAMILY,
-  CODE_FONT_SIZE,
   MARKER_GAP,
   codeBlockMetrics,
   codeUnitLength,
@@ -439,7 +438,7 @@ function nodeOps(
     })
     // 逐 token 画：颜色按语法种类取，横向偏移按「等宽字符数 × 单字宽」推进——
     // 单字宽随字号等比变化，保证导出与画布上的换行位置一致
-    const charWidth = (codeMetrics.fontSize * CODE_CHAR_WIDTH) / CODE_FONT_SIZE
+    const charWidth = codeMetrics.fontSize * CODE_CHAR_RATIO
     const codeLines = highlightCode(topic.code.text, topic.code.language)
     let textY = cursorY + codeMetrics.header + codeMetrics.paddingY + codeMetrics.fontSize * 0.8
     for (const line of codeLines) {

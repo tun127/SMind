@@ -149,6 +149,23 @@ function DefaultStylePanel({
       </div>
 
       <div className="default-style__row">
+        <span className="default-style__label">代码块字号</span>
+        <select
+          className="select"
+          value={settings.defaultCodeFontSize ?? ''}
+          title="所有代码块的基准字号（影响画布与导出）"
+          onChange={(e) => patch({ defaultCodeFontSize: e.target.value ? Number(e.target.value) : null })}
+        >
+          <option value="">内置 (12)</option>
+          {[11, 12, 13, 14, 16, 18].map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="default-style__row">
         <span className="default-style__label">对齐</span>
         {(
           [
@@ -193,7 +210,8 @@ function DefaultStylePanel({
               defaultFontFamily: null,
               defaultFontSize: null,
               defaultColor: null,
-              defaultAlign: 'center'
+              defaultAlign: 'center',
+              defaultCodeFontSize: null
             }).then(onRenderDefaultsChanged)
           }}
         >
@@ -240,6 +258,22 @@ export default function RichFormatBar({ onRenderDefaultsChanged }: Props): React
     if (target && target.closest('button')) event.preventDefault()
   }
 
+  /* 默认样式面板开着时，点面板以外的地方就收起。
+     注意：这个 useEffect 只依赖 styleAnchor，与 editor 无关——
+     必须放在下面的 if (!editor) return null **之前**，
+     否则编辑器出现/消失时 hooks 数量变化，React 直接抛错 */
+  useEffect(() => {
+    if (!styleAnchor) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target as Node | null
+      if (target && (gearRef.current?.contains(target) || (event.target as HTMLElement)?.closest?.('.default-style')))
+        return
+      setStyleAnchor(null)
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [styleAnchor])
+
   if (!editor) return null
 
   /**
@@ -276,18 +310,6 @@ export default function RichFormatBar({ onRenderDefaultsChanged }: Props): React
       ? [...SIZES, state.fontSize].sort((a, b) => a - b)
       : SIZES
 
-  /* 默认样式面板开着时，点面板以外的地方就收起 */
-  useEffect(() => {
-    if (!styleAnchor) return
-    const onPointerDown = (event: PointerEvent): void => {
-      const target = event.target as Node | null
-      if (target && (gearRef.current?.contains(target) || (event.target as HTMLElement)?.closest?.('.default-style')))
-        return
-      setStyleAnchor(null)
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [styleAnchor])
 
   return (
     <div className="formatbar" onMouseDown={keepFocus}>

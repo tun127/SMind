@@ -838,6 +838,12 @@ function registerIpc(): void {
           typeof parsed.defaultColor === 'string' && parsed.defaultColor.length > 0
             ? parsed.defaultColor
             : null,
+        defaultCodeFontSize:
+          typeof parsed.defaultCodeFontSize === 'number' &&
+          Number.isFinite(parsed.defaultCodeFontSize) &&
+          parsed.defaultCodeFontSize >= 8
+            ? Math.round(parsed.defaultCodeFontSize)
+            : null,
         toolbarHidden: Array.isArray(parsed.toolbarHidden)
           ? parsed.toolbarHidden.filter((item): item is string => typeof item === 'string')
           : []
@@ -869,6 +875,12 @@ function registerIpc(): void {
       defaultColor:
         typeof settings?.defaultColor === 'string' && settings.defaultColor.length > 0
           ? settings.defaultColor
+          : null,
+      defaultCodeFontSize:
+        typeof settings?.defaultCodeFontSize === 'number' &&
+        Number.isFinite(settings.defaultCodeFontSize) &&
+        settings.defaultCodeFontSize >= 8
+          ? Math.round(settings.defaultCodeFontSize)
           : null,
       toolbarHidden: Array.isArray(settings?.toolbarHidden)
         ? settings.toolbarHidden.filter((item) => typeof item === 'string')

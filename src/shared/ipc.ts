@@ -44,6 +44,8 @@ export interface AppSettings {
   defaultFontSize: number | null
   /** 新建节点的默认文字颜色；null = 跟随主题 */
   defaultColor: string | null
+  /** 代码块的默认字号；null = 内置 12（影响所有代码块的排版与导出） */
+  defaultCodeFontSize: number | null
   /** 收进「更多 ▾」的工具栏功能 id 列表（其余都在快捷栏） */
   toolbarHidden: string[]
 }
@@ -55,6 +57,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultFontFamily: null,
   defaultFontSize: null,
   defaultColor: null,
+  defaultCodeFontSize: null,
   toolbarHidden: []
 }
 

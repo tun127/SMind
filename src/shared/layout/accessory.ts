@@ -108,6 +108,30 @@ export function markerStripSize(count: number): Size {
 
 export const CODE_FONT_SIZE = 12
 export const CODE_FONT_FAMILY = 'Consolas, "JetBrains Mono", Menlo, "Courier New", monospace'
+/** 单字宽 / 字号 的恒定比率（等宽字体），随「基准字号」变化时按它换算 */
+export const CODE_CHAR_RATIO = 0.6
+/** 等宽字体里一个「宽度单位」对应多少像素（尺寸估算与导出绘制共用） */
+export const CODE_CHAR_WIDTH = CODE_FONT_SIZE * CODE_CHAR_RATIO
+
+/**
+ * 代码块的**基准字号**：来自「默认样式」面板的设置（null = 内置 12）。
+ *
+ * 为什么用模块级变量而不是函数参数：codeBlockMetrics 被
+ * 布局测量 / 画布渲染 / 导出绘制 / 自检四处调用，逐个传参改动面太大；
+ * 项目里「默认对齐」（setDefaultTextAlign）就是同一套模式。
+ */
+let codeFontSizeBase = CODE_FONT_SIZE
+
+/** 设置代码块基准字号（null = 回到内置默认）；非法值一律忽略 */
+export function setCodeFontSizeBase(size: number | null): void {
+  codeFontSizeBase = size !== null && Number.isFinite(size) && size >= 8 ? Math.round(size) : CODE_FONT_SIZE
+}
+
+/** 当前代码块基准字号（导出绘制 / 测试用） */
+export function codeFontSize(): number {
+  return codeFontSizeBase
+}
+
 /** 只保留一个下限：代码块**不封顶**，长宽都随内容自适应（用户要求完整展示） */
 export const CODE_MIN_WIDTH = 96
 export const CODE_LINE_RATIO = 1.45
@@ -122,9 +146,6 @@ export function codeUnitLength(line: string): number {
   for (const ch of line) units += ch.charCodeAt(0) > 0xff ? 2 : 1
   return units
 }
-
-/** 等宽字体里一个「宽度单位」对应多少像素（尺寸估算与导出绘制共用） */
-export const CODE_CHAR_WIDTH = CODE_FONT_SIZE * 0.6
 
 /** 手动拉伸节点时，代码块最多放大到自然尺寸的几倍 */
 export const CODE_GROW_LIMIT = 2
@@ -164,19 +185,22 @@ export function codeBlockMetrics(code: TopicCode | undefined, bounds?: Size): Co
   let maxUnits = 8
   for (const line of lines) maxUnits = Math.max(maxUnits, codeUnitLength(line))
 
-  const naturalWidth = Math.max(CODE_MIN_WIDTH, Math.round(maxUnits * CODE_CHAR_WIDTH) + CODE_PADDING_X * 2)
-  const naturalLineHeight = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
+  const naturalWidth = Math.max(
+    CODE_MIN_WIDTH,
+    Math.round(maxUnits * codeFontSizeBase * CODE_CHAR_RATIO) + CODE_PADDING_X * 2
+  )
+  const naturalLineHeight = Math.round(codeFontSizeBase * CODE_LINE_RATIO)
   const naturalHeight = CODE_HEADER + CODE_PADDING_Y * 2 + lines.length * naturalLineHeight
 
   /** 按给定比例算出全套指标（字号、行高、内边距都有可读性下限） */
   const metricsAt = (value: number): CodeMetrics => {
-    const fontSize = Math.max(6, Math.round(CODE_FONT_SIZE * value))
+    const fontSize = Math.max(6, Math.round(codeFontSizeBase * value))
     const lineHeight = Math.round(fontSize * CODE_LINE_RATIO)
     const paddingX = Math.max(4, Math.round(CODE_PADDING_X * value))
     const paddingY = Math.max(3, Math.round(CODE_PADDING_Y * value))
     const header = Math.max(12, Math.round(CODE_HEADER * value))
-    // 等宽字体：单字宽随字号等比变化（CODE_CHAR_WIDTH 就是自然字号下的单字宽）
-    const charWidth = (fontSize * CODE_CHAR_WIDTH) / CODE_FONT_SIZE
+    // 等宽字体：单字宽随字号等比变化（CODE_CHAR_RATIO 是单字宽/字号的恒定比率）
+    const charWidth = fontSize * CODE_CHAR_RATIO
     return {
       scale: value,
       fontSize,

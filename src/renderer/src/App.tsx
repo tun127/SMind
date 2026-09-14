@@ -28,6 +28,7 @@ import HistoryDialog from './components/HistoryDialog'
 import { viewportActions } from './render/viewport'
 import { bumpMeasureEpoch } from './render/measure'
 import { setDefaultTextAlign } from './render/defaults'
+import { setCodeFontSizeBase } from '@shared/layout/accessory'
 import { stageTypedChar } from './editor/typedChar'
 import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
 import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
@@ -41,6 +42,8 @@ import type { ThemeDefinition } from '@shared/theme'
  */
 function applyRenderDefaults(settings: AppSettings): void {
   setDefaultTextAlign(settings.defaultAlign)
+  // 代码块基准字号：布局测量 / 画布 / 导出共用（改了必须重算测量）
+  setCodeFontSizeBase(settings.defaultCodeFontSize)
   bumpMeasureEpoch()
 }
 
@@ -95,6 +98,8 @@ export default function App(): ReactElement {
   const dirty = useEditor((s) => s.dirty)
   // 只订阅「中心主题的文字」这一个字符串：标题栏与默认文件名都跟着它变，又不至于每次改动都重渲染
   const rootTitle = useEditor((s) => activeRoot(s.workbook).title)
+  // 工具栏收纳状态：右键「收进更多 ▾」后要立即反映到快捷栏与「更多」菜单
+  const toolbarHidden = useEditor((s) => s.appSettings.toolbarHidden)
 
   const [toast, setToast] = useState<string | null>(null)
   const [recovery, setRecovery] = useState<RecoveryInfo | null>(null)
@@ -1014,6 +1019,16 @@ export default function App(): ReactElement {
     <div className="app">
       <Toolbar
         outlineOpen={showOutline}
+        hiddenItems={toolbarHidden}
+        onToggleHidden={(id, hidden) => {
+          const current = useEditor.getState().appSettings.toolbarHidden
+          const next = hidden
+            ? current.includes(id)
+              ? current
+              : [...current, id]
+            : current.filter((item) => item !== id)
+          void patchAppSettings({ toolbarHidden: next })
+        }}
         actions={{
           onNew: () => newDocument(),
           onOpen: () => void openDocument(),

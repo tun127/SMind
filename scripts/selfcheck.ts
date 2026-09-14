@@ -131,7 +131,9 @@ import {
   CODE_FONT_SIZE,
   CODE_HEADER,
   codeBlockMetrics,
+  codeFontSize,
   codeMinNodeSize,
+  setCodeFontSizeBase,
   CODE_LINE_RATIO,
   CODE_PADDING_X,
   CODE_PADDING_Y,
@@ -2850,6 +2852,19 @@ async function testMediaElements(): Promise<void> {
     check('最小尺寸确实小于自然尺寸（只是兜底）', min.width < natural.width)
     check('没有代码时没有最小尺寸', codeMinNodeSize(undefined, { x: 14, y: 9 }) === null)
   }
+
+  // 「默认样式」面板的代码块基准字号：改基准后整套指标（字号/行高/框宽）都要跟着走
+  group('代码块：基准字号（默认样式）')
+
+  eq('默认等于内置字号', codeFontSize(), CODE_FONT_SIZE)
+  setCodeFontSizeBase(16)
+  eq('设置后生效', codeFontSize(), 16)
+  const bigger = codeBlockMetrics({ language: 'ts', text: 'const a = 1' })!
+  eq('自然尺寸的字号用基准', bigger.fontSize, 16)
+  check('框宽随字号变大', bigger.width > oneLine.width, `${bigger.width} vs ${oneLine.width}`)
+  setCodeFontSizeBase(null)
+  eq('null 回到内置', codeFontSize(), CODE_FONT_SIZE)
+  eq('恢复后指标复原', codeBlockMetrics({ language: 'ts', text: 'const a = 1' })!.width, oneLine.width)
 
   group('手动拉伸：尺寸覆盖只作下限、可撤销、往返保真')
 
