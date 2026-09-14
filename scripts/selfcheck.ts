@@ -120,6 +120,7 @@ import {
 import { parseMarkdownOutline } from '../src/shared/import/markdown'
 import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../src/shared/formula'
 import { estimateOverlayLabelSize, overlayTitleLines } from '../src/shared/layout/overlays'
+import { autosaveSlotName, findWindowForPath, sameDocPath } from '../src/shared/window'
 import { readOverlayFontSize, readOverlayTextStyle, withOverlayTextStyle } from '../src/shared/model/overlay-style'
 import { parseOpmlOutline } from '../src/shared/import/opml'
 import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
@@ -1534,6 +1535,27 @@ function testBranchFamiliesMore(): void {
   // 树状表格：列头行在分支下方，后代沿缩进列往下
   check('表格：列头在分支下方', n(s1).y > n(s).y + n(s).height - 1)
   check('表格：后代在列头下方', n(s11).y > n(s1).y + n(s1).height - 1)
+}
+
+/* ------------------------------------------------------------------ */
+/* 8.5g 多窗口：路径判定与自动存档槽位                                  */
+/* ------------------------------------------------------------------ */
+
+function testMultiWindow(): void {
+  group('多窗口：路径判定与存档槽位')
+
+  eq('大小写与斜杠不同 = 同一个文件', sameDocPath('C:\\A\\B.xmind', 'c:/a/b.XMIND'), true)
+  eq('不同文件不算同一个', sameDocPath('C:/a/b.xmind', 'C:/a/c.xmind'), false)
+  eq('null 不与任何路径相等', sameDocPath(null, 'C:/a/b.xmind'), false)
+  eq('两边都 null 不等于同一个', sameDocPath(null, null), false)
+  eq('路径末尾斜杠不影响判定', sameDocPath('C:/dir/b.xmind\\', 'C:/dir/b.xmind'), true)
+
+  eq('双击已打开的文件：命中那个窗口', findWindowForPath(['C:/a.xmind', null, 'C:/b.xmind'], 'c:/B.xmind'), 2)
+  eq('没打开过：-1（开新窗口）', findWindowForPath([null, 'C:/a.xmind'], 'C:/z.xmind'), -1)
+  eq('空窗口列表：-1', findWindowForPath([], 'C:/a.xmind'), -1)
+
+  eq('存档槽位名', autosaveSlotName(3), 'slot-3')
+  eq('槽位名从 1 起（0/负数兜底）', autosaveSlotName(0), 'slot-1')
 }
 
 /* ------------------------------------------------------------------ */
@@ -5143,6 +5165,7 @@ async function main(): Promise<void> {
   testTypedChar()
   testBranchStructure()
   testBranchFamiliesMore()
+  testMultiWindow()
   testUndoSelectionAndRelayout()
   testLayoutNoOverlap()
   testMarkdownRoundTrip()

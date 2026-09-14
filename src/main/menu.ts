@@ -1,12 +1,17 @@
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
 import { IPC, type MenuCommand } from '@shared/ipc'
 
+interface MenuActions {
+  /** 开一个新窗口（= 新的一份文档）；由主进程处理，不走渲染进程命令 */
+  newWindow: () => void
+}
+
 function send(command: MenuCommand): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   win?.webContents.send(IPC.menuCommand, command)
 }
 
-export function buildAppMenu(): void {
+export function buildAppMenu(actions: MenuActions): void {
   const isMac = process.platform === 'darwin'
 
   const template: MenuItemConstructorOptions[] = [
@@ -19,6 +24,7 @@ export function buildAppMenu(): void {
       label: '文件',
       submenu: [
         { label: '新建', accelerator: 'CmdOrCtrl+N', click: () => send('file:new') },
+        { label: '新建窗口', accelerator: 'CmdOrCtrl+Shift+N', click: () => actions.newWindow() },
         { label: '打开 / 导入 .xmind…', accelerator: 'CmdOrCtrl+O', click: () => send('file:open') },
         {
           label: '导入',

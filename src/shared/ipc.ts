@@ -80,6 +80,10 @@ export const IPC = {
   confirmClose: 'window:confirm-close',
   closeRequest: 'window:close-request',
   setTitle: 'window:set-title',
+  /** 新开一个窗口（= 新的一份文档） */
+  newWindow: 'window:new',
+  /** 渲染进程报告「这个窗口现在打开的是哪个文件」（新建＝null） */
+  documentPath: 'window:document-path',
   showInFolder: 'shell:show-in-folder',
   openExternal: 'shell:open-external',
   menuCommand: 'menu:command',
@@ -177,6 +181,13 @@ export interface MindApi {
   recoveryDiscard(): Promise<void>
   confirmClose(): void
   setTitle(title: string): void
+  /** 开一个新窗口（= 新的一份文档）；每个窗口各自独立文档与撤销栈 */
+  newWindow(): Promise<void>
+  /**
+   * 告诉主进程「这个窗口现在打开的是哪个文件」（新建文档传 null）。
+   * 主进程用它判断「双击的那个文件是不是已经开着」，从而聚焦已有窗口而不是重复开一个。
+   */
+  reportDocument(path: string | null): void
   showInFolder(path: string): void
   /** 用系统默认程序打开外部链接（仅允许 http/https/mailto） */
   openExternal(url: string): Promise<boolean>

@@ -592,6 +592,9 @@ export default function App(): ReactElement {
       ? (fileNameOf(filePath) ?? '未命名导图')
       : defaultDocumentName(useEditor.getState().workbook)
     window.api.setTitle(`${dirty ? '● ' : ''}${name} - SMind`)
+    // 顺手告诉主进程「这个窗口开着哪个文件」：多窗口下双击同一个 .xmind 时，
+    // 主进程会聚焦已经开着它的那个窗口，而不是又开一份（同一个文件两边改会互相覆盖）
+    window.api.reportDocument(filePath)
     // rootTitle 参与依赖：改名后标题栏要立刻跟着变
   }, [filePath, dirty, rootTitle])
 

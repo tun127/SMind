@@ -59,6 +59,10 @@ const api: MindApi = {
 
   setTitle: (title: string) => ipcRenderer.send(IPC.setTitle, title),
 
+  newWindow: () => ipcRenderer.invoke(IPC.newWindow) as Promise<void>,
+
+  reportDocument: (path: string | null) => ipcRenderer.send(IPC.documentPath, path),
+
   showInFolder: (path: string) => ipcRenderer.send(IPC.showInFolder, path),
 
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<boolean>,
