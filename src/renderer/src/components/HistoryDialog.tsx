@@ -21,6 +21,7 @@ import {
 } from '@shared/snapshot'
 import { defaultDocumentName } from '@shared/model/naming'
 import { snapshotForSave, useEditor } from '../store/editor'
+import { activeDocId } from '../store/tabs'
 import { Modal } from './Dialogs'
 
 interface Props {
@@ -128,7 +129,7 @@ export default function HistoryDialog({ onClose, onNotify, onOpenFile, onRestore
     try {
       const store = useEditor.getState()
       const note = noteDraft.trim()
-      const list = await window.api.snapshotCreate({
+      const list = await window.api.snapshotCreate(activeDocId(), {
         // 用「把正在输入的内容也算上」的快照，避免刚敲的字没进版本
         workbook: snapshotForSave(store),
         path: store.filePath,

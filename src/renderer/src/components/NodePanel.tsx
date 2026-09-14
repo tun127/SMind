@@ -19,6 +19,7 @@ import { MARKER_GROUPS, markerVisualOf } from '../render/markers'
 import { formulaHtml } from '../render/formula'
 import { resourceUrl } from '../render/resource'
 import { useEditor } from '../store/editor'
+import { activeDocId } from '../store/tabs'
 import MarkerIcon from './MarkerIcon'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import { readOverlayTextStyle, type OverlayKind } from '@shared/model/overlay-style'
@@ -302,7 +303,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
   const insertImage = async (): Promise<void> => {
     try {
-      const picked = await window.api.pickImage()
+      const picked = await window.api.pickImage(activeDocId())
       if (!picked) return
       setImage(topicId, { path: picked.path, width: picked.width, height: picked.height })
       onNotify(
@@ -317,7 +318,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
   const attachFile = async (): Promise<void> => {
     try {
-      const picked = await window.api.pickAttachment()
+      const picked = await window.api.pickAttachment(activeDocId())
       if (!picked) return
       addAttachment(topicId, picked)
       onNotify(`已添加附件 ${picked.name}，保存时会打包进 .xmind`)

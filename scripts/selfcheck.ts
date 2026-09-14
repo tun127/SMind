@@ -13,6 +13,7 @@ import {
   themeColorsOf,
   useEditor
 } from '../src/renderer/src/store/editor'
+import { useTabs } from '../src/renderer/src/store/tabs'
 import { withAlpha } from '../src/renderer/src/render/theme'
 import { defaultTextAlignOf, setDefaultTextAlign } from '../src/renderer/src/render/defaults'
 import { pickDocumentArg } from '../src/shared/openfile'
@@ -1684,6 +1685,76 @@ function testBranchFamiliesMore(): void {
   // 树状表格：列头行在分支下方，后代沿缩进列往下
   check('表格：列头在分支下方', n(s1).y > n(s).y + n(s).height - 1)
   check('表格：后代在列头下方', n(s11).y > n(s1).y + n(s1).height - 1)
+}
+
+/* ------------------------------------------------------------------ */
+/* 8.5h 多文档标签：快照切换 / 隔离 / 去重 / 排序                        */
+/* ------------------------------------------------------------------ */
+
+function testTabs(): void {
+  group('多文档标签：快照与隔离')
+
+  // 从干净状态开始：reset 之后的编辑器就是「当前激活文档」
+  reset()
+  const pristineTabs = useTabs.getState()
+  const pristineId = pristineTabs.activeId
+  eq('初始只有一个标签', pristineTabs.tabs.length, 1)
+
+  // 在当前（唯一）标签里做出内容
+  const tab1Root = root().id
+  store().setTitle(tab1Root, '第一份文档')
+  const tab1Child = addChildOf(tab1Root, '甲')
+
+  // 新建标签：编辑器换成全新文档，第一份原样停在标签里
+  useTabs.getState().newTab()
+  const state2 = useTabs.getState()
+  eq('新建后有两个标签', state2.tabs.length, 2)
+  check('激活的是新标签', state2.activeId !== pristineId, state2.activeId)
+  eq('新标签是全新文档', activeRoot(store().workbook).title, '中心主题')
+
+  // 新文档里做改动 + 记住撤销栈长度
+  const tab2Id = useTabs.getState().activeId
+  const tab2Root = root().id
+  store().setTitle(tab2Root, '第二份文档')
+  const tab2UndoDepth = store().undoStack.length
+  check('第二份有撤销记录', tab2UndoDepth > 0, String(tab2UndoDepth))
+
+  // 切回第一份：workbook / 选中内容 / 撤销栈都要原样回来
+  useTabs.getState().switchTo(pristineId)
+  eq('切回后根主题是第一份的', activeRoot(store().workbook).title, '第一份文档')
+  check('第一份的子主题还在', Boolean(find(tab1Child)), '子主题丢了')
+  eq('第一份的撤销栈与第二份无关', store().undoStack.length !== tab2UndoDepth, true)
+  const tab1UndoDepth = store().undoStack.length
+  store().undo()
+  eq('第一份的撤销栈可用（undo 走一步）', store().undoStack.length, tab1UndoDepth - 1)
+
+  // 再切回第二份：改动与撤销栈都还在
+  useTabs.getState().switchTo(tab2Id)
+  eq('第二份的改动还在', activeRoot(store().workbook).title, '第二份文档')
+  eq('第二份的撤销栈还在', store().undoStack.length, tab2UndoDepth)
+
+  group('多文档标签：路径去重 / 排序 / 关闭')
+
+  // 路径去重：markSaved 后 findByPath 应能找到（大小写/斜杠归一）
+  store().markSaved('D:/Tmp/DocA.xmind')
+  eq('按路径找到标签', useTabs.getState().findByPath('d:/tmp/doca.XMIND'), tab2Id)
+  eq('没开过的文件找不到', useTabs.getState().findByPath('D:/Tmp/其他.xmind'), null)
+
+  // 排序：把第二个标签拖到最前
+  useTabs.getState().moveTab(1, 0)
+  eq('拖拽后顺序改变', useTabs.getState().tabs[0].id, tab2Id)
+  eq('拖拽不影响激活', useTabs.getState().activeId, tab2Id)
+
+  // 关闭非激活标签：直接移除
+  useTabs.getState().closeTab(pristineId)
+  eq('关闭后只剩一个标签', useTabs.getState().tabs.length, 1)
+
+  // 关闭激活标签（最后一个）：窗口留下，换成空白文档
+  useTabs.getState().closeTab(tab2Id)
+  eq('关掉最后一个后仍是单标签', useTabs.getState().tabs.length, 1)
+  eq('关掉最后一个后是全新文档', activeRoot(store().workbook).title, '中心主题')
+  eq('关掉最后一个后不脏', store().dirty, false)
+  eq('路径记录随文档消失', useTabs.getState().findByPath('D:/Tmp/DocA.xmind'), null)
 }
 
 /* ------------------------------------------------------------------ */
@@ -4262,35 +4333,7 @@ function testSearch(): void {
   eq('统计：标签分布', stats.labels.map((item) => [item.label, item.count]), [['标签甲', 1]])
   eq('统计：无附件时计数为 0', stats.withAttachments, 0)
 
-  group('多画布')
-
-  reset()
-  eq('默认只有一张画布', store().workbook.sheets.length, 1)
-  const newSheetId = store().addSheet()
-  eq('新建后有两张画布', store().workbook.sheets.length, 2)
-  eq('新建后自动切到新画布', store().workbook.activeSheetId, newSheetId)
-  eq('新画布标题', store().workbook.sheets[1].title, '画布 2')
-  check('新画布有根主题', Boolean(activeRoot(store().workbook).id))
-
-  const firstId = store().workbook.sheets[0].id
-  // 先假装刚保存过，才能验证「切换画布」本身不会把文档标脏
-  store().markSaved('D:/tmp/切换测试.xmind')
-  eq('切换前不脏', store().dirty, false)
-  // 此时的撤销栈里还有前面「新建/改名画布」留下的记录，切换不应再往上加
-  const undoBefore = store().undoStack.length
-  store().setActiveSheet(firstId)
-  eq('切换画布', store().workbook.activeSheetId, firstId)
-  eq('切换画布不标记未保存', store().dirty, false)
-  eq('切换画布不写入撤销栈', store().undoStack.length, undoBefore)
-
-  store().renameSheet(firstId, '改名后的画布')
-  eq('重命名画布', store().workbook.sheets[0].title, '改名后的画布')
-
-  store().removeSheet(firstId)
-  eq('删除画布后只剩一张', store().workbook.sheets.length, 1)
-  eq('删除当前画布后自动切到另一张', store().workbook.activeSheetId, newSheetId)
-  store().removeSheet(newSheetId)
-  eq('最后一张画布不允许删除', store().workbook.sheets.length, 1)
+  // 多画布功能已移除：界面只显示第一张画布，多文档由「标签页」承接（见 store/tabs 的测试）
 }
 
 /* ------------------------------------------------------------------ */
@@ -4748,28 +4791,29 @@ function testAi(): void {
   store().undo()
   eq('一次撤销整批回退', find(aiTarget)?.children.length, 0)
 
-  const sheetsBefore = store().workbook.sheets.length
-  const applied = store().applyOutlineTree({ kind: 'newSheet' }, {
+  // 「生成新导图」已改为在新窗口里成为独立文档（不走 applyOutlineTree）；
+  // 这里只测「挂到指定主题下」这一条路
+  reset()
+  const aiHost = addChildOf(root().id, '宿主')
+  const applied = store().applyOutlineTree(aiHost, {
     title: 'AI 主题',
     children: [{ title: '分支一', children: [{ title: '细节点', children: [] }] }]
   })
   eq('生成的节点数正确', applied, 3)
-  eq('新画布已创建', store().workbook.sheets.length, sheetsBefore + 1)
-  eq('当前画布切到新画布', activeRoot(store().workbook).title, 'AI 主题')
-  eq('层级被正确写入', activeRoot(store().workbook).children[0].children[0].title, '细节点')
+  eq('层级被正确写入', find(aiHost)?.children[0]?.children[0]?.children[0]?.title, '细节点')
   store().undo()
-  eq('撤销后回到原来的画布数', store().workbook.sheets.length, sheetsBefore)
+  eq('一次撤销整批回退', find(aiHost)?.children.length, 0)
 
   reset()
   const hostId = addChildOf(root().id, '宿主主题')
-  const childApplied = store().applyOutlineTree({ kind: 'childOf', id: hostId }, {
+  const childApplied = store().applyOutlineTree(hostId, {
     title: '生成的分支',
     children: []
   })
   eq('挂到已有主题下：节点数', childApplied, 1)
   eq('挂载结果正确', find(hostId)?.children.map((c) => c.title), ['生成的分支'])
 
-  const unknownTarget = store().applyOutlineTree({ kind: 'childOf', id: '不存在的主题' }, {
+  const unknownTarget = store().applyOutlineTree('不存在的主题', {
     title: 'x',
     children: []
   })
@@ -4948,14 +4992,12 @@ function testImport(): void {
   reset()
   const markdownText = '# 学习计划\n- 前端\n  - React\n- 后端'
   const parsedMd = parseMarkdownOutline(markdownText, '学习计划')
-  const beforeSheets = store().workbook.sheets.length
-  const imported = store().applyOutlineTree({ kind: 'newSheet' }, parsedMd.root!, parsedMd.root!.title)
+  const mdHost = addChildOf(root().id, '宿主')
+  const imported = store().applyOutlineTree(mdHost, parsedMd.root!)
   eq('导入节点数', imported, 4)
-  eq('导入后新增一张画布', store().workbook.sheets.length, beforeSheets + 1)
-  eq('画布中心主题正确', activeRoot(store().workbook).title, '学习计划')
-  eq('导入层级正确', activeRoot(store().workbook).children[0].children.map((c) => c.title), ['React'])
+  eq('导入层级正确', find(mdHost)?.children[0]?.children[0]?.children.map((c) => c.title), ['React'])
   store().undo()
-  eq('一次撤销回到导入前', store().workbook.sheets.length, beforeSheets)
+  eq('一次撤销回到导入前', find(mdHost)?.children.length, 0)
 }
 
 /* ------------------------------------------------------------------ */
@@ -4977,12 +5019,6 @@ function testNaming(): void {
   store().setTitle(root().id, '')
   eq('中心主题为空时退回画布名', defaultDocumentName(store().workbook), '画布 1')
 
-  store().renameSheet(sheet().id, '我的画布')
-  eq('画布名也参与兜底', defaultDocumentName(store().workbook), '我的画布')
-
-  store().renameSheet(sheet().id, '   ')
-  eq('画布名也没有时用未命名导图', defaultDocumentName(store().workbook), '未命名导图')
-
   group('默认文件名：非法字符与保留名')
 
   reset()
@@ -5003,18 +5039,6 @@ function testNaming(): void {
 
   eq('纯空白的名字返回空串', sanitizeFileName('   '), '')
   eq('有内容的正常通过', sanitizeFileName('正常名字'), '正常名字')
-
-  group('默认文件名：多画布时取当前画布')
-
-  reset()
-  const firstSheetId = sheet().id
-  store().setTitle(root().id, '第一张')
-  const secondId = store().addSheet()
-  eq('新画布用的是新画布的中心主题', defaultDocumentName(store().workbook), '中心主题')
-  store().renameSheet(secondId, '第二张画布')
-  eq('改画布名不影响取名（仍看中心主题）', defaultDocumentName(store().workbook), '中心主题')
-  store().setActiveSheet(firstSheetId)
-  eq('切回第一张后跟着变', defaultDocumentName(store().workbook), '第一张')
 }
 
 /* ------------------------------------------------------------------ */
@@ -5480,6 +5504,7 @@ async function main(): Promise<void> {
   testBranchStructure()
   testBranchFamiliesMore()
   testMultiWindow()
+  testTabs()
   testMarkdownFullFormat()
   testUndoSelectionAndRelayout()
   testLayoutNoOverlap()

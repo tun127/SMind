@@ -59,9 +59,7 @@ export default function SearchPanel({ onClose, onNotify }: Props): ReactElement 
 
   const goTo = (topicId: string): void => {
     useEditor.getState().select(topicId)
-    // 命中的节点可能在别的画布上，先切过去再居中
-    const owner = workbook.sheets.find((item) => findTopic(item.rootTopic, topicId))
-    if (owner && owner.id !== workbook.activeSheetId) useEditor.getState().setActiveSheet(owner.id)
+    // 界面只显示第一张画布，命中后直接居中
     window.requestAnimationFrame(() => viewportActions.centerOn(topicId))
   }
 

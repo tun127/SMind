@@ -20,6 +20,12 @@ interface Props {
   task: AiTask
   onClose(): void
   onNotify(message: string): void
+  /**
+   * 「生成新导图」的落地方式：在**新窗口**里成为一份独立文档。
+   *
+   * 不再往当前文档里加内容——那会让用户觉得"当前导图被塞了东西/被覆盖了"。
+   */
+  onGenerateInNewWindow(root: OutlineNode, title: string): void
 }
 
 /** 生成结果的树形预览 */
@@ -37,7 +43,7 @@ function OutlinePreview({ node, depth = 0 }: { node: OutlineNode; depth?: number
   )
 }
 
-export default function AiDialog({ task, onClose, onNotify }: Props): ReactElement {
+export default function AiDialog({ task, onClose, onNotify, onGenerateInNewWindow }: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
   const selectedId = selection[0] ?? null
@@ -51,7 +57,7 @@ export default function AiDialog({ task, onClose, onNotify }: Props): ReactEleme
   const [extra, setExtra] = useState('')
   const [count, setCount] = useState(5)
   const [style, setStyle] = useState('简洁、专业、通顺')
-  const [target, setTarget] = useState<'newSheet' | 'child'>('newSheet')
+  const [target, setTarget] = useState<'newWindow' | 'child'>('newWindow')
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -159,11 +165,15 @@ export default function AiDialog({ task, onClose, onNotify }: Props): ReactEleme
     }
 
     if (!outline) return
-    const applied = store.applyOutlineTree(
-      target === 'newSheet' ? { kind: 'newSheet' } : { kind: 'childOf', id: selectedTopic?.id ?? '' },
-      outline,
-      outline.title
-    )
+
+    // 生成新导图 → 在新窗口里成为独立文档（不动当前文档）
+    if (target === 'newWindow') {
+      onGenerateInNewWindow(outline, outline.title)
+      onClose()
+      return
+    }
+
+    const applied = store.applyOutlineTree(selectedTopic?.id ?? '', outline)
     onNotify(`已生成 ${applied} 个主题，可用 Ctrl+Z 撤回`)
     onClose()
   }
@@ -172,8 +182,8 @@ export default function AiDialog({ task, onClose, onNotify }: Props): ReactEleme
     !busy &&
     ((task === 'generate' &&
       outline !== null &&
-      // 挂到已有主题下时必须有选中的主题，否则无处可挂
-      (target === 'newSheet' || selectedTopic !== null)) ||
+      // 挂到已有主题下时必须有选中的主题，否则无处可挂（「新窗口」不需要）
+      (target === 'newWindow' || selectedTopic !== null)) ||
       (task === 'expand' && flat.length > 0) ||
       (task === 'polish' && polished.trim().length > 0))
 
@@ -240,10 +250,11 @@ export default function AiDialog({ task, onClose, onNotify }: Props): ReactEleme
               <div className="ai-choices">
                 <button
                   type="button"
-                  className={target === 'newSheet' ? 'ai-choice ai-choice--active' : 'ai-choice'}
-                  onClick={() => setTarget('newSheet')}
+                  className={target === 'newWindow' ? 'ai-choice ai-choice--active' : 'ai-choice'}
+                  title="在**新窗口**里成为一份独立文档，不影响当前导图"
+                  onClick={() => setTarget('newWindow')}
                 >
-                  新画布
+                  新窗口
                 </button>
                 <button
                   type="button"

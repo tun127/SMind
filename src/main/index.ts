@@ -64,7 +64,7 @@ import {
 import { imageExportFormatDef, type ImageExportFormat } from '@shared/export/types'
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
 import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '@shared/recovery'
-import { autosaveSlotName, findWindowForPath } from '@shared/window'
+import { autosaveSlotName, sameDocPath } from '@shared/window'
 import { buildAppMenu } from './menu'
 
 /** 应用名：与 electron-builder 的 productName、窗口标题保持一致 */
@@ -145,19 +145,13 @@ async function pruneStaleCopies(): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 /**
- * 一个窗口 = 一份独立文档。
+ * 一个窗口可以开着**多个文档标签**（浏览器式多文件），
+ * 所以资源与文档归属再往下分一层——按 docId（标签）隔离。
  *
- * 多窗口下「这是谁的文档」必须分得清：图片/附件资源、自动存档槽位、
- * 未保存确认、当前文档路径都挂在窗口上。否则两个窗口会互相糟蹋——
- * A 窗口保存时把 B 窗口的图片打进包里、退出时只问了其中一个窗口、
- * 两个窗口互相覆盖同一份自动存档。
+ * 不分的话：A 标签保存时会把 B 标签的图片打进包里，A 删掉图片会把 B 的资源一起清掉。
+ * 自动存档槽位与未保存确认仍然按窗口（一次只存/问激活的那个标签）。
  */
-interface DocWindow {
-  /** webContents.id */
-  id: number
-  win: BrowserWindow
-  /** 自动存档槽位名 */
-  slot: string
+interface DocResources {
   /** 这份文档携带的图片/附件资源；保存时只打自己这一份 */
   resources: Record<string, Uint8Array>
   /**
@@ -166,14 +160,22 @@ interface DocWindow {
    * 文件里原本带着的资源一律不动（可能有本软件尚未建模的引用）。
    */
   inserted: Set<string>
-  /** 当前打开的文档路径（新文档＝null） */
+  /** 这份文档当前打开的文件路径（新文档＝null） */
   docPath: string | null
+}
+
+interface DocWindow {
+  /** webContents.id */
+  id: number
+  win: BrowserWindow
+  /** 自动存档槽位名 */
+  slot: string
+  /** 按文档 id（标签）隔离的资源与路径 */
+  docs: Map<string, DocResources>
   /** 渲染进程已确认可以关闭（未保存内容问过了） */
   allowClose: boolean
   /** 启动/二实例带的文件，渲染进程就绪后取走 */
   pendingPath: string | null
-  /** 这个窗口打开文档后要定位到哪张画布（「在新窗口打开画布副本」用） */
-  pendingSheet: string | null
   /** 这个窗口打开的是临时副本：文档没有磁盘归属，关窗时把临时文件删掉 */
   copySource: string | null
 }
@@ -183,16 +185,21 @@ const windows = new Map<number, DocWindow>()
 let primaryWindowId: number | null = null
 let windowSeq = 0
 
-function resetResources(state: DocWindow): void {
-  state.resources = {}
-  state.inserted.clear()
+/** 取（或建）某个文档的资源记录：渲染进程开新标签后第一次用到时才真正建起来 */
+function docOf(state: DocWindow, docId: string): DocResources {
+  let doc = state.docs.get(docId)
+  if (!doc) {
+    doc = { resources: {}, inserted: new Set(), docPath: null }
+    state.docs.set(docId, doc)
+  }
+  return doc
 }
 
-function pruneForSave(state: DocWindow, workbook: Workbook): void {
-  const { resources, removed } = pruneSessionResources(state.resources, state.inserted, workbook)
+function pruneForSave(doc: DocResources, workbook: Workbook): void {
+  const { resources, removed } = pruneSessionResources(doc.resources, doc.inserted, workbook)
   if (removed.length === 0) return
-  state.resources = resources
-  for (const path of removed) state.inserted.delete(path)
+  doc.resources = resources
+  for (const path of removed) doc.inserted.delete(path)
 }
 
 /** 取发起请求的窗口状态；实在拿不到就退回聚焦窗口 */
@@ -235,16 +242,22 @@ async function showSaveIn(
 /* 文件读写                                                            */
 /* ------------------------------------------------------------------ */
 
-async function readDocumentInto(state: DocWindow | null, path: string): Promise<OpenResult> {
+async function readDocumentInto(
+  state: DocWindow | null,
+  docId: string,
+  path: string
+): Promise<OpenResult> {
   const buf = await fs.readFile(path)
   // 传文件名进去：亿图脑图的专有 .emmx 没有自带文档名，只能拿文件名当中心主题
   const parsed = await parseXmind(new Uint8Array(buf), { fileName: basename(path) })
   // 副本（临时文件）：算"未保存的新文档"——不记路径、不进历史、保存走另存为
   const isCopy = Boolean(state && state.copySource && state.copySource === path)
-  if (state) {
-    state.resources = parsed.resources
-    state.inserted.clear()
-    state.docPath = isCopy ? null : path
+  if (state && typeof docId === 'string') {
+    // 资源记在**这个文档**名下：别的标签保存时不会把它们打进去
+    const doc = docOf(state, docId)
+    doc.resources = parsed.resources
+    doc.inserted.clear()
+    doc.docPath = isCopy ? null : path
   }
   // 记一笔打开历史（用中心主题名，方便在历史界面里认出是哪张图）；副本不进历史
   if (!isCopy) await recordVisit(path, defaultDocumentName(parsed.workbook)).catch(() => undefined)
@@ -257,11 +270,17 @@ async function readDocumentInto(state: DocWindow | null, path: string): Promise<
   }
 }
 
-async function writeDocument(state: DocWindow | null, path: string, workbook: Workbook): Promise<SaveResult> {
-  if (state) pruneForSave(state, workbook)
-  const bytes = await serializeXmind({ workbook, resources: state?.resources ?? {} })
+async function writeDocument(
+  state: DocWindow | null,
+  docId: string,
+  path: string,
+  workbook: Workbook
+): Promise<SaveResult> {
+  const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
+  if (doc) pruneForSave(doc, workbook)
+  const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
   await fs.writeFile(path, Buffer.from(bytes))
-  if (state) state.docPath = path
+  if (doc) doc.docPath = path
   // 保存成功也记一笔，并记住这次用的目录（下次「另存为」默认落在这里）
   await rememberSaveDir(dirname(path)).catch(() => undefined)
   await recordVisit(path, defaultDocumentName(workbook)).catch(() => undefined)
@@ -401,9 +420,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `options.path` 只在「启动时带文件 / 双击文件 / 二实例传参」时给：
  * 那一刻 React 可能还没挂载，所以路径先存在窗口状态里，渲染进程就绪后自己来取一次。
  */
-function createWindow(
-  options: { path?: string | null; sheetId?: string | null; copySource?: string | null } = {}
-): DocWindow {
+function createWindow(options: { path?: string | null; copySource?: string | null } = {}): DocWindow {
   windowSeq += 1
   const slot = autosaveSlotName(windowSeq)
 
@@ -429,12 +446,9 @@ function createWindow(
     id: win.webContents.id,
     win,
     slot,
-    resources: {},
-    inserted: new Set(),
-    docPath: null,
+    docs: new Map(),
     allowClose: false,
     pendingPath: options.path ?? null,
-    pendingSheet: options.sheetId ?? null,
     copySource: options.copySource ?? null
   }
   windows.set(state.id, state)
@@ -512,24 +526,33 @@ function createWindow(
   return state
 }
 
-/** 当前所有窗口的文档路径（按窗口顺序），用于「同一个文件别开两个窗口」 */
-function openDocPaths(): Array<string | null> {
-  return [...windows.values()].map((state) => state.docPath)
-}
-
 /**
- * 「从外面打开一个文档」（双击 .xmind、二实例传参、macOS 的 open-file）：
- * 已经在某个窗口里开着就聚焦它，否则**开一个新窗口**——多窗口的基本预期就是这个。
+ * 「从外面打开一个文档」（双击 .xmind、二实例传参、macOS 的 open-file）。
+ *
+ * 标签为主：已经开着这个文件 → 聚焦那个窗口，并推给它的渲染进程去**切到那个标签**；
+ * 没开过 → 交给**当前聚焦的窗口**开一个新标签（浏览器的行为）；
+ * 一个窗口都没有才新建窗口。
  */
 function openDocumentSomewhere(path: string): void {
-  const index = findWindowForPath(openDocPaths(), path)
-  if (index >= 0) {
-    const state = [...windows.values()][index]
-    if (state && !state.win.isDestroyed()) {
+  for (const state of windows.values()) {
+    let has = false
+    for (const doc of state.docs.values()) {
+      if (doc.docPath && sameDocPath(doc.docPath, path)) {
+        has = true
+        break
+      }
+    }
+    if (has && !state.win.isDestroyed()) {
       if (state.win.isMinimized()) state.win.restore()
       state.win.focus()
+      state.win.webContents.send(IPC.fileOpenRequest, path)
       return
     }
+  }
+  const current = focusedState()
+  if (current && !current.win.isDestroyed()) {
+    current.win.webContents.send(IPC.fileOpenRequest, path)
+    return
   }
   createWindow({ path })
 }
@@ -539,15 +562,17 @@ function openDocumentSomewhere(path: string): void {
 /* ------------------------------------------------------------------ */
 
 /**
- * 跨窗口找一份资源。
+ * 跨窗口、跨标签找一份资源。
  *
- * 协议请求本身认不出是哪个窗口发的，而资源路径是全局唯一的，
- * 所以这里扫描各窗口的资源表；**隔离发生在保存时**（每个窗口只打自己那一份）。
+ * 协议请求本身认不出是哪个窗口/标签发的，而资源路径是全局唯一的，
+ * 所以这里扫描各窗口各文档的资源表；**隔离发生在保存时**（每份文档只打自己那一份）。
  */
 function resourceBytesOf(path: string): Uint8Array | undefined {
   for (const state of windows.values()) {
-    const bytes = state.resources[path]
-    if (bytes) return bytes
+    for (const doc of state.docs.values()) {
+      const bytes = doc.resources[path]
+      if (bytes) return bytes
+    }
   }
   return undefined
 }
@@ -593,11 +618,18 @@ function registerIpc(): void {
     return target
   })
 
-  /** 渲染进程报告「我这个窗口现在打开的是哪个文件」（新建＝null）：用于同文件不重复开窗 */
-  ipcMain.on(IPC.documentPath, (e, path: string | null) => {
+  /** 渲染进程报告「某个标签现在打开的是哪个文件」（新建＝null）：用于同文件不重复开窗/开标签 */
+  ipcMain.on(IPC.documentPath, (e, docId: string, path: string | null) => {
     const state = stateOf(e.sender)
-    if (!state) return
-    state.docPath = typeof path === 'string' && path.length > 0 ? path : null
+    if (!state || typeof docId !== 'string') return
+    docOf(state, docId).docPath = typeof path === 'string' && path.length > 0 ? path : null
+  })
+
+  /** 释放一个文档（标签关闭）：丢掉它的资源表；自动存档槽位不归它管 */
+  ipcMain.handle(IPC.releaseDoc, async (e, docId: string): Promise<void> => {
+    const state = stateOf(e.sender)
+    if (!state || typeof docId !== 'string') return
+    state.docs.delete(docId)
   })
 
   /** 新建一个窗口（菜单「新建窗口」/ Ctrl+Shift+N） */
@@ -614,21 +646,25 @@ function registerIpc(): void {
    * 所以这里把当前文档（含未保存改动与图片资源）写成一份**临时副本**，
    * 新窗口打开它但**不认路径**：保存时会走「另存为」，永远不会写回原文件。
    */
-  ipcMain.handle(IPC.openSheetWindow, async (e, workbook: Workbook, sheetId: string): Promise<'ok' | 'failed'> => {
-    const state = stateOf(e.sender)
-    if (!state) return 'failed'
-    try {
-      await fs.mkdir(copyDir(), { recursive: true })
-      pruneForSave(state, workbook)
-      const bytes = await serializeXmind({ workbook, resources: state.resources })
-      const copyPath = join(copyDir(), `${state.slot}-copy-${Date.now().toString(36)}.xmind`)
-      await fs.writeFile(copyPath, Buffer.from(bytes))
-      createWindow({ path: copyPath, sheetId, copySource: copyPath })
-      return 'ok'
-    } catch {
-      return 'failed'
+  ipcMain.handle(
+    IPC.openSheetWindow,
+    async (e, docId: string, workbook: Workbook): Promise<'ok' | 'failed'> => {
+      const state = stateOf(e.sender)
+      if (!state) return 'failed'
+      try {
+        await fs.mkdir(copyDir(), { recursive: true })
+        const doc = typeof docId === 'string' ? docOf(state, docId) : null
+        if (doc) pruneForSave(doc, workbook)
+        const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
+        const copyPath = join(copyDir(), `${state.slot}-copy-${Date.now().toString(36)}.xmind`)
+        await fs.writeFile(copyPath, Buffer.from(bytes))
+        createWindow({ path: copyPath, copySource: copyPath })
+        return 'ok'
+      } catch {
+        return 'failed'
+      }
     }
-  })
+  )
 
   /**
    * 在**新窗口**打开一个已有文件。
@@ -644,15 +680,6 @@ function registerIpc(): void {
     }
   })
 
-  /** 新窗口启动后取「要定位到哪张画布」，取一次即清空 */
-  ipcMain.handle(IPC.pendingSheet, async (e): Promise<string | null> => {
-    const state = stateOf(e.sender)
-    if (!state) return null
-    const target = state.pendingSheet
-    state.pendingSheet = null
-    return target
-  })
-
   /**
    * 读系统剪贴板里的纯文本。
    * 渲染进程自己也读得到（navigator.clipboard），但那个 API 在没聚焦/无权限时会抛，
@@ -660,7 +687,7 @@ function registerIpc(): void {
    */
   ipcMain.handle(IPC.clipboardText, async (): Promise<string> => clipboard.readText())
 
-  ipcMain.handle(IPC.openDialog, async (e): Promise<OpenResult | null> => {
+  ipcMain.handle(IPC.openDialog, async (e, docId: string): Promise<OpenResult | null> => {
     const result = await showOpenIn(winOf(e.sender), {
       title: '打开思维导图',
       filters: [
@@ -673,20 +700,23 @@ function registerIpc(): void {
       properties: ['openFile']
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    return readDocumentInto(stateOf(e.sender), result.filePaths[0])
+    return readDocumentInto(stateOf(e.sender), docId, result.filePaths[0])
   })
 
-  ipcMain.handle(IPC.openPath, async (e, path: string): Promise<OpenResult> =>
-    readDocumentInto(stateOf(e.sender), path)
+  ipcMain.handle(IPC.openPath, async (e, docId: string, path: string): Promise<OpenResult> =>
+    readDocumentInto(stateOf(e.sender), docId, path)
   )
 
-  ipcMain.handle(IPC.saveToPath, async (e, path: string, workbook: Workbook): Promise<SaveResult> => {
-    return writeDocument(stateOf(e.sender), ensureXmindExt(path), workbook)
-  })
+  ipcMain.handle(
+    IPC.saveToPath,
+    async (e, docId: string, path: string, workbook: Workbook): Promise<SaveResult> => {
+      return writeDocument(stateOf(e.sender), docId, ensureXmindExt(path), workbook)
+    }
+  )
 
   ipcMain.handle(
     IPC.saveAs,
-    async (e, workbook: Workbook, suggestedName: string): Promise<SaveResult | null> => {
+    async (e, docId: string, workbook: Workbook, suggestedName: string): Promise<SaveResult | null> => {
       // 默认落在记住的保存目录（首次是「文档/思维导图」）
       const dir = await currentSaveDir()
       const result = await showSaveIn(winOf(e.sender), {
@@ -695,18 +725,19 @@ function registerIpc(): void {
         filters: [{ name: '思维导图文件', extensions: ['xmind'] }]
       })
       if (result.canceled || !result.filePath) return null
-      return writeDocument(stateOf(e.sender), ensureXmindExt(result.filePath), workbook)
+      return writeDocument(stateOf(e.sender), docId, ensureXmindExt(result.filePath), workbook)
     }
   )
 
   ipcMain.handle(
     IPC.autosave,
-    async (e, workbook: Workbook, originalPath: string | null, title: string): Promise<void> => {
+    async (e, docId: string, workbook: Workbook, originalPath: string | null, title: string): Promise<void> => {
       const state = stateOf(e.sender)
+      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
       if (!state) return
       await fs.mkdir(autosaveDir(), { recursive: true })
-      pruneForSave(state, workbook)
-      const bytes = await serializeXmind({ workbook, resources: state.resources })
+      if (doc) pruneForSave(doc, workbook)
+      const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
       await fs.writeFile(autosaveFile(state.slot), Buffer.from(bytes))
       const meta: RecoveryMeta = {
         originalPath: originalPath ?? null,
@@ -721,14 +752,6 @@ function registerIpc(): void {
   ipcMain.handle(IPC.autosaveClear, async (e): Promise<void> => {
     const state = stateOf(e.sender)
     if (!state) return
-    await fs.rm(autosaveFile(state.slot), { force: true })
-    await fs.rm(autosaveMeta(state.slot), { force: true })
-  })
-
-  ipcMain.handle(IPC.documentReset, async (e): Promise<void> => {
-    const state = stateOf(e.sender)
-    if (!state) return
-    resetResources(state)
     await fs.rm(autosaveFile(state.slot), { force: true })
     await fs.rm(autosaveMeta(state.slot), { force: true })
   })
@@ -754,16 +777,20 @@ function registerIpc(): void {
     return { originalPath: meta.originalPath, title: meta.title, savedAt: meta.savedAt }
   })
 
-  ipcMain.handle(IPC.recoveryLoad, async (e): Promise<OpenResult | null> => {
+  ipcMain.handle(IPC.recoveryLoad, async (e, docId: string): Promise<OpenResult | null> => {
     const state = stateOf(e.sender)
     if (!state || !existsSync(autosaveFile(state.slot))) return null
     const meta = await readAutosaveMeta(state.slot)
     const buf = await fs.readFile(autosaveFile(state.slot))
     const parsed = await parseXmind(new Uint8Array(buf))
-    // 存档里同样带着图片/附件：不还原资源的话，恢复后一保存就全丢了
-    state.resources = parsed.resources
-    state.inserted.clear()
-    state.docPath = meta?.originalPath ?? null
+    // 存档里同样带着图片/附件：不还原资源的话，恢复后一保存就全丢了。
+    // 资源记到**恢复到的那份文档**名下（多标签之间互不沾染）
+    if (typeof docId === 'string') {
+      const doc = docOf(state, docId)
+      doc.resources = parsed.resources
+      doc.inserted.clear()
+      doc.docPath = meta?.originalPath ?? null
+    }
     return {
       path: meta?.originalPath ?? '',
       workbook: parsed.workbook,
@@ -870,7 +897,7 @@ function registerIpc(): void {
 
   /* ---- 图片与附件（P4） ---- */
 
-  ipcMain.handle(IPC.pickImage, async (e): Promise<PickedImage | null> => {
+  ipcMain.handle(IPC.pickImage, async (e, docId: string): Promise<PickedImage | null> => {
     const result = await showOpenIn(winOf(e.sender), {
       title: '插入图片',
       filters: [{ name: '图片', extensions: IMAGE_EXTENSIONS }],
@@ -880,14 +907,19 @@ function registerIpc(): void {
 
     const file = result.filePaths[0]
     const buf = await fs.readFile(file)
-    return registerImageBytes(stateOf(e.sender), safeResourceName(file), buf)
+    return registerImageBytes(stateOf(e.sender), docId, safeResourceName(file), buf)
   })
 
   /**
-   * 把一段图片字节登记进**这个窗口的**资源表（与 pickImage 同一条路，保存时打进包里）。
-   * 多窗口下必须挂在窗口上：否则 A 窗口保存时会把 B 窗口插入的图片一起打进包。
+   * 把一段图片字节登记进**这份文档**的资源表（与 pickImage 同一条路，保存时打进包里）。
+   * 必须按 docId 挂：否则 A 标签保存时会把 B 标签插入的图片一起打进包。
    */
-  const registerImageBytes = (state: DocWindow | null, name: string, buf: Buffer): PickedImage => {
+  const registerImageBytes = (
+    state: DocWindow | null,
+    docId: string,
+    name: string,
+    buf: Buffer
+  ): PickedImage => {
     if (buf.byteLength === 0) throw new Error('这张图片是空文件，无法插入')
     const path = resourcePathFor(createId('img'), name)
 
@@ -903,15 +935,16 @@ function registerIpc(): void {
       height = 0
     }
 
-    if (state) {
-      state.resources[path] = new Uint8Array(buf)
-      state.inserted.add(path)
+    if (state && typeof docId === 'string') {
+      const doc = docOf(state, docId)
+      doc.resources[path] = new Uint8Array(buf)
+      doc.inserted.add(path)
     }
     return { path, name: safeResourceName(name), width, height, size: buf.byteLength }
   }
 
   // 读取系统剪贴板里的图片（截图后直接 Ctrl+V 贴到选中的主题上）；没有图片返回 null
-  ipcMain.handle(IPC.pasteImage, async (e): Promise<PickedImage | null> => {
+  ipcMain.handle(IPC.pasteImage, async (e, docId: string): Promise<PickedImage | null> => {
     let items: Electron.ClipboardItem[] = []
     try {
       items = await clipboard.read()
@@ -927,7 +960,7 @@ function registerIpc(): void {
         const buf = Buffer.from(await payload.arrayBuffer())
         if (buf.byteLength === 0) continue
         const extension = mime === 'image/jpeg' ? 'jpg' : 'png'
-        return registerImageBytes(stateOf(e.sender), `剪贴板图片.${extension}`, buf)
+        return registerImageBytes(stateOf(e.sender), docId, `剪贴板图片.${extension}`, buf)
       } catch {
         continue
       }
@@ -936,12 +969,15 @@ function registerIpc(): void {
   })
 
   // 渲染进程拖入 / 粘贴得到的图片字节（拖拽文件走这里）
-  ipcMain.handle(IPC.addImage, async (e, name: string, bytes: Uint8Array): Promise<PickedImage | null> => {
-    if (!bytes || bytes.byteLength === 0) return null
-    return registerImageBytes(stateOf(e.sender), name, Buffer.from(bytes))
-  })
+  ipcMain.handle(
+    IPC.addImage,
+    async (e, docId: string, name: string, bytes: Uint8Array): Promise<PickedImage | null> => {
+      if (!bytes || bytes.byteLength === 0) return null
+      return registerImageBytes(stateOf(e.sender), docId, name, Buffer.from(bytes))
+    }
+  )
 
-  ipcMain.handle(IPC.pickAttachment, async (e): Promise<PickedAttachment | null> => {
+  ipcMain.handle(IPC.pickAttachment, async (e, docId: string): Promise<PickedAttachment | null> => {
     const result = await showOpenIn(winOf(e.sender), {
       title: '添加附件',
       filters: [{ name: '所有文件', extensions: ['*'] }],
@@ -953,9 +989,10 @@ function registerIpc(): void {
     const buf = await fs.readFile(file)
     const path = resourcePathFor(createId('att'), file)
     const state = stateOf(e.sender)
-    if (state) {
-      state.resources[path] = new Uint8Array(buf)
-      state.inserted.add(path)
+    if (state && typeof docId === 'string') {
+      const doc = docOf(state, docId)
+      doc.resources[path] = new Uint8Array(buf)
+      doc.inserted.add(path)
     }
 
     return {
@@ -968,8 +1005,8 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.openAttachment, async (e, path: string, name: string): Promise<boolean> => {
-    // 附件也是这个窗口文档的资源；找不到时再跨窗口找一次（协议请求之外的实际需要）
-    const bytes = stateOf(e.sender)?.resources[path] ?? resourceBytesOf(path)
+    // 附件资源路径全局唯一：直接跨窗口/跨标签找
+    const bytes = resourceBytesOf(path)
     if (!bytes) return false
     // 附件是包内资源，得先落到临时文件才能交给系统程序打开。
     // 文件名带上路径哈希：同名附件互不覆盖，同一附件重复打开复用同一个临时文件。
@@ -983,7 +1020,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.saveAttachmentAs, async (e, path: string, suggestedName: string): Promise<boolean> => {
-    const bytes = stateOf(e.sender)?.resources[path] ?? resourceBytesOf(path)
+    const bytes = resourceBytesOf(path)
     if (!bytes) return false
     const result = await showSaveIn(winOf(e.sender), {
       title: '导出附件',
@@ -1158,6 +1195,7 @@ function registerIpc(): void {
     IPC.snapshotCreate,
     async (
       e,
+      docId: string,
       input: {
         workbook: Workbook
         path: string | null
@@ -1165,27 +1203,31 @@ function registerIpc(): void {
         reason: SnapshotReason
         note?: string
       }
-    ): Promise<SnapshotItem[]> =>
-      createSnapshot({
+    ): Promise<SnapshotItem[]> => {
+      const state = stateOf(e.sender)
+      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
+      return createSnapshot({
         workbook: input.workbook,
-        // 资源留在主进程，直接取**这个窗口**文档的那一份
-        resources: stateOf(e.sender)?.resources ?? {},
+        // 资源留在主进程，直接取**这份文档**的那一份
+        resources: doc?.resources ?? {},
         path: input.path,
         title: input.title,
         reason: input.reason,
         note: input.note
       })
+    }
   )
 
-  ipcMain.handle(IPC.snapshotRestore, async (e, id: string): Promise<SnapshotRestoreResult> => {
+  ipcMain.handle(IPC.snapshotRestore, async (e, docId: string, id: string): Promise<SnapshotRestoreResult> => {
     const bytes = await readSnapshotBytes(id)
     if (!bytes) throw new Error('这个版本的文件已经不在了，可能被清理过')
     const parsed = await parseXmind(bytes)
     // 与打开文件一致：资源必须留在主进程，否则「恢复后再保存」会把图片丢掉
     const state = stateOf(e.sender)
-    if (state) {
-      state.resources = parsed.resources
-      state.inserted.clear()
+    if (state && typeof docId === 'string') {
+      const doc = docOf(state, docId)
+      doc.resources = parsed.resources
+      doc.inserted.clear()
     }
     return {
       workbook: parsed.workbook,

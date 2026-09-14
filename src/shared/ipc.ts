@@ -88,16 +88,16 @@ export const IPC = {
   setTitle: 'window:set-title',
   /** 新开一个窗口（= 新的一份文档） */
   newWindow: 'window:new',
-  /** 在新窗口打开「当前文档的某张画布」（同一文件，用于并排看两张画布） */
-  openSheetWindow: 'window:open-sheet',
-  /** 在新窗口打开一个已有文件（当前窗口有内容时用它，避免覆盖当前画布） */
+  /** 在新窗口打开一份文档副本（导入大纲 / AI 生成导图 / 「在新窗口打开副本」用） */
+  openSheetWindow: 'window:open-copy',
+  /** 在新窗口打开一个已有文件（当前窗口有内容时用它，避免覆盖当前文档） */
   openPathWindow: 'window:open-path',
   /** 读系统剪贴板里的纯文本（粘贴 Markdown 片段用） */
   clipboardText: 'clipboard:read-text',
-  /** 新窗口启动后要定位到哪张画布（取一次即清空） */
-  pendingSheet: 'window:pending-sheet',
-  /** 渲染进程报告「这个窗口现在打开的是哪个文件」（新建＝null） */
+  /** 渲染进程报告「某个标签现在打开的是哪个文件」（新建＝null） */
   documentPath: 'window:document-path',
+  /** 释放一个文档（标签关闭）：主进程丢掉它的图片/附件资源表 */
+  releaseDoc: 'document:release',
   showInFolder: 'shell:show-in-folder',
   openExternal: 'shell:open-external',
   menuCommand: 'menu:command',
@@ -174,8 +174,13 @@ export type MenuCommand =
 
 /** preload 暴露给渲染进程的 API */
 export interface MindApi {
-  openDialog(): Promise<OpenResult | null>
-  openPath(path: string): Promise<OpenResult>
+  /**
+   * 多文档标签下，每个文档都有稳定的 docId；
+   * 主进程按 docId 隔离图片/附件资源——涉及「读文件 / 存文件 / 插资源」的
+   * IPC 第一个参数都是 docId。
+   */
+  openDialog(docId: string): Promise<OpenResult | null>
+  openPath(docId: string, path: string): Promise<OpenResult>
   /**
    * 启动时命令行里带的文档（双击 `.xmind`、把文件拖到 exe 上、右键「打开方式 → Mind」都走这里）。
    * 取一次即清空，没有则返回 null。
@@ -183,29 +188,33 @@ export interface MindApi {
   openFilePending(): Promise<string | null>
   /** 窗口已经开着时又打开了一个文档：主进程把它推过来（返回取消订阅） */
   onFileOpenRequest(handler: (path: string) => void): () => void
-  saveToPath(path: string, workbook: Workbook): Promise<SaveResult>
-  saveAs(workbook: Workbook, suggestedName: string): Promise<SaveResult | null>
-  autosave(workbook: Workbook, originalPath: string | null, title: string): Promise<void>
+  saveToPath(docId: string, path: string, workbook: Workbook): Promise<SaveResult>
+  saveAs(docId: string, workbook: Workbook, suggestedName: string): Promise<SaveResult | null>
+  autosave(docId: string, workbook: Workbook, originalPath: string | null, title: string): Promise<void>
   clearAutosave(): Promise<void>
   /**
-   * 丢弃当前文档的残留状态：自动存档 + 已加载的附件资源。
-   * 新建文档时必须调用，否则上一份文件的图片/附件会被写进新文件。
+   * 释放一个文档的残留资源（标签关闭时调用）：
+   * 主进程丢掉这个 docId 的图片/附件资源表。
+   * 自动存档不在这里清——它按窗口槽位存，由 clearAutosave / 正常关窗负责。
    */
-  documentReset(): Promise<void>
+  releaseDoc(docId: string): Promise<void>
   recoveryCheck(): Promise<RecoveryInfo | null>
-  recoveryLoad(): Promise<OpenResult | null>
+  recoveryLoad(docId: string): Promise<OpenResult | null>
   recoveryDiscard(): Promise<void>
   confirmClose(): void
   setTitle(title: string): void
   /** 开一个新窗口（= 新的一份文档）；每个窗口各自独立文档与撤销栈 */
   newWindow(): Promise<void>
   /**
-   * 在新窗口打开**当前文档的副本**（并定位到指定画布）。
+   * 在**新窗口**打开一份文档（副本语义）。
    *
-   * 副本是**完全独立**的：没有磁盘归属，导入/导出/保存（另存为）都不会影响原文档。
-   * 这就是"A 画布新建 B 画布、两者互不影响"的做法。未保存过的文档也能开副本。
+   * 用途：① 「在新窗口打开副本」——当前文档复制一份到新窗口，两边互不影响；
+   * ② 导入 Markdown/OPML、AI 生成导图——直接在**新窗口**里成为独立文档，
+   * 不往当前文档里塞东西（也就不会影响用户正在编辑的内容）。
+   *
+   * 副本**没有磁盘归属**：保存时会走「另存为」，永远不会覆盖原文件。
    */
-  openSheetInNewWindow(workbook: Workbook, sheetId: string): Promise<'ok' | 'failed'>
+  openWorkbookInNewWindow(docId: string, workbook: Workbook): Promise<'ok' | 'failed'>
   /**
    * 在**新窗口**打开一个已有文件。
    *
@@ -215,13 +224,11 @@ export interface MindApi {
   openPathInNewWindow(path: string): Promise<'ok' | 'failed'>
   /** 读系统剪贴板里的纯文本（粘贴 Markdown 片段用） */
   readClipboardText(): Promise<string>
-  /** 新窗口启动时要定位的画布 id（取一次即清空） */
-  pendingSheet(): Promise<string | null>
   /**
-   * 告诉主进程「这个窗口现在打开的是哪个文件」（新建文档传 null）。
-   * 主进程用它判断「双击的那个文件是不是已经开着」，从而聚焦已有窗口而不是重复开一个。
+   * 告诉主进程「某个标签现在打开的是哪个文件」（新建文档传 null）。
+   * 主进程用它判断「双击的那个文件是不是已经开着」，从而聚焦对应窗口/标签。
    */
-  reportDocument(path: string | null): void
+  reportDocument(docId: string, path: string | null): void
   showInFolder(path: string): void
   /** 用系统默认程序打开外部链接（仅允许 http/https/mailto） */
   openExternal(url: string): Promise<boolean>
@@ -245,14 +252,14 @@ export interface MindApi {
   settingsSave(settings: AppSettings): Promise<void>
 
   /* ---- 图片与附件（P4） ---- */
-  /** 选择一张图片并读进当前文档的资源里，取消返回 null */
-  pickImage(): Promise<PickedImage | null>
+  /** 选择一张图片并读进指定文档的资源里，取消返回 null */
+  pickImage(docId: string): Promise<PickedImage | null>
   /** 读取系统剪贴板里的图片，剪贴板中没有图片返回 null */
-  pasteImage(): Promise<PickedImage | null>
-  /** 把一段图片字节登记进当前文档资源（拖拽图片文件用） */
-  addImage(name: string, bytes: Uint8Array): Promise<PickedImage | null>
+  pasteImage(docId: string): Promise<PickedImage | null>
+  /** 把一段图片字节登记进指定文档资源（拖拽图片文件用） */
+  addImage(docId: string, name: string, bytes: Uint8Array): Promise<PickedImage | null>
   /** 选择一个文件作为附件，取消返回 null */
-  pickAttachment(): Promise<PickedAttachment | null>
+  pickAttachment(docId: string): Promise<PickedAttachment | null>
   /** 用系统默认程序打开附件（name 用于生成可读的临时文件名），失败返回 false */
   openAttachment(path: string, name: string): Promise<boolean>
   /** 把附件另存到用户选择的位置，取消或失败返回 false */
@@ -313,19 +320,22 @@ export interface MindApi {
    * 存一份版本。
    * reason 为 auto 时，内容与上一份相同（或距上次太近）会被忽略，不会重复写盘。
    */
-  snapshotCreate(input: {
-    workbook: Workbook
-    path: string | null
-    title: string
-    reason: SnapshotReason
-    note?: string
-  }): Promise<SnapshotItem[]>
+  snapshotCreate(
+    docId: string,
+    input: {
+      workbook: Workbook
+      path: string | null
+      title: string
+      reason: SnapshotReason
+      note?: string
+    }
+  ): Promise<SnapshotItem[]>
   /**
    * 恢复某个版本。
    * 刻意不复用 OpenResult：恢复是「把当前文档换回旧内容」，
    * 文件路径要保留当前值，而不是变成快照里记录的那个。
    */
-  snapshotRestore(id: string): Promise<SnapshotRestoreResult>
+  snapshotRestore(docId: string, id: string): Promise<SnapshotRestoreResult>
   snapshotRemove(id: string, path: string | null): Promise<SnapshotItem[]>
   snapshotClear(path: string | null): Promise<SnapshotItem[]>
 }

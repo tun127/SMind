@@ -9,13 +9,14 @@ import {
   parseInlineMarkdown,
   parseMarkdownOutline
 } from '@shared/import/markdown'
+import { outlineToTopic, type OutlineNode } from '@shared/ai'
+import { createWorkbookFromRoot } from '@shared/model/factory'
 import { parseOpmlOutline } from '@shared/import/opml'
 import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
 import OutlinePanel from './components/OutlinePanel'
 import RichFormatBar from './components/RichFormatBar'
 import SearchPanel from './components/SearchPanel'
-import SheetTabs from './components/SheetTabs'
 import StatusBar from './components/StatusBar'
 import ThemePanel from './components/ThemePanel'
 import Toolbar from './components/Toolbar'
@@ -29,6 +30,8 @@ import { bumpMeasureEpoch } from './render/measure'
 import { setDefaultTextAlign } from './render/defaults'
 import { stageTypedChar } from './editor/typedChar'
 import { snapshotForSave, useEditor } from './store/editor'
+import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
+import TabBar from './components/TabBar'
 import SettingsDialog from './components/SettingsDialog'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
 import type { ThemeDefinition } from '@shared/theme'
@@ -71,6 +74,7 @@ async function readClipboardImage(): Promise<PastedImage | null> {
       const bytes = new Uint8Array(await blob.arrayBuffer())
       if (bytes.byteLength === 0) continue
       const picked = await window.api.addImage(
+        activeDocId(),
         mime === 'image/jpeg' ? '剪贴板图片.jpg' : '剪贴板图片.png',
         bytes
       )
@@ -80,7 +84,7 @@ async function readClipboardImage(): Promise<PastedImage | null> {
     /* 渲染进程读不到就走主进程 */
   }
   try {
-    const picked = await window.api.pasteImage()
+    const picked = await window.api.pasteImage(activeDocId())
     return picked ? { path: picked.path, width: picked.width, height: picked.height } : null
   } catch {
     return null
@@ -95,7 +99,12 @@ export default function App(): ReactElement {
 
   const [toast, setToast] = useState<string | null>(null)
   const [recovery, setRecovery] = useState<RecoveryInfo | null>(null)
-  const [pending, setPending] = useState<{ run: () => void } | null>(null)
+  /** 未保存确认：run＝确认后的动作；fileName＝被确认的文档名；discard＝「不保存」的额外动作 */
+  const [pending, setPending] = useState<{
+    run: () => void
+    fileName: string
+    discard?: () => void
+  } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   /** 右侧抽屉：同一时刻只开一个 */
   const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node' | 'search'>('none')
@@ -143,12 +152,12 @@ export default function App(): ReactElement {
         if (!state.filePath || forceSaveAs) {
           // 默认文件名用中心主题的名字（空标题才退回「未命名导图」）
           const suggested = state.filePath ?? defaultFileName(state.workbook, 'xmind')
-          const result = await window.api.saveAs(state.workbook, suggested)
+          const result = await window.api.saveAs(activeDocId(), state.workbook, suggested)
           if (!result) return false
           useEditor.getState().markSaved(result.path)
           showToast(`已保存到 ${result.path}`)
         } else {
-          await window.api.saveToPath(state.filePath, state.workbook)
+          await window.api.saveToPath(activeDocId(), state.filePath, state.workbook)
           useEditor.getState().markSaved(state.filePath)
           showToast('已保存')
         }
@@ -162,18 +171,22 @@ export default function App(): ReactElement {
     [commitPending, showToast]
   )
 
-  /** 把「打开结果」落到编辑器里（对话框打开与历史记录打开共用一套收尾逻辑） */
-  const applyOpenResult = useCallback(
+  /** 把「打开结果」落成**一个标签**（对话框打开与历史记录打开共用一套收尾逻辑） */
+  const openIntoTab = useCallback(
     async (result: OpenResult): Promise<void> => {
+      const tabs = useTabs.getState()
+      // 已经开着这个文件：直接切过去（多标签去重，不会同一文件开两份）
+      if (!result.copy) {
+        const existing = tabs.findByPath(result.path)
+        if (existing) {
+          tabs.switchTo(existing)
+          showToast('这个文件已经开着，已帮你切换到那个标签')
+          return
+        }
+      }
       // 副本没有磁盘归属：当成未保存的新文档（保存时会提示另存为），
       // 这样它跟原文档完全独立——导入/导出/保存都不会影响另一个画布
-      useEditor.getState().loadDocument(result.workbook, result.copy ? null : result.path)
-      // 换了文档，上一份的自动存档已经没意义，清掉避免下次启动误提示恢复
-      try {
-        await window.api.clearAutosave()
-      } catch {
-        /* 忽略 */
-      }
+      tabs.openWorkbook(result.workbook, result.copy ? null : result.path)
       const messages: string[] = []
       if (result.resourceCount > 0) {
         messages.push(`已加载 ${result.resourceCount} 个图片/附件资源（保存时会一并写回）`)
@@ -184,46 +197,28 @@ export default function App(): ReactElement {
     [showToast]
   )
 
-  /**
-   * 当前窗口是不是"空白未改动"的文档。
-   *
-   * 用它决定「打开文件」是就地打开还是**开新窗口**：就地打开会把当前文档
-   * （含所有画布）整份替换掉——用户看到的"导入文件把画布 1 覆盖了"就是这么来的。
-   */
-  const isPristineWindow = useCallback((): boolean => {
-    const state = useEditor.getState()
-    return state.filePath === null && !state.dirty
-  }, [])
-
   const openDocument = useCallback(async (): Promise<void> => {
     commitPending()
-    const inPlace = isPristineWindow()
     try {
-      const result = await window.api.openDialog()
+      const result = await window.api.openDialog(activeDocId())
       if (!result) return
-      // 当前窗口有内容：转交给新窗口打开（读到的内容丢掉即可，本地文件再读一次很便宜）
-      if (!inPlace) {
-        const opened = await window.api.openPathInNewWindow(result.path)
-        showToast(opened === 'ok' ? '已在**新窗口**打开这个文件（当前文档保持不变）' : '打开失败，请重试')
-        return
-      }
-      await applyOpenResult(result)
+      await openIntoTab(result)
     } catch (err) {
       showToast(`打开失败：${(err as Error).message}`)
     }
-  }, [commitPending, applyOpenResult, isPristineWindow, showToast])
+  }, [commitPending, openIntoTab, showToast])
 
-  /** 直接打开某个路径（历史记录里点一条走这里） */
+  /** 直接打开某个路径（历史记录里点一条、外部拖入/双击共用） */
   const openPath = useCallback(
     async (path: string): Promise<void> => {
       commitPending()
       try {
-        await applyOpenResult(await window.api.openPath(path))
+        await openIntoTab(await window.api.openPath(activeDocId(), path))
       } catch (err) {
         showToast(`打开失败：${(err as Error).message}`)
       }
     },
-    [commitPending, applyOpenResult, showToast]
+    [commitPending, openIntoTab, showToast]
   )
 
   /** 直接打开某个路径（历史记录里点一条走这里） */
@@ -240,7 +235,7 @@ export default function App(): ReactElement {
       const store = useEditor.getState()
 
       try {
-        await window.api.snapshotCreate({
+        await window.api.snapshotCreate(activeDocId(), {
           workbook: snapshotForSave(store),
           path: store.filePath,
           title: defaultDocumentName(store.workbook),
@@ -251,7 +246,7 @@ export default function App(): ReactElement {
       }
 
       try {
-        const result = await window.api.snapshotRestore(snapshotId)
+        const result = await window.api.snapshotRestore(activeDocId(), snapshotId)
         useEditor.getState().restoreDocument(result.workbook)
         const messages = ['已恢复到所选版本（恢复前的状态也留了一份，可再切回）']
         if (result.resourceCount > 0) messages.push(`带回了 ${result.resourceCount} 个图片/附件资源`)
@@ -313,24 +308,50 @@ export default function App(): ReactElement {
   }, [])
 
   const newDocument = useCallback((): void => {
-    useEditor.getState().newDocument()
-    // 新建文档时套用「设置」里的默认主题（打开已有文件不动它自己的主题）
+    commitPending()
+    // 新建＝开一个**新标签**：当前文档原样留在自己的标签里，不需要未保存确认
+    useTabs.getState().newTab()
+    // 新文档按「设置」里的默认主题起手（打开已有文件不动它自己的主题）
     const preferred = useEditor.getState().appSettings.defaultThemeId
     if (preferred) {
       const theme = themesRef.current.find((item) => item.id === preferred)
       if (theme) useEditor.getState().applyTheme({ id: theme.id, name: theme.name, colors: theme.colors })
     }
-    // 一并清掉上一份文档残留的自动存档与附件资源，
-    // 否则旧文件的图片会被写进新文件
-    void window.api.documentReset()
-  }, [])
+  }, [commitPending])
+
+  /** 关闭一个标签（带未保存确认；确认文案里显示这份文档自己的名字） */
+  const closeTabById = useCallback(
+    (id: string): void => {
+      commitPending()
+      const tabs = useTabs.getState()
+      const tab = tabs.tabs.find((item) => item.id === id)
+      if (!tab) return
+      const liveDirty = id === tabs.activeId ? useEditor.getState().dirty : tab.dirty
+      const run = (): void => {
+        useTabs.getState().closeTab(id)
+        // 主进程丢掉这份文档的图片/附件资源（别的标签不受影响）
+        void window.api.releaseDoc(id).catch(() => undefined)
+      }
+      if (liveDirty) {
+        // 保存要保的是被关的那份：先把它切到前台再问
+        if (id !== tabs.activeId) useTabs.getState().switchTo(id)
+        setPending({ fileName: tabTitleOf(tab), run, discard: run })
+        return
+      }
+      run()
+    },
+    [commitPending]
+  )
 
   /** 有未保存内容时先弹确认框（先把未提交的输入落定，dirty 才准确） */
   const guard = useCallback(
     (run: () => void): void => {
       commitPending()
-      if (useEditor.getState().dirty) setPending({ run })
-      else run()
+      if (useEditor.getState().dirty) {
+        const state = useEditor.getState()
+        const active = useTabs.getState().tabs.find((item) => item.id === useTabs.getState().activeId)
+        setPending({ fileName: active ? tabTitleOf(active) : '当前文档', run })
+      } else run()
     },
     [commitPending]
   )
@@ -354,19 +375,33 @@ export default function App(): ReactElement {
    * **不会影响当前文档**——这就是"A 画布新建 B 画布、两者互不影响"的做法。
    * 因为副本是直接从内存里的文档序列化出来的（含未保存改动），不需要先保存。
    */
-  const openSheetWindow = useCallback((): void => {
+  const openCopyWindow = useCallback((): void => {
     commitPending()
     const store = useEditor.getState()
-    const sheetId = store.workbook.activeSheetId
     void (async () => {
-      const result = await window.api.openSheetInNewWindow(store.workbook, sheetId)
+      const result = await window.api.openWorkbookInNewWindow(activeDocId(), store.workbook)
       showToast(
         result === 'ok'
-          ? '已在新窗口打开这张画布的副本：两边互不影响，保存时会让你另存为新文件'
+          ? '已在新窗口打开副本：两边互不影响，保存时会让你另存为新文件'
           : '新窗口打开失败，请重试'
       )
     })()
   }, [commitPending, showToast])
+
+  /**
+   * AI「生成新导图」：在**新窗口**里成为一份独立文档（副本语义）。
+   * 不往当前文档里塞内容——那会让用户觉得"当前导图被塞了东西"。
+   */
+  const openGeneratedInNewWindow = useCallback(
+    (root: OutlineNode, title: string): void => {
+      const workbook = createWorkbookFromRoot(outlineToTopic(root), title || 'AI 导图')
+      void (async () => {
+        const opened = await window.api.openWorkbookInNewWindow(activeDocId(), workbook)
+        showToast(opened === 'ok' ? '已在新窗口生成一份独立导图' : '新窗口打开失败，请重试')
+      })()
+    },
+    [showToast]
+  )
 
   /* ------------------------------------------------------------------ */
   /* 导入 / 导出（工具栏与菜单共用）                                      */
@@ -421,9 +456,16 @@ export default function App(): ReactElement {
           return
         }
 
-        const count = useEditor.getState().applyOutlineTree({ kind: 'newSheet' }, parsed.root, fallbackTitle)
+        // 导入＝在**新窗口**里成为一份独立文档：不往当前文档里塞内容，
+        // 也就不会影响用户正在编辑的东西（保存时另存为新文件）
+        const workbook = createWorkbookFromRoot(outlineToTopic(parsed.root), fallbackTitle)
+        const opened = await window.api.openWorkbookInNewWindow(activeDocId(), workbook)
         const extra = parsed.warnings.length > 0 ? `（${parsed.warnings.join('；')}）` : ''
-        showToast(`已从「${file.name}」导入 ${count} 个主题${extra}，可用 Ctrl+Z 撤回`)
+        showToast(
+          opened === 'ok'
+            ? `已在新窗口打开「${file.name}」导入的 ${parsed.count} 个主题${extra}`
+            : '导入失败：新窗口没能打开'
+        )
       } catch (error) {
         showToast(`导入失败：${(error as Error).message}`)
       }
@@ -443,10 +485,11 @@ export default function App(): ReactElement {
           setShowSettings(true)
           break
         case 'file:new':
-          guard(newDocument)
+          // 新标签不动当前文档，不需要未保存确认
+          newDocument()
           break
         case 'file:open':
-          guard(() => void openDocument())
+          void openDocument()
           break
         case 'file:save':
           void saveDocument(false)
@@ -455,7 +498,7 @@ export default function App(): ReactElement {
           void saveDocument(true)
           break
         case 'file:open-sheet-window':
-          openSheetWindow()
+          openCopyWindow()
           break
         case 'edit:undo':
           store.undo()
@@ -530,7 +573,7 @@ export default function App(): ReactElement {
     importTheme,
     importOutlineFile,
     exportOutlineAs,
-    openSheetWindow,
+    openCopyWindow,
     showToast
   ])
 
@@ -541,53 +584,77 @@ export default function App(): ReactElement {
    *   主进程替我们存着，这里就绪后取一次（取走即清空）；
    * - **窗口已经开着时**再打开一个：主进程通过 `fileOpenRequest` 推过来。
    *
-   * 两条路都走 `guard`，避免在"有未保存改动"时静默替换掉当前文档。
+   * 标签为主：已经开着就切到那个标签，否则开**新标签**——都不动当前文档，无需未保存确认。
    */
-  /** 外部送来一个文件（拖进窗口 / 双击 .xmind / 命令行）：空白窗口就地打开，否则开新窗口 */
   const receiveExternalFile = useCallback(
     (path: string): void => {
-      if (isPristineWindow()) {
-        guard(() => void openPath(path))
+      const tabs = useTabs.getState()
+      const existing = tabs.findByPath(path)
+      if (existing) {
+        tabs.switchTo(existing)
+        showToast('这个文件已经开着，已帮你切换到那个标签')
         return
       }
-      void window.api
-        .openPathInNewWindow(path)
-        .then((opened) => {
-          if (opened === 'ok') showToast('已在新窗口打开这个文件（当前文档保持不变）')
-        })
-        .catch(() => undefined)
+      void openPath(path)
     },
-    [guard, isPristineWindow, openPath, showToast]
+    [openPath, showToast]
   )
 
   useEffect(() => {
     void (async () => {
       const path = await window.api.openFilePending()
       if (!path) return
-      guard(() => {
-        void (async () => {
-          await openPath(path)
-          // 这个窗口如果是「在新窗口打开画布副本」开出来的，打开文档后定位到那张画布
-          const sheetId = await window.api.pendingSheet()
-          if (sheetId) useEditor.getState().setActiveSheet(sheetId)
-        })()
-      })
+      void openPath(path)
     })()
     return window.api.onFileOpenRequest((path) => receiveExternalFile(path))
-  }, [guard, openPath, receiveExternalFile])
+  }, [openPath, receiveExternalFile])
 
   /* ------------------------------------------------------------------ */
   /* 关闭窗口                                                            */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * 退出前把**每个有未保存改动的标签**都问一遍（逐个切到前台询问），
+   * 全部有了着落（保存 / 丢弃）才真正关闭窗口。
+   */
+  const forceCloseIds = useRef(new Set<string>())
+  const closeWindowFlow = useCallback((): void => {
+    commitPending()
+    const tabs = useTabs.getState()
+    const askThis = (fileName: string): void =>
+      setPending({
+        fileName,
+        run: closeWindowFlow,
+        discard: () => {
+          forceCloseIds.current.add(useTabs.getState().activeId)
+          closeWindowFlow()
+        }
+      })
+    // 先问激活的（它就是屏幕上这份，用户最有概念）
+    if (useEditor.getState().dirty && !forceCloseIds.current.has(tabs.activeId)) {
+      const active = tabs.tabs.find((item) => item.id === tabs.activeId)
+      askThis(active ? tabTitleOf(active) : '当前文档')
+      return
+    }
+    // 再问其余脏标签（逐个切过去问）
+    const nextDirty = tabs.tabs.find(
+      (item) => item.dirty && item.id !== tabs.activeId && !forceCloseIds.current.has(item.id)
+    )
+    if (nextDirty) {
+      tabs.switchTo(nextDirty.id)
+      askThis(tabTitleOf(nextDirty))
+      return
+    }
+    closeApp()
+  }, [commitPending])
+
   useEffect(() => {
     const off = window.api.onCloseRequest(() => {
-      commitPending()
-      if (useEditor.getState().dirty) setPending({ run: closeApp })
-      else closeApp()
+      forceCloseIds.current.clear()
+      closeWindowFlow()
     })
     return off
-  }, [commitPending, closeApp])
+  }, [closeWindowFlow])
 
   /* ------------------------------------------------------------------ */
   /* 自动保存                                                            */
@@ -600,6 +667,7 @@ export default function App(): ReactElement {
       // 用快照而不是直接落库：把正在输入但还没提交的文本也写进去，
       // 同时不打断用户的输入（不会退出编辑态）
       void window.api.autosave(
+        activeDocId(),
         snapshotForSave(store),
         store.filePath,
         fileNameOf(store.filePath) ?? '未命名导图'
@@ -620,7 +688,7 @@ export default function App(): ReactElement {
       const store = useEditor.getState()
       if (!store.filePath) return
       void window.api
-        .snapshotCreate({
+        .snapshotCreate(activeDocId(), {
           workbook: snapshotForSave(store),
           path: store.filePath,
           title: defaultDocumentName(store.workbook),
@@ -652,9 +720,9 @@ export default function App(): ReactElement {
   const handleRestore = useCallback(async (): Promise<void> => {
     setRecovery(null)
     try {
-      const result = await window.api.recoveryLoad()
+      const result = await window.api.recoveryLoad(activeDocId())
       if (result) {
-        useEditor.getState().loadDocument(result.workbook, result.path || null)
+        useTabs.getState().openWorkbook(result.workbook, result.path || null)
         showToast('已恢复未保存的内容')
       }
     } catch (err) {
@@ -682,9 +750,9 @@ export default function App(): ReactElement {
       ? (fileNameOf(filePath) ?? '未命名导图')
       : defaultDocumentName(useEditor.getState().workbook)
     window.api.setTitle(`${dirty ? '● ' : ''}${name} - SMind`)
-    // 顺手告诉主进程「这个窗口开着哪个文件」：多窗口下双击同一个 .xmind 时，
-    // 主进程会聚焦已经开着它的那个窗口，而不是又开一份（同一个文件两边改会互相覆盖）
-    window.api.reportDocument(filePath)
+    // 告诉主进程「这个标签开着哪个文件」：多标签/多窗口下双击同一个 .xmind 时，
+    // 主进程会聚焦对应窗口，由渲染层切到那个标签（同一文件开两份会互相覆盖）
+    window.api.reportDocument(activeDocId(), filePath)
     // rootTitle 参与依赖：改名后标题栏要立刻跟着变
   }, [filePath, dirty, rootTitle])
 
@@ -904,7 +972,7 @@ export default function App(): ReactElement {
       void (async () => {
         try {
           const bytes = new Uint8Array(await file.arrayBuffer())
-          const image = await window.api.addImage(file.name, bytes)
+          const image = await window.api.addImage(activeDocId(), file.name, bytes)
           const store = useEditor.getState()
           const id = store.selection[0]
           if (!image || !id) {
@@ -939,8 +1007,8 @@ export default function App(): ReactElement {
       <Toolbar
         outlineOpen={showOutline}
         actions={{
-          onNew: () => guard(newDocument),
-          onOpen: () => guard(() => void openDocument()),
+          onNew: () => newDocument(),
+          onOpen: () => void openDocument(),
           onSave: () => void saveDocument(false),
           onSaveAs: () => void saveDocument(true),
           onHelp: () => setShowShortcuts(true),
@@ -968,14 +1036,13 @@ export default function App(): ReactElement {
           onAiSettings: () => setShowAiSettings(true),
           onHistory: () => setShowHistory(true),
           onNewWindow: openNewWindow,
-          onOpenSheetWindow: openSheetWindow
+          onOpenSheetWindow: openCopyWindow
         }}
       />
 
-      <div className={showOutline ? 'app__body app__body--tabs app__body--with-outline' : 'app__body app__body--tabs'}>
+      <div className={showOutline ? 'app__body app__body--with-outline' : 'app__body'}>
         {showOutline && <OutlinePanel onClose={() => setShowOutline(false)} onNotify={showToast} />}
         <Canvas />
-        <SheetTabs onNotify={showToast} />
         {sidePanel === 'theme' && <ThemePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
         {sidePanel === 'node' && <NodePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
         {sidePanel === 'search' && <SearchPanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
@@ -983,6 +1050,9 @@ export default function App(): ReactElement {
 
       {/* 仅在进入编辑态时出现 */}
       <RichFormatBar />
+
+      {/* 底部多文档标签栏（浏览器式任务栏）：点标签切换文档 */}
+      <TabBar onNewTab={() => newDocument()} onCloseTab={closeTabById} />
 
       <StatusBar />
 
@@ -996,12 +1066,14 @@ export default function App(): ReactElement {
 
       {pending && (
         <UnsavedDialog
-          fileName={displayName}
+          fileName={pending.fileName || displayName}
           onCancel={() => setPending(null)}
           onDiscard={() => {
             const action = pending
             setPending(null)
-            action.run()
+            // 关标签/退出的「不保存」：先做自己的收尾（标记强制关闭等），再继续流程
+            if (action.discard) action.discard()
+            else action.run()
           }}
           onSave={() => {
             const action = pending
@@ -1017,7 +1089,14 @@ export default function App(): ReactElement {
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} onNotify={showToast} />}
 
-      {aiTask && <AiDialog task={aiTask} onClose={() => setAiTask(null)} onNotify={showToast} />}
+      {aiTask && (
+        <AiDialog
+          task={aiTask}
+          onClose={() => setAiTask(null)}
+          onNotify={showToast}
+          onGenerateInNewWindow={openGeneratedInNewWindow}
+        />
+      )}
 
       {showAiSettings && (
         <AiSettingsDialog onClose={() => setShowAiSettings(false)} onNotify={showToast} />
@@ -1036,7 +1115,7 @@ export default function App(): ReactElement {
         <HistoryDialog
           onClose={() => setShowHistory(false)}
           onNotify={showToast}
-          onOpenFile={(path) => guard(() => void openPath(path))}
+          onOpenFile={(path) => void openPath(path)}
           onRestore={(snapshotId) => guard(() => void restoreSnapshot(snapshotId))}
         />
       )}

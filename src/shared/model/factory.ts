@@ -47,6 +47,23 @@ export interface CreateWorkbookOptions {
   seedBranches?: string[]
 }
 
+/**
+ * 用一棵**现成的主题树**构建一份新文档。
+ *
+ * 用途：导入 Markdown/OPML、AI 生成导图——它们都要"在新窗口里成为一份独立文档"，
+ * 而不是往当前文档里塞内容（那会让用户觉得"当前文档被覆盖了"）。
+ */
+export function createWorkbookFromRoot(rootTopic: Topic, sheetTitle = '画布 1'): Workbook {
+  const sheet = createSheet(sheetTitle, rootTopic.title)
+  sheet.rootTopic = rootTopic
+  return {
+    version: MODEL_VERSION,
+    sheets: [sheet],
+    activeSheetId: sheet.id,
+    creator: { ...CREATOR }
+  }
+}
+
 export function createWorkbook(options: CreateWorkbookOptions = {}): Workbook {
   const sheet = createSheet(options.sheetTitle ?? '画布 1', options.rootTitle ?? '中心主题')
   const branches = options.seedBranches ?? ['分支主题 1', '分支主题 2']

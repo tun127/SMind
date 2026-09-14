@@ -24,9 +24,10 @@ import type { OutlineFormat } from '@shared/outline'
 import type { ThemeDefinition } from '@shared/theme'
 
 const api: MindApi = {
-  openDialog: () => ipcRenderer.invoke(IPC.openDialog) as Promise<OpenResult | null>,
+  openDialog: (docId: string) => ipcRenderer.invoke(IPC.openDialog, docId) as Promise<OpenResult | null>,
 
-  openPath: (path) => ipcRenderer.invoke(IPC.openPath, path) as Promise<OpenResult>,
+  openPath: (docId: string, path: string) =>
+    ipcRenderer.invoke(IPC.openPath, docId, path) as Promise<OpenResult>,
 
   openFilePending: () => ipcRenderer.invoke(IPC.openFilePending) as Promise<string | null>,
 
@@ -36,22 +37,22 @@ const api: MindApi = {
     return () => ipcRenderer.removeListener(IPC.fileOpenRequest, listener)
   },
 
-  saveToPath: (path, workbook: Workbook) =>
-    ipcRenderer.invoke(IPC.saveToPath, path, workbook) as Promise<SaveResult>,
+  saveToPath: (docId: string, path: string, workbook: Workbook) =>
+    ipcRenderer.invoke(IPC.saveToPath, docId, path, workbook) as Promise<SaveResult>,
 
-  saveAs: (workbook: Workbook, suggestedName: string) =>
-    ipcRenderer.invoke(IPC.saveAs, workbook, suggestedName) as Promise<SaveResult | null>,
+  saveAs: (docId: string, workbook: Workbook, suggestedName: string) =>
+    ipcRenderer.invoke(IPC.saveAs, docId, workbook, suggestedName) as Promise<SaveResult | null>,
 
-  autosave: (workbook: Workbook, originalPath: string | null, title: string) =>
-    ipcRenderer.invoke(IPC.autosave, workbook, originalPath, title) as Promise<void>,
+  autosave: (docId: string, workbook: Workbook, originalPath: string | null, title: string) =>
+    ipcRenderer.invoke(IPC.autosave, docId, workbook, originalPath, title) as Promise<void>,
 
   clearAutosave: () => ipcRenderer.invoke(IPC.autosaveClear) as Promise<void>,
 
-  documentReset: () => ipcRenderer.invoke(IPC.documentReset) as Promise<void>,
+  releaseDoc: (docId: string) => ipcRenderer.invoke(IPC.releaseDoc, docId) as Promise<void>,
 
   recoveryCheck: () => ipcRenderer.invoke(IPC.recoveryCheck) as Promise<RecoveryInfo | null>,
 
-  recoveryLoad: () => ipcRenderer.invoke(IPC.recoveryLoad) as Promise<OpenResult | null>,
+  recoveryLoad: (docId: string) => ipcRenderer.invoke(IPC.recoveryLoad, docId) as Promise<OpenResult | null>,
 
   recoveryDiscard: () => ipcRenderer.invoke(IPC.recoveryDiscard) as Promise<void>,
 
@@ -61,16 +62,14 @@ const api: MindApi = {
 
   newWindow: () => ipcRenderer.invoke(IPC.newWindow) as Promise<void>,
 
-  openSheetInNewWindow: (workbook: Workbook, sheetId: string) =>
-    ipcRenderer.invoke(IPC.openSheetWindow, workbook, sheetId) as Promise<'ok' | 'failed'>,
-
-  pendingSheet: () => ipcRenderer.invoke(IPC.pendingSheet) as Promise<string | null>,
+  openWorkbookInNewWindow: (docId: string, workbook: Workbook) =>
+    ipcRenderer.invoke(IPC.openSheetWindow, docId, workbook) as Promise<'ok' | 'failed'>,
 
   openPathInNewWindow: (path: string) => ipcRenderer.invoke(IPC.openPathWindow, path) as Promise<'ok' | 'failed'>,
 
   readClipboardText: () => ipcRenderer.invoke(IPC.clipboardText) as Promise<string>,
 
-  reportDocument: (path: string | null) => ipcRenderer.send(IPC.documentPath, path),
+  reportDocument: (docId: string, path: string | null) => ipcRenderer.send(IPC.documentPath, docId, path),
 
   showInFolder: (path: string) => ipcRenderer.send(IPC.showInFolder, path),
 
@@ -102,14 +101,15 @@ const api: MindApi = {
 
   settingsSave: (settings: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, settings) as Promise<void>,
 
-  pickImage: () => ipcRenderer.invoke(IPC.pickImage) as Promise<PickedImage | null>,
+  pickImage: (docId: string) => ipcRenderer.invoke(IPC.pickImage, docId) as Promise<PickedImage | null>,
 
-  pasteImage: () => ipcRenderer.invoke(IPC.pasteImage) as Promise<PickedImage | null>,
+  pasteImage: (docId: string) => ipcRenderer.invoke(IPC.pasteImage, docId) as Promise<PickedImage | null>,
 
-  addImage: (name: string, bytes: Uint8Array) =>
-    ipcRenderer.invoke(IPC.addImage, name, bytes) as Promise<PickedImage | null>,
+  addImage: (docId: string, name: string, bytes: Uint8Array) =>
+    ipcRenderer.invoke(IPC.addImage, docId, name, bytes) as Promise<PickedImage | null>,
 
-  pickAttachment: () => ipcRenderer.invoke(IPC.pickAttachment) as Promise<PickedAttachment | null>,
+  pickAttachment: (docId: string) =>
+    ipcRenderer.invoke(IPC.pickAttachment, docId) as Promise<PickedAttachment | null>,
 
   openAttachment: (path: string, name: string) =>
     ipcRenderer.invoke(IPC.openAttachment, path, name) as Promise<boolean>,
@@ -152,16 +152,19 @@ const api: MindApi = {
   snapshotList: (path: string | null) =>
     ipcRenderer.invoke(IPC.snapshotList, path) as Promise<SnapshotItem[]>,
 
-  snapshotCreate: (input: {
-    workbook: Workbook
-    path: string | null
-    title: string
-    reason: SnapshotReason
-    note?: string
-  }) => ipcRenderer.invoke(IPC.snapshotCreate, input) as Promise<SnapshotItem[]>,
+  snapshotCreate: (
+    docId: string,
+    input: {
+      workbook: Workbook
+      path: string | null
+      title: string
+      reason: SnapshotReason
+      note?: string
+    }
+  ) => ipcRenderer.invoke(IPC.snapshotCreate, docId, input) as Promise<SnapshotItem[]>,
 
-  snapshotRestore: (id: string) =>
-    ipcRenderer.invoke(IPC.snapshotRestore, id) as Promise<SnapshotRestoreResult>,
+  snapshotRestore: (docId: string, id: string) =>
+    ipcRenderer.invoke(IPC.snapshotRestore, docId, id) as Promise<SnapshotRestoreResult>,
 
   snapshotRemove: (id: string, path: string | null) =>
     ipcRenderer.invoke(IPC.snapshotRemove, id, path) as Promise<SnapshotItem[]>,

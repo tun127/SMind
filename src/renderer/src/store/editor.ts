@@ -125,23 +125,18 @@ export interface EditorState {
   toggleFilterLabel(label: string): void
   clearFilter(): void
 
-  /* ---- 多画布（P7） ---- */
-  addSheet(): string
-  removeSheet(id: string): void
-  renameSheet(id: string, title: string): void
-  setActiveSheet(id: string): void
-
   /* ---- AI 结果落地（P8） ---- */
   /** 给某个主题一次性追加若干子主题（AI 扩写用，整批算一步撤销） */
   addChildTitles(parentId: string, titles: string[]): number
   /** 追加若干**带格式**的子主题（粘贴 Markdown 片段用；整批一步撤销） */
   addRichChildren(parentId: string, items: Array<{ title: string; rich?: RichText }>): number
-  /** 把 AI 生成的整棵大纲应用到画布：新建一张画布，或挂到指定主题下面 */
-  applyOutlineTree(
-    target: { kind: 'newSheet' } | { kind: 'childOf'; id: string },
-    root: OutlineNode,
-    sheetTitle?: string
-  ): number
+  /**
+   * 把 AI 生成的整棵大纲挂到指定主题下面。
+   *
+   * 「生成新导图」不再走这里——那会往当前文档里塞内容；改成在新窗口里成为独立文档
+   * （见 App 的 `openGeneratedInNewWindow`）。
+   */
+  applyOutlineTree(parentId: string, root: OutlineNode): number
 
   /* ---- 视图 ---- */
   setZoom(zoom: number): void
@@ -502,62 +497,6 @@ export const useEditor = create<EditorState>()((set, get) => ({
   clearFilter: () => set({ filter: { ...EMPTY_FILTER } }),
 
   /* ------------------------------------------------------------------ */
-  /* 多画布                                                              */
-  /* ------------------------------------------------------------------ */
-
-  addSheet: () => {
-    const { workbook } = get()
-    const sheet = createSheet(`画布 ${workbook.sheets.length + 1}`, '中心主题')
-    get().mutate((draft) => {
-      draft.sheets.push(sheet)
-      draft.activeSheetId = sheet.id
-    }, '新建画布')
-    set({ selection: [sheet.rootTopic.id], editingId: null, editingText: '', editingRich: null, zoom: 1, pan: { x: 0, y: 0 } })
-    return sheet.id
-  },
-
-  removeSheet: (id) => {
-    const { workbook } = get()
-    // 至少留一张画布
-    if (workbook.sheets.length <= 1) return
-    const index = workbook.sheets.findIndex((sheet) => sheet.id === id)
-    if (index < 0) return
-    const next = workbook.sheets[index + 1] ?? workbook.sheets[index - 1]
-
-    get().mutate((draft) => {
-      draft.sheets = draft.sheets.filter((sheet) => sheet.id !== id)
-      if (draft.activeSheetId === id) draft.activeSheetId = next.id
-    }, '删除画布')
-    set({ selection: [], editingId: null, editingText: '', editingRich: null, zoom: 1, pan: { x: 0, y: 0 } })
-  },
-
-  renameSheet: (id, title) => {
-    get().mutate((draft) => {
-      const sheet = draft.sheets.find((item) => item.id === id)
-      if (sheet) sheet.title = title
-    }, '重命名画布')
-  },
-
-  /**
-   * 切换画布不写历史、也不标记未保存：切标签页本身不是对内容的修改。
-   * activeSheetId 会在下一次保存时一并写进文件。
-   */
-  setActiveSheet: (id) =>
-    set((s) => {
-      if (s.workbook.activeSheetId === id) return {}
-      if (!s.workbook.sheets.some((sheet) => sheet.id === id)) return {}
-      return {
-        workbook: { ...s.workbook, activeSheetId: id },
-        selection: [],
-        editingId: null,
-        editingText: '',
-        editingRich: null,
-        zoom: 1,
-        pan: { x: 0, y: 0 }
-      }
-    }),
-
-  /* ------------------------------------------------------------------ */
   /* AI 结果落地                                                         */
   /* ------------------------------------------------------------------ */
 
@@ -605,33 +544,14 @@ export const useEditor = create<EditorState>()((set, get) => ({
     return created.length
   },
 
-  applyOutlineTree: (target, root, sheetTitle) => {
+  applyOutlineTree: (parentId, root) => {
     const count = countOutlineNodes(root)
     if (count === 0) return 0
-
-    if (target.kind === 'newSheet') {
-      const sheet = createSheet(sheetTitle && sheetTitle.trim().length > 0 ? sheetTitle.trim() : root.title)
-      // 让生成的大纲直接成为这张画布的中心主题
-      sheet.rootTopic = outlineToTopic(root)
-      get().mutate((draft) => {
-        draft.sheets.push(sheet)
-        draft.activeSheetId = sheet.id
-      }, 'AI 生成导图')
-      set({
-        selection: [sheet.rootTopic.id],
-        editingId: null,
-        editingText: '',
-        editingRich: null,
-        zoom: 1,
-        pan: { x: 0, y: 0 }
-      })
-      return count
-    }
 
     // 挂到已有主题下：根节点的文字成为新的子主题
     const childTopic = outlineToTopic(root)
     get().mutate((draft) => {
-      const parent = findTopic(activeRoot(draft), target.id)
+      const parent = findTopic(activeRoot(draft), parentId)
       if (!parent) return
       parent.children.push(childTopic)
       if (parent.collapsed) parent.collapsed = false
@@ -665,7 +585,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   loadDocument: (workbook, path) =>
     set((state) => ({
-      workbook,
+      // 界面只显示**第一张画布**（画布切换按钮已移除）：文件的其余画布原样保留在
+      // workbook 里，保存时照旧写回，不会丢内容。
+      workbook: { ...workbook, activeSheetId: workbook.sheets[0]?.id ?? workbook.activeSheetId },
       filePath: path,
       dirty: false,
       docSeq: state.docSeq + 1,
