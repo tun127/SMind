@@ -51,6 +51,15 @@ export default function RichFormatBar(): ReactElement | null {
   /** 段落级格式（对齐、列表）直接作用于光标所在段落 */
   const chain = (): Chain => editor.chain().focus()
 
+  /**
+   * 上/下标是「一次性」格式：光标折叠（没选中文字）时**不能**像加粗那样全选整个节点——
+   * 那会把整段文字都变成下标。正确做法是直接 toggle：设置/取消「接下来输入的格式」，
+   * 打完上标再点一下（或光标贴着下标后面直接打字）就恢复正常。
+   */
+  const toggleScript = (mark: 'superscript' | 'subscript'): void => {
+    editor.chain().focus().toggleMark(mark).run()
+  }
+
   // 当前字号不在预设列表里时，补进选项，避免下拉框显示为空
   const sizeOptions =
     state.fontSize !== null && !SIZES.includes(state.fontSize)
@@ -95,16 +104,16 @@ export default function RichFormatBar(): ReactElement | null {
         <button
           type="button"
           className={state.script === 'super' ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
-          title="上标（也可以打 ^x^，如 a^2^）"
-          onClick={() => applyInline((c) => c.toggleMark('superscript'))}
+          title="上标（也可以打 ^x^，如 a^2^；再点一次恢复正常输入）"
+          onClick={() => toggleScript('superscript')}
         >
           <SuperscriptIcon size={15} />
         </button>
         <button
           type="button"
           className={state.script === 'sub' ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
-          title="下标（也可以打 ~x~，如 a~1~）"
-          onClick={() => applyInline((c) => c.toggleMark('subscript'))}
+          title="下标（也可以打 ~x~，如 a~1~；再点一次恢复正常输入）"
+          onClick={() => toggleScript('subscript')}
         >
           <SubscriptIcon size={15} />
         </button>

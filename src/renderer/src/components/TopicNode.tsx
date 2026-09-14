@@ -436,7 +436,8 @@ function TopicNodeInner({
             onToggleCollapse(node.id)
           }}
         >
-          {node.topic.collapsed ? `+${countDescendants(node.topic)}` : '−'}
+          {/* 折叠时显示折叠的后代数量，展开时是 −（XMind 式圆形简约徽标） */}
+          {node.topic.collapsed ? countDescendants(node.topic) : '−'}
         </button>
       )}
     </div>
