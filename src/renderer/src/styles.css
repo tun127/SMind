@@ -1216,6 +1216,21 @@ textarea {
   gap: 3px;
 }
 
+/* 手动拉伸手柄（选中时出现在右下角） */
+.topic__resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--accent);
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.28);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
 /* 能拖的主题给「抓取」光标：这是最省事的操作提示，也省掉一次试探性拖动 */
 .topic--draggable {
   cursor: grab;

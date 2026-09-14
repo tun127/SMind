@@ -109,8 +109,14 @@ function readOurExtensions(raw: unknown): {
   titleRich?: Topic['titleRich']
   formula?: string
   code?: Topic['code']
+  sizeOverride?: Topic['sizeOverride']
 } {
-  const out: { titleRich?: Topic['titleRich']; formula?: string; code?: Topic['code'] } = {}
+  const out: {
+    titleRich?: Topic['titleRich']
+    formula?: string
+    code?: Topic['code']
+    sizeOverride?: Topic['sizeOverride']
+  } = {}
   for (const item of asArray(raw)) {
     if (!isRecord(item)) continue
     if (item.provider !== OUR_PROVIDER) continue
@@ -122,6 +128,13 @@ function readOurExtensions(raw: unknown): {
       if (typeof content.formula === 'string') out.formula = content.formula
       if (isRecord(content.code) && typeof content.code.text === 'string') {
         out.code = content.code as unknown as Topic['code']
+      }
+      if (isRecord(content.sizeOverride)) {
+        const width = asNumber(content.sizeOverride.width)
+        const height = asNumber(content.sizeOverride.height)
+        if (width !== undefined && height !== undefined && width > 0 && height > 0) {
+          out.sizeOverride = { width: Math.round(width), height: Math.round(height) }
+        }
       }
     }
   }
@@ -169,6 +182,7 @@ function parseTopic(raw: unknown): Topic | null {
   if (ours.titleRich) topic.titleRich = ours.titleRich
   if (ours.formula) topic.formula = ours.formula
   if (ours.code) topic.code = ours.code
+  if (ours.sizeOverride) topic.sizeOverride = ours.sizeOverride
   if (isRecord(raw.position)) {
     const px = asNumber(raw.position.x)
     const py = asNumber(raw.position.y)

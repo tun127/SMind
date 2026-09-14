@@ -98,6 +98,13 @@ export interface Topic {
   formula?: string
   /** 节点里的一段代码（P7）：等宽排版 + 语法高亮 */
   code?: TopicCode
+  /**
+   * 手动拉伸后的节点尺寸覆盖（拖右下角手柄设置）。
+   *
+   * 只覆盖**下限**：内容需要更高时仍然会长高（绝不裁切内容），
+   * 宽度则作为文本换行上限（文字按给定宽度重排）。
+   */
+  sizeOverride?: { width: number; height: number }
   attachments: Attachment[]
   style?: NodeStyle
   /** 是否折叠子节点 */

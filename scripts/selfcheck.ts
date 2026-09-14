@@ -1919,13 +1919,19 @@ const fakeMeasure = (topic: Topic, depth: number): MeasureResult => {
 
   const markerIds = topic.markers.map((marker) => marker.markerId).filter((id) => id.length > 0)
   const markerStrip = markerStripSize(markerIds.length)
+  const stripWidth = markerStrip.width > 0 ? markerStrip.width + MARKER_STRIP_GAP : 0
+
+  // 手动拉伸的语义与 measure.ts 一致：宽度取给定值（有下限），高度只作下限
+  const override = topic.sizeOverride
+  const autoWidth = 90 + topic.title.length * 9 + stripWidth
+  const autoHeight = Math.max(
+    (depth === 0 ? 44 : 30) + accessory.height + labelRow.height,
+    markerStrip.height + (depth === 0 ? 15 : 9) * 2
+  )
 
   return {
-    width: 90 + topic.title.length * 9 + (markerStrip.width > 0 ? markerStrip.width + MARKER_STRIP_GAP : 0),
-    height: Math.max(
-      (depth === 0 ? 44 : 30) + accessory.height + labelRow.height,
-      markerStrip.height + (depth === 0 ? 15 : 9) * 2
-    ),
+    width: override ? Math.max(override.width, stripWidth + (depth === 0 ? 24 : 14) * 2 + 40) : autoWidth,
+    height: override ? Math.max(override.height, autoHeight) : autoHeight,
     lines: [
       {
         segments:
@@ -2063,6 +2069,8 @@ function buildFeatureRichWorkbook(): Workbook {
     target.notesHtml = '<p>这是备注</p>'
     target.href = 'https://example.com'
     target.titleRich = { paragraphs: [{ align: 'center', runs: [{ text: '第一分支', bold: true, color: '#ff0000' }] }] }
+    // 手动拉伸的尺寸覆盖也要能往返（P7）
+    target.sizeOverride = { width: 260, height: 96 }
 
     const rootTopic = draft.sheets[0].rootTopic
     rootTopic.style = { properties: { 'svg:fill': '#FF8A65', 'fo:color': '#FFFFFF' } }
@@ -2456,6 +2464,30 @@ async function testMediaElements(): Promise<void> {
   )
   const empty = codeBoxSize({ language: 'text', text: '' })
   check('空文本也保留一行的最小框', empty.height === CODE_HEADER + CODE_PADDING_Y * 2 + lineH, JSON.stringify(empty))
+
+  group('手动拉伸：尺寸覆盖只作下限、可撤销、往返保真')
+
+  reset()
+  const sizeRoot = root().id
+  const resized = addChildOf(sizeRoot, '被拉伸的节点')
+  const autoBox = layoutSheet(root(), fakeMeasure).nodeMap.get(resized)!
+  store().setSizeOverride(resized, { width: 320, height: 140 })
+  const resizedBox = layoutSheet(root(), fakeMeasure).nodeMap.get(resized)!
+  eq('宽度按给定值', resizedBox.width, 320)
+  eq('高度按给定值（高于内容时）', resizedBox.height, 140)
+  check('比自动尺寸更大', resizedBox.width > autoBox.width && resizedBox.height > autoBox.height)
+  store().setSizeOverride(resized, { width: 320, height: 20 })
+  const floorBox = layoutSheet(root(), fakeMeasure).nodeMap.get(resized)!
+  check(
+    '高度只作下限：给太小也不会裁掉内容',
+    floorBox.height >= autoBox.height,
+    `${floorBox.height} vs ${autoBox.height}`
+  )
+  store().setSizeOverride(resized, null)
+  const restored = layoutSheet(root(), fakeMeasure).nodeMap.get(resized)!
+  eq('恢复自动尺寸', restored.width, autoBox.width)
+  store().undo()
+  check('恢复自动尺寸可撤销', findTopic(root(), resized)?.sizeOverride !== undefined)
 
   group('标记条：标记竖排在节点左侧（不再占顶部图标行）')
 

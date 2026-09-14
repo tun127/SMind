@@ -176,6 +176,7 @@ function accessoryKey(topic: Topic): string {
     topic.formula ?? '',
     topic.image ? `${topic.image.path}:${topic.image.width ?? ''}x${topic.image.height ?? ''}` : '',
     topic.code ? `${topic.code.language}\u0002${topic.code.text}` : '',
+    topic.sizeOverride ? `${topic.sizeOverride.width}x${topic.sizeOverride.height}` : '',
     (topic.attachments?.length ?? 0) > 0 ? 'a' : ''
   ].join('|')
 }
@@ -387,10 +388,20 @@ function compute(topic: Topic, depth: number): MeasureResult {
       ? rich.paragraphs
       : [{ runs: [] }]
 
+  // 左侧标记条先行：它影响可用文字宽度与节点最小宽度
+  const markerStrip: MarkerStrip = markersOf(topic)
+  const stripWidth = markerStrip.width > 0 ? markerStrip.width + MARKER_STRIP_GAP : 0
+
+  // 手动拉伸过：宽度成为文本换行上限（文字按给定宽度重排）
+  const override = topic.sizeOverride
+  const textMax = override
+    ? Math.max(40, override.width - base.paddingX * 2 - stripWidth)
+    : base.maxTextWidth
+
   const lines: MeasuredLine[] = []
   for (const paragraph of paragraphs) {
     const chars = charsOfParagraph(paragraph, base)
-    for (const lineChars of wrapChars(chars, base.maxTextWidth)) {
+    for (const lineChars of wrapChars(chars, textMax)) {
       let width = 0
       let maxFontSize = 0
       for (const char of lineChars) {
@@ -418,8 +429,6 @@ function compute(topic: Topic, depth: number): MeasureResult {
   const imageBox: Size = imageBoxSize(topic.image)
   const formulaBox: Size = topic.formula ? formulaSize(topic.formula, base.fontSize) : { width: 0, height: 0 }
   const codeBox: Size = codeBoxSize(topic.code)
-  const markerStrip: MarkerStrip = markersOf(topic)
-  const stripWidth = markerStrip.width > 0 ? markerStrip.width + MARKER_STRIP_GAP : 0
   const imageBlock = imageBox.height > 0 ? imageBox.height + BLOCK_GAP : 0
   const formulaBlock = formulaBox.height > 0 ? formulaBox.height + BLOCK_GAP : 0
   const codeBlock = codeBox.height > 0 ? codeBox.height + BLOCK_GAP : 0
@@ -436,12 +445,18 @@ function compute(topic: Topic, depth: number): MeasureResult {
     formulaBox.width,
     codeBox.width
   )
-  const width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2 + stripWidth, base.minWidth)
+  let width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2 + stripWidth, base.minWidth)
 
   let height = base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + codeBlock + labelRow.height
   for (const line of lines) height += line.height
   // 标记条可能比内容还高（标记多时），节点要能装下它
   height = Math.max(height, markerStrip.height + base.paddingY * 2)
+
+  // 手动拉伸：宽度用给定值（不小于一个可读下限），高度只作**下限**——内容更高时长高，不裁切
+  if (override) {
+    width = Math.max(override.width, stripWidth + base.paddingX * 2 + 40)
+    height = Math.max(override.height, height)
+  }
 
   return {
     width,

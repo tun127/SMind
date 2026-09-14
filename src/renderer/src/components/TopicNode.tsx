@@ -307,6 +307,39 @@ function TopicNodeInner({
 
       </div>
 
+      {/* 手动拉伸手柄：选中且不在编辑态时出现，拖右下角改尺寸，双击恢复自动尺寸 */}
+      {selected && !editing && (
+        <span
+          className="topic__resize"
+          title="拖动调整节点大小；双击恢复自动尺寸"
+          onPointerDown={(event) => {
+            event.stopPropagation()
+            event.preventDefault()
+            const startX = event.clientX
+            const startY = event.clientY
+            const startWidth = node.width
+            const startHeight = node.height
+            const zoom = useEditor.getState().zoom || 1
+            const move = (moveEvent: PointerEvent): void => {
+              useEditor.getState().setSizeOverride(node.id, {
+                width: Math.max(60, startWidth + (moveEvent.clientX - startX) / zoom),
+                height: Math.max(28, startHeight + (moveEvent.clientY - startY) / zoom)
+              })
+            }
+            const up = (): void => {
+              window.removeEventListener('pointermove', move)
+              window.removeEventListener('pointerup', up)
+            }
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', up)
+          }}
+          onDoubleClick={(event) => {
+            event.stopPropagation()
+            useEditor.getState().setSizeOverride(node.id, null)
+          }}
+        />
+      )}
+
       {hasChildren && (
         <button
           type="button"

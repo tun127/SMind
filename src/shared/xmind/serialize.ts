@@ -49,13 +49,14 @@ function topicToRaw(topic: Topic): Raw {
 
   const extensions: unknown[] = []
   // 本软件自己的扩展字段（Xmind 会忽略，但不影响往返保真）
-  if (topic.titleRich || topic.formula || topic.code) {
+  if (topic.titleRich || topic.formula || topic.code || topic.sizeOverride) {
     extensions.push({
       provider: OUR_PROVIDER,
       content: compact({
         titleRich: topic.titleRich,
         formula: topic.formula,
-        code: topic.code
+        code: topic.code,
+        sizeOverride: topic.sizeOverride
       })
     })
   }

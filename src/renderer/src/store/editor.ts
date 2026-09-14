@@ -228,6 +228,8 @@ export interface EditorState {
   setTopicSide(id: string, side: 'left' | 'right'): void
   /** 全部恢复自动布局：清空当前画布所有手动位置偏移（含悬浮主题），一步撤销 */
   relayoutAll(): void
+  /** 手动拉伸节点尺寸；传 null 恢复自动尺寸（拖拽过程中会合并成一步撤销） */
+  setSizeOverride(id: string, size: { width: number; height: number } | null): void
   /**
    * 拖拽节点释放。落点一律由 `resolveDrop` 裁决（在 shared/model/drop 里，
    * 与画布上的落点预览共用同一套规则）：
@@ -912,6 +914,29 @@ export const useEditor = create<EditorState>()((set, get) => ({
       properties[TOPIC_SIDE_KEY] = side
       topic.style = { ...(topic.style ?? {}), properties }
     }, '调整分支左右')
+  },
+
+  setSizeOverride: (id, size) => {
+    const next =
+      size && size.width > 0 && size.height > 0
+        ? { width: Math.round(size.width), height: Math.round(size.height) }
+        : null
+    get().mutate(
+      (draft) => {
+        const topic = findTopic(activeRoot(draft), id)
+        if (!topic) return
+        if (!next) {
+          if (topic.sizeOverride === undefined) return
+          topic.sizeOverride = undefined
+          return
+        }
+        if (topic.sizeOverride?.width === next.width && topic.sizeOverride?.height === next.height) return
+        topic.sizeOverride = next
+      },
+      next ? '拉伸节点' : '恢复节点自动尺寸',
+      // 拖动过程中每帧都写，合并成一步撤销
+      next ? `size:${id}` : undefined
+    )
   },
 
   /** 全部恢复自动布局：清掉当前画布所有手动位置偏移（含悬浮主题），整批算一步撤销 */

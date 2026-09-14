@@ -33,6 +33,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const setHref = useEditor((s) => s.setHref)
   const setFormula = useEditor((s) => s.setFormula)
   const setCode = useEditor((s) => s.setCode)
+  const setSizeOverride = useEditor((s) => s.setSizeOverride)
   const codeFocusTick = useEditor((s) => s.codeFocusTick)
   const setImage = useEditor((s) => s.setImage)
   const addAttachment = useEditor((s) => s.addAttachment)
@@ -489,6 +490,26 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
               移除公式
             </button>
           </div>
+        )}
+
+        {topic.sizeOverride && (
+          <>
+            <div className="side-panel__title">尺寸</div>
+            <div className="side-panel__row">
+              <span className="side-panel__hint">
+                已手动拉伸为 {topic.sizeOverride.width} × {topic.sizeOverride.height}
+              </span>
+              <button
+                type="button"
+                className="btn"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setSizeOverride(topicId, null)}
+              >
+                <X size={14} />
+                恢复自动尺寸
+              </button>
+            </div>
+          </>
         )}
 
         <div className="side-panel__title">
