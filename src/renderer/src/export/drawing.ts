@@ -324,7 +324,13 @@ function nodeOps(
         y: cursorY,
         align: line.align,
         baseline: baselineIn(cursorY, line.height, fontSize),
-        segments: line.segments.map((segment) => ({ ...segment })),
+        // 行内公式（标题里的 $…$）在导出里以源码文本斜体呈现：
+        // 导出后端只画文字/图形，塞不进 KaTeX 的 HTML；画布上仍是渲染后的公式
+        segments: line.segments.map((segment) =>
+          segment.formula
+            ? { ...segment, text: segment.formula, formula: undefined, italic: true }
+            : { ...segment }
+        ),
         color: visual.color
       })
     }

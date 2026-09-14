@@ -115,6 +115,7 @@ function TopicNodeInner({
   const formula = node.topic.formula
 
   const code = node.topic.code
+
   const codeBox = code ? node.codeBox ?? codeBoxSize(code) : null
 
   // 标记条挂在节点**外面**：默认左侧；左向分支放右侧，免得压到它自己的子节点
@@ -232,11 +233,21 @@ function TopicNodeInner({
             >
               {line.segments.length === 0
                 ? '\u00A0'
-                : line.segments.map((segment, segmentIndex) => (
-                    <span key={segmentIndex} style={segmentStyle(segment)}>
-                      {segment.text}
-                    </span>
-                  ))}
+                : line.segments.map((segment, segmentIndex) =>
+                    segment.formula ? (
+                      // 行内公式（标题里的 $…$）：交给 KaTeX，垂直居中对齐文字
+                      <span
+                        key={segmentIndex}
+                        className="topic__inline-formula"
+                        // KaTeX 的输出由渲染器生成，不是用户 HTML
+                        dangerouslySetInnerHTML={{ __html: formulaHtml(segment.formula) }}
+                      />
+                    ) : (
+                      <span key={segmentIndex} style={segmentStyle(segment)}>
+                        {segment.text}
+                      </span>
+                    )
+                  )}
             </div>
           ))}
         </div>

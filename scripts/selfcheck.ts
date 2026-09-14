@@ -118,7 +118,7 @@ import {
   toConfigView
 } from '../src/shared/ai'
 import { parseMarkdownOutline } from '../src/shared/import/markdown'
-import { matchWholeLineMath, normalizeFormulaInput } from '../src/shared/formula'
+import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../src/shared/formula'
 import { overlayTitleLines } from '../src/shared/layout/overlays'
 import { parseOpmlOutline } from '../src/shared/import/opml'
 import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
@@ -4432,6 +4432,15 @@ function testImport(): void {
   eq('纯 LaTeX 原样保留', normalizeFormulaInput('\\sum_{i=1}^{n} i'), '\\sum_{i=1}^{n} i')
   eq('只有定界符时不剥成空', normalizeFormulaInput('$$'), '$$')
   eq('整句数学识别', matchWholeLineMath('$$x^2$$'), 'x^2')
+  // 标题内行内公式（$…$）的切分
+  {
+    const mixed = splitInlineMath('面积 $S=\\pi r^2$ 的公式')
+    eq('行内公式切成三段', mixed.length, 3)
+    eq('公式段拿到源码', mixed[1].formula, 'S=\\pi r^2')
+    eq('前后文字保留', `${mixed[0].text}|${mixed[2].text}`, '面积 | 的公式')
+    eq('没有公式时原样一段', splitInlineMath('纯文字').length, 1)
+    eq('两个公式各自成段', splitInlineMath('$a$$b$').filter((item) => item.formula).length, 2)
+  }
   eq('普通文字不是数学', matchWholeLineMath('这是普通文字'), null)
 
   const mathImport = parseMarkdownOutline('# 公式\n- $E=mc^2$\n- 普通项')

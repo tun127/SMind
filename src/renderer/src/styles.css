@@ -1238,6 +1238,18 @@ textarea {
   cursor: grab;
 }
 
+/* 标题里的行内公式（$…$）：随文字行内排布，垂直居中对齐 */
+.topic__inline-formula {
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 1;
+  margin: 0 1px;
+}
+
+.topic__inline-formula .katex {
+  font-size: 1em;
+}
+
 .topic__text {
   width: 100%;
   white-space: pre;

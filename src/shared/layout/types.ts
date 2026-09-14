@@ -7,6 +7,8 @@ export interface Size {
 
 /** 一段样式一致的文本 */
 export interface StyledSegment {
+  /** 行内公式源码：非空时这一段的 text 只作纯文本回退，渲染要走 KaTeX */
+  formula?: string
   text: string
   /** 已解析好的字体粗细，渲染层直接用 */
   weight?: number

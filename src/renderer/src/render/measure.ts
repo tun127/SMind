@@ -18,6 +18,7 @@ import {
   type Size
 } from '@shared/layout/accessory'
 import { richFromPlain } from '@shared/richtext'
+import { splitInlineMath } from '@shared/formula'
 import { formulaSize } from './formula'
 import { defaultTextAlignOf } from './defaults'
 
@@ -127,7 +128,7 @@ function labelsOf(topic: Topic): LabelRow {
     const text = typeof raw === 'string' ? raw.trim() : ''
     if (text.length === 0) continue
     let textWidth = 0
-    for (const ch of text) textWidth += widthOf(ch, style)
+    for (const ch of text) textWidth += widthOf({ ch, style })
     items.push({
       text,
       width: Math.min(Math.round(textWidth) + LABEL_PADDING_X * 2, LABEL_MAX_WIDTH)
@@ -205,6 +206,16 @@ interface ResolvedStyle {
 interface StyledChar {
   ch: string
   style: ResolvedStyle
+  /** 行内公式（`$…$`）：整段作为一个「原子」参与断行，宽度取 KaTeX 的实测值 */
+  formula?: string
+  /** 行内公式的实测宽高（有公式时用，避免再走单字测量） */
+  formulaWidth?: number
+  formulaHeight?: number
+}
+
+/** 行内公式的实测尺寸（拿不到 DOM 时退回估算） */
+function inlineFormulaSize(source: string, fontSize: number): Size {
+  return formulaSize(source, fontSize)
 }
 
 function baseOf(depth: number): BaseStyle {
@@ -245,7 +256,10 @@ function fontOf(style: ResolvedStyle): string {
 const charWidthCache = new Map<string, number>()
 const CHAR_CACHE_LIMIT = 60000
 
-function widthOf(ch: string, style: ResolvedStyle): number {
+function widthOf(char: StyledChar): number {
+  if (char.formula) return char.formulaWidth ?? inlineFormulaSize(char.formula, char.style.fontSize).width
+  const ch = char.ch
+  const style = char.style
   const font = fontOf(style)
   const key = `${font}\u0000${ch}`
   const cached = charWidthCache.get(key)
@@ -279,7 +293,7 @@ function wrapChars(chars: StyledChar[], maxWidth: number): StyledChar[][] {
   let lastSpace = -1
 
   while (index < chars.length) {
-    const charWidth = widthOf(chars[index].ch, chars[index].style)
+    const charWidth = widthOf(chars[index])
     if (width + charWidth > maxWidth && index > start) {
       const breakAt = lastSpace > start ? lastSpace + 1 : index
       lines.push(chars.slice(start, breakAt))
@@ -328,8 +342,13 @@ function segmentOf(text: string, style: ResolvedStyle): StyledSegment {
 function groupSegments(chars: StyledChar[]): StyledSegment[] {
   const segments: StyledSegment[] = []
   for (const char of chars) {
+    // 行内公式自成一个段（不与前后文字合并，渲染时要整块交给 KaTeX）
+    if (char.formula) {
+      segments.push({ ...segmentOf(char.ch, char.style), formula: char.formula })
+      continue
+    }
     const previous = segments[segments.length - 1]
-    if (previous && sameStyle(previous, char.style)) previous.text += char.ch
+    if (previous && !previous.formula && sameStyle(previous, char.style)) previous.text += char.ch
     else segments.push(segmentOf(char.ch, char.style))
   }
   return segments
@@ -373,7 +392,21 @@ function charsOfParagraph(paragraph: RichTextParagraph, base: BaseStyle): Styled
   }
   for (const run of paragraph.runs) {
     const style = resolveRun(run, base)
-    for (const ch of run.text) chars.push({ ch, style })
+    // 行内公式（`$…$`）拆成独立的「原子块」，宽度按 KaTeX 实测
+    for (const segment of splitInlineMath(run.text)) {
+      if (segment.formula) {
+        const size = inlineFormulaSize(segment.formula, style.fontSize)
+        chars.push({
+          ch: `$${segment.formula}$`,
+          style,
+          formula: segment.formula,
+          formulaWidth: size.width,
+          formulaHeight: size.height
+        })
+        continue
+      }
+      for (const ch of segment.text ?? '') chars.push({ ch, style })
+    }
   }
   return chars
 }
@@ -408,15 +441,22 @@ function compute(topic: Topic, depth: number): MeasureResult {
     for (const lineChars of wrapChars(chars, textMax)) {
       let width = 0
       let maxFontSize = 0
+      let maxFormulaHeight = 0
       for (const char of lineChars) {
-        width += widthOf(char.ch, char.style)
+        width += widthOf(char)
         if (char.style.fontSize > maxFontSize) maxFontSize = char.style.fontSize
+        if (char.formula) {
+          const size = char.formulaHeight ?? inlineFormulaSize(char.formula, char.style.fontSize).height
+          if (size > maxFormulaHeight) maxFormulaHeight = size
+        }
       }
       if (maxFontSize === 0) maxFontSize = base.fontSize
+      // 行内公式比文字高时行高要跟着长（否则公式会被上下裁掉）
+      const lineHeight = Math.round(Math.max(maxFontSize * LINE_HEIGHT_RATIO, maxFormulaHeight + 2))
       lines.push({
         segments: groupSegments(lineChars),
         width: Math.round(width * 10) / 10,
-        height: Math.round(maxFontSize * LINE_HEIGHT_RATIO),
+        height: lineHeight,
         // 没有显式段落对齐时用「设置 → 默认对齐」
         align: paragraph.align ?? defaultTextAlignOf()
       })
