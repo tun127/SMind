@@ -2,13 +2,21 @@ import type {
   AccessoryItem,
   AccessoryRow,
   LabelRow,
+  MarkerStrip,
   MeasureResult,
   MeasuredLabel,
   MeasuredLine,
   StyledSegment
 } from '@shared/layout/types'
 import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/model/types'
-import { BLOCK_GAP, codeBoxSize, imageBoxSize, type Size } from '@shared/layout/accessory'
+import {
+  BLOCK_GAP,
+  MARKER_STRIP_GAP,
+  codeBoxSize,
+  imageBoxSize,
+  markerStripSize,
+  type Size
+} from '@shared/layout/accessory'
 import { richFromPlain } from '@shared/richtext'
 import { formulaSize } from './formula'
 
@@ -59,18 +67,14 @@ function rowCount(widths: number[], gap: number, maxWidth: number): number {
 }
 
 /**
- * 顶部图标行：标记图标 + 备注/链接/附件的指示图标。
+ * 顶部图标行：备注 / 链接 / 附件的指示图标。
  *
- * 图片与公式不再放指示图标 —— 它们现在会直接在节点里画出来，
- * 再加一个「有图片 / 有公式」的图标就重复了。
+ * 标记图标**不再放这里** —— 它们现在竖排在节点左侧（见 markersOf）；
+ * 图片与公式也不放指示图标：它们会直接在节点里画出来，再加图标就重复了。
  */
 function accessoryOf(topic: Topic): AccessoryRow {
   const items: AccessoryItem[] = []
 
-  for (const marker of topic.markers ?? []) {
-    const id = marker?.markerId
-    if (typeof id === 'string' && id.length > 0) items.push({ kind: 'marker', markerId: id, width: ICON_SIZE })
-  }
   if (topic.notes && topic.notes.length > 0) items.push({ kind: 'notes', width: ICON_SIZE })
   if (topic.href) items.push({ kind: 'link', width: ICON_SIZE })
   if ((topic.attachments?.length ?? 0) > 0) items.push({ kind: 'attachment', width: ICON_SIZE })
@@ -88,6 +92,17 @@ function accessoryOf(topic: Topic): AccessoryRow {
     height: rows * ICON_SIZE + (rows - 1) * ICON_GAP + ROW_GAP,
     width: Math.min(natural, TEXT_MAX)
   }
+}
+
+/** 左侧标记条：标记竖排（每列最多 4 个，多出来的换列） */
+function markersOf(topic: Topic): MarkerStrip {
+  const markerIds: string[] = []
+  for (const marker of topic.markers ?? []) {
+    const id = marker?.markerId
+    if (typeof id === 'string' && id.length > 0) markerIds.push(id)
+  }
+  const size = markerStripSize(markerIds.length)
+  return { markerIds, width: size.width, height: size.height }
 }
 
 function labelStyle(): ResolvedStyle {
@@ -403,6 +418,8 @@ function compute(topic: Topic, depth: number): MeasureResult {
   const imageBox: Size = imageBoxSize(topic.image)
   const formulaBox: Size = topic.formula ? formulaSize(topic.formula, base.fontSize) : { width: 0, height: 0 }
   const codeBox: Size = codeBoxSize(topic.code)
+  const markerStrip: MarkerStrip = markersOf(topic)
+  const stripWidth = markerStrip.width > 0 ? markerStrip.width + MARKER_STRIP_GAP : 0
   const imageBlock = imageBox.height > 0 ? imageBox.height + BLOCK_GAP : 0
   const formulaBlock = formulaBox.height > 0 ? formulaBox.height + BLOCK_GAP : 0
   const codeBlock = codeBox.height > 0 ? codeBox.height + BLOCK_GAP : 0
@@ -419,10 +436,12 @@ function compute(topic: Topic, depth: number): MeasureResult {
     formulaBox.width,
     codeBox.width
   )
-  const width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2, base.minWidth)
+  const width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2 + stripWidth, base.minWidth)
 
   let height = base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + codeBlock + labelRow.height
   for (const line of lines) height += line.height
+  // 标记条可能比内容还高（标记多时），节点要能装下它
+  height = Math.max(height, markerStrip.height + base.paddingY * 2)
 
   return {
     width,
@@ -436,7 +455,8 @@ function compute(topic: Topic, depth: number): MeasureResult {
     labelRow,
     imageBox,
     formulaBox,
-    codeBox
+    codeBox,
+    markerStrip
   }
 }
 

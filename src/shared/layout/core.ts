@@ -134,7 +134,8 @@ export class LayoutBuilder {
       labelRow: size.labelRow,
       imageBox: size.imageBox,
       formulaBox: size.formulaBox,
-      codeBox: size.codeBox
+      codeBox: size.codeBox,
+      markerStrip: size.markerStrip
     }
     this.nodes.push(node)
     this.nodeMap.set(topic.id, node)

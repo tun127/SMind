@@ -27,7 +27,7 @@ import {
   normalizeThemeColors,
   normalizeThemeDefinition
 } from '../src/shared/theme'
-import { activeRoot, activeSheet, countCharacters, countTopics, findParent, findTopic, subtreeIds } from '../src/shared/model/tree'
+import { activeRoot, activeSheet, countCharacters, countDescendants, countTopics, findParent, findTopic, subtreeIds } from '../src/shared/model/tree'
 import { createSheet, createTopic, createWorkbook } from '../src/shared/model/factory'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove } from '../src/shared/model/dragmove'
 import {
@@ -126,6 +126,8 @@ import {
   CODE_MAX_LINES,
   CODE_PADDING_X,
   CODE_PADDING_Y,
+  MARKER_STRIP_GAP,
+  markerStripSize,
   codeBoxSize,
   IMAGE_FALLBACK,
   IMAGE_MAX_HEIGHT,
@@ -1275,6 +1277,17 @@ function testBranchStructure(): void {
 /* ------------------------------------------------------------------ */
 
 function testUndoSelectionAndRelayout(): void {
+  group('折叠徽标：数得清折叠了多少节点')
+  reset()
+  const badgeRoot = root().id
+  const badgeA = addChildOf(badgeRoot, '分支甲')
+  const badgeB = addChildOf(badgeA, '子一')
+  addChildOf(badgeA, '子二')
+  addChildOf(badgeB, '孙一')
+  eq('后代总数（含各层）', countDescendants(findTopic(root(), badgeA)!), 3)
+  eq('叶子没有后代', countDescendants(findTopic(root(), badgeB)!), 1)
+  eq('中心主题的后代数 = 全树 - 1', countDescendants(root()), countTopics(root()) - 1)
+
   group('撤销保留框选 / 恢复自动布局')
   reset()
   const rootId = root().id
@@ -1887,7 +1900,6 @@ const fakeMeasure = (topic: Topic, depth: number): MeasureResult => {
   const lineHeight = Math.round(fontSize * 1.5)
 
   const items = [
-    ...topic.markers.map((marker) => ({ kind: 'marker' as const, markerId: marker.markerId, width: 16 })),
     ...(topic.notes ? [{ kind: 'notes' as const, width: 16 }] : []),
     ...(topic.href ? [{ kind: 'link' as const, width: 16 }] : []),
     ...(topic.attachments.length > 0 ? [{ kind: 'attachment' as const, width: 16 }] : []),
@@ -1905,9 +1917,15 @@ const fakeMeasure = (topic: Topic, depth: number): MeasureResult => {
     width: topic.labels.reduce((sum, text) => sum + 30 + text.length * 7, 0)
   }
 
+  const markerIds = topic.markers.map((marker) => marker.markerId).filter((id) => id.length > 0)
+  const markerStrip = markerStripSize(markerIds.length)
+
   return {
-    width: 90 + topic.title.length * 9,
-    height: (depth === 0 ? 44 : 30) + accessory.height + labelRow.height,
+    width: 90 + topic.title.length * 9 + (markerStrip.width > 0 ? markerStrip.width + MARKER_STRIP_GAP : 0),
+    height: Math.max(
+      (depth === 0 ? 44 : 30) + accessory.height + labelRow.height,
+      markerStrip.height + (depth === 0 ? 15 : 9) * 2
+    ),
     lines: [
       {
         segments:
@@ -1923,6 +1941,7 @@ const fakeMeasure = (topic: Topic, depth: number): MeasureResult => {
     lineHeight,
     paddingX: depth === 0 ? 24 : 14,
     paddingY: depth === 0 ? 15 : 9,
+    markerStrip: { markerIds, width: markerStrip.width, height: markerStrip.height },
     accessory,
     labelRow
   }
@@ -2437,6 +2456,26 @@ async function testMediaElements(): Promise<void> {
   )
   const empty = codeBoxSize({ language: 'text', text: '' })
   check('空文本也保留一行的最小框', empty.height === CODE_HEADER + CODE_PADDING_Y * 2 + lineH, JSON.stringify(empty))
+
+  group('标记条：标记竖排在节点左侧（不再占顶部图标行）')
+
+  reset()
+  const stripRoot = root().id
+  const marked = addChildOf(stripRoot, '带标记的节点')
+  const plain = addChildOf(stripRoot, '没有标记的节点')
+  store().mutate((draft) => {
+    const topic = findTopic(activeRoot(draft), marked)
+    if (!topic) return
+    topic.markers = [{ markerId: 'priority-1' }, { markerId: 'priority-2' }]
+  }, '加标记')
+  const stripLayout = layoutSheet(root(), fakeMeasure)
+  const markedBox = stripLayout.nodeMap.get(marked)!
+  const plainBox = stripLayout.nodeMap.get(plain)!
+  eq('标记条列出全部标记', markedBox.markerStrip?.markerIds.length, 2)
+  check('标记条占宽：节点相应变宽', markedBox.width > plainBox.width, `${markedBox.width} vs ${plainBox.width}`)
+  check('标记不再出现在顶部图标行', markedBox.accessory.items.every((item) => item.kind !== 'marker'))
+  check('无标记的节点没有标记条', (plainBox.markerStrip?.markerIds.length ?? 0) === 0)
+  check('标记条尺寸与分列规则一致', markedBox.markerStrip?.width === markerStripSize(2).width)
 
   group('资源：路径与 MIME')
 

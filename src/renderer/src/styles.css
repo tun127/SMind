@@ -1179,13 +1179,41 @@ textarea {
 .topic {
   position: absolute;
   display: flex;
-  /* 纵向排列：图标行 / 文字 / 标签行 */
-  flex-direction: column;
+  /* 横向：左侧标记条 + 内容列（图标行 / 文字 / 图片 / 代码 / 标签） */
+  flex-direction: row;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   cursor: default;
   user-select: none;
   transition: box-shadow 0.12s ease;
+}
+
+/* 内容列：原来的纵向排布都搬到这里 */
+.topic__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* 左侧标记条：竖排，每列最多 4 个（与 markerStripSize 的分列一致） */
+.topic__markers {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.topic__marker-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
 }
 
 /* 能拖的主题给「抓取」光标：这是最省事的操作提示，也省掉一次试探性拖动 */
@@ -1490,17 +1518,19 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
+  min-width: 15px;
   height: 15px;
   margin-top: -7.5px;
-  padding: 0;
+  padding: 0 3px;
   border: 1.5px solid #ffffff;
-  border-radius: 50%;
+  border-radius: 9px;
   color: #ffffff;
   font-size: 11px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(16, 24, 40, 0.22);
+  box-sizing: content-box;
 }
 
 .topic__collapse--right {

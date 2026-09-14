@@ -20,6 +20,9 @@ import {
   CODE_MAX_LINES,
   CODE_PADDING_X,
   CODE_PADDING_Y,
+  MARKER_GAP,
+  MARKER_PER_COLUMN,
+  MARKER_SIZE,
   codeBoxSize,
   imageBoxSize
 } from '@shared/layout/accessory'
@@ -186,9 +189,6 @@ export interface BuildDrawingInput {
   includeMarkers?: boolean
 }
 
-/** 图标行一行最多这么宽（与 measure.ts 里的 TEXT_MAX 一致） */
-const ACCESSORY_MAX = 240
-const ACCESSORY_GAP = 3
 const LABEL_GAP = 4
 const LABEL_HEIGHT = 18
 const LABEL_PADDING_X = 7
@@ -286,42 +286,18 @@ function nodeOps(
   // 内容自上而下：图标行 → 文字 → 图片 → 公式 → 标签
   let cursorY = node.y + node.paddingY
 
+  // 标记竖排在节点左侧（每列最多 MARKER_PER_COLUMN 个，与画布上的排法一致）
   const includeMarkers = input.includeMarkers !== false
-  if (includeMarkers && node.accessory.height > 0) {
-    const items = node.accessory.items.filter((item) => item.kind === 'marker')
-    const contentLeft = node.x + node.paddingX
-    const contentRight = node.x + node.width - node.paddingX
-    const limit = Math.max(16, Math.min(ACCESSORY_MAX, contentRight - contentLeft))
-
-    // 先按「贪心换行、每行居中」把位置算出来，再统一生成指令——
-    // 比先画后挪要清楚得多，也不会碰到已经生成的别的指令
-    const rows: Array<Array<{ item: AccessoryItem; offset: number }>> = []
-    let row: Array<{ item: AccessoryItem; offset: number }> = []
-    let used = 0
-    for (const item of items) {
-      const next = row.length === 0 ? item.width : used + ACCESSORY_GAP + item.width
-      if (row.length > 0 && next > limit) {
-        rows.push(row)
-        row = []
-        used = 0
-      }
-      const offset = used === 0 ? 0 : used + ACCESSORY_GAP
-      row.push({ item, offset })
-      used = offset + item.width
-    }
-    if (row.length > 0) rows.push(row)
-
-    let rowY = cursorY
-    for (const current of rows) {
-      const last = current[current.length - 1]
-      const rowWidth = last ? last.offset + last.item.width : 0
-      const shift = contentLeft + Math.max(0, (limit - rowWidth) / 2)
-      for (const entry of current) {
-        ops.push(...markerOps(entry.item, shift + entry.offset, rowY, entry.item.width))
-      }
-      rowY += 16 + ACCESSORY_GAP
-    }
-    cursorY = node.y + node.paddingY + node.accessory.height
+  const strip = node.markerStrip
+  if (includeMarkers && strip && strip.markerIds.length > 0) {
+    const startY = node.y + Math.max(node.paddingY, (node.height - strip.height) / 2)
+    strip.markerIds.forEach((markerId, index) => {
+      const column = Math.floor(index / MARKER_PER_COLUMN)
+      const row = index % MARKER_PER_COLUMN
+      const x = node.x + node.paddingX + column * (MARKER_SIZE + MARKER_GAP)
+      const y = startY + row * (MARKER_SIZE + MARKER_GAP)
+      ops.push(...markerOps({ kind: 'marker', markerId, width: MARKER_SIZE }, x, y, MARKER_SIZE))
+    })
   }
 
   for (const line of node.lines) {

@@ -1,7 +1,8 @@
 import { memo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
 import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
-import { BLOCK_GAP, codeBoxSize, imageBoxSize } from '@shared/layout/accessory'
+import { BLOCK_GAP, MARKER_PER_COLUMN, codeBoxSize, imageBoxSize } from '@shared/layout/accessory'
 import { CODE_LANGUAGES } from '@shared/code-language'
+import { countDescendants } from '@shared/model/tree'
 import { useEditor } from '../store/editor'
 import type { RichText, ThemeColors } from '@shared/model/types'
 import { richFromPlain } from '@shared/richtext'
@@ -108,6 +109,13 @@ function TopicNodeInner({
 
   const code = node.topic.code
   const codeBox = code ? node.codeBox ?? codeBoxSize(code) : null
+
+  // 左侧标记条：按每列最多 4 个分列（与测量里的 markerStripSize 一致）
+  const markerIds = node.markerStrip?.markerIds ?? []
+  const markerColumns: string[][] = []
+  for (let i = 0; i < markerIds.length; i += MARKER_PER_COLUMN) {
+    markerColumns.push(markerIds.slice(i, i + MARKER_PER_COLUMN))
+  }
   // 正常情况下尺寸来自布局测量结果；个别测量实现没给时退回同一套公式尺寸函数
   const formulaBox = formula ? node.formulaBox ?? formulaSize(formula, node.fontSize) : null
 
@@ -161,16 +169,26 @@ function TopicNodeInner({
         onDoubleClick(node.id)
       }}
     >
-      {/* 顶部图标行：标记图标 + 备注/链接/附件/公式/图片指示 */}
+      {/* 左侧标记条：标记竖排在节点左侧（每列最多 4 个，超出换列） */}
+      {markerColumns.length > 0 && (
+        <div className="topic__markers" style={{ width: node.markerStrip?.width }}>
+          {markerColumns.map((column, columnIndex) => (
+            <div key={columnIndex} className="topic__marker-col">
+              {column.map((markerId, index) => (
+                <MarkerIcon key={`mk-${columnIndex}-${index}-${markerId}`} markerId={markerId} />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="topic__body">
+      {/* 顶部图标行：备注 / 链接 / 附件指示（标记已移到左侧） */}
       {node.accessory.items.length > 0 && (
         <div className="topic__accessory" style={{ height: node.accessory.height }}>
-          {node.accessory.items.map((item, index) =>
-            item.kind === 'marker' ? (
-              <MarkerIcon key={`m-${index}-${item.markerId ?? ''}`} markerId={item.markerId ?? ''} />
-            ) : (
-              <IndicatorIcon key={`i-${index}-${item.kind}`} kind={item.kind} />
-            )
-          )}
+          {node.accessory.items.map((item, index) => (
+            <IndicatorIcon key={`i-${index}-${item.kind}`} kind={item.kind} />
+          ))}
         </div>
       )}
 
@@ -287,6 +305,8 @@ function TopicNodeInner({
         </div>
       )}
 
+      </div>
+
       {hasChildren && (
         <button
           type="button"
@@ -300,7 +320,7 @@ function TopicNodeInner({
             onToggleCollapse(node.id)
           }}
         >
-          {node.topic.collapsed ? '+' : '−'}
+          {node.topic.collapsed ? `+${countDescendants(node.topic)}` : '−'}
         </button>
       )}
     </div>

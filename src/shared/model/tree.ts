@@ -129,6 +129,14 @@ export function moveTopic(root: Topic, id: string, newParentId: string, index?: 
   return true
 }
 
+/** 某个主题的**后代**总数（不含自己）：折叠徽标显示「折叠了多少个节点」用它 */
+export function countDescendants(topic: Topic): number {
+  let n = 0
+  for (const child of topic.children) n += 1 + countDescendants(child)
+  for (const floating of topic.detachedChildren ?? []) n += 1 + countDescendants(floating)
+  return n
+}
+
 /** 节点总数（不含根时可传 false） */
 export function countTopics(root: Topic, includeRoot = true): number {
   let n = 0

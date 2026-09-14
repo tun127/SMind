@@ -76,6 +76,13 @@ export interface MeasureResult extends Size {
   formulaBox?: Size
   /** 代码块的显示框（0 表示没有代码） */
   codeBox?: Size
+  /** 节点左侧的标记条（标记竖排；没有标记时为空） */
+  markerStrip?: MarkerStrip
+}
+
+/** 节点左侧的标记条 */
+export interface MarkerStrip extends Size {
+  markerIds: string[]
 }
 
 /** 由渲染层注入的文本测量函数（依赖 Canvas measureText） */
@@ -104,6 +111,8 @@ export interface NodeLayout {
   imageBox?: Size
   formulaBox?: Size
   codeBox?: Size
+  /** 节点左侧的标记条（标记竖排） */
+  markerStrip?: MarkerStrip
 }
 
 export interface EdgeLayout {
