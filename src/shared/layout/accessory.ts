@@ -228,3 +228,21 @@ export function codeMinNodeSize(code: TopicCode | undefined, padding: { x: numbe
     height: floor.height + padding.y * 2
   }
 }
+
+/**
+ * 带公式块的节点**最小尺寸**：不能小于「公式框 + 一行标题 + 节点内边距」。
+ *
+ * 公式是**整块原子**（不能换行、不随手动拉伸缩放），节点框被拖得比它小就会
+ * 左右裁掉半边——用户报的"公式被截断、外框比内框还小"就是这么来的。
+ * `textLineHeight` 是标题一行的高度（公式上方永远至少留一行文字的位置）。
+ */
+export function formulaMinNodeSize(
+  formulaBox: Size,
+  padding: { x: number; y: number },
+  textLineHeight: number
+): Size {
+  return {
+    width: formulaBox.width + padding.x * 2,
+    height: formulaBox.height + textLineHeight + BLOCK_GAP + padding.y * 2
+  }
+}

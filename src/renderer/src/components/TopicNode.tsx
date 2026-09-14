@@ -7,6 +7,7 @@ import {
   MARKER_STRIP_GAP,
   codeBlockMetrics,
   codeMinNodeSize,
+  formulaMinNodeSize,
   imageBoxSize
 } from '@shared/layout/accessory'
 import { nodePaddingOf } from '../render/measure'
@@ -135,7 +136,8 @@ function TopicNodeInner({
   const codeMetrics = code ? node.codeMetrics ?? codeBlockMetrics(code) : null
   const codeBox = code && codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : null
   /** 拉伸时的最小尺寸：代码块缩到下限时的大小 + 内边距（框不能比内容还小） */
-  const minSize = codeMinNodeSize(code, nodePaddingOf(node.depth))
+  const padding = nodePaddingOf(node.depth)
+  const minSize = codeMinNodeSize(code, padding)
 
   // 标记条挂在节点**外面**：默认左侧；左向分支放右侧，免得压到它自己的子节点
   const markerIds = node.markerStrip?.markerIds ?? []
@@ -151,13 +153,22 @@ function TopicNodeInner({
   // 正常情况下尺寸来自布局测量结果；个别测量实现没给时退回同一套公式尺寸函数
   const formulaBox = formula ? node.formulaBox ?? formulaSize(formula, node.fontSize) : null
 
+  // 框不能比内容还小：代码块（可缩放下限）与公式块（整块原子）取更大的一份。
+  // 公式节点被手动缩小到极限时，外框最小也要包住公式——否则左右各裁掉半边
+  const formulaMin =
+    formula && formulaBox ? formulaMinNodeSize(formulaBox, padding, node.lineHeight) : null
+  const minNodeWidth = Math.max(minSize?.width ?? 0, formulaMin?.width ?? 0)
+  const minNodeHeight = Math.max(minSize?.height ?? 0, formulaMin?.height ?? 0)
+
   const style: CSSProperties = {
     left: node.x,
     top: node.y,
     width: node.width,
     // 编辑时高度交给内容决定，避免富文本内容被裁掉
     height: editing ? 'auto' : node.height,
-    minHeight: node.height,
+    minHeight: Math.max(node.height, minNodeHeight),
+    // 双保险：就算 sizeOverride 里存了历史遗留的过小值，框也绝不含把公式裁掉
+    minWidth: minNodeWidth > 0 ? minNodeWidth : undefined,
     background: visual.background,
     color: visual.color,
     borderRadius: visual.borderRadius,
@@ -399,9 +410,9 @@ function TopicNodeInner({
             const startWidth = node.width
             const startHeight = node.height
             const zoom = useEditor.getState().zoom || 1
-            // 框不能小于内容：代码块最小只能缩到缩放下限，再小就会溢出到框外
-            const minWidth = Math.max(60, minSize?.width ?? 0)
-            const minHeight = Math.max(28, (minSize?.height ?? 0) + node.lineHeight)
+            // 框不能小于内容：代码块缩到缩放下限、公式块整块原子——取两者更大的下限
+            const minWidth = Math.max(60, minNodeWidth)
+            const minHeight = Math.max(28, minNodeHeight)
             const move = (moveEvent: PointerEvent): void => {
               useEditor.getState().setSizeOverride(node.id, {
                 width: Math.max(minWidth, startWidth + (moveEvent.clientX - startX) / zoom),

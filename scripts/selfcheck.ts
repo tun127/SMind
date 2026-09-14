@@ -2824,6 +2824,31 @@ async function testMediaElements(): Promise<void> {
   const shrunk = layoutSheet(root(), fakeMeasure).nodeMap.get(imgNode)!.imageBox!
   check('缩小节点时图片跟着变小', shrunk.width < autoImage.width, JSON.stringify(shrunk))
 
+  group('手动拉伸：公式节点的外框不会小于公式')
+
+  reset()
+  const fxRoot = root().id
+  const fxNode = addChildOf(fxRoot, '公式节点')
+  const FX_SOURCE = '\\theta_{i+1} = \\theta_i - \\alpha\\sum_{j=0}^{m}'
+  store().mutate((draft) => {
+    const topic = findTopic(activeRoot(draft), fxNode)
+    if (topic) topic.formula = FX_SOURCE
+  }, '加公式')
+
+  // 自检环境没有 DOM（公式用 pureFormulaSize 估算、fakeMeasure 用 16px 占位），
+  // 这里验证 store 的钳制：疯狂往小拖时，外框会被抬到「公式框 + 内边距」以上
+  const fxBox = pureFormulaSize(FX_SOURCE, 15) // depth=1 → 基准字号 15
+  store().setSizeOverride(fxNode, { width: 40, height: 30 })
+  const override = findTopic(root(), fxNode)?.sizeOverride
+  check('宽度被钳到不小于公式宽 + 内边距', (override?.width ?? 0) >= fxBox.width + 28, String(override?.width))
+  check(
+    '高度被钳到不小于「公式高 + 一行标题 + 间隔 + 内边距」',
+    (override?.height ?? 0) >= fxBox.height + 24 + 6 + 18,
+    String(override?.height)
+  )
+  store().setSizeOverride(fxNode, null)
+  eq('恢复自动尺寸', findTopic(root(), fxNode)?.sizeOverride, undefined)
+
   group('默认对齐：渲染兜底值')
 
   eq('初始默认是居中', defaultTextAlignOf(), 'center')

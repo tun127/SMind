@@ -19,8 +19,10 @@ import {
   type TopicFilter
 } from '@shared/search'
 import { DEFAULT_THEME, getThemeColors } from '@shared/theme'
-import { codeMinNodeSize } from '@shared/layout/accessory'
-import { nodePaddingOf } from '../render/measure'
+import { BLOCK_GAP, codeMinNodeSize } from '@shared/layout/accessory'
+import type { Size } from '@shared/layout/types'
+import { NODE_FONT_SIZES, nodePaddingOf } from '../render/measure'
+import { formulaSize } from '../render/formula'
 import {
   activeRoot,
   activeSheet,
@@ -924,8 +926,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
           topic.sizeOverride = undefined
           return
         }
-        // 兜底：框不能小于内容。代码块最小只能缩到缩放下限，再小就会溢出框外，
-        // 所以这里按「代码块下限尺寸 + 内边距」夹一下（渲染层的拉伸手柄也夹，双保险）
+        // 兜底：框不能小于内容。代码块最小只能缩到缩放下限、公式是整块原子，
+        // 任一方都按「内容尺寸 + 内边距」夹一下（渲染层的拉伸手柄也夹，双保险）
         let depth = 0
         let cursor = topic
         while (cursor) {
@@ -934,10 +936,25 @@ export const useEditor = create<EditorState>()((set, get) => ({
           depth += 1
           cursor = parent
         }
-        const min = codeMinNodeSize(topic.code, nodePaddingOf(depth))
+        const padding = nodePaddingOf(depth)
+        const fontSize = NODE_FONT_SIZES[Math.min(depth, NODE_FONT_SIZES.length - 1)]
+        const mins: Size[] = []
+        const codeMin = codeMinNodeSize(topic.code, padding)
+        if (codeMin) mins.push(codeMin)
+        // 公式块：宽度 = 公式宽 + 内边距；高度 = 公式高 + 一行标题 + 间隔 + 内边距
+        // （这里拿不到排版行高，用 1.6 倍字号近似——渲染层手柄才是精确钳制，这里只防历史遗留的过小值）
+        if (topic.formula) {
+          const box = formulaSize(topic.formula, fontSize)
+          mins.push({
+            width: box.width + padding.x * 2,
+            height: box.height + Math.round(fontSize * 1.6) + BLOCK_GAP + padding.y * 2
+          })
+        }
+        const minWidth = Math.max(0, ...mins.map((item) => item.width))
+        const minHeight = Math.max(0, ...mins.map((item) => item.height))
         const clamped =
-          min && (min.width > next.width || min.height > next.height)
-            ? { width: Math.max(next.width, Math.round(min.width)), height: Math.max(next.height, Math.round(min.height)) }
+          minWidth > next.width || minHeight > next.height
+            ? { width: Math.max(next.width, Math.round(minWidth)), height: Math.max(next.height, Math.round(minHeight)) }
             : next
         if (topic.sizeOverride?.width === clamped.width && topic.sizeOverride?.height === clamped.height) return
         topic.sizeOverride = clamped
