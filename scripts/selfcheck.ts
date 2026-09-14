@@ -14,6 +14,7 @@ import {
   useEditor
 } from '../src/renderer/src/store/editor'
 import { withAlpha } from '../src/renderer/src/render/theme'
+import { defaultTextAlignOf, setDefaultTextAlign } from '../src/renderer/src/render/defaults'
 import { pickDocumentArg } from '../src/shared/openfile'
 import {
   clearTypedChar,
@@ -2539,6 +2540,16 @@ async function testMediaElements(): Promise<void> {
   store().setSizeOverride(imgNode, { width: 180, height: 180 })
   const shrunk = layoutSheet(root(), fakeMeasure).nodeMap.get(imgNode)!.imageBox!
   check('缩小节点时图片跟着变小', shrunk.width < autoImage.width, JSON.stringify(shrunk))
+
+  group('默认对齐：渲染兜底值')
+
+  eq('初始默认是居中', defaultTextAlignOf(), 'center')
+  setDefaultTextAlign('left')
+  eq('设置后立即生效', defaultTextAlignOf(), 'left')
+  setDefaultTextAlign('right')
+  eq('可以改成右对齐', defaultTextAlignOf(), 'right')
+  setDefaultTextAlign('center')
+  eq('改回居中', defaultTextAlignOf(), 'center')
 
   group('概要标题：支持换行')
 

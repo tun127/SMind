@@ -72,7 +72,7 @@ export default function SettingsDialog({ settings, themes, onChange, onClose }: 
             <option value="right">右对齐</option>
           </select>
           <span className="ai-field__hint">
-            先记进设置并随文档新建生效；富文本标题的逐段对齐接线在下一批补上。
+            没有单独设置过对齐的段落都用它（改完立即生效；单独设过对齐的段落不受影响）。
           </span>
         </div>
       </div>

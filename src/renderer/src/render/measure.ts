@@ -19,6 +19,7 @@ import {
 } from '@shared/layout/accessory'
 import { richFromPlain } from '@shared/richtext'
 import { formulaSize } from './formula'
+import { defaultTextAlignOf } from './defaults'
 
 export const FONT_FAMILY =
   '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", system-ui, sans-serif'
@@ -419,13 +420,19 @@ function compute(topic: Topic, depth: number): MeasureResult {
         segments: groupSegments(lineChars),
         width: Math.round(width * 10) / 10,
         height: Math.round(maxFontSize * LINE_HEIGHT_RATIO),
-        align: paragraph.align ?? 'center'
+        // 没有显式段落对齐时用「设置 → 默认对齐」
+        align: paragraph.align ?? defaultTextAlignOf()
       })
     }
   }
 
   if (lines.length === 0 && !contentOnly) {
-    lines.push({ segments: [], width: 0, height: Math.round(base.fontSize * LINE_HEIGHT_RATIO), align: 'center' })
+    lines.push({
+      segments: [],
+      width: 0,
+      height: Math.round(base.fontSize * LINE_HEIGHT_RATIO),
+      align: defaultTextAlignOf()
+    })
   }
 
   const accessory = accessoryOf(topic)

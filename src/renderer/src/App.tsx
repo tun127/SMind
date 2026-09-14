@@ -20,11 +20,22 @@ import AiSettingsDialog from './components/AiSettingsDialog'
 import ExportDialog from './components/ExportDialog'
 import HistoryDialog from './components/HistoryDialog'
 import { viewportActions } from './render/viewport'
+import { bumpMeasureEpoch } from './render/measure'
+import { setDefaultTextAlign } from './render/defaults'
 import { stageTypedChar } from './editor/typedChar'
 import { snapshotForSave, useEditor } from './store/editor'
 import SettingsDialog from './components/SettingsDialog'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
 import type { ThemeDefinition } from '@shared/theme'
+
+/**
+ * 把设置里的默认值送到渲染层并让测量缓存失效。
+ * 对齐是段落级的兜底默认值（见 render/defaults.ts），改了必须重算测量。
+ */
+function applyRenderDefaults(settings: AppSettings): void {
+  setDefaultTextAlign(settings.defaultAlign)
+  bumpMeasureEpoch()
+}
 
 function fileNameOf(path: string | null): string | null {
   if (!path) return null
@@ -254,6 +265,7 @@ export default function App(): ReactElement {
         const loaded = await window.api.settingsLoad()
         setSettings(loaded)
         useEditor.getState().setAppSettings(loaded)
+        applyRenderDefaults(loaded)
       } catch {
         /* 读不到就用内置默认值 */
       }
@@ -269,6 +281,7 @@ export default function App(): ReactElement {
   const updateSettings = useCallback((next: AppSettings): void => {
     setSettings(next)
     useEditor.getState().setAppSettings(next)
+    applyRenderDefaults(next)
     void window.api.settingsSave(next).catch(() => undefined)
   }, [])
 
