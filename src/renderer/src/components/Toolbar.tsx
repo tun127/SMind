@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElemen
 import { createPortal } from 'react-dom'
 import {
   AlignStartVertical,
+  AppWindow,
   Braces,
   ChevronDown,
   CircleHelp,
   Code2,
+  Copy,
   Crosshair,
   FileInput,
   FileOutput,
@@ -20,6 +22,7 @@ import {
   MoreHorizontal,
   Palette,
   PanelRight,
+  Pin,
   PinOff,
   Plus,
   Redo2,
@@ -116,6 +119,8 @@ function ToolMenu({
     onSelect(): void
     /** 提供时在行尾显示「移回快捷栏」小按钮（收纳进来的功能用） */
     onUnpin?(): void
+    /** 提供时在行尾显示「拿出到快捷栏」小按钮（还在「更多」里的功能用） */
+    onTakeOut?(): void
   }>
   iconOnly?: boolean
 }): ReactElement {
@@ -199,6 +204,19 @@ function ToolMenu({
               <PinOff size={13} />
             </span>
           ) : null}
+          {item.onUnpin ? null : item.onTakeOut ? (
+            <span
+              className="tool-menu__pin"
+              title="拿出到快捷栏"
+              onClick={(event) => {
+                event.stopPropagation()
+                item.onTakeOut?.()
+                setPosition(null)
+              }}
+            >
+              <Pin size={13} />
+            </span>
+          ) : null}
         </button>
       ))}
     </div>
@@ -236,20 +254,20 @@ function ToolMenu({
 /**
  * 快捷栏按钮的「收纳」外壳：**右键**弹出「收进更多 ▾」。
  *
- * 被收纳的功能从快捷栏消失、出现在「更多 ▾」菜单的「已收纳」区，行尾有
+ * 被收纳的功能从快捷栏消失、出现在「更多 ▾」菜单里，行尾有
  * 「移回快捷栏」按钮——收纳状态持久化在设置里（toolbarHidden）。
  */
 function PinWrap({
-  id,
   title,
-  hidden,
-  onToggleHidden,
+  shown,
+  onHide,
   children
 }: {
-  id: string
   title: string
-  hidden: boolean
-  onToggleHidden(id: string, hidden: boolean): void
+  /** false＝已收进「更多 ▾」，不占快捷栏的位置 */
+  shown: boolean
+  /** 右键「收进更多 ▾」的统一收尾（快捷项与「拿出」的菜单项动作不同，由调用方决定） */
+  onHide(): void
   children: ReactNode
 }): ReactElement | null {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -274,7 +292,7 @@ function PinWrap({
   }, [menu])
 
   // 被收纳的功能不占快捷栏的位置（它活在「更多 ▾」里）
-  if (hidden) return null
+  if (!shown) return null
 
   return (
     <span
@@ -297,7 +315,7 @@ function PinWrap({
                 type="button"
                 className="tool-menu__item"
                 onClick={() => {
-                  onToggleHidden(id, true)
+                  onHide()
                   setMenu(null)
                 }}
               >
@@ -324,6 +342,21 @@ interface QuickItemMeta {
   run(): void
 }
 
+/**
+ * 「更多 ▾」菜单里**原生**的条目 id：这些项默认不在快捷栏，
+ * 只有在菜单里点过「拿出到快捷栏」（toolbarHidden 里存 `show:${id}` 标记）才出现。
+ * 其余 quickMeta 项（新建/保存等）默认在快捷栏，存裸 id 表示「已收进更多」。
+ */
+const MENU_PINNABLE: ReadonlySet<string> = new Set([
+  'new-window',
+  'sheet-copy',
+  'history',
+  'default-view-lock',
+  'reset-layout',
+  'reset-all-layout',
+  'shortcuts'
+])
+
 export default function Toolbar({ actions, outlineOpen = false, hiddenItems = [], onToggleHidden }: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
@@ -344,6 +377,25 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
   const toggleHidden = (id: string, hidden: boolean): void => {
     if (!onToggleHidden) return
     onToggleHidden(id, hidden)
+  }
+
+  /**
+   * 某个功能此刻**应不应该出现在快捷栏**：
+   * - 原生快捷项（新建/保存…）：默认显示，toolbarHidden 存裸 id = 已收进更多；
+   * - 「更多」原生项（新建窗口…）：默认不显示，存 `show:${id}` 标记 = 已拿出。
+   */
+  const isShown = (id: string): boolean =>
+    MENU_PINNABLE.has(id) ? hiddenItems.includes(`show:${id}`) : !hiddenItems.includes(id)
+
+  /** 右键「收进更多 ▾」：按来源写对应标记 */
+  const hideFromBar = (id: string): void => {
+    if (MENU_PINNABLE.has(id)) toggleHidden(`show:${id}`, false)
+    else toggleHidden(id, true)
+  }
+
+  /** 菜单行尾「拿出到快捷栏」 */
+  const takeOutToBar = (id: string): void => {
+    if (MENU_PINNABLE.has(id)) toggleHidden(`show:${id}`, true)
   }
 
   // 这三个按钮是「开关」：当前选择已经有对应元素时显示为已按下，再点一次即移除。
@@ -415,7 +467,32 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
       run: () => viewportActions.zoomTo(zoom * 1.2)
     },
     fit: { label: '适应画布', icon: <Maximize size={15} />, run: () => viewportActions.fit() },
-    'view-lock': { label: '视角锁定', icon: <Crosshair size={15} />, run: () => store().toggleViewLock() }
+    'view-lock': { label: '视角锁定', icon: <Crosshair size={15} />, run: () => store().toggleViewLock() },
+
+    /* ---- 以下默认住在「更多 ▾」里，可拿出到快捷栏（MENU_PINNABLE） ---- */
+    'new-window': { label: '新建窗口', icon: <AppWindow size={15} />, run: actions.onNewWindow },
+    'sheet-copy': {
+      label: '新窗口打开画布副本',
+      icon: <Copy size={15} />,
+      run: actions.onOpenSheetWindow
+    },
+    history: { label: '历史记录与常用', icon: <HistoryIcon size={15} />, run: actions.onHistory },
+    'default-view-lock': {
+      label: '启动默认视角锁定',
+      icon: <Crosshair size={15} />,
+      run: () => void patchAppSettings({ defaultViewLock: !appSettings.defaultViewLock })
+    },
+    'reset-layout': {
+      label: '恢复自动布局（选中主题）',
+      icon: <RotateCcw size={15} />,
+      run: () => selectedId && store().clearPosition(selectedId)
+    },
+    'reset-all-layout': {
+      label: '全部恢复自动布局',
+      icon: <AlignStartVertical size={15} />,
+      run: () => store().clearAllPositions()
+    },
+    shortcuts: { label: '快捷键说明', icon: <CircleHelp size={15} />, run: actions.onHelp }
   }
 
   // 工具栏按钮不抢焦点：否则点过按钮后按 Enter / Tab 会先被按钮吃掉。
@@ -427,7 +504,7 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
 
   /** 快捷栏按钮：pinned 收纳外壳 + 更多菜单里的对应条目 */
   const quick = (id: keyof typeof quickMeta & string, node: ReactNode): ReactElement | null => (
-    <PinWrap id={id} title={quickMeta[id].label} hidden={hiddenItems.includes(id)} onToggleHidden={toggleHidden}>
+    <PinWrap title={quickMeta[id].label} shown={isShown(id)} onHide={() => hideFromBar(id)}>
       {node}
     </PinWrap>
   )
@@ -840,6 +917,83 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
         )}
       </div>
 
+      {/* 从「更多 ▾」拿出来的功能落在这里：默认全部收着，拿出一个显示一个 */}
+      <div className="toolbar__group">
+        {quick(
+          'new-window',
+          <button
+            type="button"
+            className="tool-btn"
+            title="新建窗口（Ctrl+Shift+N）"
+            onClick={actions.onNewWindow}
+          >
+            <AppWindow size={17} />
+          </button>
+        )}
+        {quick(
+          'sheet-copy',
+          <button
+            type="button"
+            className="tool-btn"
+            title="在新窗口打开画布副本（副本独立，不影响当前文档）"
+            onClick={actions.onOpenSheetWindow}
+          >
+            <Copy size={17} />
+          </button>
+        )}
+        {quick(
+          'history',
+          <button
+            type="button"
+            className="tool-btn"
+            title="历史记录与常用（最近打开 / 固定常用 / 默认保存位置）"
+            onClick={actions.onHistory}
+          >
+            <HistoryIcon size={17} />
+          </button>
+        )}
+        {quick(
+          'default-view-lock',
+          <button
+            type="button"
+            className={appSettings.defaultViewLock ? 'tool-btn tool-btn--active' : 'tool-btn'}
+            title="启动时默认开启视角锁定（只影响新开文档，点击切换）"
+            onClick={() => void patchAppSettings({ defaultViewLock: !appSettings.defaultViewLock })}
+          >
+            <Crosshair size={17} />
+          </button>
+        )}
+        {quick(
+          'reset-layout',
+          <button
+            type="button"
+            className="tool-btn"
+            title="恢复自动布局：把选中的自由摆放主题放回自动位置"
+            disabled={!selectedId}
+            onClick={() => selectedId && store().clearPosition(selectedId)}
+          >
+            <RotateCcw size={17} />
+          </button>
+        )}
+        {quick(
+          'reset-all-layout',
+          <button
+            type="button"
+            className="tool-btn"
+            title="全部恢复自动布局：把这张画布上所有自由摆放的主题一次性放回去"
+            onClick={() => store().clearAllPositions()}
+          >
+            <AlignStartVertical size={17} />
+          </button>
+        )}
+        {quick(
+          'shortcuts',
+          <button type="button" className="tool-btn" title="快捷键说明" onClick={actions.onHelp}>
+            <CircleHelp size={17} />
+          </button>
+        )}
+      </div>
+
       <div className="toolbar__divider" />
 
       {/* 不常用但仍需要一键到达的：收进「更多」，让主行保持短 */}
@@ -861,55 +1015,31 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
                 onSelect: quickMeta[id].run,
                 onUnpin: () => toggleHidden(id, false)
               })),
-            {
-              key: 'new-window',
-              label: '新建窗口',
-              hint: '一个窗口一份文档（Ctrl+Shift+N）',
-              icon: <Frame size={15} />,
-              onSelect: actions.onNewWindow
-            },
-            {
-              key: 'open-sheet-window',
-              label: '在新窗口打开画布副本',
-              hint: '副本独立：导入/导出/另存都不影响当前文档',
-              icon: <PanelRight size={15} />,
-              onSelect: actions.onOpenSheetWindow
-            },
-            {
-              key: 'history',
-              label: '历史记录与常用',
-              hint: '最近打开 / 固定常用 / 默认保存位置',
-              icon: <HistoryIcon size={15} />,
-              onSelect: actions.onHistory
-            },
-            {
-              key: 'default-view-lock',
-              label: `启动时默认开启视角锁定（当前${appSettings.defaultViewLock ? '开' : '关'}）`,
-              hint: '只影响新开文档的初始状态',
-              icon: <Crosshair size={15} />,
-              onSelect: () => void patchAppSettings({ defaultViewLock: !appSettings.defaultViewLock })
-            },
-            {
-              key: 'reset-layout',
-              label: '恢复自动布局',
-              hint: hasFreePosition ? '把自由摆放的主题放回自动位置' : '选中自由摆放的主题后可用',
-              icon: <RotateCcw size={15} />,
-              onSelect: () => selectedId && store().clearPosition(selectedId)
-            },
-            {
-              key: 'reset-all-layout',
-              label: '全部恢复自动布局',
-              hint: '把这张画布上所有自由摆放的主题一次性放回去',
-              icon: <AlignStartVertical size={15} />,
-              onSelect: () => store().clearAllPositions()
-            },
-            {
-              key: 'shortcuts',
-              label: '快捷键说明',
-              hint: '全部快捷键速查',
-              icon: <CircleHelp size={15} />,
-              onSelect: actions.onHelp
-            }
+            // 「更多」原生条目：全部可拿出到快捷栏（已拿出的行尾是「移回快捷栏」）
+            ...(
+              [
+                ['new-window', '一个窗口一份文档（Ctrl+Shift+N）'],
+                ['sheet-copy', '副本独立：导入/导出/另存都不影响当前文档'],
+                ['history', '最近打开 / 固定常用 / 默认保存位置'],
+                ['default-view-lock', `只影响新开文档（当前${appSettings.defaultViewLock ? '开' : '关'}）`],
+                [
+                  'reset-layout',
+                  hasFreePosition ? '把自由摆放的主题放回自动位置' : '选中自由摆放的主题后可用'
+                ],
+                ['reset-all-layout', '把这张画布上所有自由摆放的主题一次性放回去'],
+                ['shortcuts', '全部快捷键速查']
+              ] as Array<[keyof typeof quickMeta & string, string]>
+            ).map(([id, hint]) => ({
+              key: id,
+              label: quickMeta[id].label,
+              hint,
+              icon: quickMeta[id].icon,
+              onSelect: quickMeta[id].run,
+              // 已拿出 → 行尾「移回快捷栏」；还没拿出 → 行尾「拿出到快捷栏」
+              ...(hiddenItems.includes(`show:${id}`)
+                ? { onUnpin: () => toggleHidden(`show:${id}`, false) }
+                : { onTakeOut: () => takeOutToBar(id) })
+            }))
           ]}
         />
       </div>
