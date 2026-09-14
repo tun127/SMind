@@ -126,18 +126,87 @@ export function codeUnitLength(line: string): number {
 /** 等宽字体里一个「宽度单位」对应多少像素（尺寸估算与导出绘制共用） */
 export const CODE_CHAR_WIDTH = CODE_FONT_SIZE * 0.6
 
+/** 手动拉伸节点时，代码块最多放大到自然尺寸的几倍 */
+export const CODE_GROW_LIMIT = 2
+/** 代码块缩放下限：再小就看不清了（宁可溢出也不糊成一团） */
+export const CODE_MIN_SCALE = 0.5
+
 /**
- * 代码块显示框：等宽字体按字符数估宽，**行数与列宽都不封顶**——
- * 代码块要完整展示整段代码（滚动条会让"代码被截断"，用户明确要求长宽不限）。
- * 渲染层（TopicNode / 导出绘制）的字号、内边距、行高全部取这里的常量，
- * 保证「测量 = 显示」。
+ * 代码块的**全套排版指标**。
+ *
+ * 为什么返回整套指标而不是只返回尺寸：手动拉伸节点时，代码块要像图片一样
+ * 等比缩放——字号、行高、内边距**必须一起缩**，否则"测量说这么大、画出来那么大"
+ * 就对不上了（会出现文字溢出节点框）。
+ * 渲染层与导出层都从这里取指标，保证三处一致。
  */
-export function codeBoxSize(code: TopicCode | undefined): Size {
-  if (!code) return { width: 0, height: 0 }
+export interface CodeMetrics {
+  /** 相对自然尺寸的缩放系数 */
+  scale: number
+  fontSize: number
+  lineHeight: number
+  paddingX: number
+  paddingY: number
+  /** 顶部语言标签占的高度 */
+  header: number
+  width: number
+  height: number
+}
+
+/**
+ * 代码块指标：等宽字体按字符数估宽，**行数与列宽都不封顶**（要完整展示整段代码）。
+ *
+ * 给了 `bounds`（节点被手动拉伸）时按可用空间**等比缩放**：字号、行高、内边距一起缩，
+ * 于是代码块永远待在节点框里——这就是"像图片一样有缩放功能"。
+ */
+export function codeBlockMetrics(code: TopicCode | undefined, bounds?: Size): CodeMetrics | null {
+  if (!code) return null
   const lines = code.text.length > 0 ? code.text.split('\n') : ['']
   let maxUnits = 8
   for (const line of lines) maxUnits = Math.max(maxUnits, codeUnitLength(line))
-  const width = Math.max(CODE_MIN_WIDTH, Math.round(maxUnits * CODE_CHAR_WIDTH) + CODE_PADDING_X * 2)
-  const height = CODE_HEADER + CODE_PADDING_Y * 2 + lines.length * Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
-  return { width, height }
+
+  const naturalWidth = Math.max(CODE_MIN_WIDTH, Math.round(maxUnits * CODE_CHAR_WIDTH) + CODE_PADDING_X * 2)
+  const naturalLineHeight = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
+  const naturalHeight = CODE_HEADER + CODE_PADDING_Y * 2 + lines.length * naturalLineHeight
+
+  /** 按给定比例算出全套指标（字号、行高、内边距都有可读性下限） */
+  const metricsAt = (value: number): CodeMetrics => {
+    const fontSize = Math.max(6, Math.round(CODE_FONT_SIZE * value))
+    const lineHeight = Math.round(fontSize * CODE_LINE_RATIO)
+    const paddingX = Math.max(4, Math.round(CODE_PADDING_X * value))
+    const paddingY = Math.max(3, Math.round(CODE_PADDING_Y * value))
+    const header = Math.max(12, Math.round(CODE_HEADER * value))
+    // 等宽字体：单字宽随字号等比变化（CODE_CHAR_WIDTH 就是自然字号下的单字宽）
+    const charWidth = (fontSize * CODE_CHAR_WIDTH) / CODE_FONT_SIZE
+    return {
+      scale: value,
+      fontSize,
+      lineHeight,
+      paddingX,
+      paddingY,
+      header,
+      width: Math.max(CODE_MIN_WIDTH * value, Math.round(maxUnits * charWidth) + paddingX * 2),
+      height: header + paddingY * 2 + lines.length * lineHeight
+    }
+  }
+
+  if (!bounds || bounds.width <= 0 || bounds.height <= 0) return metricsAt(1)
+
+  // 先按比例估算，再根据**取整与可读性下限**带来的误差回调几次：
+  // 目标是把整块塞进给定空间（塞不下就接受下限值，宁可略大也不能糊）
+  let scale = Math.max(
+    CODE_MIN_SCALE,
+    Math.min(CODE_GROW_LIMIT, bounds.width / naturalWidth, bounds.height / naturalHeight)
+  )
+  for (let i = 0; i < 8 && scale > CODE_MIN_SCALE; i += 1) {
+    const test = metricsAt(scale)
+    if (test.width <= bounds.width && test.height <= bounds.height) break
+    scale = Math.max(CODE_MIN_SCALE, scale * 0.94)
+  }
+  return metricsAt(scale)
+}
+
+/** 代码块显示框（尺寸；渲染层要完整指标时用 {@link codeBlockMetrics}） */
+export function codeBoxSize(code: TopicCode | undefined, bounds?: Size): Size {
+  const metrics = codeBlockMetrics(code, bounds)
+  return metrics ? { width: metrics.width, height: metrics.height } : { width: 0, height: 0 }
 }

@@ -12,6 +12,12 @@ export interface OpenResult {
   warnings: string[]
   /** 是否存在未加载完成的资源（P4 使用） */
   resourceCount: number
+  /**
+   * 这是一份**副本**（「在新窗口打开画布副本」开出来的）：
+   * 它没有磁盘归属，渲染层必须当成"未保存的新文档"——保存走「另存为」，
+   * 绝不覆盖原文件（否则一个窗口里的改动会顺着原路径写回去，影响另一个画布）。
+   */
+  copy?: boolean
 }
 
 export interface SaveResult {
@@ -190,12 +196,12 @@ export interface MindApi {
   /** 开一个新窗口（= 新的一份文档）；每个窗口各自独立文档与撤销栈 */
   newWindow(): Promise<void>
   /**
-   * 在新窗口打开**当前文档**的某张画布（同一份文件，各自独立视图）。
+   * 在新窗口打开**当前文档的副本**（并定位到指定画布）。
    *
-   * 用来并排看两张画布——多窗口的意义就在这里。
-   * 返回 `no-file` 表示这个文档还没保存过（没有磁盘路径，开不了新窗口）。
+   * 副本是**完全独立**的：没有磁盘归属，导入/导出/保存（另存为）都不会影响原文档。
+   * 这就是"A 画布新建 B 画布、两者互不影响"的做法。未保存过的文档也能开副本。
    */
-  openSheetInNewWindow(sheetId: string): Promise<'ok' | 'no-file' | 'failed'>
+  openSheetInNewWindow(workbook: Workbook, sheetId: string): Promise<'ok' | 'failed'>
   /** 新窗口启动时要定位的画布 id（取一次即清空） */
   pendingSheet(): Promise<string | null>
   /**

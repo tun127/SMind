@@ -135,6 +135,7 @@ export class LayoutBuilder {
       imageBox: size.imageBox,
       formulaBox: size.formulaBox,
       codeBox: size.codeBox,
+      codeMetrics: size.codeMetrics,
       markerStrip: size.markerStrip
     }
     this.nodes.push(node)

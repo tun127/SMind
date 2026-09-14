@@ -1,4 +1,5 @@
 import type { NodeStyle, Topic } from '../model/types'
+import type { CodeMetrics } from './accessory'
 
 export interface Size {
   width: number
@@ -85,6 +86,8 @@ export interface MeasureResult extends Size {
   formulaBox?: Size
   /** 代码块的显示框（0 表示没有代码） */
   codeBox?: Size
+  /** 代码块排版指标（字号/行高/内边距/缩放系数）：渲染与导出共用 */
+  codeMetrics?: CodeMetrics
   /** 节点左侧的标记条（标记竖排；没有标记时为空） */
   markerStrip?: MarkerStrip
 }
@@ -120,6 +123,8 @@ export interface NodeLayout {
   imageBox?: Size
   formulaBox?: Size
   codeBox?: Size
+  /** 代码块排版指标（字号/行高/内边距/缩放系数）：渲染与导出共用，别各算各的 */
+  codeMetrics?: CodeMetrics
   /** 节点左侧的标记条（标记竖排） */
   markerStrip?: MarkerStrip
 }

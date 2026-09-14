@@ -1609,11 +1609,11 @@ textarea {
 }
 
 .topic__collapse--right {
-  left: calc(100% + 6px);
+  left: calc(100% + 5px);
 }
 
 .topic__collapse--left {
-  right: calc(100% + 6px);
+  right: calc(100% + 5px);
 }
 
 /* ------------------------------------------------------------------ */

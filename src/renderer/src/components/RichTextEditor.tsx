@@ -3,7 +3,9 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
-import { Mark } from '@tiptap/core'
+import { Mark, markInputRule } from '@tiptap/core'
+import { Slice } from '@tiptap/pm/model'
+import { parseInlineMarkdown, inlineRunsToRich } from '@shared/import/markdown'
 import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
@@ -22,21 +24,35 @@ import { takeTypedChar } from '../editor/typedChar'
 const Highlight = Mark.create({
   name: 'highlight',
   parseHTML: () => [{ tag: 'mark' }],
-  renderHTML: () => ['mark', { class: 'rt-highlight' }, 0]
+  renderHTML: () => ['mark', { class: 'rt-highlight' }, 0],
+  // 打字时即时生效：输入 `==高亮==` 立刻变成高亮（Typora 那样）
+  addInputRules() {
+    return [markInputRule({ find: /(?:^|\s)((?:==)((?:[^=]+))(?:==))$/, type: this.type })]
+  }
 })
 
 const Superscript = Mark.create({
   name: 'superscript',
   excludes: 'subscript',
   parseHTML: () => [{ tag: 'sup' }],
-  renderHTML: () => ['sup', 0]
+  renderHTML: () => ['sup', 0],
+  addInputRules() {
+    return [
+      // `^上标^`，以及脚注引用 `[^1]`（导入时也按上标渲染，这里保持一致）
+      markInputRule({ find: /(?:^|\s)((?:\^)((?:[^\s^]+))(?:\^))$/, type: this.type }),
+      markInputRule({ find: /(?:^|\s)(\[\^[^\]]+\])$/, type: this.type })
+    ]
+  }
 })
 
 const Subscript = Mark.create({
   name: 'subscript',
   excludes: 'superscript',
   parseHTML: () => [{ tag: 'sub' }],
-  renderHTML: () => ['sub', 0]
+  renderHTML: () => ['sub', 0],
+  addInputRules() {
+    return [markInputRule({ find: /(?:^|\s)((?:~)((?:[^\s~]+))(?:~))$/, type: this.type })]
+  }
 })
 
 export interface RichTextEditorProps {
@@ -92,6 +108,37 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     shouldRerenderOnTransaction: true,
     editorProps: {
       attributes: { class: 'rich-editor__content', spellcheck: 'false' },
+
+      /**
+       * 粘贴 Markdown 片段时按语法落地：`==高亮==`、`^上标^`、`~下标~`、`[^1]` 等。
+       *
+       * 三条防呆：
+       * 1. 剪贴板里**有 HTML**（从网页/文档复制）时不动它——那是真正的富文本；
+       * 2. 只处理**单行**纯文本，多行粘贴照旧当普通文本（免得把一段代码里的 `*` 当语法）；
+       * 3. 解析后文字没变化（说明本来就没有标记）就放行，交给默认粘贴。
+       */
+      handlePaste: (view, event) => {
+        const clipboard = event.clipboardData
+        if (!clipboard) return false
+        if (clipboard.getData('text/html').length > 0) return false
+        const text = clipboard.getData('text/plain')
+        if (text.length === 0 || text.includes('\n')) return false
+        const inline = parseInlineMarkdown(text)
+        if (inline.text === text || inline.runs.length === 0) return false
+        const pasted = inlineRunsToRich(inline.runs)
+        if (!pasted) return false
+        const paragraph = richToTiptap(pasted).content[0]
+        try {
+          const inlineNodes = view.state.schema.nodeFromJSON(paragraph).content
+          event.preventDefault()
+          view.dispatch(view.state.tr.replaceSelection(new Slice(inlineNodes, 0, 0)))
+        } catch {
+          // 解析失败就退回默认粘贴，别让用户粘不进去
+          return false
+        }
+        return true
+      },
+
       handleKeyDown: (view, event) => {
         // 中文输入法组词期间的按键交还输入法
         if (event.isComposing || event.keyCode === 229) return false

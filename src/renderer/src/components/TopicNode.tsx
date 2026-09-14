@@ -5,7 +5,7 @@ import {
   MARKER_MAX_COLUMNS,
   MARKER_PER_COLUMN,
   MARKER_STRIP_GAP,
-  codeBoxSize,
+  codeBlockMetrics,
   imageBoxSize
 } from '@shared/layout/accessory'
 import { CODE_LANGUAGES } from '@shared/code-language'
@@ -128,7 +128,10 @@ function TopicNodeInner({
 
   const code = node.topic.code
 
-  const codeBox = code ? node.codeBox ?? codeBoxSize(code) : null
+  // 代码块的尺寸与排版指标都来自测量：节点被手动拉伸时，字号/行高/内边距一起等比缩放，
+  // 所以代码块永远待在节点框里（与图片的缩放行为一致）
+  const codeMetrics = code ? node.codeMetrics ?? codeBlockMetrics(code) : null
+  const codeBox = code && codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : null
 
   // 标记条挂在节点**外面**：默认左侧；左向分支放右侧，免得压到它自己的子节点
   const markerIds = node.markerStrip?.markerIds ?? []
@@ -305,8 +308,8 @@ function TopicNodeInner({
         />
       )}
 
-      {/* 代码块：等宽排版，尺寸来自布局测量；超出行数内部滚动；语言小标可直接切换 */}
-      {code && codeBox && (
+      {/* 代码块：等宽排版，尺寸与字号都来自测量（节点被拉伸时一起等比缩放）；语言小标可直接切换 */}
+      {code && codeMetrics && codeBox && (
         <div
           className="topic__code"
           style={{ width: codeBox.width, height: codeBox.height, marginTop: BLOCK_GAP }}
@@ -315,6 +318,10 @@ function TopicNodeInner({
             className="topic__code-lang"
             value={code.language || 'text'}
             title="切换代码语言"
+            style={{
+              fontSize: Math.max(8, Math.round(9 * codeMetrics.scale)),
+              lineHeight: `${codeMetrics.header}px`
+            }}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             onChange={(event) =>
@@ -327,7 +334,14 @@ function TopicNodeInner({
               </option>
             ))}
           </select>
-          <pre className="topic__code-pre">
+          <pre
+            className="topic__code-pre"
+            style={{
+              fontSize: codeMetrics.fontSize,
+              lineHeight: `${codeMetrics.lineHeight}px`,
+              padding: `${codeMetrics.header}px ${codeMetrics.paddingX}px ${codeMetrics.paddingY}px`
+            }}
+          >
             {highlightCode(code.text, code.language).map((line, lineIndex, all) => (
               <span key={lineIndex} className="topic__code-line">
                 {line.tokens.map((token, tokenIndex) => (
@@ -407,7 +421,7 @@ function TopicNodeInner({
           className={`topic__collapse topic__collapse--${node.side === 'left' ? 'left' : 'right'}`}
           title={node.topic.collapsed ? '展开子主题' : '折叠子主题'}
           // 底色＝分支配色；外圈用**画布底色**描一圈，压在连线上也不会糊在一起
-          style={{ background: color, boxShadow: `0 0 0 2px ${colors.canvas}, 0 1px 3px rgba(16, 24, 40, 0.22)` }}
+          style={{ background: color, boxShadow: `0 0 0 1.5px ${colors.canvas}, 0 1px 2px rgba(16, 24, 40, 0.18)` }}
           onPointerDown={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.preventDefault()}
           onClick={(event) => {

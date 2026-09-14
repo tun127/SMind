@@ -81,6 +81,50 @@ export const HIGHLIGHT_BG = 'rgba(255, 214, 0, 0.35)'
  */
 export const SCRIPT_FONT_RATIO = 0.72
 
+/** HTML 转义（粘贴 Markdown 片段时要拼成 HTML，不能让内容逃出去） */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * 行内 run → HTML 片段。
+ *
+ * 用途：把 Markdown 行内语法**粘贴进节点**时，先转成 HTML 再交给编辑器，
+ * 编辑器（TipTap）会按自己的 schema 解析成带 mark 的文本。
+ * 与编辑器里注册的 mark 名字一一对应（mark/strong/em/s/code/sup/sub）。
+ */
+export function runsToHtml(
+  runs: Array<{
+    text: string
+    bold?: boolean
+    italic?: boolean
+    strike?: boolean
+    underline?: boolean
+    highlight?: boolean
+    script?: 'super' | 'sub'
+    mono?: boolean
+  }>
+): string {
+  return runs
+    .map((run) => {
+      let html = escapeHtml(run.text).replace(/\n/g, '<br>')
+      if (run.mono) html = `<code>${html}</code>`
+      if (run.bold) html = `<strong>${html}</strong>`
+      if (run.italic) html = `<em>${html}</em>`
+      if (run.strike) html = `<s>${html}</s>`
+      if (run.underline) html = `<u>${html}</u>`
+      if (run.highlight) html = `<mark>${html}</mark>`
+      if (run.script === 'super') html = `<sup>${html}</sup>`
+      if (run.script === 'sub') html = `<sub>${html}</sub>`
+      return html
+    })
+    .join('')
+}
+
 /** 是否带有任何格式；为 false 时可以不用保存 titleRich，保持 .xmind 干净 */
 export function hasFormatting(rich: RichText): boolean {
   if (rich.paragraphs.length > 1) return true

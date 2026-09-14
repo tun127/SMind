@@ -16,17 +16,13 @@ import {
   CODE_CHAR_WIDTH,
   CODE_FONT_FAMILY,
   CODE_FONT_SIZE,
-  CODE_HEADER,
-  CODE_LINE_RATIO,
-  CODE_PADDING_X,
-  CODE_PADDING_Y,
   MARKER_GAP,
+  codeBlockMetrics,
   codeUnitLength,
   MARKER_MAX_COLUMNS,
   MARKER_PER_COLUMN,
   MARKER_SIZE,
   MARKER_STRIP_GAP,
-  codeBoxSize,
   imageBoxSize
 } from '@shared/layout/accessory'
 import type { ThemeColors, Topic } from '@shared/model/types'
@@ -423,9 +419,11 @@ function nodeOps(
     cursorY += formulaBox.height
   }
 
-  // 代码块：底色圆角框 + 等宽文本逐行、逐 token 上色画
-  const codeBox = topic.code ? node.codeBox ?? codeBoxSize(topic.code) : { width: 0, height: 0 }
-  if (topic.code && codeBox.height > 0) {
+  // 代码块：底色圆角框 + 等宽文本逐行、逐 token 上色画。
+  // 指标（字号/行高/内边距/缩放）与画布共用同一份，节点被拉伸时一起等比缩放。
+  const codeMetrics = topic.code ? node.codeMetrics ?? codeBlockMetrics(topic.code) : null
+  const codeBox = codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : { width: 0, height: 0 }
+  if (topic.code && codeMetrics && codeBox.height > 0) {
     cursorY += BLOCK_GAP
     const x = node.x + (node.width - codeBox.width) / 2
     ops.push({
@@ -440,19 +438,19 @@ function nodeOps(
       strokeWidth: 1
     })
     // 逐 token 画：颜色按语法种类取，横向偏移按「等宽字符数 × 单字宽」推进——
-    // 与 codeBoxSize 的宽度估算用同一个单位，保证导出与画布上的换行位置一致
+    // 单字宽随字号等比变化，保证导出与画布上的换行位置一致
+    const charWidth = (codeMetrics.fontSize * CODE_CHAR_WIDTH) / CODE_FONT_SIZE
     const codeLines = highlightCode(topic.code.text, topic.code.language)
-    const lineH = Math.round(CODE_FONT_SIZE * CODE_LINE_RATIO)
-    let textY = cursorY + CODE_HEADER + CODE_PADDING_Y + CODE_FONT_SIZE * 0.8
+    let textY = cursorY + codeMetrics.header + codeMetrics.paddingY + codeMetrics.fontSize * 0.8
     for (const line of codeLines) {
       let offset = 0
       for (const token of line.tokens) {
         ops.push({
           kind: 'text',
-          x: x + CODE_PADDING_X + offset,
+          x: x + codeMetrics.paddingX + offset,
           y: textY,
           text: token.text,
-          fontSize: CODE_FONT_SIZE,
+          fontSize: codeMetrics.fontSize,
           fontWeight: 400,
           fill: CODE_TOKEN_COLORS[token.kind],
           italic: token.kind === 'comment' || undefined,
@@ -460,9 +458,9 @@ function nodeOps(
           baseline: 'alphabetic',
           fontFamily: CODE_FONT_FAMILY
         })
-        offset += codeUnitLength(token.text) * CODE_CHAR_WIDTH
+        offset += codeUnitLength(token.text) * charWidth
       }
-      textY += lineH
+      textY += codeMetrics.lineHeight
     }
     cursorY += codeBox.height
   }

@@ -100,6 +100,8 @@ protocol.registerSchemesAsPrivileged([
 /* ------------------------------------------------------------------ */
 
 const autosaveDir = (): string => join(app.getPath('userData'), 'autosave')
+/** 「在新窗口打开画布副本」用的临时文件目录（关窗即删） */
+const copyDir = (): string => join(app.getPath('userData'), 'copies')
 /**
  * 自动存档按**窗口**分槽位：多窗口时各存各的，互不覆盖。
  * 槽位名按窗口创建顺序（slot-1 / slot-2 …），重启后新会话的窗口按同样顺序认领。
@@ -113,6 +115,28 @@ async function readAutosaveMeta(slot: string): Promise<RecoveryMeta | null> {
     return parseRecoveryMeta(JSON.parse(await fs.readFile(autosaveMeta(slot), 'utf8')))
   } catch {
     return null
+  }
+}
+
+/** 清理上次运行留下的画布副本（超过一天，肯定没窗口还开着它了） */
+async function pruneStaleCopies(): Promise<void> {
+  try {
+    const dir = copyDir()
+    const names = await fs.readdir(dir)
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000
+    await Promise.all(
+      names.map(async (name) => {
+        const target = join(dir, name)
+        try {
+          const info = await fs.stat(target)
+          if (info.mtimeMs < cutoff) await fs.rm(target, { force: true })
+        } catch {
+          /* 单个文件清理失败不影响启动 */
+        }
+      })
+    )
+  } catch {
+    /* 目录不存在就是没有副本 */
   }
 }
 
@@ -148,8 +172,10 @@ interface DocWindow {
   allowClose: boolean
   /** 启动/二实例带的文件，渲染进程就绪后取走 */
   pendingPath: string | null
-  /** 这个窗口打开文档后要定位到哪张画布（「在新窗口打开当前画布」用） */
+  /** 这个窗口打开文档后要定位到哪张画布（「在新窗口打开画布副本」用） */
   pendingSheet: string | null
+  /** 这个窗口打开的是临时副本：文档没有磁盘归属，关窗时把临时文件删掉 */
+  copySource: string | null
 }
 
 const windows = new Map<number, DocWindow>()
@@ -213,19 +239,21 @@ async function readDocumentInto(state: DocWindow | null, path: string): Promise<
   const buf = await fs.readFile(path)
   // 传文件名进去：亿图脑图的专有 .emmx 没有自带文档名，只能拿文件名当中心主题
   const parsed = await parseXmind(new Uint8Array(buf), { fileName: basename(path) })
-  // 关键：资源必须留着，否则「打开带图的文件 → 另存」会把图片丢掉
+  // 副本（临时文件）：算"未保存的新文档"——不记路径、不进历史、保存走另存为
+  const isCopy = Boolean(state && state.copySource && state.copySource === path)
   if (state) {
     state.resources = parsed.resources
     state.inserted.clear()
-    state.docPath = path
+    state.docPath = isCopy ? null : path
   }
-  // 记一笔打开历史（用中心主题名，方便在历史界面里认出是哪张图）
-  await recordVisit(path, defaultDocumentName(parsed.workbook)).catch(() => undefined)
+  // 记一笔打开历史（用中心主题名，方便在历史界面里认出是哪张图）；副本不进历史
+  if (!isCopy) await recordVisit(path, defaultDocumentName(parsed.workbook)).catch(() => undefined)
   return {
-    path,
+    path: isCopy ? '' : path,
     workbook: parsed.workbook,
     warnings: parsed.warnings,
-    resourceCount: Object.keys(parsed.resources).length
+    resourceCount: Object.keys(parsed.resources).length,
+    copy: isCopy || undefined
   }
 }
 
@@ -373,7 +401,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `options.path` 只在「启动时带文件 / 双击文件 / 二实例传参」时给：
  * 那一刻 React 可能还没挂载，所以路径先存在窗口状态里，渲染进程就绪后自己来取一次。
  */
-function createWindow(options: { path?: string | null; sheetId?: string | null } = {}): DocWindow {
+function createWindow(
+  options: { path?: string | null; sheetId?: string | null; copySource?: string | null } = {}
+): DocWindow {
   windowSeq += 1
   const slot = autosaveSlotName(windowSeq)
 
@@ -404,7 +434,8 @@ function createWindow(options: { path?: string | null; sheetId?: string | null }
     docPath: null,
     allowClose: false,
     pendingPath: options.path ?? null,
-    pendingSheet: options.sheetId ?? null
+    pendingSheet: options.sheetId ?? null,
+    copySource: options.copySource ?? null
   }
   windows.set(state.id, state)
 
@@ -467,6 +498,8 @@ function createWindow(options: { path?: string | null; sheetId?: string | null }
     // 真崩溃时这个事件不会触发，存档照旧留着给恢复用。
     void fs.rm(autosaveFile(state.slot), { force: true })
     void fs.rm(autosaveMeta(state.slot), { force: true })
+    // 画布副本的临时文件：窗口关了就没用了
+    if (state.copySource) void fs.rm(state.copySource, { force: true })
   })
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
@@ -573,17 +606,24 @@ function registerIpc(): void {
   })
 
   /**
-   * 在新窗口打开**当前文档的某张画布**：多窗口最常见的诉求是「并排看两张画布」，
-   * 而画布是文档内部的标签页，只有再开一个窗口才能并排。
+   * 在新窗口打开**当前文档的副本**（并定位到指定画布）。
    *
-   * 新窗口打开的是**磁盘上的那份文件**（当前窗口的未保存改动不会带过去，
-   * 所以渲染层会先走一遍"要不要保存"的确认）。
+   * 为什么是"副本"而不是"在同一份文件上再开一个窗口"：
+   * 用户要的是"A 画布新建 B 画布，B 能自己导入/导出，**不影响 A**，两者互不影响"。
+   * 两个窗口指向同一个文件时，谁后保存谁覆盖——那就谈不上互不影响了。
+   * 所以这里把当前文档（含未保存改动与图片资源）写成一份**临时副本**，
+   * 新窗口打开它但**不认路径**：保存时会走「另存为」，永远不会写回原文件。
    */
-  ipcMain.handle(IPC.openSheetWindow, async (e, sheetId: string): Promise<'ok' | 'no-file' | 'failed'> => {
+  ipcMain.handle(IPC.openSheetWindow, async (e, workbook: Workbook, sheetId: string): Promise<'ok' | 'failed'> => {
     const state = stateOf(e.sender)
-    if (!state?.docPath) return 'no-file'
+    if (!state) return 'failed'
     try {
-      createWindow({ path: state.docPath, sheetId })
+      await fs.mkdir(copyDir(), { recursive: true })
+      pruneForSave(state, workbook)
+      const bytes = await serializeXmind({ workbook, resources: state.resources })
+      const copyPath = join(copyDir(), `${state.slot}-copy-${Date.now().toString(36)}.xmind`)
+      await fs.writeFile(copyPath, Buffer.from(bytes))
+      createWindow({ path: copyPath, sheetId, copySource: copyPath })
       return 'ok'
     } catch {
       return 'failed'
@@ -1220,6 +1260,8 @@ if (!app.requestSingleInstanceLock()) {
     registerResourceProtocol()
     registerIpc()
     buildAppMenu({ newWindow: () => createWindow() })
+    // 上一次运行崩溃时可能留下画布副本的临时文件：超过一天的一律清掉
+    void pruneStaleCopies()
     // 第一个窗口认领「启动时带的那个文件」（双击 .xmind / 拖到 exe 上 / 右键打开方式）
     createWindow({ path: startupOpenPath })
 

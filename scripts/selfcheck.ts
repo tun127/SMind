@@ -129,6 +129,7 @@ import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/s
 import {
   CODE_FONT_SIZE,
   CODE_HEADER,
+  codeBlockMetrics,
   CODE_LINE_RATIO,
   CODE_PADDING_X,
   CODE_PADDING_Y,
@@ -181,6 +182,7 @@ import {
   plainTextOf,
   richFromPlain,
   richToTiptap,
+  runsToHtml,
   tiptapToRich,
   type TipTapDoc
 } from '../src/shared/richtext'
@@ -1550,6 +1552,19 @@ function testMarkdownFullFormat(): void {
   check('往返：下标回到富文本', backRuns.some((run) => run.script === 'sub' && run.text === '2'))
   check('往返：上标回到富文本', backRuns.some((run) => run.script === 'super' && run.text === '2'))
   check('往返：高亮回到富文本', backRuns.some((run) => run.highlight === true && run.text === '重点'))
+
+  // 粘贴 Markdown 片段：run → HTML（编辑器按自己的 schema 解析成带 mark 的文本）
+  const html = runsToHtml(parseInlineMarkdown('==高亮== 与 ^上标^ 与 ~~删~~ 与 <b>粗</b>').runs)
+  check('HTML：高亮转 <mark>', html.includes('<mark>高亮</mark>'), html)
+  check('HTML：上标转 <sup>', html.includes('<sup>上标</sup>'), html)
+  check('HTML：删除线转 <s>', html.includes('<s>删</s>'), html)
+  check('HTML：加粗转 <strong>', html.includes('<strong>粗</strong>'), html)
+  check(
+    'HTML：内容被转义（不能逃出标签）',
+    runsToHtml([{ text: '<script>x</script>' }]) === '&lt;script&gt;x&lt;/script&gt;',
+    runsToHtml([{ text: '<script>x</script>' }])
+  )
+  check('HTML：换行转 <br>', runsToHtml([{ text: 'a\nb' }]) === 'a<br>b')
 }
 
 /* ------------------------------------------------------------------ */
@@ -2641,6 +2656,33 @@ async function testMediaElements(): Promise<void> {
   )
   const empty = codeBoxSize({ language: 'text', text: '' })
   check('空文本也保留一行的最小框', empty.height === CODE_HEADER + CODE_PADDING_Y * 2 + lineH, JSON.stringify(empty))
+
+  // 手动拉伸节点：代码块要像图片一样等比缩放（字号/行高/内边距一起缩），
+  // 缩完必须**待在给定空间里**——否则就是用户报的"拉伸后代码块跑到节点外面去了"
+  {
+    const block = { language: 'python', text: Array.from({ length: 12 }, () => 'print("hello world")').join('\n') }
+    const natural = codeBlockMetrics(block)!
+    eq('不给空间时保持自然尺寸', natural.scale, 1)
+
+    // 空间比自然尺寸小 → 缩小；缩完要落在给定空间里
+    const tight = codeBlockMetrics(block, { width: 150, height: 300 })!
+    check('空间不够时缩小', tight.scale < 1, String(tight.scale))
+    check('缩完落在给定宽度内', tight.width <= 150, `${tight.width} > 150`)
+    check('缩完落在给定高度内', tight.height <= 300, `${tight.height} > 300`)
+    check(
+      '字号/行高/内边距一起缩（不是只改尺寸）',
+      tight.fontSize < natural.fontSize && tight.paddingX < natural.paddingX && tight.header < natural.header,
+      JSON.stringify(tight)
+    )
+
+    const roomy = codeBlockMetrics(block, { width: 4000, height: 4000 })!
+    check('空间很大时最多放大到上限', roomy.scale <= 2 && roomy.scale > 1, String(roomy.scale))
+    check('放大后字号跟着变大', roomy.fontSize > natural.fontSize, `${roomy.fontSize} vs ${natural.fontSize}`)
+
+    const tiny = codeBlockMetrics(block, { width: 10, height: 10 })!
+    check('再挤也不会缩到看不清（下限 0.5）', tiny.scale >= 0.5, String(tiny.scale))
+    check('没有代码时没有指标', codeBlockMetrics(undefined) === null)
+  }
 
   group('手动拉伸：尺寸覆盖只作下限、可撤销、往返保真')
 

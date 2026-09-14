@@ -614,8 +614,8 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
             },
             {
               key: 'open-sheet-window',
-              label: '在新窗口打开当前画布',
-              hint: '并排看两张画布',
+              label: '在新窗口打开画布副本',
+              hint: '副本独立：导入/导出/另存都不影响当前文档',
               icon: <PanelRight size={15} />,
               onSelect: actions.onOpenSheetWindow
             },

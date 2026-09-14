@@ -61,8 +61,8 @@ const api: MindApi = {
 
   newWindow: () => ipcRenderer.invoke(IPC.newWindow) as Promise<void>,
 
-  openSheetInNewWindow: (sheetId: string) =>
-    ipcRenderer.invoke(IPC.openSheetWindow, sheetId) as Promise<'ok' | 'no-file' | 'failed'>,
+  openSheetInNewWindow: (workbook: Workbook, sheetId: string) =>
+    ipcRenderer.invoke(IPC.openSheetWindow, workbook, sheetId) as Promise<'ok' | 'failed'>,
 
   pendingSheet: () => ipcRenderer.invoke(IPC.pendingSheet) as Promise<string | null>,
 

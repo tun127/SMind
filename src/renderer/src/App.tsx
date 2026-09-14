@@ -160,7 +160,9 @@ export default function App(): ReactElement {
   /** 把「打开结果」落到编辑器里（对话框打开与历史记录打开共用一套收尾逻辑） */
   const applyOpenResult = useCallback(
     async (result: OpenResult): Promise<void> => {
-      useEditor.getState().loadDocument(result.workbook, result.path)
+      // 副本没有磁盘归属：当成未保存的新文档（保存时会提示另存为），
+      // 这样它跟原文档完全独立——导入/导出/保存都不会影响另一个画布
+      useEditor.getState().loadDocument(result.workbook, result.copy ? null : result.path)
       // 换了文档，上一份的自动存档已经没意义，清掉避免下次启动误提示恢复
       try {
         await window.api.clearAutosave()
@@ -323,28 +325,25 @@ export default function App(): ReactElement {
   }, [])
 
   /**
-   * 在**新窗口打开当前画布**——并排看两张画布的唯一办法（画布是文档内部的标签页）。
+   * 在**新窗口打开当前画布**（实际是这份文档的**副本**）。
    *
-   * 走 `guard`：新窗口打开的是**磁盘上的那份文件**，所以先把未保存内容问一遍，
-   * 免得"并排看到的另一张画布"其实是旧内容。
+   * 副本完全独立：没有磁盘归属，导入/导出/保存都走自己的路，
+   * **不会影响当前文档**——这就是"A 画布新建 B 画布、两者互不影响"的做法。
+   * 因为副本是直接从内存里的文档序列化出来的（含未保存改动），不需要先保存。
    */
   const openSheetWindow = useCallback((): void => {
-    const sheetId = useEditor.getState().workbook.activeSheetId
-    guard(() => {
-      void (async () => {
-        const result = await window.api.openSheetInNewWindow(sheetId)
-        if (result === 'no-file') {
-          showToast('这个文档还没保存过：先 Ctrl+S 存成 .xmind，才能在新窗口里打开它的画布')
-          return
-        }
-        if (result === 'failed') {
-          showToast('新窗口打开失败，请重试')
-          return
-        }
-        showToast('已在新窗口打开这张画布（在新窗口里可以切到别的画布）')
-      })()
-    })
-  }, [guard, showToast])
+    commitPending()
+    const store = useEditor.getState()
+    const sheetId = store.workbook.activeSheetId
+    void (async () => {
+      const result = await window.api.openSheetInNewWindow(store.workbook, sheetId)
+      showToast(
+        result === 'ok'
+          ? '已在新窗口打开这张画布的副本：两边互不影响，保存时会让你另存为新文件'
+          : '新窗口打开失败，请重试'
+      )
+    })()
+  }, [commitPending, showToast])
 
   /* ------------------------------------------------------------------ */
   /* 导入 / 导出（工具栏与菜单共用）                                      */

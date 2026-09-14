@@ -12,7 +12,7 @@ import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/mo
 import {
   BLOCK_GAP,
   MARKER_STRIP_GAP,
-  codeBoxSize,
+  codeBlockMetrics,
   imageBoxSize,
   markerStripSize,
   type Size
@@ -498,7 +498,10 @@ function compute(topic: Topic, depth: number): MeasureResult {
     : undefined
   const imageBox: Size = imageBoxSize(topic.image, imageBounds)
   const formulaBox: Size = topic.formula ? formulaSize(topic.formula, base.fontSize) : { width: 0, height: 0 }
-  const codeBox: Size = codeBoxSize(topic.code)
+  // 代码块同样吃「手动拉伸」的可用空间：按空间等比缩放字号/行高/内边距，
+  // 于是它永远待在节点框里（不给 bounds 时保持自然尺寸、完整展示整段代码）
+  const codeMetrics = codeBlockMetrics(topic.code, imageBounds)
+  const codeBox: Size = codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : { width: 0, height: 0 }
   const imageBlock = imageBox.height > 0 ? imageBox.height + BLOCK_GAP : 0
   const formulaBlock = formulaBox.height > 0 ? formulaBox.height + BLOCK_GAP : 0
   const codeBlock = codeBox.height > 0 ? codeBox.height + BLOCK_GAP : 0
@@ -541,6 +544,7 @@ function compute(topic: Topic, depth: number): MeasureResult {
     imageBox,
     formulaBox,
     codeBox,
+    codeMetrics: codeMetrics ?? undefined,
     markerStrip
   }
 }
