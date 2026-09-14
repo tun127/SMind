@@ -1179,11 +1179,10 @@ textarea {
 .topic {
   position: absolute;
   display: flex;
-  /* 横向：左侧标记条 + 内容列（图标行 / 文字 / 图片 / 代码 / 标签） */
-  flex-direction: row;
+  /* 内容列（图标行 / 文字 / 图片 / 代码 / 标签）；标记条是盒外的绝对定位元素 */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   cursor: default;
   user-select: none;
   transition: box-shadow 0.12s ease;
@@ -1199,14 +1198,17 @@ textarea {
   flex: 1 1 auto;
 }
 
-/* 左侧标记条：竖排，每列最多 4 个（与 markerStripSize 的分列一致） */
+/* 标记条：绝对定位在节点**外面**的左侧（左向分支用 right 定位放到右侧），
+   垂直居中；不参与节点盒尺寸，所以节点宽度不会因为标记变宽 */
 .topic__markers {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
   gap: 3px;
-  flex: 0 0 auto;
+  pointer-events: none;
 }
 
 .topic__marker-col {

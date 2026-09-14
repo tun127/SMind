@@ -1948,7 +1948,8 @@ const fakeMeasure = (topic: Topic, depth: number): MeasureResult => {
     : undefined
   const imageBox = imageBoxSize(topic.image, imageBounds)
 
-  const autoWidth = Math.max(90 + topic.title.length * 9 + stripWidth, imageBox.width)
+  // 标记条挂在盒外，不占节点宽度
+  const autoWidth = Math.max(90 + topic.title.length * 9, imageBox.width)
   const autoHeight = Math.max(
     (depth === 0 ? 44 : 30) + accessory.height + labelRow.height + imageBox.height,
     markerStrip.height + paddingY * 2
@@ -2593,10 +2594,16 @@ async function testMediaElements(): Promise<void> {
   const markedBox = stripLayout.nodeMap.get(marked)!
   const plainBox = stripLayout.nodeMap.get(plain)!
   eq('标记条列出全部标记', markedBox.markerStrip?.markerIds.length, 2)
-  check('标记条占宽：节点相应变宽', markedBox.width > plainBox.width, `${markedBox.width} vs ${plainBox.width}`)
+  eq('标记条挂在盒外：节点宽度不被撑宽', markedBox.width, 90 + '带标记的节点'.length * 9)
   check('标记不再出现在顶部图标行', markedBox.accessory.items.every((item) => item.kind !== 'marker'))
   check('无标记的节点没有标记条', (plainBox.markerStrip?.markerIds.length ?? 0) === 0)
-  check('标记条尺寸与分列规则一致', markedBox.markerStrip?.width === markerStripSize(2).width)
+  eq('标记条尺寸与分列规则一致', markedBox.markerStrip?.width, markerStripSize(2).width)
+  check(
+    '标记很多时最多两列（不会盖到隔壁）',
+    markerStripSize(10).width <= 2 * 16 + 3,
+    JSON.stringify(markerStripSize(10))
+  )
+  check('标记很多时往高度涨', markerStripSize(10).height > markerStripSize(4).height)
 
   group('资源：路径与 MIME')
 

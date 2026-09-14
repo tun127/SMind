@@ -1,6 +1,13 @@
 import { memo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
 import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
-import { BLOCK_GAP, MARKER_PER_COLUMN, codeBoxSize, imageBoxSize } from '@shared/layout/accessory'
+import {
+  BLOCK_GAP,
+  MARKER_MAX_COLUMNS,
+  MARKER_PER_COLUMN,
+  MARKER_STRIP_GAP,
+  codeBoxSize,
+  imageBoxSize
+} from '@shared/layout/accessory'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import { countDescendants } from '@shared/model/tree'
 import { useEditor } from '../store/editor'
@@ -110,11 +117,16 @@ function TopicNodeInner({
   const code = node.topic.code
   const codeBox = code ? node.codeBox ?? codeBoxSize(code) : null
 
-  // 左侧标记条：按每列最多 4 个分列（与测量里的 markerStripSize 一致）
+  // 标记条挂在节点**外面**：默认左侧；左向分支放右侧，免得压到它自己的子节点
   const markerIds = node.markerStrip?.markerIds ?? []
+  const markerStripWidth = node.markerStrip?.width ?? 0
+  const markerSide: 'left' | 'right' = node.side === 'left' ? 'right' : 'left'
   const markerColumns: string[][] = []
-  for (let i = 0; i < markerIds.length; i += MARKER_PER_COLUMN) {
-    markerColumns.push(markerIds.slice(i, i + MARKER_PER_COLUMN))
+  if (markerIds.length > 0) {
+    // 分列规则与 markerStripSize 一致：≤4 个一列，否则两列，行数 = ceil(总数 / 列数)
+    const columns = markerIds.length <= MARKER_PER_COLUMN ? 1 : MARKER_MAX_COLUMNS
+    const rows = Math.ceil(markerIds.length / columns)
+    for (let i = 0; i < markerIds.length; i += rows) markerColumns.push(markerIds.slice(i, i + rows))
   }
   // 正常情况下尺寸来自布局测量结果；个别测量实现没给时退回同一套公式尺寸函数
   const formulaBox = formula ? node.formulaBox ?? formulaSize(formula, node.fontSize) : null
@@ -169,9 +181,16 @@ function TopicNodeInner({
         onDoubleClick(node.id)
       }}
     >
-      {/* 左侧标记条：标记竖排在节点左侧（每列最多 4 个，超出换列） */}
+      {/* 标记条：挂在节点**外侧**竖排（默认左侧，左向分支放右侧） */}
       {markerColumns.length > 0 && (
-        <div className="topic__markers" style={{ width: node.markerStrip?.width }}>
+        <div
+          className="topic__markers"
+          style={
+            markerSide === 'left'
+              ? { left: -(markerStripWidth + MARKER_STRIP_GAP) }
+              : { right: -(markerStripWidth + MARKER_STRIP_GAP) }
+          }
+        >
           {markerColumns.map((column, columnIndex) => (
             <div key={columnIndex} className="topic__marker-col">
               {column.map((markerId, index) => (

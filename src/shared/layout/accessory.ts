@@ -81,16 +81,21 @@ export function pureFormulaSize(source: string | undefined, fontSize: number): S
 
 export const MARKER_SIZE = 16
 export const MARKER_GAP = 3
-/** 标记条与右侧文字之间的间距 */
+/** 标记条与节点之间的间距（标记条挂在节点**外面**） */
 export const MARKER_STRIP_GAP = 6
-/** 一列最多放几个，超出换到下一列 */
+/** 一列最多放几个，超出换到第二列 */
 export const MARKER_PER_COLUMN = 4
+/**
+ * 最多两列：标记条挂在节点外侧，宽度必须小于父子间距（56px），
+ * 否则会盖到父节点或相邻主题上。标记再多就往**高度**涨（节点会跟着长高）。
+ */
+export const MARKER_MAX_COLUMNS = 2
 
 /** 标记条占用：列数 × 单列行数（与渲染层的分列方式一致） */
 export function markerStripSize(count: number): Size {
   if (count <= 0) return { width: 0, height: 0 }
-  const rows = Math.min(count, MARKER_PER_COLUMN)
-  const columns = Math.ceil(count / MARKER_PER_COLUMN)
+  const columns = count <= MARKER_PER_COLUMN ? 1 : MARKER_MAX_COLUMNS
+  const rows = Math.ceil(count / columns)
   return {
     width: columns * MARKER_SIZE + (columns - 1) * MARKER_GAP,
     height: rows * MARKER_SIZE + (rows - 1) * MARKER_GAP

@@ -21,8 +21,10 @@ import {
   CODE_PADDING_X,
   CODE_PADDING_Y,
   MARKER_GAP,
+  MARKER_MAX_COLUMNS,
   MARKER_PER_COLUMN,
   MARKER_SIZE,
+  MARKER_STRIP_GAP,
   codeBoxSize,
   imageBoxSize
 } from '@shared/layout/accessory'
@@ -287,15 +289,21 @@ function nodeOps(
   // 内容自上而下：图标行 → 文字 → 图片 → 公式 → 标签
   let cursorY = node.y + node.paddingY
 
-  // 标记竖排在节点左侧（每列最多 MARKER_PER_COLUMN 个，与画布上的排法一致）
+  // 标记条挂在节点**外侧**竖排（与画布一致）：默认左侧，左向分支放右侧
   const includeMarkers = input.includeMarkers !== false
   const strip = node.markerStrip
   if (includeMarkers && strip && strip.markerIds.length > 0) {
-    const startY = node.y + Math.max(node.paddingY, (node.height - strip.height) / 2)
+    const columns = strip.markerIds.length <= MARKER_PER_COLUMN ? 1 : MARKER_MAX_COLUMNS
+    const rows = Math.ceil(strip.markerIds.length / columns)
+    const startY = node.y + (node.height - strip.height) / 2
+    const leftSide = node.side !== 'left'
+    const stripLeft = leftSide
+      ? node.x - MARKER_STRIP_GAP - strip.width
+      : node.x + node.width + MARKER_STRIP_GAP
     strip.markerIds.forEach((markerId, index) => {
-      const column = Math.floor(index / MARKER_PER_COLUMN)
-      const row = index % MARKER_PER_COLUMN
-      const x = node.x + node.paddingX + column * (MARKER_SIZE + MARKER_GAP)
+      const column = leftSide ? Math.floor(index / rows) : Math.floor(index / rows)
+      const row = index % rows
+      const x = stripLeft + column * (MARKER_SIZE + MARKER_GAP)
       const y = startY + row * (MARKER_SIZE + MARKER_GAP)
       ops.push(...markerOps({ kind: 'marker', markerId, width: MARKER_SIZE }, x, y, MARKER_SIZE))
     })
