@@ -1504,6 +1504,15 @@ export const useEditor = create<EditorState>()((set, get) => ({
   /* ------------------------------------------------------------------ */
 
   applyTheme: (theme) => {
+    const current = (() => {
+      const { workbook } = get()
+      return (workbook.sheets.find((s) => s.id === workbook.activeSheetId) ?? workbook.sheets[0])?.theme
+    })()
+    // 已经是这个主题（例如启动时套用「设置」里的默认主题）就别再写一次：
+    // 否则新建文档一上来就被记成"有未保存改动"，标题栏立刻出现 ●
+    if (current && current.id === theme.id && JSON.stringify(current.colors) === JSON.stringify(theme.colors)) {
+      return
+    }
     get().mutate((draft) => {
       const sheet = draft.sheets.find((s) => s.id === draft.activeSheetId) ?? draft.sheets[0]
       if (!sheet) return
