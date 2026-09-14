@@ -197,6 +197,8 @@ export interface OutlineNode {
   href?: string
   /** Markdown 围栏代码块 → 节点代码块 */
   code?: TopicCode
+  /** Markdown 数学（`$…$` / `$$…$$`）→ 节点公式 */
+  formula?: string
 }
 
 export interface ParsedOutline {
@@ -330,6 +332,7 @@ export function outlineToTopic(node: OutlineNode, structureClass?: string): Topi
   if (node.rich) topic.titleRich = node.rich
   if (node.href) topic.href = node.href
   if (node.code) topic.code = { language: node.code.language, text: node.code.text }
+  if (node.formula) topic.formula = node.formula
   if (node.notes && node.notes.trim().length > 0) {
     topic.notes = node.notes
     topic.notesHtml = `<p>${escapeHtmlForNotes(node.notes).replace(/\n/g, '<br/>')}</p>`

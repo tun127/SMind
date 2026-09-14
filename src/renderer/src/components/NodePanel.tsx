@@ -8,6 +8,7 @@ import { resourceUrl } from '../render/resource'
 import { useEditor } from '../store/editor'
 import MarkerIcon from './MarkerIcon'
 import { CODE_LANGUAGES } from '@shared/code-language'
+import { normalizeFormulaInput } from '@shared/formula'
 
 interface Props {
   onClose(): void
@@ -35,6 +36,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const setCode = useEditor((s) => s.setCode)
   const setSizeOverride = useEditor((s) => s.setSizeOverride)
   const codeFocusTick = useEditor((s) => s.codeFocusTick)
+  const formulaFocusTick = useEditor((s) => s.formulaFocusTick)
   const setImage = useEditor((s) => s.setImage)
   const addAttachment = useEditor((s) => s.addAttachment)
   const removeAttachment = useEditor((s) => s.removeAttachment)
@@ -57,11 +59,17 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const [codeDraft, setCodeDraft] = useState('')
   const [codeLangDraft, setCodeLangDraft] = useState('text')
   const codeAreaRef = useRef<HTMLTextAreaElement | null>(null)
+  const formulaAreaRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Alt+C 的落点：面板一打开（或已打开时收到信号）就把焦点交给代码输入框
   useEffect(() => {
     if (codeFocusTick > 0) codeAreaRef.current?.focus()
   }, [codeFocusTick])
+
+  // 快捷栏「公式」的落点：同理聚焦公式输入框
+  useEffect(() => {
+    if (formulaFocusTick > 0) formulaAreaRef.current?.focus()
+  }, [formulaFocusTick])
 
   // 只在「切换所选节点」时同步草稿，输入过程中绝不覆盖用户正在敲的内容
   useEffect(() => {
@@ -124,7 +132,10 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   }
 
   const commitFormula = (): void => {
-    if ((topic.formula ?? '') !== formulaDraft.trim()) setFormula(topicId, formulaDraft)
+    // 支持 Markdown / LaTeX 各种数学写法：$x^2$、$$x^2$$、\(x^2\)、\[x^2\] 都剥成纯 LaTeX
+    const next = normalizeFormulaInput(formulaDraft)
+    if (next !== formulaDraft) setFormulaDraft(next)
+    if ((topic.formula ?? '') !== next) setFormula(topicId, next)
   }
 
   const commitCode = (): void => {
@@ -454,9 +465,10 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
         <div className="side-panel__title">LaTeX 公式</div>
         <textarea
+          ref={formulaAreaRef}
           className="input input--area input--mono"
           rows={3}
-          placeholder="例如 \frac{a}{b}、\sqrt{x^2+y^2}、\sum_{i=1}^{n} i"
+          placeholder="例如 \frac{a}{b}、\sqrt{x^2+y^2}；也支持 Markdown 写法 $x^2$ / $$E=mc^2$$"
           value={formulaDraft}
           onChange={(event) => setFormulaDraft(event.target.value)}
           onBlur={commitFormula}

@@ -380,9 +380,15 @@ function charsOfParagraph(paragraph: RichTextParagraph, base: BaseStyle): Styled
 function compute(topic: Topic, depth: number): MeasureResult {
   const base = baseOf(depth)
   const rich: RichText = topic.titleRich ?? richFromPlain(topic.title)
-  // 图片节点（P8）：标题为空且带图片时，不再给空标题行留高度，图片就是节点的全部内容
-  const imageOnly = Boolean(topic.image) && topic.title.length === 0 && !topic.titleRich
-  const paragraphs: RichTextParagraph[] = imageOnly
+  /**
+   * 内容型节点：标题为空、只有图片 / 公式 / 代码时，不再给空标题行留高度——
+   * 那块内容就是节点的全部（从 Markdown 导进来的 `$$…$$` 公式节点正是这种）。
+   */
+  const contentOnly =
+    topic.title.length === 0 &&
+    !topic.titleRich &&
+    (Boolean(topic.image) || Boolean(topic.formula) || Boolean(topic.code))
+  const paragraphs: RichTextParagraph[] = contentOnly
     ? []
     : rich.paragraphs.length > 0
       ? rich.paragraphs
@@ -418,7 +424,7 @@ function compute(topic: Topic, depth: number): MeasureResult {
     }
   }
 
-  if (lines.length === 0 && !imageOnly) {
+  if (lines.length === 0 && !contentOnly) {
     lines.push({ segments: [], width: 0, height: Math.round(base.fontSize * LINE_HEIGHT_RATIO), align: 'center' })
   }
 

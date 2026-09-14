@@ -5,6 +5,7 @@ import {
   Braces,
   ChevronDown,
   CircleHelp,
+  Code2,
   Crosshair,
   FileInput,
   FileOutput,
@@ -26,6 +27,7 @@ import {
   SaveAll,
   Search as SearchIcon,
   Settings2,
+  Sigma,
   Sparkles,
   Spline,
   Tag,
@@ -68,6 +70,10 @@ export interface ToolbarActions {
   onHistory(): void
   /** 全部恢复自动布局（清空手动位置偏移） */
   onRelayout(): void
+  /** 插入/编辑公式（打开节点面板并聚焦公式输入框） */
+  onFormula(): void
+  /** 插入/编辑代码块（打开节点面板并聚焦代码输入框） */
+  onCode(): void
 }
 
 interface Props {
@@ -475,6 +481,22 @@ export default function Toolbar({ actions, outlineOpen = false }: Props): ReactE
         </button>
         <button type="button" className="tool-btn" title="主题（换配色 / 边框样式）" onClick={actions.onThemes}>
           <Palette size={17} />
+        </button>
+        <button
+          type="button"
+          className="tool-btn"
+          title="插入 / 编辑公式（也支持 $x^2$、$$…$$ 这类 Markdown 写法）"
+          onClick={actions.onFormula}
+        >
+          <Sigma size={17} />
+        </button>
+        <button
+          type="button"
+          className="tool-btn"
+          title="插入 / 编辑代码块（Alt+C；节点上的语言小标可直接切换语言）"
+          onClick={actions.onCode}
+        >
+          <Code2 size={17} />
         </button>
         <button
           type="button"

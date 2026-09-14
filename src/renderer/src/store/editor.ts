@@ -288,6 +288,10 @@ export interface EditorState {
   requestCodeFocus(): void
   /** 代码聚焦信号（自增值），NodePanel 监听它 */
   codeFocusTick: number
+  /** 公式聚焦信号（自增值），NodePanel 监听它 */
+  formulaFocusTick: number
+  /** 请求节点面板聚焦到公式输入框（快捷栏 / 快捷键用） */
+  requestFormulaFocus(): void
   /** 应用级默认设置（默认视角锁定 / 主题 / 对齐），由「设置」对话框读写 */
   appSettings: AppSettings
   setAppSettings(next: AppSettings): void
@@ -1355,6 +1359,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   codeFocusTick: 0,
   requestCodeFocus: () => set((s) => ({ codeFocusTick: s.codeFocusTick + 1 })),
+
+  formulaFocusTick: 0,
+  requestFormulaFocus: () => set((s) => ({ formulaFocusTick: s.formulaFocusTick + 1 })),
 
   appSettings: { ...DEFAULT_APP_SETTINGS },
   setAppSettings: (next) => set({ appSettings: { ...next } }),

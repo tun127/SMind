@@ -1329,8 +1329,14 @@ textarea {
   line-height: 1;
 }
 
+/**
+ * 关键：这里**不能**再对 .katex 做 font-size 缩放。
+ * 测量（render/formula.ts）用的是脱离节点的隐藏容器，那里没有这条规则——
+ * 一旦这里放大（曾经是 1.1em），渲染出的公式就比算出来的框大约 10%，
+ * 而 .topic__formula 是 overflow: hidden，表现为「公式右/下被截断」。
+ * 想让公式更大，就调节点字号或公式框尺寸，别在这里偷偷放大。
+ */
 .topic__formula .katex {
-  font-size: 1.1em;
   white-space: nowrap;
 }
 

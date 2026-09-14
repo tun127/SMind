@@ -15,6 +15,7 @@
  */
 
 import type { OutlineNode, ParsedOutline } from '../ai'
+import { matchWholeLineMath } from '../formula'
 import type { RichText, RichTextRun } from '../model/types'
 
 /** 行内代码在节点里用的等宽字体（与代码块一致） */
@@ -136,6 +137,8 @@ interface MarkdownLine {
   text: string
   rich?: RichText
   href?: string
+  /** 整句就是数学（`$…$` / `$$…$$`）时，这里放公式源码，标题留空 */
+  formula?: string
 }
 
 /** 解析一行；不是标题/列表则返回 null */
@@ -145,6 +148,9 @@ export function parseMarkdownLine(line: string): MarkdownLine | null {
   const heading = /^(#{1,6})\s+(.*)$/.exec(line.trim())
   if (heading) {
     const body = heading[2].replace(/\s*#+\s*$/, '') // 行尾的标题锚点 ### 之类
+    // 整句是数学 → 变成节点的公式
+    const math = matchWholeLineMath(body)
+    if (math) return { kind: 'heading', depth: heading[1].length, level: heading[1].length, text: '', formula: math }
     const inline = parseInlineMarkdown(body)
     if (inline.text.length === 0) return null
     const level = heading[1].length
@@ -163,11 +169,15 @@ export function parseMarkdownLine(line: string): MarkdownLine | null {
   if (list) {
     // 任务列表：勾选框不进标题（- [x] 已完成 → 「已完成」）
     const body = list[3].replace(/^\[[ xX]\]\s+/, '')
+    const depth = Math.floor(list[1].length / 2)
+    // 整句是数学 → 变成节点的公式（节点标题留空，公式自成一块）
+    const math = matchWholeLineMath(body)
+    if (math) return { kind: 'list', depth, level: 0, text: '', formula: math }
     const inline = parseInlineMarkdown(body)
     if (inline.text.length === 0) return null
     return {
       kind: 'list',
-      depth: Math.floor(list[1].length / 2),
+      depth,
       level: 0,
       text: inline.text,
       rich: inlineRunsToRich(inline.runs),
@@ -181,6 +191,7 @@ export function parseMarkdownLine(line: string): MarkdownLine | null {
 type MdEvent =
   | { type: 'node'; line: MarkdownLine }
   | { type: 'code'; language: string; text: string }
+  | { type: 'formula'; text: string }
   | { type: 'note'; text: string }
   | { type: 'tableRow'; cells: string[] }
 
@@ -234,6 +245,12 @@ function scanMarkdown(source: string): MdEvent[] {
       // 分隔行 | - | - | 跳过（单个短横也算分隔）
       if (cells.every((cell) => cell.length === 0 || /^:?-+:?$/.test(cell))) return
       events.push({ type: 'tableRow', cells })
+      return
+    }
+    // 整行数学（导出的 `$$…$$` 就是这种）→ 挂到最近节点当公式
+    const math = matchWholeLineMath(trimmed)
+    if (math) {
+      events.push({ type: 'formula', text: math })
       return
     }
     const item = parseMarkdownLine(line)
@@ -294,6 +311,19 @@ export function parseMarkdownOutline(text: string, fallbackTitle = '导入的大
       attachCode(event.language, event.text)
       continue
     }
+    if (event.type === 'formula') {
+      if (event.text.length === 0) continue
+      // 与代码块同一套挂靠规则：先挂到最近的节点，挂不上就生成「公式」子主题
+      if (currentNode && !currentNode.formula && currentNode.children.length === 0) {
+        currentNode.formula = event.text
+      } else {
+        const parent = listStack[listStack.length - 1]?.node ?? sectionRoot
+        const node: OutlineNode = { title: '公式', children: [], formula: event.text }
+        pushRoot(node, parent ?? null)
+        currentNode = node
+      }
+      continue
+    }
     if (event.type === 'note') {
       appendNote(event.text)
       continue
@@ -312,6 +342,7 @@ export function parseMarkdownOutline(text: string, fallbackTitle = '导入的大
     const node: OutlineNode = { title: item.text, children: [] }
     if (item.rich) node.rich = item.rich
     if (item.href) node.href = item.href
+    if (item.formula) node.formula = item.formula
 
     if (item.kind === 'heading') {
       while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= item.level) {

@@ -70,12 +70,15 @@ export function formulaSize(source: string, fontSize: number): Size {
       el.style.fontSize = `${fontSize}px`
       el.innerHTML = formulaHtml(source)
       const child = el.firstElementChild
-      const width = child instanceof HTMLElement ? child.offsetWidth : el.offsetWidth
-      const height = child instanceof HTMLElement ? child.offsetHeight : el.offsetHeight
+      // 用 getBoundingClientRect 拿**亚像素**尺寸，再向上取整 + 2px 余量：
+      // offsetWidth 是取整值，渲染又是亚像素的，差值会恰好把右/下边缘切掉一点点
+      const rect = child instanceof HTMLElement ? child.getBoundingClientRect() : el.getBoundingClientRect()
+      const width = rect.width
+      const height = rect.height
       if (width > 0 && height > 0) {
         size = {
-          width: Math.max(1, Math.min(Math.round(width), FORMULA_MAX_WIDTH * 2)),
-          height: Math.max(1, Math.round(height))
+          width: Math.max(1, Math.min(Math.ceil(width) + 2, FORMULA_MAX_WIDTH * 2)),
+          height: Math.max(1, Math.ceil(height) + 2)
         }
       }
     } catch {

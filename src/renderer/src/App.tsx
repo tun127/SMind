@@ -817,6 +817,14 @@ export default function App(): ReactElement {
           onOutline: () => setShowOutline((current) => !current),
           onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
           onRelayout: () => useEditor.getState().relayoutAll(),
+          onFormula: () => {
+            setSidePanel('node')
+            useEditor.getState().requestFormulaFocus()
+          },
+          onCode: () => {
+            setSidePanel('node')
+            useEditor.getState().requestCodeFocus()
+          },
           onExport: () => setShowExport(true),
           onImportTheme: () => void importTheme(),
           onImportMarkdown: () => void importOutlineFile('markdown'),

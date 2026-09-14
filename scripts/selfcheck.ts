@@ -117,6 +117,7 @@ import {
   toConfigView
 } from '../src/shared/ai'
 import { parseMarkdownOutline } from '../src/shared/import/markdown'
+import { matchWholeLineMath, normalizeFormulaInput } from '../src/shared/formula'
 import { parseOpmlOutline } from '../src/shared/import/opml'
 import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
 import {
@@ -1449,9 +1450,15 @@ function testMarkdownRoundTrip(): void {
   }, '造往返测试数据')
   store().setHref(plan, 'https://example.com/doc')
   store().setNotes(plan, '这是备注')
+  // 公式也要能往返（导出 $$…$$，导入回节点公式）
+  store().mutate((draft) => {
+    const topic = findTopic(activeRoot(draft), codeChild)
+    if (topic) topic.formula = 'E=mc^2'
+  }, '加公式')
 
   const md = toMarkdown(root())
   check('代码围栏带语言标注', md.includes('```ts'))
+  check('公式导出为 $$…$$', md.includes('$$E=mc^2$$'))
   check('链接导出为 Markdown 链接', md.includes('[计划](https://example.com/doc)'))
 
   const parsed = parseMarkdownOutline(md)
@@ -1464,6 +1471,11 @@ function testMarkdownRoundTrip(): void {
   eq('往返：代码块挂回原节点', importedCode?.title, '示例代码')
   eq('往返：代码块语言', importedCode?.code?.language, 'ts')
   eq('往返：代码块内容', importedCode?.code?.text, 'const a = 1\nconst b = 2')
+  eq(
+    '往返：公式回到节点',
+    importedPlan?.children.find((child) => child.formula)?.formula,
+    'E=mc^2'
+  )
   const importedRich = importedPlan?.children.find((child) => child.rich)
   check('往返：粗体进富文本', importedRich?.rich?.paragraphs[0]?.runs[0]?.bold === true)
   eq('往返：节点数一致', parsed.count, countTopics(root()))
@@ -4326,6 +4338,22 @@ function testImport(): void {
   eq('斜体进富文本', richList.root?.children[1].rich?.paragraphs[0]?.runs[0]?.italic, true)
   eq('行内代码用等宽字体', typeof richList.root?.children[2].rich?.paragraphs[0]?.runs[0]?.fontFamily, 'string')
   eq('纯文本标题不受影响', richList.root?.children[0].title, '重点内容')
+
+  group('公式：Markdown 数学写法')
+
+  eq('行内 $…$ 剥成纯 LaTeX', normalizeFormulaInput('$x^2$'), 'x^2')
+  eq('块级 $$…$$ 剥成纯 LaTeX', normalizeFormulaInput('$$E=mc^2$$'), 'E=mc^2')
+  eq('LaTeX 定界符 \\(…\\) 也剥掉', normalizeFormulaInput('\\(a+b\\)'), 'a+b')
+  eq('\\[…\\] 同样支持', normalizeFormulaInput('\\[\\frac{a}{b}\\]'), '\\frac{a}{b}')
+  eq('纯 LaTeX 原样保留', normalizeFormulaInput('\\sum_{i=1}^{n} i'), '\\sum_{i=1}^{n} i')
+  eq('只有定界符时不剥成空', normalizeFormulaInput('$$'), '$$')
+  eq('整句数学识别', matchWholeLineMath('$$x^2$$'), 'x^2')
+  eq('普通文字不是数学', matchWholeLineMath('这是普通文字'), null)
+
+  const mathImport = parseMarkdownOutline('# 公式\n- $E=mc^2$\n- 普通项')
+  eq('Markdown 行内数学变成节点公式', mathImport.root?.children[0]?.formula, 'E=mc^2')
+  eq('公式节点标题留空', mathImport.root?.children[0]?.title, '')
+  eq('同级的普通项不受影响', mathImport.root?.children[1]?.title, '普通项')
 
   const linked = parseMarkdownOutline('# 链接\n- [文档](https://example.com) 首页')
   eq('链接 url 挂到节点超链接', linked.root?.children[0]?.href, 'https://example.com')
