@@ -1911,6 +1911,22 @@ textarea {
   accent-color: var(--accent);
 }
 
+/* 面板里的多行概要标题输入 */
+.overlay-row__multi {
+  resize: vertical;
+  line-height: 15px;
+  min-height: 34px;
+}
+
+/* 多行就地编辑框（概要标题）：保留换行、不出现滚动条、可上下长大 */
+.overlay-title-editor--multi {
+  white-space: pre;
+  resize: none;
+  overflow: hidden;
+  line-height: 15px;
+  min-width: 120px;
+}
+
 .side-panel__footer {
   display: flex;
   gap: 6px;

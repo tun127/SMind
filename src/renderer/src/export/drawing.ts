@@ -27,6 +27,7 @@ import {
   imageBoxSize
 } from '@shared/layout/accessory'
 import type { ThemeColors, Topic } from '@shared/model/types'
+import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import { formulaSize } from '../render/formula'
 import { markerVisualOf, type MarkerGlyph } from '../render/markers'
 import { branchColorOf, visualFor } from '../render/theme'
@@ -508,18 +509,26 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
         strokeOpacity: 0.75
       })
       if (summary.title) {
-        ops.push({
-          kind: 'text',
-          x: summary.label.x,
-          y: summary.label.y,
-          text: summary.title,
-          fontSize: 13,
-          fontWeight: 600,
-          fill: color,
-          anchor: textAnchorOf(summary.anchor === 'middle' ? 'center' : summary.anchor === 'end' ? 'right' : 'left'),
-          baseline: 'middle',
-          stroke: input.background ?? '#ffffff',
-          strokeWidth: 4
+        // 多行标题逐行画，整体以 label.y 为中线居中（与画布上的 tspan 排法一致）
+        const lines = overlayTitleLines(summary.title)
+        const startY = summary.label.y - ((lines.length - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2
+        lines.forEach((line, index) => {
+          if (line.length === 0) return
+          ops.push({
+            kind: 'text',
+            x: summary.label.x,
+            y: startY + index * OVERLAY_TITLE_LINE_HEIGHT,
+            text: line,
+            fontSize: 13,
+            fontWeight: 600,
+            fill: color,
+            anchor: textAnchorOf(
+              summary.anchor === 'middle' ? 'center' : summary.anchor === 'end' ? 'right' : 'left'
+            ),
+            baseline: 'middle',
+            stroke: input.background ?? '#ffffff',
+            strokeWidth: 4
+          })
         })
       }
     }

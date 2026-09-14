@@ -351,6 +351,14 @@ function boundaryOf(
 const SUMMARY_GAP = 12
 const SUMMARY_SPINE = 10
 const SUMMARY_NIB = 20
+/** 概要 / 边界标题的行高（多行时按它排布，画布与导出共用） */
+export const OVERLAY_TITLE_LINE_HEIGHT = 15
+
+/** 概要 / 边界标题按显式换行拆行（渲染与导出共用，空行保留以便对齐） */
+export function overlayTitleLines(title: string | undefined): string[] {
+  if (!title) return []
+  return title.split(/\r?\n/)
+}
 
 function summaryOf(
   summary: { id: string; topicId: string; range: string; title?: string },
@@ -472,11 +480,14 @@ export function addOverlays(result: LayoutResult, root: Topic, sheet: Sheet): vo
     }
   }
   for (const summary of result.summaries) {
+    // 多行标题要把上下都算进去，否则换行后的文字会跑出画布边界
+    const lines = Math.max(1, overlayTitleLines(summary.title).length)
+    const half = Math.max(20, (lines * OVERLAY_TITLE_LINE_HEIGHT) / 2 + 6)
     const box = {
       minX: summary.label.x - 80,
-      minY: summary.label.y - 20,
+      minY: summary.label.y - half,
       maxX: summary.label.x + 200,
-      maxY: summary.label.y + 20
+      maxY: summary.label.y + half
     }
     extent = extent ? sameBounds(extent, box) : box
   }

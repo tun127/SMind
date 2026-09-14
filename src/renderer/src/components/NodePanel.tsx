@@ -199,21 +199,33 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
     kind: string,
     items: Array<{ id: string; title: string | undefined }>,
     setTitle: (id: string, title: string) => void,
-    remove: (id: string) => void
+    remove: (id: string) => void,
+    multiline = false
   ): ReactElement[] =>
     items.map((item) => (
       <div key={`${kind}-${item.id}`} className="overlay-row">
         <span className="overlay-row__tag">{kind}</span>
-        <input
-          key={`${item.id}-${item.title ?? ''}`}
-          className="input input--mini"
-          defaultValue={item.title ?? ''}
-          placeholder="标题（可留空）"
-          onBlur={(event) => setTitle(item.id, event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') event.currentTarget.blur()
-          }}
-        />
+        {multiline ? (
+          <textarea
+            key={`${item.id}-${item.title ?? ''}`}
+            className="input input--mini overlay-row__multi"
+            rows={2}
+            defaultValue={item.title ?? ''}
+            placeholder="标题（可留空，Enter 换行）"
+            onBlur={(event) => setTitle(item.id, event.currentTarget.value)}
+          />
+        ) : (
+          <input
+            key={`${item.id}-${item.title ?? ''}`}
+            className="input input--mini"
+            defaultValue={item.title ?? ''}
+            placeholder="标题（可留空）"
+            onBlur={(event) => setTitle(item.id, event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+            }}
+          />
+        )}
         <button
           type="button"
           className="chip__del"
@@ -582,7 +594,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
         {overlayRow('关系线', sheet.relationships.map((item) => ({ id: item.id, title: item.title })), setRelationshipTitle, removeRelationship)}
         {overlayRow('边界', sheet.boundaries.map((item) => ({ id: item.id, title: item.title })), setBoundaryTitle, removeBoundary)}
-        {overlayRow('概要', sheet.summaries.map((item) => ({ id: item.id, title: item.title })), setSummaryTitle, removeSummary)}
+        {overlayRow('概要', sheet.summaries.map((item) => ({ id: item.id, title: item.title })), setSummaryTitle, removeSummary, true)}
       </div>
     </div>
   )

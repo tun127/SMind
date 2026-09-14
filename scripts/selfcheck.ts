@@ -118,6 +118,7 @@ import {
 } from '../src/shared/ai'
 import { parseMarkdownOutline } from '../src/shared/import/markdown'
 import { matchWholeLineMath, normalizeFormulaInput } from '../src/shared/formula'
+import { overlayTitleLines } from '../src/shared/layout/overlays'
 import { parseOpmlOutline } from '../src/shared/import/opml'
 import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
 import {
@@ -2538,6 +2539,33 @@ async function testMediaElements(): Promise<void> {
   store().setSizeOverride(imgNode, { width: 180, height: 180 })
   const shrunk = layoutSheet(root(), fakeMeasure).nodeMap.get(imgNode)!.imageBox!
   check('缩小节点时图片跟着变小', shrunk.width < autoImage.width, JSON.stringify(shrunk))
+
+  group('概要标题：支持换行')
+
+  eq('单行标题就是一行', overlayTitleLines('概要').length, 1)
+  eq('显式换行拆成多行', overlayTitleLines('第一行\n第二行').length, 2)
+  eq('空行也保留（不影响对齐）', overlayTitleLines('甲\n\n乙').length, 3)
+  eq('空标题没有行', overlayTitleLines(undefined).length, 0)
+  {
+    // 多行标题要把占据高度算进画布边界，否则换行文字会跑出边界
+    reset()
+    const wrapRoot = root().id
+    const wrapA = addChildOf(wrapRoot, '甲')
+    addChildOf(wrapRoot, '乙')
+    store().select(wrapA)
+    store().select(findTopic(root(), wrapRoot)!.children[1].id, true)
+    const summaryId = store().addSummary()
+    store().setSummaryTitle(summaryId!, '第一行\n第二行\n第三行')
+    const single = layoutSheet(root(), fakeMeasure)
+    const summary = single.summaries.find((item) => item.id === summaryId)!
+    store().setSummaryTitle(summaryId!, '第一行')
+    const oneLine = layoutSheet(root(), fakeMeasure)
+    check(
+      '多行概要会撑高画布边界',
+      single.bounds.height >= oneLine.bounds.height,
+      `${single.bounds.height} vs ${oneLine.bounds.height}`
+    )
+  }
 
   group('标记条：标记竖排在节点左侧（不再占顶部图标行）')
 

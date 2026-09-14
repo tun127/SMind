@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
 import { layoutSheet, LAYOUT_DEFAULTS } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
+import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import type { Topic } from '@shared/model/types'
 import { activeRoot, activeSheet, findParent, findTopic, isSelfOrDescendant } from '@shared/model/tree'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove, type DragMove } from '@shared/model/dragmove'
@@ -1601,7 +1602,12 @@ export default function Canvas(): ReactElement {
                   })
                 }
               >
-                {boundary.title}
+                {/* 边界标题同样支持换行（自上而下排） */}
+                {overlayTitleLines(boundary.title).map((line, index) => (
+                  <tspan key={index} x={boundary.label.x} dy={index === 0 ? 0 : OVERLAY_TITLE_LINE_HEIGHT}>
+                    {line.length > 0 ? line : '\u00A0'}
+                  </tspan>
+                ))}
               </text>
             ) : null
           )}
@@ -1646,7 +1652,16 @@ export default function Canvas(): ReactElement {
                       })
                     }
                   >
-                    {summary.title}
+                    {/* 支持换行：按行拆 tspan，整体以 label.y 为中线居中 */}
+                    {overlayTitleLines(summary.title).map((line, index, all) => (
+                      <tspan
+                        key={index}
+                        x={summary.label.x}
+                        dy={index === 0 ? -(all.length - 1) * (OVERLAY_TITLE_LINE_HEIGHT / 2) : OVERLAY_TITLE_LINE_HEIGHT}
+                      >
+                        {line.length > 0 ? line : '\u00A0'}
+                      </tspan>
+                    ))}
                   </text>
                 ) : null}
               </g>
@@ -1966,8 +1981,43 @@ export default function Canvas(): ReactElement {
           ) : null}
         </svg>
 
-        {/* 双击标题后的就地编辑框。放在世界容器内，所以会随画布一起缩放 */}
-        {titleEdit ? (
+        {/* 双击标题后的就地编辑框。放在世界容器内，所以会随画布一起缩放。
+            概要支持换行，用 textarea（Enter 换行、Esc 取消、失焦提交）；其余仍是单行 input */}
+        {titleEdit && titleEdit.kind === 'summary' ? (
+          <textarea
+            className="overlay-title-editor overlay-title-editor--multi"
+            rows={Math.max(1, overlayTitleLines(titleEdit.value).length)}
+            style={{
+              left: titleEdit.x,
+              top: titleEdit.y - 13,
+              transform:
+                titleEdit.anchor === 'middle'
+                  ? 'translateX(-50%)'
+                  : titleEdit.anchor === 'end'
+                    ? 'translateX(-100%)'
+                    : 'none'
+            }}
+            value={titleEdit.value}
+            autoFocus
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => {
+              const next = e.currentTarget.value
+              setTitleEdit((current) => (current ? { ...current, value: next } : current))
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return
+              // Enter 交给 textarea 换行；Esc 取消并提交（走失焦那条统一路径）
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                cancelTitleRef.current = true
+                e.currentTarget.blur()
+              }
+            }}
+            onBlur={commitTitleEdit}
+          />
+        ) : titleEdit ? (
           <input
             className="overlay-title-editor"
             style={{
