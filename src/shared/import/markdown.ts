@@ -457,6 +457,27 @@ export function parseMarkdownLine(line: string, context: InlineContext = {}): Ma
 }
 
 /**
+ * 文本里是否含 Markdown 行内标记。
+ *
+ * 粘贴时用它决定"要不要按语法解析"：
+ * 剪贴板里同时带 HTML（从网页/文档复制）时，只有纯文本本身明显是 Markdown 才抢过来解析，
+ * 否则交给编辑器的默认粘贴（那是真正的富文本）。
+ */
+export function looksLikeMarkdown(text: string): boolean {
+  return (
+    /==[^\s=][^=]*==/.test(text) ||
+    /\^[^\s^]+\^/.test(text) ||
+    /~~[^~]+~~/.test(text) ||
+    /`[^`]+`/.test(text) ||
+    /\*\*[^*]+\*\*/.test(text) ||
+    /\[[^\]^][^\]]*\]\([^)]+\)/.test(text) ||
+    /\[\^[^\]]+\]/.test(text) ||
+    // 单波浪线下标：贴着字的（H~2~O）或前后有空白的（~i~ ），但不能是 ~~删除线~~
+    /[^\s~]~[^\s~]+~/.test(text)
+  )
+}
+
+/**
  * 收集 `[^脚注]: 说明` 与 `[链接名]: url` 这两类**定义行**。
  * 它们不是内容，主扫描里要跳过；但行内解析需要它们做查表。
  */

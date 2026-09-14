@@ -3,7 +3,12 @@ import type { OpenResult, RecoveryInfo } from '@shared/ipc'
 import type { OutlineFormat } from '@shared/outline'
 import { activeRoot } from '@shared/model/tree'
 import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
-import { parseMarkdownOutline } from '@shared/import/markdown'
+import {
+  inlineRunsToRich,
+  looksLikeMarkdown,
+  parseInlineMarkdown,
+  parseMarkdownOutline
+} from '@shared/import/markdown'
 import { parseOpmlOutline } from '@shared/import/opml'
 import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
@@ -179,16 +184,34 @@ export default function App(): ReactElement {
     [showToast]
   )
 
+  /**
+   * 当前窗口是不是"空白未改动"的文档。
+   *
+   * 用它决定「打开文件」是就地打开还是**开新窗口**：就地打开会把当前文档
+   * （含所有画布）整份替换掉——用户看到的"导入文件把画布 1 覆盖了"就是这么来的。
+   */
+  const isPristineWindow = useCallback((): boolean => {
+    const state = useEditor.getState()
+    return state.filePath === null && !state.dirty
+  }, [])
+
   const openDocument = useCallback(async (): Promise<void> => {
     commitPending()
+    const inPlace = isPristineWindow()
     try {
       const result = await window.api.openDialog()
       if (!result) return
+      // 当前窗口有内容：转交给新窗口打开（读到的内容丢掉即可，本地文件再读一次很便宜）
+      if (!inPlace) {
+        const opened = await window.api.openPathInNewWindow(result.path)
+        showToast(opened === 'ok' ? '已在**新窗口**打开这个文件（当前文档保持不变）' : '打开失败，请重试')
+        return
+      }
       await applyOpenResult(result)
     } catch (err) {
       showToast(`打开失败：${(err as Error).message}`)
     }
-  }, [commitPending, applyOpenResult, showToast])
+  }, [commitPending, applyOpenResult, isPristineWindow, showToast])
 
   /** 直接打开某个路径（历史记录里点一条走这里） */
   const openPath = useCallback(
@@ -520,6 +543,23 @@ export default function App(): ReactElement {
    *
    * 两条路都走 `guard`，避免在"有未保存改动"时静默替换掉当前文档。
    */
+  /** 外部送来一个文件（拖进窗口 / 双击 .xmind / 命令行）：空白窗口就地打开，否则开新窗口 */
+  const receiveExternalFile = useCallback(
+    (path: string): void => {
+      if (isPristineWindow()) {
+        guard(() => void openPath(path))
+        return
+      }
+      void window.api
+        .openPathInNewWindow(path)
+        .then((opened) => {
+          if (opened === 'ok') showToast('已在新窗口打开这个文件（当前文档保持不变）')
+        })
+        .catch(() => undefined)
+    },
+    [guard, isPristineWindow, openPath, showToast]
+  )
+
   useEffect(() => {
     void (async () => {
       const path = await window.api.openFilePending()
@@ -527,14 +567,14 @@ export default function App(): ReactElement {
       guard(() => {
         void (async () => {
           await openPath(path)
-          // 这个窗口如果是「在新窗口打开某张画布」开出来的，打开文档后定位到那张画布
+          // 这个窗口如果是「在新窗口打开画布副本」开出来的，打开文档后定位到那张画布
           const sheetId = await window.api.pendingSheet()
           if (sheetId) useEditor.getState().setActiveSheet(sheetId)
         })()
       })
     })()
-    return window.api.onFileOpenRequest((path) => guard(() => void openPath(path)))
-  }, [guard, openPath])
+    return window.api.onFileOpenRequest((path) => receiveExternalFile(path))
+  }, [guard, openPath, receiveExternalFile])
 
   /* ------------------------------------------------------------------ */
   /* 关闭窗口                                                            */
@@ -720,7 +760,7 @@ export default function App(): ReactElement {
           store.copySelection()
         } else if (key === 'v') {
           e.preventDefault()
-          // 先试剪贴板里的图片（截图后直接 Ctrl+V 贴到选中的主题上）；没有图片再按「粘贴节点」处理
+          // 依次试：剪贴板图片 → 带 Markdown 标记的文本 → 内部复制的节点
           void (async () => {
             if (!store.editingId && selectedId) {
               const image = await readClipboardImage()
@@ -733,6 +773,23 @@ export default function App(): ReactElement {
                     ? `已把剪贴板图片贴到选中的主题（${image.width}×${image.height}）`
                     : '已把剪贴板图片贴到选中的主题（未取到像素尺寸，按默认大小显示）'
                 )
+                return
+              }
+
+              // 文本里带 Markdown 标记（`==高亮==`、`^上标^`、`A[^1]`…）→ 建成带格式的子主题。
+              // 编辑器内粘贴由 RichTextEditor 自己处理；这里是"选中节点、没在编辑"时的路径。
+              const text = await window.api.readClipboardText().catch(() => '')
+              const lines = text
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0 && looksLikeMarkdown(line))
+              if (lines.length > 0) {
+                const items = lines.map((line) => {
+                  const inline = parseInlineMarkdown(line)
+                  return { title: inline.text, rich: inlineRunsToRich(inline.runs) }
+                })
+                const count = useEditor.getState().addRichChildren(selectedId, items)
+                showToast(`已按 Markdown 粘贴 ${count} 个带格式的子主题（可用 Ctrl+Z 撤回）`)
                 return
               }
             }

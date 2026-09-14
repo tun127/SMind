@@ -210,3 +210,21 @@ export function codeBoxSize(code: TopicCode | undefined, bounds?: Size): Size {
   const metrics = codeBlockMetrics(code, bounds)
   return metrics ? { width: metrics.width, height: metrics.height } : { width: 0, height: 0 }
 }
+
+/**
+ * 带代码块的节点**最小尺寸**：不能小于「代码块缩到下限时的尺寸 + 节点内边距」。
+ *
+ * 为什么需要它：代码块最小只能缩到 {@link CODE_MIN_SCALE}（再小就看不清了），
+ * 如果允许把节点框拖得比这更小，代码块就会**溢出到节点框外面**——
+ * 用户报的"框比代码块还小"就是这么来的。
+ */
+export function codeMinNodeSize(code: TopicCode | undefined, padding: { x: number; y: number }): Size | null {
+  if (!code) return null
+  // 用"极小空间"逼出缩放下限下的那套指标
+  const floor = codeBlockMetrics(code, { width: 1, height: 1 })
+  if (!floor) return null
+  return {
+    width: floor.width + padding.x * 2,
+    height: floor.height + padding.y * 2
+  }
+}

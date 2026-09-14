@@ -630,6 +630,20 @@ function registerIpc(): void {
     }
   })
 
+  /**
+   * 在**新窗口**打开一个已有文件。
+   * 当前窗口里已经有内容时，「打开 / 导入」走这条路——就地打开会整份替换当前文档
+   * （也就是用户看到的"画布 1 被覆盖"）。
+   */
+  ipcMain.handle(IPC.openPathWindow, async (_e, path: string): Promise<'ok' | 'failed'> => {
+    try {
+      createWindow({ path })
+      return 'ok'
+    } catch {
+      return 'failed'
+    }
+  })
+
   /** 新窗口启动后取「要定位到哪张画布」，取一次即清空 */
   ipcMain.handle(IPC.pendingSheet, async (e): Promise<string | null> => {
     const state = stateOf(e.sender)
@@ -638,6 +652,13 @@ function registerIpc(): void {
     state.pendingSheet = null
     return target
   })
+
+  /**
+   * 读系统剪贴板里的纯文本。
+   * 渲染进程自己也读得到（navigator.clipboard），但那个 API 在没聚焦/无权限时会抛，
+   * 走主进程更稳——粘贴 Markdown 片段要靠它。
+   */
+  ipcMain.handle(IPC.clipboardText, async (): Promise<string> => clipboard.readText())
 
   ipcMain.handle(IPC.openDialog, async (e): Promise<OpenResult | null> => {
     const result = await showOpenIn(winOf(e.sender), {

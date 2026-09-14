@@ -5,7 +5,7 @@ import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
 import { Mark, markInputRule } from '@tiptap/core'
 import { Slice } from '@tiptap/pm/model'
-import { parseInlineMarkdown, inlineRunsToRich } from '@shared/import/markdown'
+import { inlineRunsToRich, looksLikeMarkdown, parseInlineMarkdown } from '@shared/import/markdown'
 import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
@@ -120,8 +120,10 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
       handlePaste: (view, event) => {
         const clipboard = event.clipboardData
         if (!clipboard) return false
-        if (clipboard.getData('text/html').length > 0) return false
         const text = clipboard.getData('text/plain')
+        // 剪贴板里带 HTML（从网页/文档复制）时，只有纯文本本身**明显是 Markdown 标记**
+        // 才抢过来按语法解析；否则交给编辑器默认粘贴（那是真正的富文本）
+        if (clipboard.getData('text/html').length > 0 && !looksLikeMarkdown(text)) return false
         if (text.length === 0 || text.includes('\n')) return false
         const inline = parseInlineMarkdown(text)
         if (inline.text === text || inline.runs.length === 0) return false

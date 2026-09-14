@@ -66,6 +66,10 @@ const api: MindApi = {
 
   pendingSheet: () => ipcRenderer.invoke(IPC.pendingSheet) as Promise<string | null>,
 
+  openPathInNewWindow: (path: string) => ipcRenderer.invoke(IPC.openPathWindow, path) as Promise<'ok' | 'failed'>,
+
+  readClipboardText: () => ipcRenderer.invoke(IPC.clipboardText) as Promise<string>,
+
   reportDocument: (path: string | null) => ipcRenderer.send(IPC.documentPath, path),
 
   showInFolder: (path: string) => ipcRenderer.send(IPC.showInFolder, path),

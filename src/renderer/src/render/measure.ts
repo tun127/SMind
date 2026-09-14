@@ -224,6 +224,16 @@ function inlineFormulaSize(source: string, fontSize: number): Size {
   return formulaSize(source, fontSize)
 }
 
+/**
+ * 某层级的节点内边距。
+ * 拉伸时的「最小尺寸」要按它算（框不能小于内容），所以对外暴露，
+ * 保证"限制拖动"和"实际排版"用的是同一份内边距。
+ */
+export function nodePaddingOf(depth: number): { x: number; y: number } {
+  const isRoot = depth === 0
+  return { x: isRoot ? PADDING_X_ROOT : PADDING_X, y: isRoot ? PADDING_Y_ROOT : PADDING_Y }
+}
+
 function baseOf(depth: number): BaseStyle {
   const index = Math.min(depth, 2)
   const isRoot = depth === 0

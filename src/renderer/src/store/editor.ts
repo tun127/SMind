@@ -19,6 +19,8 @@ import {
   type TopicFilter
 } from '@shared/search'
 import { DEFAULT_THEME, getThemeColors } from '@shared/theme'
+import { codeMinNodeSize } from '@shared/layout/accessory'
+import { nodePaddingOf } from '../render/measure'
 import {
   activeRoot,
   activeSheet,
@@ -132,6 +134,8 @@ export interface EditorState {
   /* ---- AI 结果落地（P8） ---- */
   /** 给某个主题一次性追加若干子主题（AI 扩写用，整批算一步撤销） */
   addChildTitles(parentId: string, titles: string[]): number
+  /** 追加若干**带格式**的子主题（粘贴 Markdown 片段用；整批一步撤销） */
+  addRichChildren(parentId: string, items: Array<{ title: string; rich?: RichText }>): number
   /** 把 AI 生成的整棵大纲应用到画布：新建一张画布，或挂到指定主题下面 */
   applyOutlineTree(
     target: { kind: 'newSheet' } | { kind: 'childOf'; id: string },
@@ -576,6 +580,31 @@ export const useEditor = create<EditorState>()((set, get) => ({
     return created.length
   },
 
+  /**
+   * 追加若干**带格式**的子主题（粘贴 Markdown 片段用）。
+   * 与 `addChildTitles` 的区别：标题之外还能带上富文本（高亮/上下标/加粗…），
+   * 而且不进编辑态——粘贴完就能继续操作。
+   */
+  addRichChildren: (parentId, items) => {
+    const cleaned = items.filter((item) => item.title.trim().length > 0)
+    if (cleaned.length === 0) return 0
+
+    const created: string[] = []
+    get().mutate((draft) => {
+      const parent = findTopic(activeRoot(draft), parentId) ?? activeRoot(draft)
+      for (const item of cleaned) {
+        const node = createTopic(item.title.trim())
+        if (item.rich) node.titleRich = item.rich
+        parent.children.push(node)
+        created.push(node.id)
+      }
+      if (parent.collapsed) parent.collapsed = false
+    }, '粘贴 Markdown')
+
+    if (created.length > 0) set({ selection: created, editingId: null, editingText: '', editingRich: null })
+    return created.length
+  },
+
   applyOutlineTree: (target, root, sheetTitle) => {
     const count = countOutlineNodes(root)
     if (count === 0) return 0
@@ -965,15 +994,31 @@ export const useEditor = create<EditorState>()((set, get) => ({
         : null
     get().mutate(
       (draft) => {
-        const topic = findTopic(activeRoot(draft), id)
+        const root = activeRoot(draft)
+        const topic = findTopic(root, id)
         if (!topic) return
         if (!next) {
           if (topic.sizeOverride === undefined) return
           topic.sizeOverride = undefined
           return
         }
-        if (topic.sizeOverride?.width === next.width && topic.sizeOverride?.height === next.height) return
-        topic.sizeOverride = next
+        // 兜底：框不能小于内容。代码块最小只能缩到缩放下限，再小就会溢出框外，
+        // 所以这里按「代码块下限尺寸 + 内边距」夹一下（渲染层的拉伸手柄也夹，双保险）
+        let depth = 0
+        let cursor = topic
+        while (cursor) {
+          const parent = findParent(root, cursor.id)
+          if (!parent) break
+          depth += 1
+          cursor = parent
+        }
+        const min = codeMinNodeSize(topic.code, nodePaddingOf(depth))
+        const clamped =
+          min && (min.width > next.width || min.height > next.height)
+            ? { width: Math.max(next.width, Math.round(min.width)), height: Math.max(next.height, Math.round(min.height)) }
+            : next
+        if (topic.sizeOverride?.width === clamped.width && topic.sizeOverride?.height === clamped.height) return
+        topic.sizeOverride = clamped
       },
       next ? '拉伸节点' : '恢复节点自动尺寸',
       // 拖动过程中每帧都写，合并成一步撤销

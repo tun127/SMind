@@ -6,8 +6,10 @@ import {
   MARKER_PER_COLUMN,
   MARKER_STRIP_GAP,
   codeBlockMetrics,
+  codeMinNodeSize,
   imageBoxSize
 } from '@shared/layout/accessory'
+import { nodePaddingOf } from '../render/measure'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
 import { HIGHLIGHT_BG } from '@shared/richtext'
@@ -132,6 +134,8 @@ function TopicNodeInner({
   // 所以代码块永远待在节点框里（与图片的缩放行为一致）
   const codeMetrics = code ? node.codeMetrics ?? codeBlockMetrics(code) : null
   const codeBox = code && codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : null
+  /** 拉伸时的最小尺寸：代码块缩到下限时的大小 + 内边距（框不能比内容还小） */
+  const minSize = codeMinNodeSize(code, nodePaddingOf(node.depth))
 
   // 标记条挂在节点**外面**：默认左侧；左向分支放右侧，免得压到它自己的子节点
   const markerIds = node.markerStrip?.markerIds ?? []
@@ -395,10 +399,13 @@ function TopicNodeInner({
             const startWidth = node.width
             const startHeight = node.height
             const zoom = useEditor.getState().zoom || 1
+            // 框不能小于内容：代码块最小只能缩到缩放下限，再小就会溢出到框外
+            const minWidth = Math.max(60, minSize?.width ?? 0)
+            const minHeight = Math.max(28, (minSize?.height ?? 0) + node.lineHeight)
             const move = (moveEvent: PointerEvent): void => {
               useEditor.getState().setSizeOverride(node.id, {
-                width: Math.max(60, startWidth + (moveEvent.clientX - startX) / zoom),
-                height: Math.max(28, startHeight + (moveEvent.clientY - startY) / zoom)
+                width: Math.max(minWidth, startWidth + (moveEvent.clientX - startX) / zoom),
+                height: Math.max(minHeight, startHeight + (moveEvent.clientY - startY) / zoom)
               })
             }
             const up = (): void => {

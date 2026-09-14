@@ -90,6 +90,10 @@ export const IPC = {
   newWindow: 'window:new',
   /** 在新窗口打开「当前文档的某张画布」（同一文件，用于并排看两张画布） */
   openSheetWindow: 'window:open-sheet',
+  /** 在新窗口打开一个已有文件（当前窗口有内容时用它，避免覆盖当前画布） */
+  openPathWindow: 'window:open-path',
+  /** 读系统剪贴板里的纯文本（粘贴 Markdown 片段用） */
+  clipboardText: 'clipboard:read-text',
   /** 新窗口启动后要定位到哪张画布（取一次即清空） */
   pendingSheet: 'window:pending-sheet',
   /** 渲染进程报告「这个窗口现在打开的是哪个文件」（新建＝null） */
@@ -202,6 +206,15 @@ export interface MindApi {
    * 这就是"A 画布新建 B 画布、两者互不影响"的做法。未保存过的文档也能开副本。
    */
   openSheetInNewWindow(workbook: Workbook, sheetId: string): Promise<'ok' | 'failed'>
+  /**
+   * 在**新窗口**打开一个已有文件。
+   *
+   * 当前窗口里已经有内容时，菜单「打开 / 导入 .xmind」走这条路——
+   * 直接就地打开会把当前文档（含所有画布）整份换掉，用户会觉得"画布 1 被覆盖了"。
+   */
+  openPathInNewWindow(path: string): Promise<'ok' | 'failed'>
+  /** 读系统剪贴板里的纯文本（粘贴 Markdown 片段用） */
+  readClipboardText(): Promise<string>
   /** 新窗口启动时要定位的画布 id（取一次即清空） */
   pendingSheet(): Promise<string | null>
   /**

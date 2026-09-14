@@ -117,7 +117,7 @@ import {
   parseOutline,
   toConfigView
 } from '../src/shared/ai'
-import { parseInlineMarkdown, parseMarkdownOutline } from '../src/shared/import/markdown'
+import { looksLikeMarkdown, parseInlineMarkdown, parseMarkdownOutline } from '../src/shared/import/markdown'
 import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../src/shared/formula'
 import { estimateOverlayLabelSize, overlayTitleLines } from '../src/shared/layout/overlays'
 import { LABEL_ELLIPSIS, fitLabelText } from '../src/shared/layout/label-fit'
@@ -130,6 +130,7 @@ import {
   CODE_FONT_SIZE,
   CODE_HEADER,
   codeBlockMetrics,
+  codeMinNodeSize,
   CODE_LINE_RATIO,
   CODE_PADDING_X,
   CODE_PADDING_Y,
@@ -1565,6 +1566,16 @@ function testMarkdownFullFormat(): void {
     runsToHtml([{ text: '<script>x</script>' }])
   )
   check('HTML：换行转 <br>', runsToHtml([{ text: 'a\nb' }]) === 'a<br>b')
+
+  // 粘贴时"要不要按语法解析"的判定
+  check('识别：==高亮==', looksLikeMarkdown('这是 ==高亮=='))
+  check('识别：A[^1] 脚注', looksLikeMarkdown('结论 A[^1]'))
+  check('识别：H~2~O 下标', looksLikeMarkdown('H~2~O'))
+  check('识别：x^2^ 上标', looksLikeMarkdown('E=mc^2^'))
+  check('识别：**粗体** 与 `代码`', looksLikeMarkdown('**粗** 和 `code`'))
+  check('识别：普通算式不算', !looksLikeMarkdown('2 * 3 = 6'))
+  check('识别：单独的波浪线不算', !looksLikeMarkdown('路径 ~/docs'))
+  check('识别：普通句子不算', !looksLikeMarkdown('今天天气不错'))
 }
 
 /* ------------------------------------------------------------------ */
@@ -2682,6 +2693,14 @@ async function testMediaElements(): Promise<void> {
     const tiny = codeBlockMetrics(block, { width: 10, height: 10 })!
     check('再挤也不会缩到看不清（下限 0.5）', tiny.scale >= 0.5, String(tiny.scale))
     check('没有代码时没有指标', codeBlockMetrics(undefined) === null)
+
+    // 节点框不能比代码块还小（否则代码块会溢出到框外）
+    const min = codeMinNodeSize({ language: 'python', text: 'print("hi")' }, { x: 14, y: 9 })!
+    const floor = codeBlockMetrics({ language: 'python', text: 'print("hi")' }, { width: 1, height: 1 })!
+    eq('最小宽度 = 代码块下限宽 + 内边距', min.width, floor.width + 14 * 2)
+    eq('最小高度 = 代码块下限高 + 内边距', min.height, floor.height + 9 * 2)
+    check('最小尺寸确实小于自然尺寸（只是兜底）', min.width < natural.width)
+    check('没有代码时没有最小尺寸', codeMinNodeSize(undefined, { x: 14, y: 9 }) === null)
   }
 
   group('手动拉伸：尺寸覆盖只作下限、可撤销、往返保真')

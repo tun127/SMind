@@ -1608,12 +1608,14 @@ textarea {
   box-sizing: border-box;
 }
 
+/* 与节点**部分重叠**：一半压在节点边缘上，看起来是"长在节点上"的，
+   而不是悬在旁边（悬空在小图上会显得很突兀）。 */
 .topic__collapse--right {
-  left: calc(100% + 5px);
+  left: calc(100% - 8px);
 }
 
 .topic__collapse--left {
-  right: calc(100% + 5px);
+  right: calc(100% - 8px);
 }
 
 /* ------------------------------------------------------------------ */
