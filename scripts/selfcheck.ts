@@ -33,6 +33,7 @@ import { activeRoot, activeSheet, countCharacters, countDescendants, countTopics
 import { createSheet, createTopic, createWorkbook } from '../src/shared/model/factory'
 import { coerceCode, coerceRichText } from '../src/shared/model/coerce'
 import { checkImagePayload, isPlausibleFilePath, MAX_IMAGE_BYTES } from '../src/shared/ipc-args'
+import { isSelfNavigation } from '../src/shared/guards'
 import { writeFileAtomic } from '../src/main/atomic-write'
 import {
   buildChatSystemPrompt,
@@ -1365,6 +1366,28 @@ async function testSafetyHelpers(): Promise<void> {
   evictOldest(small, 100)
   eq('没到上限时不动它', small.size, 1)
 
+  group('自身导航判断（刷新要放行、拖文件要拦）')
+
+  check(
+    '同一个 file 页面 → 放行（刷新）',
+    isSelfNavigation('file:///D:/Mind/out/renderer/index.html', 'file:///D:/Mind/out/renderer/index.html')
+  )
+  check(
+    '只有 hash 不同也算同一个页面',
+    isSelfNavigation('file:///D:/Mind/out/renderer/index.html#/a', 'file:///D:/Mind/out/renderer/index.html#/b')
+  )
+  check(
+    '拖进来的图片 → 拦下（否则界面会被替换成图片）',
+    !isSelfNavigation('file:///D:/Mind/out/renderer/index.html', 'file:///C:/Users/me/a.png')
+  )
+  check('开发服务器同源刷新 → 放行', isSelfNavigation('http://localhost:5173/', 'http://localhost:5173/'))
+  check(
+    '开发服务器同源资源 → 放行（Vite 整页刷新要用）',
+    isSelfNavigation('http://localhost:5173/', 'http://localhost:5173/src/main.tsx')
+  )
+  check('跳到别的站点 → 拦下', !isSelfNavigation('http://localhost:5173/', 'https://example.com/'))
+  check('当前地址为空 → 拦下（保守处理）', !isSelfNavigation('', 'https://example.com/'))
+
   group('IPC 入参校验：路径')
 
   check('Windows 绝对路径通过', isPlausibleFilePath('D:\\a\\b.xmind'))
@@ -1505,6 +1528,11 @@ function testAgentHelpers(): void {
   eq('提到两次都算', json(cut('成本，还是成本')), json(['[成本]', '·，还是', '[成本]']))
   eq('没有命中就是一整段纯文本', json(cut('这段话里没有节点名')), json(['·这段话里没有节点名']))
   eq('空文本没有片段', json(cut('')), json([]))
+  eq(
+    '非字符串内容不会把渲染带崩（防御历史数据等外部内容）',
+    json(segmentTitleMentions(undefined as unknown as string, index)),
+    json([])
+  )
   eq('单字标题不进索引（太容易误伤）', buildTitleIndex(createTopic('甲')).size, 0)
 
   group('Agent：聊天记录校验')

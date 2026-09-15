@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
-import { isRecord } from '../shared/guards'
+import { isRecord, isSelfNavigation } from '../shared/guards'
 import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
 import { writeFileAtomic } from './atomic-write'
 import { logDirectory, logMain } from './log'
@@ -188,6 +188,11 @@ interface DocWindow {
   docs: Map<string, DocResources>
   /** 渲染进程已确认可以关闭（未保存内容问过了） */
   allowClose: boolean
+  /**
+   * 渲染层报告「界面已进入错误状态」（错误边界兜底）。
+   * 此时不能再等它回应关闭请求——错误边界把 App 卸载了，没人能回应（真踩过：窗口关不掉）。
+   */
+  uiBroken: boolean
   /** 启动/二实例带的文件，渲染进程就绪后取走 */
   pendingPath: string | null
   /** 这个窗口打开的是临时副本：文档没有磁盘归属，关窗时把临时文件删掉 */
@@ -592,6 +597,7 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
     slot,
     docs: new Map(),
     allowClose: false,
+    uiBroken: false,
     pendingPath: options.path ?? null,
     copySource: options.copySource ?? null
   }
@@ -602,6 +608,11 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
 
   win.on('ready-to-show', () => {
     if (!win.isDestroyed()) win.show()
+  })
+
+  // 页面重新加载完成 = 界面又活了，清掉「已损坏」标记
+  win.webContents.on('did-finish-load', () => {
+    state.uiBroken = false
   })
 
   // 开发期把渲染进程的 console 转发到终端，方便定位报错
@@ -655,6 +666,11 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
    * 拖进来的是本软件的文档（.xmind/.emmx/.emm）就**在这个窗口里打开**，别的文件忽略。
    */
   win.webContents.on('will-navigate', (event, url) => {
+    // **刷新也走这个事件**：一刀切 preventDefault 会把「重新加载界面」变成死按钮，
+    // 开发期 Vite 的整页刷新同样被拦（热更新推了新代码也回不来）。
+    // 放行「回到自身页面」的导航，其余（拖进来的图片 / PDF / 外链）继续拦。
+    if (isSelfNavigation(win.isDestroyed() ? '' : win.webContents.getURL(), url)) return
+
     event.preventDefault()
     if (!url.startsWith('file://')) return
     try {
@@ -672,6 +688,13 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
     const contents = win.webContents
     // 渲染进程已经没了（崩溃/被销毁）时不能再等它回应，否则窗口关不掉
     if (!contents || contents.isDestroyed()) {
+      state.allowClose = true
+      return
+    }
+    // 界面已进入错误状态：渲染层里**没有任何组件**能回应关闭请求
+    // （错误边界把 App 卸载了）。再等下去就是「窗口关不掉，只能去任务管理器」。
+    if (state.uiBroken) {
+      logMain('close-with-broken-ui', '界面处于错误状态，跳过未保存确认直接关闭')
       state.allowClose = true
       return
     }
@@ -1556,6 +1579,21 @@ function registerIpc(): void {
     IPC.snapshotClear,
     async (_e, path: string | null): Promise<SnapshotItem[]> => clearSnapshotsFor(path)
   )
+
+  /** 渲染层报告界面已损坏（错误边界触发）；页面重新加载完成时会自动清除 */
+  ipcMain.on(IPC.uiState, (e) => {
+    const state = stateOf(e.sender)
+    if (state) state.uiBroken = true
+  })
+
+  /** 由主进程刷新窗口：渲染层自己发的 location.reload 会被 will-navigate 拦下 */
+  ipcMain.on(IPC.windowReload, (e) => {
+    const state = stateOf(e.sender)
+    if (state && !state.win.isDestroyed()) {
+      state.uiBroken = false
+      state.win.webContents.reload()
+    }
+  })
 
   ipcMain.on(IPC.confirmClose, (e) => {
     const state = stateOf(e.sender)

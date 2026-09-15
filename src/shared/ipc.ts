@@ -104,6 +104,13 @@ export const IPC = {
   confirmClose: 'window:confirm-close',
   closeRequest: 'window:close-request',
   setTitle: 'window:set-title',
+  /** 渲染层报告「界面已进入错误状态」（错误边界兜底用） */
+  uiState: 'ui:state',
+  /**
+   * 请主进程刷新窗口。
+   * 渲染层自己发的 `location.reload()` 会被 `will-navigate` 拦下——这条通道必须走主进程。
+   */
+  windowReload: 'window:reload',
   /** 新开一个窗口（= 新的一份文档） */
   newWindow: 'window:new',
   /** 在新窗口打开一份文档副本（导入大纲 / AI 生成导图 / 「在新窗口打开副本」用） */
@@ -255,6 +262,15 @@ export interface MindApi {
   openExternal(url: string): Promise<boolean>
   onMenuCommand(handler: (command: MenuCommand) => void): () => void
   onCloseRequest(handler: () => void): () => void
+  /**
+   * 报告界面已进入错误状态（错误边界里调用）。
+   *
+   * 主进程据此在关窗时**跳过**「问渲染层有没有未保存内容」这一步：
+   * 界面都坏了，没有组件能回应那个询问——再等下去就是「窗口关不掉，只能去任务管理器」。
+   */
+  reportUiBroken(): void
+  /** 请主进程刷新这个窗口（渲染层发起的 reload 可能被导航拦截挡下） */
+  reloadWindow(): void
 
   /* ---- 主题 ---- */
   /** 读取「我的主题」（存放在用户数据目录的 themes.json） */

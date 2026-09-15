@@ -85,6 +85,10 @@ const api: MindApi = {
     return () => ipcRenderer.removeListener(IPC.closeRequest, listener)
   },
 
+  reportUiBroken: () => ipcRenderer.send(IPC.uiState),
+
+  reloadWindow: () => ipcRenderer.send(IPC.windowReload),
+
   themesList: () => ipcRenderer.invoke(IPC.themesList) as Promise<ThemeDefinition[]>,
 
   themesSave: (theme: ThemeDefinition) => ipcRenderer.invoke(IPC.themesSave, theme) as Promise<void>,

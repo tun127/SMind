@@ -69,9 +69,24 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo): void {
     // 开发期主进程会把渲染进程的 console 转发到终端，这里至少把现场留下
     console.error('[renderer] 渲染异常：', error, info.componentStack)
+    // 告诉主进程「界面坏了」：否则关窗时会一直等这个窗口回应未保存确认，
+    // 而这块界面已经把 App 卸载了，**没人能回应**——窗口就关不掉了。
+    try {
+      window.api.reportUiBroken()
+    } catch {
+      /* 没有 preload 时忽略：这只影响主进程的关闭兜底 */
+    }
   }
 
   private readonly reload = (): void => {
+    // 请主进程刷新：渲染层自己发的 location.reload() 会被主进程的 will-navigate
+    // 拦下，表现为「点了没反应」（这个坑真踩过）。
+    try {
+      window.api.reloadWindow()
+      return
+    } catch {
+      /* 没有 preload（例如单测环境）时退回浏览器原生刷新 */
+    }
     window.location.reload()
   }
 
@@ -94,7 +109,8 @@ export class ErrorBoundary extends Component<Props, State> {
           <h1 style={{ margin: '0 0 10px', fontSize: '19px' }}>界面遇到了一个错误</h1>
           <p style={{ margin: '0 0 16px', fontSize: '14px', lineHeight: 1.7, color: '#4a5262' }}>
             这块界面已经停止渲染，但你的文档没有被丢弃：自动存档每 30 秒保存一份，
-            重新启动本软件时会提示恢复。建议先复制下面的错误信息，再重新加载界面。
+            重新启动本软件时会提示恢复。建议先复制下面的错误信息，再点「重新加载界面」；
+            直接关闭这个窗口也可以（这时的关闭不会再询问未保存内容）。
           </p>
 
           <details style={{ margin: '0 0 18px' }}>

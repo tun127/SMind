@@ -160,12 +160,22 @@ export default function ChatPanel({ onClose, onOpenSettings }: Props): ReactElem
         setStreaming(false)
       }
 
-      /** 往最后一条助手消息上补字段（工具痕迹 / 收尾文案） */
+      /**
+       * 往最后一条助手消息上补字段（工具痕迹 / 收尾文案）。
+       *
+       * **只覆盖真正给了值的键**：`{ ...last, content: undefined }` 会把 content
+       * 清成 undefined，下一次渲染读它的 length 就直接崩（这个坑真踩过，
+       * 表现为点「停止生成」后整块界面报错）。
+       */
       const patchLast = (patch: Partial<ChatMsg>): void => {
         update((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
-          return [...prev.slice(0, -1), { ...last, ...patch }]
+          const merged: ChatMsg = { ...last }
+          if (patch.content !== undefined) merged.content = patch.content
+          if (patch.aborted !== undefined) merged.aborted = patch.aborted
+          if (patch.toolNotes !== undefined) merged.toolNotes = patch.toolNotes
+          return [...prev.slice(0, -1), merged]
         })
       }
 
@@ -204,9 +214,11 @@ export default function ChatPanel({ onClose, onOpenSettings }: Props): ReactElem
 
       if (event.aborted) {
         // 用户主动停止：已生成的部分保留；工具调用多半残缺，一律不执行
-        patchLast({
-          content: messagesRef.current[messagesRef.current.length - 1]?.content.trim().length ? undefined : '（已停止）',
-          aborted: true
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          const content = last.content.trim().length > 0 ? last.content : '（已停止）'
+          return [...prev.slice(0, -1), { ...last, content, aborted: true }]
         })
         finishTurn()
         return

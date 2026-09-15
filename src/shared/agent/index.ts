@@ -63,6 +63,10 @@ export function buildTitleIndex(root: Topic, minLength = 2): Map<string, TitleIn
  * 同一标题出现多次都会被识别。
  */
 export function segmentTitleMentions(text: string, index: Map<string, TitleIndexEntry[]>): TextSegment[] {
+  // 防御：内容可能来自历史记录等外部数据。坏数据最多让这段不高亮，
+  // **绝不能把整个界面带崩**（这里真崩过一次：上游把 content 清成了 undefined）。
+  if (typeof text !== 'string' || text.length === 0) return []
+
   const segments: TextSegment[] = []
   let plain = ''
   let position = 0
