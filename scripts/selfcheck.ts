@@ -1753,6 +1753,31 @@ function testWriteToolsAndTurn(): void {
   check('插入摘要有层级说明', insert.summary.includes('预算') && insert.summary.includes('3 个节点'))
   eq('outline 为空被拦下', plan('insertSubtree', { address: '成本', outline: '   ' }).ok, false)
 
+  // 这两条是「新主题」垃圾节点的回归断言：模型给并列的多行时，
+  // 解析器会套一个壳，写工具必须**把壳剥掉**，让那些行成为并列的新主题
+  const multi = plan('insertSubtree', { address: '成本', outline: '- 甲\n- 乙\n- 丙' })
+  check(
+    '并列多行 → 多个同级新主题',
+    multi.ok && multi.intent.kind === 'insert' && multi.intent.nodes.length === 3
+  )
+  check(
+    '**不会**凭空多出壳节点（每一条都是模型给的那几行）',
+    multi.ok &&
+      multi.intent.kind === 'insert' &&
+      multi.intent.nodes.every((node) => ['甲', '乙', '丙'].includes(node.title))
+  )
+  check('并列插入的摘要列出主题', multi.summary.includes('3 个主题') && multi.summary.includes('甲'))
+
+  const nested = plan('insertSubtree', { address: '成本', outline: '- 预算\n  - 人力' })
+  check(
+    '单根带子树 → 只插一个（保留它自己的层级）',
+    nested.ok && nested.intent.kind === 'insert' && nested.intent.nodes.length === 1
+  )
+  check(
+    '单根时标题就是模型给的标题',
+    nested.ok && nested.intent.kind === 'insert' && nested.intent.nodes[0]?.title === '预算'
+  )
+
   const del = plan('deleteTopic', { address: '成本' })
   eq('删除是破坏性操作（要确认）', destructiveOf(del), true)
   check('删除摘要带上影响范围', del.summary.includes('3 个节点'))
@@ -5525,6 +5550,10 @@ function testAi(): void {
   eq('多个顶层节点套一个根', flatRoots.root?.title, '我的主题')
   eq('同级的都挂在根下', flatRoots.root?.children.length, 3)
   check('多顶层时给出提示', flatRoots.warnings.length === 1, flatRoots.warnings.join('|'))
+  // 「根是不是套上去的壳」必须能被调用方识别：写工具靠它决定剥不剥壳
+  eq('多顶层时标记为壳（写工具据此剥壳）', flatRoots.wrapped, true)
+  eq('单顶层不是壳', parseOutline('- 甲\n  - 乙').wrapped, false)
+  eq('解析不出内容时也不是壳', parseOutline('只有一句话。').wrapped, false)
 
   const shifted = parseOutline('    - 根\n      - 子')
   eq('整体缩进的层级被归一化', shifted.root?.title, '根')

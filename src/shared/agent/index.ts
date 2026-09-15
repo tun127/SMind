@@ -111,10 +111,15 @@ export function segmentTitleMentions(text: string, index: Map<string, TitleIndex
 /* 循环上限                                                            */
 /* ------------------------------------------------------------------ */
 
-/** 一轮对话里最多几轮「模型 → 工具 → 模型」 */
-export const AGENT_MAX_ROUNDS = 6
-/** 一轮对话里最多执行多少次工具调用 */
-export const AGENT_MAX_TOOL_CALLS = 20
+/**
+ * 一轮对话里最多几轮「模型 → 工具 → 模型」。
+ *
+ * 上限是安全阀，不该变成体验问题：撞到上限时渲染层会**去掉工具再问最后一轮**，
+ * 让模型把已经看到的东西讲清楚——以前撞上限就直接收尾，用户拿到的是半截话。
+ */
+export const AGENT_MAX_ROUNDS = 8
+/** 一轮对话里最多执行多少次工具调用（读一篇大文档常常要十几次探查，给足余量） */
+export const AGENT_MAX_TOOL_CALLS = 30
 
 /**
  * 还能不能继续下一轮。
@@ -530,7 +535,8 @@ export function runReadTool(name: string, argumentsText: string, context: ToolCo
  */
 export type WriteIntent =
   | { kind: 'rename'; id: string; title: string }
-  | { kind: 'insert'; id: string; node: OutlineNode; count: number }
+  /** nodes = 要挂上去的若干**同级**新主题（并列多行时会有多个） */
+  | { kind: 'insert'; id: string; nodes: OutlineNode[]; count: number }
   | { kind: 'delete'; id: string; title: string; size: number }
   | { kind: 'move'; id: string; targetId: string; index: number | null }
   | { kind: 'collapse'; id: string; collapsed: boolean }
@@ -561,9 +567,9 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
   {
     name: 'insertSubtree',
     description:
-      '在指定主题下面**新增**一棵子树。outline 用缩进大纲写：第一行是新主题的标题，' +
-      '每多两个空格缩进一层表示更深一级，每行以「- 」开头。' +
-      '要加多个**同级**主题请多次调用本工具，不要把它们写成并列行。',
+      '在指定主题下面**新增**内容。outline 用缩进大纲写、每行以「- 」开头：' +
+      '并列的多行会成为多个**同级**新主题，缩进两格表示更深一级。' +
+      'outline 里只放要新增的主题文字，不要把解释说明或开场白写进去。',
     parameters: schema(
       {
         address: { type: 'string', description: '挂在哪个主题下面' },
@@ -723,12 +729,24 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     if (outline.length === 0) return fail('outline 不能为空。')
     const parsed = parseOutline(outline, '新主题')
     if (!parsed.root) return fail(parsed.warnings.join('；') || 'outline 里解析不出任何主题。')
-    const node = parsed.root
+
+    // 并列多行会被解析器套一个壳节点：这里**把壳剥掉**，让那些行成为并列的新主题。
+    // 直接把壳落进画布会凭空多出一个叫「新主题」的垃圾节点——模型没错，是我们的锅。
+    const nodes = parsed.wrapped ? parsed.root.children : [parsed.root]
+    if (nodes.length === 0) return fail('outline 里没有可插入的主题。')
+
+    const host = target.topic.title
+    const shown = nodes
+      .slice(0, 3)
+      .map((node) => node.title)
+      .join('、')
     return {
       ok: true,
-      intent: { kind: 'insert', id: target.topic.id, node, count: parsed.count },
-      // 「第一行是新节点标题」这条契约写进描述里了，所以这里永远只插一个根 + 它的子孙
-      summary: `在「${target.topic.title}」下新增「${node.title}」（共 ${parsed.count} 个节点）`,
+      intent: { kind: 'insert', id: target.topic.id, nodes, count: parsed.count },
+      summary:
+        nodes.length === 1
+          ? `在「${host}」下新增「${nodes[0]?.title ?? ''}」（共 ${parsed.count} 个节点）`
+          : `在「${host}」下新增 ${nodes.length} 个主题（${shown}${nodes.length > 3 ? ' 等' : ''}；共 ${parsed.count} 个节点）`,
       destructive: false
     }
   }

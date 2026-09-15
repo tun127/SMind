@@ -225,6 +225,15 @@ export interface ParsedOutline {
   /** 一共解析出多少个节点（含根） */
   count: number
   warnings: string[]
+  /**
+   * 根节点是不是**人工套上去的壳**（模型给了并列的多个顶层节点）。
+   *
+   * 这个标记必须给调用方：把壳直接落进画布，会凭空多出一个「新主题」垃圾节点
+   * （AI 写工具真踩过这个坑）。知道是壳就该把它的孩子依次挂上去。
+   *
+   * 只有 AI 大纲解析器会产生壳；Markdown / OPML 导入器等来源没有这个概念，缺省即「不是壳」。
+   */
+  wrapped?: boolean
 }
 
 /** 去掉 ```lang ... ``` 包裹；模型经常多此一举地包一层 */
@@ -299,7 +308,8 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
       return {
         root: null,
         count: 0,
-        warnings: ['模型没有返回可解析的大纲（只看到说明文字），请重试或换个模型']
+        warnings: ['模型没有返回可解析的大纲（只看到说明文字），请重试或换个模型'],
+        wrapped: false
       }
     }
     parsed = terse
@@ -331,17 +341,19 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
   }
 
   let root: OutlineNode
+  let wrapped = false
   const onlyRoot = roots[0]
   if (roots.length === 1 && onlyRoot) {
     root = onlyRoot
   } else {
     // 模型给了并列的多个顶层节点：套一个根节点，别让它们散着
     root = { title: fallbackRootTitle, children: roots }
+    wrapped = true
     warnings.push(`模型返回了 ${roots.length} 个并列的顶层节点，已统一挂到「${fallbackRootTitle}」下`)
   }
 
   const count = countOutlineNodes(root)
-  return { root, count, warnings }
+  return { root, count, warnings, wrapped }
 }
 
 export function countOutlineNodes(node: OutlineNode | null): number {

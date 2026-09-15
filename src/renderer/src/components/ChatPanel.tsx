@@ -120,6 +120,10 @@ export default function ChatPanel({
   const toolCallsUsedRef = useRef(0)
   /** 模型不支持函数调用时置 false，此后不再带工具定义 */
   const useToolsRef = useRef(true)
+  /** 撞到调用上限后的「最后一轮」：只让它作答，不再给工具 */
+  const forceNoToolsRef = useRef(false)
+  /** 本回合已执行过的调用（同名同参数）：重复的不再执行，免得白烧配额 */
+  const seenCallsRef = useRef<Set<string>>(new Set())
   /** runRound / processQueue 与 handleEvent 互相需要，用 ref 打破循环引用 */
   const runRoundRef = useRef<() => void>(() => {})
   const processQueueRef = useRef<() => void>(() => {})
@@ -234,7 +238,9 @@ export default function ChatPanel({
         store.setTitle(intent.id, intent.title)
         return { ok: true, note: '' }
       case 'insert': {
-        const added = store.applyOutlineTree(intent.id, intent.node)
+        // 可能是多个并列的新主题（解析器套的壳已经在规划阶段剥掉了）
+        let added = 0
+        for (const node of intent.nodes) added += store.applyOutlineTree(intent.id, node)
         return added > 0 ? { ok: true, note: '' } : { ok: false, note: '目标主题已不存在，插入没有生效。' }
       }
       case 'delete':
@@ -314,6 +320,21 @@ export default function ChatPanel({
         runRoundRef.current()
         return
       }
+
+      // 同一回合里重复问同一件事：不重复执行（白烧配额，模型还会原地打转），
+      // 直接把「问过了」告诉它，逼它换个策略
+      const callKey = `${call.name}|${call.argumentsText}`
+      if (seenCallsRef.current.has(callKey)) {
+        pushToolResult(
+          call,
+          `（这个调用本回合已经执行过，结果见上面那条 ${call.name} 的返回。请换个关键词或换个分支再试，不要重复同一个调用。）`
+        )
+        noteAction(`跳过重复调用：${call.name}`, false)
+        queue.index += 1
+        step()
+        return
+      }
+      seenCallsRef.current.add(callKey)
 
       if (isReadToolName(call.name)) {
         const state = useEditor.getState()
@@ -486,20 +507,32 @@ export default function ChatPanel({
         return
       }
 
-      // 有工具调用：把助手这一轮记进消息线（协议要求带上 tool_calls），然后逐个处理
-      wireRef.current = [...wireRef.current, { role: 'assistant', content: event.content, toolCalls: calls }]
       roundRef.current += 1
 
+      // 先算还有没有预算：不够就**不要**把这轮的 tool_calls 记进消息线——
+      // 助手消息带 tool_calls 却没有对应的工具结果，服务端会直接报 400。
       const gate = canContinueAgentLoop(roundRef.current, toolCallsUsedRef.current + calls.length)
       if (!gate.ok) {
         toolCallsUsedRef.current += calls.length
-        patchLast({ content: `${messagesRef.current[messagesRef.current.length - 1]?.content ?? ''}\n\n（${gate.reason}，先基于已看到的内容作答）` })
-        requestIdRef.current = null
-        setStreaming(false)
-        commitTurnRef.current()
+        // 把「为什么停了」以小标签留在气泡里（用户看得见，而不是回答突然断掉）
+        patchLast({
+          toolNotes: [...(messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []), gate.reason]
+        })
+        // 撞上限 ≠ 不回答：去掉工具再问最后一轮，让它把已经看到的东西讲清楚
+        forceNoToolsRef.current = true
+        wireRef.current = [
+          ...wireRef.current,
+          {
+            role: 'user',
+            content: '（工具调用次数已达本次上限，请立刻基于你已经获取到的信息直接作答，不要再调用任何工具。）'
+          }
+        ]
+        runRoundRef.current()
         return
       }
 
+      // 有工具调用：把助手这一轮记进消息线（协议要求带上 tool_calls），然后逐个处理
+      wireRef.current = [...wireRef.current, { role: 'assistant', content: event.content, toolCalls: calls }]
       toolCallsUsedRef.current += calls.length
       queueRef.current = { calls, index: 0 }
       processQueueRef.current()
@@ -512,7 +545,9 @@ export default function ChatPanel({
     requestIdRef.current = requestId
     setStreaming(true)
     void window.api
-      .aiChatStream(requestId, wireRef.current, { useTools: useToolsRef.current })
+      .aiChatStream(requestId, wireRef.current, {
+        useTools: useToolsRef.current && !forceNoToolsRef.current
+      })
       .catch((error: unknown) => {
         // invoke 被拒（参数无效 / 没配 Key）：同样以事件形式收尾，只有一条代码路径
         handleEvent({ requestId, kind: 'error', message: (error as Error).message })
@@ -570,6 +605,8 @@ export default function ChatPanel({
       writeLogRef.current = []
       turnStartedRef.current = false
       queueRef.current = null
+      forceNoToolsRef.current = false
+      seenCallsRef.current = new Set()
       setPending(null)
       setPendingWrite(null)
 
