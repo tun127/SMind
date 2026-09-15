@@ -2017,8 +2017,8 @@ function testAgentTools(): void {
 function testWriteToolsAndTurn(): void {
   group('Agent：写工具的意图规划')
 
-  eq('写工具一共 9 个（第一批）', AGENT_WRITE_TOOLS.length, 9)
-  eq('全部工具 = 读 4 + 写 9', AGENT_ALL_TOOLS.length, 13)
+  eq('写工具一共 10 个（第一批 + 批量移动）', AGENT_WRITE_TOOLS.length, 10)
+  eq('全部工具 = 读 4 + 写 10', AGENT_ALL_TOOLS.length, 14)
 
   // 注意别把这个变量叫 root：会遮蔽上面那个 root() 助手
   const tree = createTopic('中心主题')
@@ -2098,6 +2098,66 @@ function testWriteToolsAndTurn(): void {
   eq(
     '明确许可后才允许移动（用户确实要求重排时）',
     plan('moveTopic', { address: '成本/物料', toAddress: '中心主题', allowMoved: true }).ok,
+    true
+  )
+  material.position = undefined
+
+  // 批量移动：整理大导图的正路（一次调用搬很多节点，调用上限按「调用」算不按节点算）
+  const batch = plan('moveTopics', {
+    moves: [
+      { address: '成本/物料', toAddress: '中心主题' },
+      { address: '成本/人力', toAddress: '中心主题', index: 0 }
+    ]
+  })
+  eq('批量移动规划成功', batch.ok, true)
+  check(
+    '意图里带着每一条移动',
+    batch.ok && batch.intent.kind === 'moveMany' && batch.intent.moves.length === 2
+  )
+  check('摘要说的是批量', batch.summary.includes('批量移动 2 个'))
+  eq('空数组被拦下', plan('moveTopics', { moves: [] }).ok, false)
+  eq(
+    '超过 200 条被拦下',
+    plan('moveTopics', {
+      moves: Array.from({ length: 201 }, () => ({ address: '成本/物料', toAddress: '中心主题' }))
+    }).ok,
+    false
+  )
+  eq(
+    '缺 address 的那一条让整批停下（全有或全无，不搬一半留一半）',
+    plan('moveTopics', { moves: [{ address: '成本/物料', toAddress: '中心主题' }, { toAddress: '中心主题' }] }).ok,
+    false
+  )
+  check(
+    '失败时指出错在第几条',
+    (() => {
+      const r = plan('moveTopics', {
+        moves: [
+          { address: '成本/物料', toAddress: '中心主题' },
+          { address: '根本不存在的东西', toAddress: '成本' }
+        ]
+      })
+      return !r.ok && r.error.includes('moves[1]')
+    })()
+  )
+  check(
+    '失败的错误里带候选（与单个寻址同样的引导）',
+    (() => {
+      const r = plan('moveTopics', { moves: [{ address: '不存在的东西', toAddress: '成本' }] })
+      return !r.ok && r.error.includes('searchNodes')
+    })()
+  )
+
+  // 手动定位保护对批量同样生效
+  material.position = { x: 3, y: 4 }
+  eq(
+    '批量里含手动定位节点默认整批拒绝',
+    plan('moveTopics', { moves: [{ address: '成本/物料', toAddress: '中心主题' }] }).ok,
+    false
+  )
+  eq(
+    '整批带上 allowMoved 才放行',
+    plan('moveTopics', { moves: [{ address: '成本/物料', toAddress: '中心主题' }], allowMoved: true }).ok,
     true
   )
   material.position = undefined

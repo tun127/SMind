@@ -118,8 +118,14 @@ export function segmentTitleMentions(text: string, index: Map<string, TitleIndex
  * 让模型把已经看到的东西讲清楚——以前撞上限就直接收尾，用户拿到的是半截话。
  */
 export const AGENT_MAX_ROUNDS = 8
-/** 一轮对话里最多执行多少次工具调用（读一篇大文档常常要十几次探查，给足余量） */
-export const AGENT_MAX_TOOL_CALLS = 30
+/**
+ * 一轮对话里最多执行多少次**工具调用**（不是操作数——一次 moveTopics 可以搬很多节点）。
+ *
+ * 为什么不去掉上限：没有它，模型陷入循环时会无限烧用户的钱和 patience。
+ * 为什么够用：大导图的整理靠**批量工具**（moveTopics / insertSubtree），
+ * 几次调用就能搬完上百个节点，逐个搬的用法本来就不该有。
+ */
+export const AGENT_MAX_TOOL_CALLS = 50
 
 /**
  * 还能不能继续下一轮。
@@ -561,6 +567,11 @@ export type WriteIntent =
   | { kind: 'insert'; id: string; nodes: OutlineNode[]; count: number }
   | { kind: 'delete'; id: string; title: string; size: number }
   | { kind: 'move'; id: string; targetId: string; index: number | null }
+  /**
+   * 批量移动：整理大导图的正路。一次工具调用搬很多节点，
+   * 否则「把 84 个平铺节点归类」这种任务在任何调用上限下都做不完。
+   */
+  | { kind: 'moveMany'; moves: Array<{ id: string; targetId: string; index: number | null }>; requested: number }
   | { kind: 'collapse'; id: string; collapsed: boolean }
   | { kind: 'notes'; id: string; text: string }
   | { kind: 'code'; id: string; code: { language: string; text: string } | null }
@@ -610,8 +621,9 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
   {
     name: 'moveTopic',
     description:
-      '把一个主题（连同子树）移动到另一个主题下面。index 是插到第几个子节点（从 0 开始；省略表示放到最后）。' +
+      '把**一个**主题（连同子树）移动到另一个主题下面。index 是插到第几个子节点（从 0 开始；省略表示放到最后）。' +
       '不能移动到自己的子孙下面。' +
+      '要移动**很多**主题时（整理、归类）请改用 moveTopics——一次调用批量移动，别一个个搬。' +
       '注意：用户**手动摆过位置**的主题默认不能移动——那会打乱他自己排好的版面；' +
       '确实必要（例如用户明确要求重新排列）时，再带上 allowMoved: true 重新调用。',
     parameters: schema(
@@ -625,6 +637,37 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
         }
       },
       ['address', 'toAddress']
+    )
+  },
+  {
+    name: 'moveTopics',
+    description:
+      '**批量**移动多个主题——整理 / 归类大导图时务必用它：一次调用可以移动很多节点，' +
+      '比逐个 moveTopic 省得多（调用次数上限按「调用」算，不按节点算）。' +
+      'moves 里每一项的语义与 moveTopic 完全相同（address / toAddress / index?）。' +
+      '只要有一条解析失败，**整批都不会执行**并告诉你错在哪一条——所以先 searchNodes 确认再发。' +
+      '列表里有用户手动摆过位置的主题时，同样需要 allowMoved: true。',
+    parameters: schema(
+      {
+        moves: {
+          type: 'array',
+          description: '要执行的移动列表（一次最多 200 项；更多请分批）',
+          items: {
+            type: 'object',
+            properties: {
+              address: { type: 'string', description: '要移动的主题' },
+              toAddress: { type: 'string', description: '新的父主题' },
+              index: { type: 'integer', description: '插到第几个位置（可省略，省略放到最后）' }
+            },
+            required: ['address', 'toAddress']
+          }
+        },
+        allowMoved: {
+          type: 'boolean',
+          description: '列表里有用户手动摆过位置的主题时，必须显式传 true 才允许整批移动'
+        }
+      },
+      ['moves']
     )
   },
   {
@@ -825,6 +868,51 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       ok: true,
       intent: { kind: 'move', id: source.topic.id, targetId: destination.topic.id, index },
       summary: `移动「${source.topic.title}」到「${destination.topic.title}」下`,
+      destructive: false
+    }
+  }
+
+  if (name === 'moveTopics') {
+    // 批量移动：整理大导图的正路。规划阶段**全有或全无**——有一条解析失败就整批退回，
+    // 并指明是第几条（moves[i]），模型拿到就能精准纠正，不会搬一半留一半。
+    const raw = args.moves
+    if (!Array.isArray(raw) || raw.length === 0) return fail('moves 必须是非空的数组。')
+    if (raw.length > 200) return fail('一次最多移动 200 个主题，更多请分批调用。')
+
+    const moves: Array<{ id: string; targetId: string; index: number | null }> = []
+    for (let position = 0; position < raw.length; position += 1) {
+      const item = raw[position]
+      if (!isRecord(item)) return fail(`moves[${position}] 不是对象。`)
+      const sourceAddress = typeof item.address === 'string' ? item.address.trim() : ''
+      if (sourceAddress.length === 0) return fail(`moves[${position}] 缺少 address。`)
+      const source = resolveTopicAddress(root, sourceAddress)
+      if (!source.ok) return fail(`moves[${position}]：${source.error}`)
+      const targetAddress = typeof item.toAddress === 'string' ? item.toAddress.trim() : ''
+      if (targetAddress.length === 0) return fail(`moves[${position}] 缺少 toAddress。`)
+      const destination = resolveTopicAddress(root, targetAddress)
+      if (!destination.ok) return fail(`moves[${position}]：${destination.error}`)
+      if (source.resolved.topic.id === destination.resolved.topic.id) {
+        return fail(`moves[${position}]：不能把「${source.resolved.topic.title}」移到它自己下面。`)
+      }
+      if (subtreeContains(source.resolved.topic, destination.resolved.topic.id)) {
+        return fail(`moves[${position}]：不能把「${source.resolved.topic.title}」移到它自己的子孙下面。`)
+      }
+      if (source.resolved.topic.position && args.allowMoved !== true) {
+        return fail(
+          `moves[${position}]：「${source.resolved.topic.title}」是用户手动摆过位置的主题。` +
+            '确实要移动时，整批调用带上 allowMoved: true。'
+        )
+      }
+      const rawIndex = item.index
+      const slot =
+        typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.max(0, Math.round(rawIndex)) : null
+      moves.push({ id: source.resolved.topic.id, targetId: destination.resolved.topic.id, index: slot })
+    }
+
+    return {
+      ok: true,
+      intent: { kind: 'moveMany', moves, requested: moves.length },
+      summary: `批量移动 ${moves.length} 个主题`,
       destructive: false
     }
   }

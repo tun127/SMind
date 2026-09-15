@@ -307,6 +307,23 @@ export default function ChatPanel({
         if (moved) touched([intent.id, intent.targetId])
         return moved ? { ok: true, note: '' } : { ok: false, note: '移动没有生效：目标位置不合法。' }
       }
+      case 'moveMany': {
+        // 批量移动：逐条落（每条都是一次 store.moveNode，都在同一步撤销里）。
+        // 个别条目可能因为前面条目改变了结构而落空——如实把比例回喂给模型
+        let movedCount = 0
+        for (const move of intent.moves) {
+          const moved = store.moveNode(move.id, move.targetId, move.index ?? undefined)
+          if (moved) {
+            movedCount += 1
+            touched([move.id, move.targetId])
+          }
+        }
+        if (movedCount === 0) return { ok: false, note: '一个都没有移动成功：目标位置可能不合法。' }
+        return {
+          ok: true,
+          note: movedCount < intent.requested ? `成功 ${movedCount}/${intent.requested}，其余目标位置不合法` : ''
+        }
+      }
       case 'collapse':
         store.setCollapsed(intent.id, intent.collapsed)
         touched([intent.id])
@@ -461,7 +478,7 @@ export default function ChatPanel({
       }
 
       const applied = applyWriteIntent(plan.intent)
-      pushToolResult(call, applied.ok ? `已执行：${plan.summary}` : applied.note)
+      pushToolResult(call, applied.ok ? `已执行：${plan.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note)
       if (applied.ok) noteAction(plan.summary, true)
       queue.index += 1
       step()
@@ -478,7 +495,7 @@ export default function ChatPanel({
 
     if (approve) {
       const applied = applyWriteIntent(pending.intent)
-      pushToolResult(pending.call, applied.ok ? `已执行：${pending.summary}` : applied.note)
+      pushToolResult(pending.call, applied.ok ? `已执行：${pending.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note)
       if (applied.ok) noteAction(pending.summary, true)
     } else {
       // 拒绝也要如实回喂：否则模型以为删掉了，后面的判断全错
@@ -632,7 +649,9 @@ export default function ChatPanel({
           ...wireRef.current,
           {
             role: 'user',
-            content: '（工具调用次数已达本次上限，请立刻基于你已经获取到的信息直接作答，不要再调用任何工具。）'
+            content:
+              '（工具调用次数已达本次上限。请立刻停止调用工具，向用户**总结**：你已经完成了哪些改动、' +
+              '哪些还没来得及做、建议用户接下来怎么办——比如让他再发一句「继续」。）'
           }
         ]
         runRoundRef.current()
@@ -892,23 +911,32 @@ export default function ChatPanel({
             {messages.map((msg) => (
               <div key={msg.id} className={msg.role === 'user' ? 'chat-msg chat-msg--user' : 'chat-msg'}>
                 <div className="chat-msg__bubble">
-                  {msg.role === 'user' ? msg.content : renderAssistantText(msg.content)}
+                  {msg.role === 'user' ? (
+                    msg.content
+                  ) : (
+                    <>
+                      {/* 过程在上、结论在下：先看见它干了什么，AI 的回答压轴——
+                          以前回答在最上面、被工具条目和上限提示压在下面，用户根本找不到「回复」在哪儿 */}
+                      {msg.toolNotes && msg.toolNotes.length > 0 && (
+                        <div className="chat-msg__tools">
+                          {msg.toolNotes.map((note, index) => (
+                            <span key={`${note}-${index}`} className="chat-msg__tool">
+                              {note}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {renderAssistantText(msg.content)}
+                      {msg.usage && (
+                        <div className="chat-msg__usage" title="按服务商回报统计（问 + 答），多轮工具调用已累计">
+                          tokens {formatTokenCount(msg.usage.totalTokens)}（问{' '}
+                          {msg.usage.promptTokens.toLocaleString()} · 答{' '}
+                          {msg.usage.completionTokens.toLocaleString()}）
+                        </div>
+                      )}
+                    </>
+                  )}
                   {msg.aborted && <span className="chat-msg__stop">（已停止）</span>}
-                  {msg.toolNotes && msg.toolNotes.length > 0 && (
-                    <div className="chat-msg__tools">
-                      {msg.toolNotes.map((note, index) => (
-                        <span key={`${note}-${index}`} className="chat-msg__tool">
-                          {note}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {msg.usage && (
-                    <div className="chat-msg__usage" title="按服务商回报统计（问 + 答），多轮工具调用已累计">
-                      tokens {formatTokenCount(msg.usage.totalTokens)}（问{' '}
-                      {msg.usage.promptTokens.toLocaleString()} · 答 {msg.usage.completionTokens.toLocaleString()}）
-                    </div>
-                  )}
                 </div>
               </div>
             ))}

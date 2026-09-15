@@ -2250,14 +2250,15 @@ textarea {
   animation: ai-flash 0.8s ease-out 2;
 }
 
-/* 工具调用痕迹：让用户看得见 AI 翻看过什么 */
+/* 工具调用痕迹：让用户看得见 AI 翻看过什么。
+   版式是「过程在上、结论在下」：痕迹区在文字上方，用下边框与回复分隔 */
 .chat-msg__tools {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--border);
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
 }
 
 .chat-msg__tool {
