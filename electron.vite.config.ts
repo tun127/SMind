@@ -76,6 +76,15 @@ export default defineConfig({
       }
     },
     plugins: [react(), cspPlugin()],
+    define: {
+      /**
+       * 构建时间戳。
+       *
+       * 只为一个目的：开发期能一眼看出「这个窗口是不是旧的」。
+       * 最气人的情况是改了代码、窗口却还停在两小时前那份，白跑一轮复验（真发生过）。
+       */
+      __BUILD_STAMP__: JSON.stringify(new Date().toISOString())
+    },
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/renderer/index.html') }

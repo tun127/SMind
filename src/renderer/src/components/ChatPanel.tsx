@@ -453,7 +453,18 @@ export default function ChatPanel({
    * （用户点完「执行」再从断点继续）。读工具没有副作用，直接跑。
    */
   const processQueue = (): void => {
-    const step = (): void => {
+    /**
+     * 让出一帧再处理下一个调用。
+     *
+     * 以前这里是**同步递归**（`queue.index += 1; step()`）：模型一次批量发几十个调用时，
+     * 全部画布写入 + 重排会在一次调用栈里跑完，渲染进程的主线程几分钟不回——
+     * 表现就是「卡死了，点击任何键都没反应、关也关不掉」（真事）。
+     * 让出一帧后，界面能持续重绘、Esc 与「停止」也能真正生效。
+     */
+    const yieldThen = (): void => {
+      window.setTimeout(step, 0)
+    }
+    function step(): void {
       const queue = queueRef.current
       if (!queue) return
       const call = queue.calls[queue.index]
@@ -473,7 +484,7 @@ export default function ChatPanel({
         )
         noteAction(`跳过重复调用：${call.name}`, false)
         queue.index += 1
-        step()
+        yieldThen()
         return
       }
       seenCallsRef.current.add(callKey)
@@ -485,12 +496,12 @@ export default function ChatPanel({
           selectedId: state.selection[0] ?? null,
           sheetCount: state.workbook.sheets.length
         }
-        setActivity('正在翻看导图…')
+        setActivity(`正在翻看导图…（${queue.index + 1}/${queue.calls.length}）`)
         const result = runReadTool(call.name, call.argumentsText, context)
         pushToolResult(call, result.content)
         noteAction(result.summary, false)
         queue.index += 1
-        step()
+        yieldThen()
         return
       }
 
@@ -500,7 +511,7 @@ export default function ChatPanel({
         pushToolResult(call, plan.error)
         noteAction(plan.summary, false)
         queue.index += 1
-        step()
+        yieldThen()
         return
       }
 
@@ -528,7 +539,7 @@ export default function ChatPanel({
         return
       }
 
-      setActivity('正在改画布…')
+      setActivity(`正在改画布…（${queue.index + 1}/${queue.calls.length}）`)
       const applied = applyWriteIntent(plan.intent)
       if (applied.ok) writesAppliedRef.current += 1
       else writesFailedRef.current += 1
@@ -547,7 +558,7 @@ export default function ChatPanel({
       pushToolResult(call, written + nudge)
       if (applied.ok) noteAction(plan.summary, true)
       queue.index += 1
-      step()
+      yieldThen()
     }
 
     step()
@@ -889,6 +900,15 @@ export default function ChatPanel({
   const stop = (): void => {
     const id = requestIdRef.current
     if (id) window.api.aiChatStreamCancel(id)
+    // 工具队列也要停：以前只取消了网络请求，已经排好队的调用还会继续改画布——
+    // 用户按了「停止」而画布还在变，比不给停更让人生气。
+    if (queueRef.current) {
+      queueRef.current = null
+      // 队列是自己「接着跑」的，不会有模型事件来收尾，所以这里得自己把回合收干净
+      setStreaming(false)
+      setActivity('')
+      commitTurnRef.current()
+    }
   }
 
   /** 回复 → 画布的反向链接：选中并居中（沿用搜索面板的定位方式） */

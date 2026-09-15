@@ -1410,14 +1410,32 @@ function registerIpc(): void {
       if (typeof requestId !== 'string' || requestId.length === 0 || requestId.length > 128) {
         throw new Error('流式请求标识无效')
       }
-      // 额度按**真实使用**定，不按想象的边界定：粘贴一整篇长文档、很长的会话都可能很大。
-      // 「超了就只回一句『对话内容无效』」是最糟的做法——用户不知道自己做错了什么
-      // （真被投诉过：粘一长段内容 → 发送失败，只看到一句无效）。所以：额度放宽 + 说清原因。
+      // 额度按**真实使用**定，不按想象的边界定。
+      //
+      // 这套校验是安全网（渲染层给的东西不默认可信），**不是体验闸门**：
+      // 以前它会把正常用法挡回去，而且只回一句「对话内容无效」，谁也查不出为什么。
+      // 两个真实踩过的坑：
+      //   ① 一次批量发**几十个**工具调用（大文档批量删除/改名时很自然）→ 撞上
+      //      这里原本 `toolCalls.length > 20` 的上限，整回合直接死掉；
+      //   ② 粘贴一整篇长文档 → 撞 6 万字上限。
+      // 所以：额度放到「只拦垃圾」的量级，并且报错必须说清**第几条、哪个字段**。
       const MAX_MESSAGES = 400
-      const MAX_CONTENT = 200_000
+      const MAX_CONTENT = 1_000_000
+      const MAX_TOOL_CALLS_PER_MESSAGE = 200
 
       if (!Array.isArray(messages) || messages.length === 0) {
-        throw new Error('对话内容无效')
+        throw new Error('对话内容无效：消息列表为空')
+      }
+      // 收窄之后再定义 blame：闭包里访问到的类型才不会被 TS 当成 unknown
+      const list: unknown[] = messages
+      const blame = (index: number, why: string): Error => {
+        const item = list[index]
+        const shape = isRecord(item)
+          ? `role=${String(item.role)}、content=${typeof item.content}、toolCalls=${
+              Array.isArray(item.toolCalls) ? item.toolCalls.length : '—'
+            }`
+          : `不是对象（${typeof item}）`
+        return new Error(`对话内容无效：第 ${index + 1} 条消息（${shape}）——${why}`)
       }
       if (messages.length > MAX_MESSAGES) {
         throw new Error(
@@ -1425,12 +1443,13 @@ function registerIpc(): void {
             '请点聊天面板右上角的「清空对话」后再继续。'
         )
       }
-      for (const item of messages) {
-        if (!isRecord(item)) throw new Error('对话内容无效')
+      for (let index = 0; index < messages.length; index += 1) {
+        const item = messages[index]
+        if (!isRecord(item)) throw blame(index, '不是对象')
         const role = item.role
         const knownRole = role === 'system' || role === 'user' || role === 'assistant' || role === 'tool'
-        if (!knownRole) throw new Error('对话内容无效')
-        if (typeof item.content !== 'string') throw new Error('对话内容无效')
+        if (!knownRole) throw blame(index, 'role 不是 system/user/assistant/tool')
+        if (typeof item.content !== 'string') throw blame(index, 'content 不是字符串')
         if (item.content.length > MAX_CONTENT) {
           throw new Error(
             `这条消息太长了（${item.content.length.toLocaleString()} 字，上限 ` +
@@ -1438,19 +1457,22 @@ function registerIpc(): void {
           )
         }
         if (item.toolCallId !== undefined && typeof item.toolCallId !== 'string') {
-          throw new Error('对话内容无效')
+          throw blame(index, 'toolCallId 不是字符串')
         }
         if (item.toolCalls !== undefined) {
-          if (!Array.isArray(item.toolCalls) || item.toolCalls.length > 20) throw new Error('对话内容无效')
+          if (!Array.isArray(item.toolCalls)) throw blame(index, 'toolCalls 不是数组')
+          if (item.toolCalls.length > MAX_TOOL_CALLS_PER_MESSAGE) {
+            throw blame(index, `一次带的工具调用太多（${item.toolCalls.length} 个）`)
+          }
           for (const call of item.toolCalls) {
             if (
               !isRecord(call) ||
               typeof call.id !== 'string' ||
               typeof call.name !== 'string' ||
               typeof call.argumentsText !== 'string' ||
-              call.argumentsText.length > 60000
+              call.argumentsText.length > 60_000
             ) {
-              throw new Error('对话内容无效')
+              throw blame(index, 'toolCalls 里有一项的 id/name/argumentsText 不合法')
             }
           }
         }

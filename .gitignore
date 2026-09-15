@@ -22,3 +22,5 @@ license-private.pem
 *.license-key
 # 用文件传中文提交信息时产生的临时文件（误提交过一次）
 .commit-msg.txt
+# 开发版的输出日志（排查「窗口是不是旧的 / 崩没崩」时用）
+.dev.log
