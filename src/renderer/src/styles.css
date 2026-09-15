@@ -2222,6 +2222,24 @@ textarea {
   opacity: 0.75;
 }
 
+/* AI 刚改过的节点：闪两下。
+   直接操作画布没有「预览确认」这一环，用户的信任完全建立在**事后看得见**上，
+   所以这一下不能省——否则改完一片安静，用户不知道刚才动了哪儿。 */
+@keyframes ai-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(47, 107, 255, 0);
+  }
+  35%,
+  65% {
+    box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.6);
+  }
+}
+
+.topic--ai-flash {
+  animation: ai-flash 0.8s ease-out 2;
+}
+
 /* 工具调用痕迹：让用户看得见 AI 翻看过什么 */
 .chat-msg__tools {
   display: flex;

@@ -100,6 +100,31 @@ export default function Canvas(): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
 
+  /**
+   * AI 刚改过的节点：闪一下。
+   *
+   * 直接操作画布省掉了「预览确认」，信任就只能来自**事后看得见**——回合结束时
+   * 闪一下改过的节点、把视口带过去，否则用户根本不知道它动了哪儿。
+   */
+  const [flashIds, setFlashIds] = useState<ReadonlySet<string>>(() => new Set<string>())
+  const flashTimerRef = useRef<number | null>(null)
+  const flashNodes = useCallback((ids: string[]): void => {
+    if (ids.length === 0) return
+    setFlashIds(new Set(ids))
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = window.setTimeout(() => {
+      flashTimerRef.current = null
+      // 已经空了就不换新对象：省掉一次无意义的整画布重渲染
+      setFlashIds((prev) => (prev.size === 0 ? prev : new Set<string>()))
+    }, 1700)
+  }, [])
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    },
+    []
+  )
+
   const workbook = useEditor((s) => s.workbook)
   const docSeq = useEditor((s) => s.docSeq)
   const zoom = useEditor((s) => s.zoom)
@@ -427,7 +452,8 @@ export default function Canvas(): ReactElement {
     viewportActions.zoomTo = zoomTo
     viewportActions.ensureVisible = ensureVisible
     viewportActions.centerOn = centerOn
-  }, [fit, centerRoot, zoomTo, ensureVisible, centerOn])
+    viewportActions.flash = flashNodes
+  }, [fit, centerRoot, zoomTo, ensureVisible, centerOn, flashNodes])
 
   /* ---- 进入编辑态时保证节点可见（新建主题可能超出视口） ---- */
   useEffect(() => {
@@ -1856,6 +1882,7 @@ export default function Canvas(): ReactElement {
             dragged={Boolean(dragSet?.has(node.id))}
             draggable={node.depth > 0}
             searchHit={searchHits ? searchHits.has(node.id) : false}
+            flash={flashIds.has(node.id)}
             dimmed={filterResult ? !filterResult.keep.has(node.id) : false}
             dragOffset={
               dragVisual && dragSet?.has(node.id) ? { dx: dragVisual.dx, dy: dragVisual.dy } : null

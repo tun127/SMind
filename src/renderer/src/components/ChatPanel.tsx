@@ -19,6 +19,7 @@ import {
 import {
   buildTitleIndex,
   canContinueAgentLoop,
+  isMutatingIntent,
   isReadToolName,
   planWriteTool,
   runReadTool,
@@ -134,6 +135,8 @@ export default function ChatPanel({
   const pendingRef = useRef<{ call: ToolCall; intent: WriteIntent; summary: string } | null>(null)
   /** 本轮 AI 改了哪些东西（并成撤销标签 + 事后摘要） */
   const writeLogRef = useRef<string[]>([])
+  /** 本轮 AI 改到/新增了哪些节点：回合结束时闪一下它们 */
+  const changedIdsRef = useRef<string[]>([])
   /** 本轮是否已经开过事务（只在真有写操作时开） */
   const turnStartedRef = useRef(false)
 
@@ -233,35 +236,62 @@ export default function ChatPanel({
       onBeforeAiWrite()
     }
 
+    // AI 动手前，先把用户**正在输入**的标题按正常流程提交掉：不提交的话，
+    // 输入框里的字会被这次写入冲掉——那是数据丢失，不是体验问题。
+    // 提交在 AI 事务**之外**，于是 Ctrl+Z 先撤 AI 的改动、再撤这次提交，顺序对得上。
+    if (store.editingId !== null && isMutatingIntent(intent)) store.commitEdit()
+
+    /** 记下这次动过的节点：回合结束时闪一下（「看得见」是放手让 AI 干的前提） */
+    const touched = (ids: Array<string | null | undefined>): void => {
+      for (const id of ids) if (typeof id === 'string' && id.length > 0) changedIdsRef.current.push(id)
+    }
+
     switch (intent.kind) {
       case 'rename':
         store.setTitle(intent.id, intent.title)
+        touched([intent.id])
         return { ok: true, note: '' }
       case 'insert': {
         // 可能是多个并列的新主题（解析器套的壳已经在规划阶段剥掉了）
+        const before = new Set(
+          findTopic(activeRoot(store.workbook), intent.id)?.children.map((child) => child.id) ?? []
+        )
         let added = 0
         for (const node of intent.nodes) added += store.applyOutlineTree(intent.id, node)
-        return added > 0 ? { ok: true, note: '' } : { ok: false, note: '目标主题已不存在，插入没有生效。' }
+        if (added === 0) return { ok: false, note: '目标主题已不存在，插入没有生效。' }
+        // 新增完比原来多出来的那批就是新节点，顺手也闪它们本人
+        const after = findTopic(activeRoot(store.workbook), intent.id)
+        touched([intent.id, ...(after?.children ?? []).filter((child) => !before.has(child.id)).map((c) => c.id)])
+        return { ok: true, note: '' }
       }
-      case 'delete':
-        return store.deleteTopic(intent.id)
-          ? { ok: true, note: '' }
-          : { ok: false, note: '目标主题已不存在，删除没有生效。' }
+      case 'delete': {
+        // 被删的节点已经没了、闪不了，就闪它的父级——用户至少知道「这一片被动过」
+        const chain = ancestorsOf(activeRoot(store.workbook), intent.id)
+        const parentId = chain[chain.length - 1]
+        const removed = store.deleteTopic(intent.id)
+        if (removed) touched([parentId])
+        return removed ? { ok: true, note: '' } : { ok: false, note: '目标主题已不存在，删除没有生效。' }
+      }
       case 'move': {
         const moved = store.moveNode(intent.id, intent.targetId, intent.index ?? undefined)
+        if (moved) touched([intent.id, intent.targetId])
         return moved ? { ok: true, note: '' } : { ok: false, note: '移动没有生效：目标位置不合法。' }
       }
       case 'collapse':
         store.setCollapsed(intent.id, intent.collapsed)
+        touched([intent.id])
         return { ok: true, note: '' }
       case 'notes':
         store.setNotes(intent.id, intent.text)
+        touched([intent.id])
         return { ok: true, note: '' }
       case 'code':
         store.setCode(intent.id, intent.code)
+        touched([intent.id])
         return { ok: true, note: '' }
       case 'formula':
         store.setFormula(intent.id, intent.formula)
+        touched([intent.id])
         return { ok: true, note: '' }
       case 'ask':
         return { ok: true, note: '' }
@@ -281,6 +311,18 @@ export default function ChatPanel({
     if (turnStartedRef.current) {
       const label = log.length > 0 ? `AI · ${log.slice(0, 2).join('、')}` : 'AI · 修改导图'
       useEditor.getState().commitAiTurn(label)
+    }
+
+    // 改完**看得见**：闪一下动过的节点，并把视口带到第一处改动。
+    // 直接操作省掉了「预览确认」，信任全靠这一眼——没这一下，画布静悄悄地变了。
+    const changed = [...new Set(changedIdsRef.current)]
+    if (changed.length > 0) {
+      viewportActions.flash(changed)
+      // 等下一帧：布局要等这次写入渲染完才更新，立刻滚会滚到旧位置
+      window.requestAnimationFrame(() => {
+        const first = changed[0]
+        if (first) viewportActions.ensureVisible(first)
+      })
     }
     if (log.length > 0) {
       const text =
@@ -623,6 +665,7 @@ export default function ChatPanel({
       roundRef.current = 0
       toolCallsUsedRef.current = 0
       writeLogRef.current = []
+      changedIdsRef.current = []
       turnStartedRef.current = false
       queueRef.current = null
       forceNoToolsRef.current = false

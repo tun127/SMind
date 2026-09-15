@@ -611,12 +611,18 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
     name: 'moveTopic',
     description:
       '把一个主题（连同子树）移动到另一个主题下面。index 是插到第几个子节点（从 0 开始；省略表示放到最后）。' +
-      '不能移动到自己的子孙下面。',
+      '不能移动到自己的子孙下面。' +
+      '注意：用户**手动摆过位置**的主题默认不能移动——那会打乱他自己排好的版面；' +
+      '确实必要（例如用户明确要求重新排列）时，再带上 allowMoved: true 重新调用。',
     parameters: schema(
       {
         address: { type: 'string', description: '要移动的主题' },
         toAddress: { type: 'string', description: '新的父主题' },
-        index: { type: 'integer', description: '插到第几个位置（可省略）' }
+        index: { type: 'integer', description: '插到第几个位置（可省略）' },
+        allowMoved: {
+          type: 'boolean',
+          description: '目标主题是用户手动摆过位置时，必须显式传 true 才允许移动'
+        }
       },
       ['address', 'toAddress']
     )
@@ -793,6 +799,14 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     if (source.topic.id === destination.topic.id) return fail('不能把一个主题移到它自己下面。')
     if (subtreeContains(source.topic, destination.topic.id)) {
       return fail('不能把一个主题移到它自己的子孙下面。')
+    }
+    // 自由摆放的地盘：用户手动摆过位置的主题默认不动（改动别人的版面比改内容更招人烦，
+    // 而且撤得回来也撤不掉火气）。要走这条路必须是模型**显式**说清楚。
+    if (source.topic.position && args.allowMoved !== true) {
+      return fail(
+        `「${source.topic.title}」是用户手动摆过位置的主题，移动它会打乱他自己排的版面。` +
+          '如果这一步确实必要（例如用户明确要求重新排列），请再调用一次并带上 allowMoved: true。'
+      )
     }
     const rawIndex = args.index
     const index = typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.max(0, Math.round(rawIndex)) : null

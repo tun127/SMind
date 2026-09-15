@@ -1838,6 +1838,23 @@ function testWriteToolsAndTurn(): void {
   eq('不能移到自己下面', plan('moveTopic', { address: '成本', toAddress: '成本' }).ok, false)
   eq('不能移到自己的子孙下面', plan('moveTopic', { address: '成本', toAddress: '人力' }).ok, false)
 
+  // 自由摆放的地盘：用户手动摆过位置的主题，AI 默认不许挪
+  // （改别人的版面比改内容更招人烦，撤得回来也撤不掉火气）
+  material.position = { x: 120, y: -40 }
+  const pinned = plan('moveTopic', { address: '成本/物料', toAddress: '中心主题' })
+  eq('手动摆过位置的节点默认不许移动', pinned.ok, false)
+  check(
+    '拒绝时告诉模型下一步怎么做（带 allowMoved 再来一次）',
+    !pinned.ok && pinned.error.includes('allowMoved'),
+    pinned.ok ? '' : pinned.error
+  )
+  eq(
+    '明确许可后才允许移动（用户确实要求重排时）',
+    plan('moveTopic', { address: '成本/物料', toAddress: '中心主题', allowMoved: true }).ok,
+    true
+  )
+  material.position = undefined
+
   eq('折叠必须给布尔值', plan('setCollapsed', { address: '成本', collapsed: 'yes' }).ok, false)
   check('折叠摘要可读', plan('setCollapsed', { address: '成本', collapsed: true }).summary.includes('折叠'))
   check('备注为空即清空', plan('setNotes', { address: '成本', text: '  ' }).summary.includes('清空'))

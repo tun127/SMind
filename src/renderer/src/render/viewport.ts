@@ -13,6 +13,13 @@ export interface ViewportActions {
   ensureVisible(id: string): void
   /** 把指定节点移到视口正中（搜索命中跳转用） */
   centerOn(id: string): void
+  /**
+   * 让这些节点**闪一下**（AI 刚改过它们）。
+   *
+   * 放在这里是因为它和视口动作是同一类东西：画布对外暴露的**临时**视觉效果，
+   * 由画布自己在挂载时实现、别处只负责触发（与 centerOn 同一套做法）。
+   */
+  flash(ids: string[]): void
 }
 
 export const viewportActions: ViewportActions = {
@@ -20,5 +27,6 @@ export const viewportActions: ViewportActions = {
   centerRoot: () => {},
   zoomTo: () => {},
   ensureVisible: () => {},
-  centerOn: () => {}
+  centerOn: () => {},
+  flash: () => {}
 }

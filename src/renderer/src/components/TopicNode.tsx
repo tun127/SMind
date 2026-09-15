@@ -40,6 +40,8 @@ export interface TopicNodeProps {
   highlight: 'child' | 'sibling' | null
   /** 命中当前搜索关键词 */
   searchHit: boolean
+  /** AI 刚改过这个节点：闪一下（「直接操作」的信任全靠事后看得见） */
+  flash: boolean
   /** 被筛选条件排除（淡出显示） */
   dimmed: boolean
   dragOffset: { dx: number; dy: number } | null
@@ -102,6 +104,7 @@ function TopicNodeInner({
   editingRich,
   highlight,
   searchHit,
+  flash,
   dimmed,
   dragOffset,
   dragPrimary,
@@ -193,6 +196,7 @@ function TopicNodeInner({
     !dragged && highlight === 'child' ? 'topic--drop' : '',
     !dragged && highlight === 'sibling' ? 'topic--drop-sibling' : '',
     searchHit ? 'topic--hit' : '',
+    flash ? 'topic--ai-flash' : '',
     dimmed ? 'topic--dimmed' : '',
     dragOffset ? 'topic--dragging' : '',
     dragPrimary ? 'topic--drag-primary' : '',
