@@ -31,6 +31,7 @@ import { bumpMeasureEpoch } from './render/measure'
 import { setDefaultTextAlign } from './render/defaults'
 import { setCodeFontSizeBase } from '@shared/layout/accessory'
 import { stageTypedChar } from './editor/typedChar'
+import { setStage } from './dev/stage'
 import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
 import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
 import TabBar from './components/TabBar'
@@ -134,6 +135,11 @@ export default function App(): ReactElement {
   const toastTimer = useRef<number | null>(null)
   /** 是否还停在「发现未保存内容」这一步没做决定 */
   const recoveryPendingRef = useRef(false)
+
+  /** 心跳的起点：界面挂载完成（之后各阶段由对应组件继续标记） */
+  useEffect(() => {
+    setStage('应用挂载完成')
+  }, [])
 
   const showToast = useCallback((message: string): void => {
     setToast(message)

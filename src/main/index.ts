@@ -758,6 +758,11 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
    * 把渲染层的 warning/error 收上来，下次翻日志就能直接定位。
    */
   win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    // 阶段心跳（[stage] 开头）一律记：卡死时它就是现场——最后一条心跳说明卡在哪一步
+    if (message.startsWith('[stage]')) {
+      logMain('stage', message)
+      return
+    }
     if (level < 2) return
     logMain('renderer-console', `${level === 3 ? 'error' : 'warn'} ${message}`, `${sourceId}:${line}`)
   })

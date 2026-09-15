@@ -38,6 +38,7 @@ import type { LicenseView } from '@shared/license'
 import { createId } from '@shared/model/factory'
 import { activeRoot, ancestorsOf, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
+import { setStage } from '../dev/stage'
 import { useEditor } from '../store/editor'
 import type { AiTask } from './AiDialog'
 
@@ -473,6 +474,7 @@ export default function ChatPanel({
         runRoundRef.current()
         return
       }
+      setStage(`执行工具 ${call.name}`)
 
       // 同一回合里重复问同一件事：不重复执行（白烧配额，模型还会原地打转），
       // 直接把「问过了」告诉它，逼它换个策略
@@ -754,6 +756,7 @@ export default function ChatPanel({
     setActivity(
       roundRef.current === 0 ? '正在思考…' : `正在思考…（第 ${roundRef.current + 1} 轮，还在翻资料）`
     )
+    setStage(`AI 第 ${roundRef.current + 1} 轮`)
     void window.api
       .aiChatStream(requestId, wireRef.current, {
         useTools: useToolsRef.current && !forceNoToolsRef.current

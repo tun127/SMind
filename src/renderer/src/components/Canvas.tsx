@@ -26,6 +26,7 @@ import {
 import { applyTopicFilter, hitTopicIds, isFilterActive, searchSheet } from '@shared/search'
 import { DEFAULT_STRUCTURE, getStructureDef } from '@shared/xmind/constants'
 import { measureTopic, bumpMeasureEpoch } from '../render/measure'
+import { setStage } from '../dev/stage'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
@@ -271,6 +272,7 @@ export default function Canvas(): ReactElement {
     if (!fonts) return
     void fonts.ready.then(() => {
       if (cancelled) return
+      setStage('字体就绪后重算')
       // 两处缓存都要失效：公式尺寸缓存 + 节点测量缓存（后者里存着 formulaBox）
       clearFormulaCache()
       bumpMeasureEpoch()
@@ -292,7 +294,10 @@ export default function Canvas(): ReactElement {
         ? measureTopic({ ...topic, title: editingText, titleRich: editingRich }, depth)
         : measureTopic(topic, depth)
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
-    return layoutSheet(root, measure, {}, sheet)
+    setStage('画布布局')
+    const computed = layoutSheet(root, measure, {}, sheet)
+    setStage('画布布局完成')
+    return computed
     // fontEpoch / renderEpoch 只用于「强制重新布局」，不是布局的输入
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
@@ -558,6 +563,7 @@ export default function Canvas(): ReactElement {
      * 直接拖就是了，下一次选择或位置变化它才重新咬住。
      */
     const step = (): void => {
+      setStage('镜头跟随')
       const node = layoutRef.current?.nodeMap.get(id)
       const width = el.clientWidth
       const height = el.clientHeight
