@@ -279,12 +279,17 @@ export default function ChatPanel({
     if (log.length > 0) {
       const text =
         log.length > 6 ? `${log.slice(0, 6).join('；')}…` : log.join('；')
+      // 已保存的文档在动手前存过版本快照；把它写出来，用户才知道「重启之后怎么回去」
+      const hasSnapshot = useEditor.getState().filePath !== null
       update((prev) => {
         const last = prev[prev.length - 1]
         if (!last || last.role !== 'assistant') return prev
+        const undoLine = hasSnapshot
+          ? '撤销：按一次 Ctrl+Z 全部回退；动手前的状态已存进「版本快照」（Ctrl+H），应用重启过也能回到那里。'
+          : '撤销：按一次 Ctrl+Z 全部回退（未保存的文档没有版本快照，应用重启后无从回退）。'
         return [
           ...prev.slice(0, -1),
-          { ...last, content: `${last.content}\n\n——\n已改动：${text}（共 ${log.length} 处，Ctrl+Z 一次全部撤销）` }
+          { ...last, content: `${last.content}\n\n——\n已改动：${text}（共 ${log.length} 处）\n${undoLine}` }
         ]
       })
     }

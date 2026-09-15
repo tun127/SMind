@@ -72,7 +72,12 @@ export class ErrorBoundary extends Component<Props, State> {
     // 告诉主进程「界面坏了」：否则关窗时会一直等这个窗口回应未保存确认，
     // 而这块界面已经把 App 卸载了，**没人能回应**——窗口就关不掉了。
     try {
-      window.api.reportUiBroken()
+      // 连错误信息一起给主进程：写进日志文件，重启之后还能查（终端输出留不住）
+      window.api.reportRendererError(
+        error.message,
+        `${error.stack ?? ''}\n\n组件栈：${info.componentStack ?? ''}`,
+        true
+      )
     } catch {
       /* 没有 preload 时忽略：这只影响主进程的关闭兜底 */
     }

@@ -1580,10 +1580,18 @@ function registerIpc(): void {
     async (_e, path: string | null): Promise<SnapshotItem[]> => clearSnapshotsFor(path)
   )
 
-  /** 渲染层报告界面已损坏（错误边界触发）；页面重新加载完成时会自动清除 */
-  ipcMain.on(IPC.uiState, (e) => {
+  /**
+   * 渲染层报告界面已损坏（错误边界触发）；页面重新加载完成时会自动清除。
+   * 顺手把错误写进日志——渲染期异常以前只打在终端里，应用一重启就查不到了。
+   */
+  ipcMain.on(IPC.uiState, (e, message: unknown, stack: unknown, broken: unknown) => {
     const state = stateOf(e.sender)
-    if (state) state.uiBroken = true
+    // 只有错误边界那种「整块界面已停止渲染」才算坏；异步错误不影响界面可用性，
+    // 不能因此跳过关窗前的未保存确认
+    if (state && broken === true) state.uiBroken = true
+    const text = typeof message === 'string' ? message.slice(0, 2000) : ''
+    const detail = typeof stack === 'string' ? stack.slice(0, 8000) : ''
+    logMain('renderer-error', `${broken === true ? '[界面已停止渲染] ' : ''}${text}`, detail)
   })
 
   /** 由主进程刷新窗口：渲染层自己发的 location.reload 会被 will-navigate 拦下 */

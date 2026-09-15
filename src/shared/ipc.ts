@@ -263,12 +263,13 @@ export interface MindApi {
   onMenuCommand(handler: (command: MenuCommand) => void): () => void
   onCloseRequest(handler: () => void): () => void
   /**
-   * 报告界面已进入错误状态（错误边界里调用）。
+   * 报告界面已进入错误状态（错误边界里调用），并把错误信息带给主进程**落盘**。
    *
-   * 主进程据此在关窗时**跳过**「问渲染层有没有未保存内容」这一步：
-   * 界面都坏了，没有组件能回应那个询问——再等下去就是「窗口关不掉，只能去任务管理器」。
+   * 两件事同等重要：
+   * ① 主进程据此在关窗时跳过「问渲染层有没有未保存内容」——界面都坏了没人能回应（窗口会关不掉）；
+   * ② 错误写进日志文件：渲染期异常以前只打在终端里，应用一重启就查不到了（真吃过这个亏）。
    */
-  reportUiBroken(): void
+  reportRendererError(message: string, stack?: string, uiBroken?: boolean): void
   /** 请主进程刷新这个窗口（渲染层发起的 reload 可能被导航拦截挡下） */
   reloadWindow(): void
 

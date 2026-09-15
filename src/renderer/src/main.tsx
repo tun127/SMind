@@ -14,3 +14,30 @@ createRoot(container).render(
     <App />
   </ErrorBoundary>
 )
+
+/**
+ * 兜底留痕：**异步 / 事件里抛出的错误不会被错误边界接住**，
+ * 但它们同样会让用户觉得"应用坏了"，而事后我们手里什么都没有（日志里一片空白）。
+ *
+ * `uiBroken` 传 false：这类错误不影响界面可用性，不该跳过关窗前的未保存确认。
+ */
+window.addEventListener('error', (event) => {
+  try {
+    const error: unknown = event.error
+    window.api.reportRendererError(event.message, error instanceof Error ? error.stack : undefined)
+  } catch {
+    /* 上报失败就算了，别在兜底里再抛一次 */
+  }
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+  try {
+    const reason: unknown = event.reason
+    window.api.reportRendererError(
+      `未处理的 Promise 拒绝：${reason instanceof Error ? reason.message : String(reason)}`,
+      reason instanceof Error ? reason.stack : undefined
+    )
+  } catch {
+    /* 同上 */
+  }
+})

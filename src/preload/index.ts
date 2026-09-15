@@ -85,7 +85,8 @@ const api: MindApi = {
     return () => ipcRenderer.removeListener(IPC.closeRequest, listener)
   },
 
-  reportUiBroken: () => ipcRenderer.send(IPC.uiState),
+  reportRendererError: (message: string, stack?: string, uiBroken = false) =>
+    ipcRenderer.send(IPC.uiState, message, stack, uiBroken),
 
   reloadWindow: () => ipcRenderer.send(IPC.windowReload),
 
