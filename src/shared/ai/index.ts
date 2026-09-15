@@ -618,6 +618,8 @@ export type AiStreamEvent =
       aborted: boolean
       /** 这一轮模型请求的工具调用（空数组 = 说完了） */
       toolCalls: ToolCall[]
+      /** token 消耗（服务商回报；不支持 usage 的服务商没有这个字段，界面就不显示） */
+      usage?: TokenUsage
     }
   | { requestId: string; kind: 'error'; message: string }
 
@@ -644,6 +646,48 @@ export function createSseLineSplitter(): (chunk: string) => string[] {
   }
 }
 
+/** 一次请求的 token 消耗（服务商回报；拿不到就不显示，**不要估**——估了就是编数字） */
+export interface TokenUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+/** 两段消耗相加：多轮对话把每一轮的消耗并到同一条消息上（工具循环一轮就是一次请求） */
+export function addUsage(a: TokenUsage | undefined, b: TokenUsage): TokenUsage {
+  if (!a) return b
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens
+  }
+}
+
+/** 展示用：1234 → 「1.2k」；45 → 「45」 */
+export function formatTokenCount(count: number): string {
+  if (!Number.isFinite(count) || count <= 0) return '0'
+  if (count < 1000) return String(Math.round(count))
+  return `${(count / 1000).toFixed(1)}k`
+}
+
+/** 解析 usage 块；字段不全就返回 null（宁可不显示，也不显示猜出来的数字） */
+function readUsage(raw: unknown): TokenUsage | null {
+  if (!isRecord(raw)) return null
+  const prompt = raw.prompt_tokens
+  const completion = raw.completion_tokens
+  if (typeof prompt !== 'number' || !Number.isFinite(prompt)) return null
+  if (typeof completion !== 'number' || !Number.isFinite(completion)) return null
+  const total =
+    typeof raw.total_tokens === 'number' && Number.isFinite(raw.total_tokens)
+      ? raw.total_tokens
+      : prompt + completion
+  return {
+    promptTokens: Math.max(0, Math.round(prompt)),
+    completionTokens: Math.max(0, Math.round(completion)),
+    totalTokens: Math.max(0, Math.round(total))
+  }
+}
+
 export interface StreamDelta {
   text: string
   /** 服务端实际使用的模型名（每个分片都带，取到一次即可） */
@@ -652,11 +696,16 @@ export interface StreamDelta {
   toolCalls: ToolCallDelta[]
   /** 结束原因：`tool_calls` = 这轮要调工具，`stop` = 说完了 */
   finishReason: string | null
+  /** token 消耗（开了 include_usage 时，最后一个分片会带；多数分片没有） */
+  usage: TokenUsage | null
 }
 
 /**
  * 从一条流式数据里取增量内容。
  * `[DONE]`、空行、解析不了的（有些实现会混入心跳）都返回 null。
+ *
+ * 注意 usage 分片很特殊：开了 `stream_options.include_usage` 后，最后会来一个
+ * **`choices` 为空数组、只有 usage** 的分片——不能因为 choices 空就把它扔掉。
  */
 export function extractStreamDelta(dataLine: string): StreamDelta | null {
   const text = dataLine.trim()
@@ -669,23 +718,27 @@ export function extractStreamDelta(dataLine: string): StreamDelta | null {
   }
   if (!isRecord(parsed)) return null
   const model = typeof parsed.model === 'string' ? parsed.model : null
+  const usage = readUsage(parsed.usage)
   const choices = parsed.choices
-  if (!Array.isArray(choices) || choices.length === 0) return null
+  if (!Array.isArray(choices) || choices.length === 0) {
+    // usage 专属分片（choices 为空）：有 usage 就收下，没有才丢
+    return usage ? { text: '', model, toolCalls: [], finishReason: null, usage } : null
+  }
   const first = choices[0]
-  if (!isRecord(first)) return null
+  if (!isRecord(first)) return usage ? { text: '', model, toolCalls: [], finishReason: null, usage } : null
   const finishReason = typeof first.finish_reason === 'string' ? first.finish_reason : null
   const delta = first.delta
   const toolCalls = isRecord(delta) ? readToolCallDeltas(delta.tool_calls) : []
 
   // 绝大多数实现是 delta.content；少数把整段塞在 message.content
   if (isRecord(delta) && typeof delta.content === 'string') {
-    return { text: delta.content, model, toolCalls, finishReason }
+    return { text: delta.content, model, toolCalls, finishReason, usage }
   }
   const message = first.message
   if (isRecord(message) && typeof message.content === 'string') {
-    return { text: message.content, model, toolCalls, finishReason }
+    return { text: message.content, model, toolCalls, finishReason, usage }
   }
-  return { text: '', model, toolCalls, finishReason }
+  return { text: '', model, toolCalls, finishReason, usage }
 }
 
 /** 解析 delta.tool_calls：各实现字段略有出入，能取多少取多少 */

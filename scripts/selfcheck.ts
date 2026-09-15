@@ -39,11 +39,13 @@ import {
   buildChatSystemPrompt,
   buildSkeletonDigest,
   accumulateToolCalls,
+  addUsage,
   countTopicTree,
   createSseLineSplitter,
   createThinkingFilter,
   extractStreamDelta,
   finalizeToolCalls,
+  formatTokenCount,
   normalizeChatHistory,
   toWireMessages
 } from '../src/shared/ai'
@@ -1589,6 +1591,40 @@ function testAiChatHelpers(): void {
   eq('分片：先到一个「<」', crossChunk.push(T_OPEN.slice(0, 1)), '')
   eq('分片：标签跨了两片', crossChunk.push(`${T_OPEN.slice(1)}想一下${T_CLOSE.slice(0, 6)}`), '')
   eq('分片：闭标签补齐后正常输出', crossChunk.push(`${T_CLOSE.slice(6)}答案`), '答案')
+
+  group('AI 聊天：token 消耗')
+
+  const withUsage = extractStreamDelta(
+    '{"choices":[{"delta":{"content":"你好"}}],"usage":{"prompt_tokens":1234,"completion_tokens":567,"total_tokens":1801}}'
+  )
+  eq('普通分片也能带 usage', withUsage?.usage?.totalTokens, 1801)
+  eq('问/答分开记', json([withUsage?.usage?.promptTokens, withUsage?.usage?.completionTokens]), json([1234, 567]))
+
+  // **关键回归**：开了 include_usage 后，最后会来一个 choices 为空、只有 usage 的分片——
+  // 不能因为 choices 空就把它扔掉（以前会扔，消耗就丢了）
+  const usageOnly = extractStreamDelta('{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}')
+  eq('choices 为空的 usage 分片要收下', usageOnly?.usage?.totalTokens, 15)
+  eq('total 缺失就自己加', usageOnly?.usage?.promptTokens, 10)
+
+  eq('没有 usage 就是没有（不编数字）', extractStreamDelta('{"choices":[{"delta":{"content":"x"}}]}')?.usage, null)
+  eq(
+    '字段不全不收',
+    extractStreamDelta('{"choices":[{"delta":{}}],"usage":{"prompt_tokens":10}}')?.usage,
+    null
+  )
+
+  eq(
+    '多轮消耗累加（工具循环一轮就是一次请求）',
+    json(addUsage({ promptTokens: 100, completionTokens: 20, totalTokens: 120 }, { promptTokens: 10, completionTokens: 2, totalTokens: 12 })),
+    json({ promptTokens: 110, completionTokens: 22, totalTokens: 132 })
+  )
+  eq('第一轮就直接用', json(addUsage(undefined, { promptTokens: 1, completionTokens: 2, totalTokens: 3 })), json({ promptTokens: 1, completionTokens: 2, totalTokens: 3 }))
+
+  eq('展示格式：0', formatTokenCount(0), '0')
+  eq('展示格式：999 原样', formatTokenCount(999), '999')
+  eq('展示格式：1000 → 1.0k', formatTokenCount(1000), '1.0k')
+  eq('展示格式：12345 → 12.3k', formatTokenCount(12345), '12.3k')
+  eq('展示格式：脏数据当 0', formatTokenCount(-5), '0')
 }
 
 

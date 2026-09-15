@@ -2222,6 +2222,16 @@ textarea {
   opacity: 0.75;
 }
 
+/* 回答底部的 token 消耗：小、淡、精确到个位（按服务商回报，不做估算） */
+.chat-msg__usage {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* AI 刚改过的节点：闪两下。
    直接操作画布没有「预览确认」这一环，用户的信任完全建立在**事后看得见**上，
    所以这一下不能省——否则改完一片安静，用户不知道刚才动了哪儿。 */

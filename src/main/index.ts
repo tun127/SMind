@@ -42,6 +42,7 @@ import {
   type AiMessage,
   type AiStreamEvent,
   type ChatHistoryEntry,
+  type TokenUsage,
   type ToolCall
 } from '@shared/ai'
 import { AGENT_WRITE_TOOLS, planAvailableTools, toWireTools, type AgentToolDef } from '@shared/agent'
@@ -413,6 +414,8 @@ async function callAiStream(
   let model: string | null = null
   /** 本轮模型请求的工具调用（分片累积；空数组 = 说完了） */
   let toolCalls: ToolCall[] = []
+  /** token 消耗（开了 include_usage 后随最后一个分片到来；服务商不支持就没有） */
+  let usage: TokenUsage | null = null
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -425,6 +428,9 @@ async function callAiStream(
         messages: toWireMessages(messages),
         temperature: config.temperature,
         stream: true,
+        // 让服务商在流末尾回报 token 消耗（面板要显示「这次花了多少」）。
+        // OpenAI 兼容实现基本都支持；不认这个字段的会忽略它，无害
+        stream_options: { include_usage: true },
         // 只下发这次允许的工具：模型看不到写工具，就物理上调不动它
         ...(tools.length > 0 ? { tools: toWireTools(tools) } : {})
       }),
@@ -453,6 +459,7 @@ async function callAiStream(
         const delta = extractStreamDelta(line)
         if (!delta) continue
         if (delta.model) model = delta.model
+        if (delta.usage) usage = delta.usage
         // 工具调用的参数是**逐片追加**的字符串，必须按 index 累积（见 accumulateToolCalls）
         if (delta.toolCalls.length > 0) toolCalls = accumulateToolCalls(toolCalls, delta.toolCalls)
         emit(think.push(delta.text))
@@ -480,7 +487,8 @@ async function callAiStream(
       content: full,
       model: model ?? config.model,
       aborted: controller.signal.aborted,
-      toolCalls: finalCalls
+      toolCalls: finalCalls,
+      ...(usage ? { usage } : {})
     })
   } catch (error) {
     if (controller.signal.aborted) {

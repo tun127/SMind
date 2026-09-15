@@ -7,13 +7,16 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement
 } from 'react'
-import { Bot, Eraser, Send, Settings2, Sparkles, Square, TriangleAlert, X } from 'lucide-react'
+import { Bot, ClipboardPaste, Eraser, Send, Settings2, Sparkles, Square, TriangleAlert, X } from 'lucide-react'
 import {
+  addUsage,
   buildChatSystemPrompt,
   buildSkeletonDigest,
   countTopicTree,
+  formatTokenCount,
   type AiMessage,
   type AiStreamEvent,
+  type TokenUsage,
   type ToolCall
 } from '@shared/ai'
 import {
@@ -61,6 +64,8 @@ interface ChatMsg {
   aborted?: boolean
   /** 这一轮里 AI 做过什么（工具调用摘要），让用户看得见它干的事 */
   toolNotes?: string[]
+  /** 这条回答花了多少 token（多轮工具调用会累计；服务商没回报就没有） */
+  usage?: TokenUsage
 }
 
 /**
@@ -114,6 +119,8 @@ export default function ChatPanel({
   const [activateOpen, setActivateOpen] = useState(false)
   const [licenseKey, setLicenseKey] = useState('')
   const [licenseMessage, setLicenseMessage] = useState<string | null>(null)
+  /** 本次会话累计的 token 消耗（按服务商回报累计；换会话/清空时归零） */
+  const [sessionTokens, setSessionTokens] = useState(0)
   const [streaming, setStreaming] = useState(false)
   /** 需要用户点头的破坏性操作（删分支等） */
   const [pendingWrite, setPendingWrite] = useState<{ summary: string } | null>(null)
@@ -125,6 +132,8 @@ export default function ChatPanel({
   const messagesRef = useRef<ChatMsg[]>([])
   const requestIdRef = useRef<string | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
+  /** 输入框：便捷粘贴要把内容插到光标处 */
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
   /** 发给模型的完整消息线（含本轮的 assistant.toolCalls 与 tool 结果） */
   const wireRef = useRef<AiMessage[]>([])
   /** 本轮已进行的模型轮数 / 已执行的工具调用次数 */
@@ -544,13 +553,26 @@ export default function ChatPanel({
         return
       }
 
-      if (event.aborted) {
-        // 用户主动停止：已生成的部分保留；工具调用多半残缺，一律不执行
+      // token 消耗按服务商回报记账：每一轮请求都有一次（工具循环一轮 = 一次请求），
+      // 既累计到会话总数，也并到这条回答上（所以多轮的回答显示的是**总和**）
+      const usage = event.usage
+      if (usage) {
+        setSessionTokens((prev) => prev + usage.totalTokens)
         update((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
-          const content = last.content.trim().length > 0 ? last.content : '（已停止）'
-          return [...prev.slice(0, -1), { ...last, content, aborted: true }]
+          return [...prev.slice(0, -1), { ...last, usage: addUsage(last.usage, usage) }]
+        })
+      }
+
+      if (event.aborted) {
+        // 用户主动停止：已生成的部分保留；工具调用多半残缺，一律不执行。
+        // 内容为空时**不要**再往里塞「（已停止）」——气泡上本来就会渲染这个标记，
+        // 两处都写会出现「（已停止）（已停止）」
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          return [...prev.slice(0, -1), { ...last, aborted: true }]
         })
         requestIdRef.current = null
         setStreaming(false)
@@ -719,6 +741,35 @@ export default function ChatPanel({
     }
   }
 
+  /**
+   * 便捷粘贴：走主进程读剪贴板（比渲染层的 clipboard API 稳——无焦点/权限时会抛），
+   * 插到光标处。Ctrl+V 本来就能用；这个按钮给的是「不想碰键盘」和「Ctrl+V 被别的
+   * 程序占住」时的第二条路，多行文本照贴。
+   */
+  const pasteFromClipboard = (): void => {
+    void window.api
+      .readClipboardText()
+      .then((text) => {
+        const clip = text
+          .replace(/\r\n?/g, '\n')
+          .replace(/[ \t]+$/gm, '')
+          .trim()
+        if (clip.length === 0) return
+        const el = inputRef.current
+        const start = el && el.selectionStart !== null ? el.selectionStart : draft.length
+        const end = el && el.selectionEnd !== null ? el.selectionEnd : draft.length
+        const next = draft.slice(0, start) + clip + draft.slice(end)
+        setDraft(next)
+        window.requestAnimationFrame(() => {
+          if (el) {
+            el.focus()
+            el.setSelectionRange(start + clip.length, start + clip.length)
+          }
+        })
+      })
+      .catch(() => undefined)
+  }
+
   const stop = (): void => {
     const id = requestIdRef.current
     if (id) window.api.aiChatStreamCancel(id)
@@ -771,6 +822,11 @@ export default function ChatPanel({
             {license.pro ? 'Pro' : `试用 ${license.remaining}/${license.trialLimit}`}
           </span>
         )}
+        {sessionTokens > 0 && (
+          <span className="chat-panel__badge" title="本次会话累计的 token 消耗（按服务商回报累计；清空对话时归零）">
+            {formatTokenCount(sessionTokens)} tok
+          </span>
+        )}
         <div className="chat-panel__actions">
           <button
             type="button"
@@ -780,6 +836,7 @@ export default function ChatPanel({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               update(() => [])
+              setSessionTokens(0)
               // 落盘的那份也要清：否则下次打开这份文档对话又"复活"了
               if (filePath) void window.api.chatHistoryClear(filePath).catch(() => undefined)
             }}
@@ -844,6 +901,12 @@ export default function ChatPanel({
                           {note}
                         </span>
                       ))}
+                    </div>
+                  )}
+                  {msg.usage && (
+                    <div className="chat-msg__usage" title="按服务商回报统计（问 + 答），多轮工具调用已累计">
+                      tokens {formatTokenCount(msg.usage.totalTokens)}（问{' '}
+                      {msg.usage.promptTokens.toLocaleString()} · 答 {msg.usage.completionTokens.toLocaleString()}）
                     </div>
                   )}
                 </div>
@@ -953,12 +1016,23 @@ export default function ChatPanel({
 
           <div className="chat-panel__input">
             <textarea
+              ref={inputRef}
               value={draft}
               rows={2}
               placeholder={streaming ? 'AI 正在回答…' : '问点什么，Enter 发送（Shift+Enter 换行）'}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={onKeyDown}
             />
+            <button
+              type="button"
+              className="btn"
+              title="粘贴剪贴板文本（保留换行，粘到光标处）"
+              disabled={streaming}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={pasteFromClipboard}
+            >
+              <ClipboardPaste size={14} />
+            </button>
             {streaming ? (
               <button type="button" className="btn" title="停止生成" onClick={stop}>
                 <Square size={14} />
