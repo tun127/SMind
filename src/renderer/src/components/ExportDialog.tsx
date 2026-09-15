@@ -71,7 +71,7 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
           </div>
         </div>
 
-        {current.scalable && (
+        {current?.scalable && (
           <div className="export-field">
             <span className="export-field__label">清晰度</span>
             <div className="export-choices export-choices--inline">

@@ -38,10 +38,11 @@
 - 收紧零散实现：外部数据收敛（`shared/model/coerce.ts`）、缓存淘汰（`shared/cache.ts`）、
   原子写（`main/atomic-write.ts`）、编辑态（`NO_EDITING` + `editingContent`）。
 - 修复：工具栏「关系线 / 概要 / 边界」三个按钮**丢失了禁用原因提示**（变量算了却没用上）。
-- **核心逻辑启用 `noUncheckedIndexedAccess`**（`tsconfig.strict.json`，49 个文件），
-  修掉 70 余处"可能取到空值"——其中数处是真会崩的：AI 返回内容里没有大纲行时、
-  对话框返回空列表时、公式尺寸算不出来时、导出图片像素越界时。
-  余下范围与推进方式见 [`docs/known-issues.md`](docs/known-issues.md)。
+- **全仓启用 `noUncheckedIndexedAccess`**（`tsconfig.strict.json`，覆盖 **94 个源文件**），
+  修掉约 200 处"可能取到空值"——其中数处是真会崩的：AI 返回内容里没有大纲行时、
+  对话框被取消却仍去取第一个文件时、公式尺寸算不出来时、导出图片像素越界时、
+  空工作簿取第一张画布时、Markdown 正则分组缺失时。
+  修法一律按语义处理（提前退出 / 合理兜底 / 确证才断言），不做机械 `!`。
 
 ## [0.6.0] - 2026-09-14
 

@@ -508,6 +508,12 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
     if (target && target.closest('button')) e.preventDefault()
   }
 
+  /**
+   * 快捷栏条目的元数据。
+   * 键来自下面手工维护的列表，必然存在；用访问器收口，避免每个调用点各写一次断言。
+   */
+  const metaOf = (id: keyof typeof quickMeta & string): QuickItemMeta => quickMeta[id]!
+
   /** 快捷栏按钮：pinned 收纳外壳 + 更多菜单里的对应条目 */
   const quick = (
     id: keyof typeof quickMeta & string,
@@ -515,7 +521,7 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
     hint?: string
   ): ReactElement | null => (
     <PinWrap
-      title={quickMeta[id].label}
+      title={metaOf(id).label}
       hint={hint}
       shown={isShown(id)}
       onHide={() => hideFromBar(id)}
@@ -1027,10 +1033,10 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
               .filter((id) => quickMeta[id])
               .map((id) => ({
                 key: `pinned-${id}`,
-                label: quickMeta[id].label,
+                label: metaOf(id).label,
                 hint: '已收纳 · 点击使用',
-                icon: quickMeta[id].icon,
-                onSelect: quickMeta[id].run,
+                icon: metaOf(id).icon,
+                onSelect: metaOf(id).run,
                 onUnpin: () => toggleHidden(id, false)
               })),
             // 「更多」原生条目：全部可拿出到快捷栏（已拿出的行尾是「移回快捷栏」）
@@ -1049,10 +1055,10 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
               ] as Array<[keyof typeof quickMeta & string, string]>
             ).map(([id, hint]) => ({
               key: id,
-              label: quickMeta[id].label,
+              label: metaOf(id).label,
               hint,
-              icon: quickMeta[id].icon,
-              onSelect: quickMeta[id].run,
+              icon: metaOf(id).icon,
+              onSelect: metaOf(id).run,
               // 已拿出 → 行尾「移回快捷栏」；还没拿出 → 行尾「拿出到快捷栏」
               ...(hiddenItems.includes(`show:${id}`)
                 ? { onUnpin: () => toggleHidden(`show:${id}`, false) }

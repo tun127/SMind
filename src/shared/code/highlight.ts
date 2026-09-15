@@ -300,7 +300,7 @@ export function normalizeCodeLanguage(language: string | undefined): string {
   const key = (language ?? '').trim().toLowerCase()
   if (key.length === 0) return ''
   if (key in DEFS) return key
-  if (key in ALIASES) return ALIASES[key]
+  if (key in ALIASES) return ALIASES[key] ?? ''
   return ''
 }
 
@@ -365,12 +365,14 @@ function scanCodeLine(line: string, def: LanguageDef, state: ScanState): CodeTok
       continue
     }
 
-    const ch = line[i]
+    // 取不到按空串处理：下面所有判断（空白/数字/标识符）对空串都为 false，
+    // 也就是"这个位置没有字符可识别"，与原来的行为一致
+    const ch = line[i] ?? ''
 
     // 2) 空白：原样保留（不合并成"可以丢的"东西，拼回去必须与源码一致）
     if (isSpace(ch)) {
       let j = i
-      while (j < line.length && isSpace(line[j])) j += 1
+      while (j < line.length && isSpace(line[j] ?? '')) j += 1
       push(line.slice(i, j), 'plain')
       i = j
       continue
@@ -438,7 +440,7 @@ function scanCodeLine(line: string, def: LanguageDef, state: ScanState): CodeTok
     // 7) 数字（含 0x / 0b / 小数 / 科学计数 / 常见单位后缀）
     if (isDigit(ch) || (ch === '.' && isDigit(line[i + 1] ?? ''))) {
       let j = i
-      while (j < line.length && /[0-9a-fA-FxXbBoO._eE+-]/.test(line[j])) {
+      while (j < line.length && /[0-9a-fA-FxXbBoO._eE+-]/.test(line[j] ?? '')) {
         // 只在科学计数法里允许 +/-，避免把 `1+2` 连成一个数字
         if ((line[j] === '+' || line[j] === '-') && !/[eE]/.test(line[j - 1] ?? '')) break
         j += 1
@@ -451,7 +453,12 @@ function scanCodeLine(line: string, def: LanguageDef, state: ScanState): CodeTok
     // 8) 记号（$var / #include / @decorator）
     if (def.sigils?.includes(ch)) {
       let j = i + 1
-      while (j < line.length && (IDENT_PART.test(line[j]) || line[j] === '{' || line[j] === '}')) j += 1
+      while (
+        j < line.length &&
+        (IDENT_PART.test(line[j] ?? '') || line[j] === '{' || line[j] === '}')
+      ) {
+        j += 1
+      }
       push(line.slice(i, Math.max(j, i + 1)), 'builtin')
       i = Math.max(j, i + 1)
       continue
@@ -460,7 +467,7 @@ function scanCodeLine(line: string, def: LanguageDef, state: ScanState): CodeTok
     // 9) 标识符：关键字 / 字面量 / 内建 / 类型 / 函数调用
     if (IDENT_START.test(ch)) {
       let j = i
-      while (j < line.length && IDENT_PART.test(line[j])) j += 1
+      while (j < line.length && IDENT_PART.test(line[j] ?? '')) j += 1
       const word = line.slice(i, j)
       const probe = def.ignoreCase ? word.toLowerCase() : word
       let kind: CodeTokenKind = 'plain'
@@ -470,7 +477,7 @@ function scanCodeLine(line: string, def: LanguageDef, state: ScanState): CodeTok
       else {
         // 后面紧跟 `(` 的标识符当作函数名：`def foo(` / `foo()` 一眼能认出来
         let k = j
-        while (k < line.length && isSpace(line[k])) k += 1
+        while (k < line.length && isSpace(line[k] ?? '')) k += 1
         if (line[k] === '(') kind = 'function'
         else if (def.upperAsType && /^[A-Z]/.test(word)) kind = 'type'
       }
@@ -501,11 +508,13 @@ function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
   const yamlKeyMatch = def.yamlKeys ? /^(\s*)([A-Za-z0-9_.$-]+)(\s*):/.exec(line) : null
 
   while (i < line.length) {
-    const ch = line[i]
+    // 取不到按空串处理：下面所有判断（空白/数字/标识符）对空串都为 false，
+    // 也就是"这个位置没有字符可识别"，与原来的行为一致
+    const ch = line[i] ?? ''
 
     if (isSpace(ch)) {
       let j = i
-      while (j < line.length && isSpace(line[j])) j += 1
+      while (j < line.length && isSpace(line[j] ?? '')) j += 1
       push(line.slice(i, j), 'plain')
       i = j
       continue
@@ -517,9 +526,11 @@ function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
     }
 
     // YAML 的键
-    if (yamlKeyMatch && i === yamlKeyMatch[1].length) {
-      push(yamlKeyMatch[2], 'property')
-      i += yamlKeyMatch[2].length
+    const yamlIndent = yamlKeyMatch?.[1] ?? ''
+    const yamlKey = yamlKeyMatch?.[2] ?? ''
+    if (yamlKeyMatch && i === yamlIndent.length) {
+      push(yamlKey, 'property')
+      i += yamlKey.length
       continue
     }
 
@@ -539,7 +550,7 @@ function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
       const text = line.slice(i, Math.min(j, line.length))
       // JSON / YAML 里「字符串后面跟冒号」就是键
       let k = Math.min(j, line.length)
-      while (k < line.length && isSpace(line[k])) k += 1
+      while (k < line.length && isSpace(line[k] ?? '')) k += 1
       push(text, line[k] === ':' ? 'property' : 'string')
       i = Math.min(j, line.length)
       continue
@@ -547,7 +558,7 @@ function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
 
     if (isDigit(ch) || (ch === '-' && isDigit(line[i + 1] ?? ''))) {
       let j = i + 1
-      while (j < line.length && /[0-9.eE+-]/.test(line[j])) j += 1
+      while (j < line.length && /[0-9.eE+-]/.test(line[j] ?? '')) j += 1
       push(line.slice(i, j), 'number')
       i = j
       continue
@@ -555,7 +566,7 @@ function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
 
     if (IDENT_START.test(ch)) {
       let j = i
-      while (j < line.length && (IDENT_PART.test(line[j]) || line[j] === '~')) j += 1
+      while (j < line.length && (IDENT_PART.test(line[j] ?? '') || line[j] === '~')) j += 1
       const word = line.slice(i, j)
       push(word, def.literals?.includes(word.toLowerCase()) ? 'literal' : 'plain')
       i = j
@@ -592,24 +603,30 @@ function scanMarkupLine(line: string): CodeToken[] {
       // 标签名 + 属性名（属性值交给字符串分支）
       const tagMatch = /^(<\/?)([A-Za-z][\w:-]*)/.exec(seg)
       if (tagMatch) {
-        push(tagMatch[1], 'operator')
-        push(tagMatch[2], 'tag')
-        let k = tagMatch[1].length + tagMatch[2].length
+        const open = tagMatch[1] ?? ''
+        const tag = tagMatch[2] ?? ''
+        push(open, 'operator')
+        push(tag, 'tag')
+        let k = open.length + tag.length
         while (k < seg.length) {
           const attrMatch = /^(\s+)([A-Za-z][\w:-]*)/.exec(seg.slice(k))
           if (!attrMatch) break
-          push(attrMatch[1], 'plain')
-          push(attrMatch[2], 'attr')
-          k += attrMatch[1].length + attrMatch[2].length
+          const gap = attrMatch[1] ?? ''
+          const attrName = attrMatch[2] ?? ''
+          push(gap, 'plain')
+          push(attrName, 'attr')
+          k += gap.length + attrName.length
           const eq = /^(\s*=\s*)/.exec(seg.slice(k))
           if (eq) {
-            push(eq[1], 'operator')
-            k += eq[1].length
+            const around = eq[1] ?? ''
+            push(around, 'operator')
+            k += around.length
           }
           const value = /^("[^"]*"|'[^']*')/.exec(seg.slice(k))
           if (value) {
-            push(value[1], 'string')
-            k += value[1].length
+            const literal = value[1] ?? ''
+            push(literal, 'string')
+            k += literal.length
           }
         }
         push(seg.slice(k), 'plain')
@@ -644,10 +661,12 @@ function scanCssLine(line: string): CodeToken[] {
       i = end < 0 ? line.length : end + 2
       continue
     }
-    const ch = line[i]
+    // 取不到按空串处理：下面所有判断（空白/数字/标识符）对空串都为 false，
+    // 也就是"这个位置没有字符可识别"，与原来的行为一致
+    const ch = line[i] ?? ''
     if (isSpace(ch)) {
       let j = i
-      while (j < line.length && isSpace(line[j])) j += 1
+      while (j < line.length && isSpace(line[j] ?? '')) j += 1
       push(line.slice(i, j), 'plain')
       i = j
       continue
@@ -669,7 +688,7 @@ function scanCssLine(line: string): CodeToken[] {
     if (/[A-Za-z-]/.test(ch)) {
       const word = /^[\w-]+/.exec(line.slice(i))?.[0] ?? ch
       let j = i + word.length
-      while (j < line.length && isSpace(line[j])) j += 1
+      while (j < line.length && isSpace(line[j] ?? '')) j += 1
       // `color:` 形式的属性名
       const isProp = line[j] === ':' && !line.startsWith('::', j)
       push(word, isProp ? 'property' : 'plain')

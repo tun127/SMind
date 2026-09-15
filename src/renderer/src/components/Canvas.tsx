@@ -576,6 +576,7 @@ export default function Canvas(): ReactElement {
     const root = rootRef.current
     for (let i = lay.nodes.length - 1; i >= 0; i -= 1) {
       const node = lay.nodes[i]
+      if (!node) continue
       if (node.x <= wx && wx <= node.x + node.width && node.y <= wy && wy <= node.y + node.height) {
         // excludeId 为空串时不会命中任何子树，等价于「不排除任何节点」
         if (isSelfOrDescendant(root, excludeId, node.id)) continue

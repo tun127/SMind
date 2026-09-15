@@ -50,7 +50,9 @@ export function placeOrgChartChildren(
 
   let total = 0
   for (let i = 0; i < kids.length; i += 1) {
-    total += builder.subtreeExtent(kids[i], inherited).width + (i > 0 ? builder.gapX : 0)
+    const kid = kids[i]
+    if (!kid) continue
+    total += builder.subtreeExtent(kid, inherited).width + (i > 0 ? builder.gapX : 0)
   }
 
   let cursor = x + size.width / 2 - total / 2

@@ -34,7 +34,9 @@ export function placeVerticalChildren(
 
   let total = 0
   for (let i = 0; i < kids.length; i += 1) {
-    total += builder.subtreeExtent(kids[i], inherited).height + (i > 0 ? builder.gapY : 0)
+    const kid = kids[i]
+    if (!kid) continue
+    total += builder.subtreeExtent(kid, inherited).height + (i > 0 ? builder.gapY : 0)
   }
 
   let cursor = parentNode.y + parentNode.height / 2 - total / 2
@@ -248,9 +250,12 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
       const parentMidY = round(parent.y + parent.height / 2)
       const tipX = parentRight + lead
       const braceX = tipX + 10
-      const top = round(kids[0].y + kids[0].height / 2)
-      const bottom = round(kids[kids.length - 1].y + kids[kids.length - 1].height / 2)
-      const branchId = kids[0].id
+      // kids.length > 0 在上面已经判过
+      const firstKid = kids[0]!
+      const lastKid = kids[kids.length - 1]!
+      const top = round(firstKid.y + firstKid.height / 2)
+      const bottom = round(lastKid.y + lastKid.height / 2)
+      const branchId = firstKid.id
 
       addDecoration(result, { d: bracePath(braceX, top, bottom, tipX), branchId, widthScale: 0.85 })
       addDecoration(result, {
@@ -286,7 +291,7 @@ export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutRe
   let cursor = 0
   for (let depth = 0; depth < maxWidthByDepth.length; depth += 1) {
     colX[depth] = cursor
-    cursor += maxWidthByDepth[depth] + builder.gapX
+    cursor += (maxWidthByDepth[depth] ?? 0) + builder.gapX
   }
 
   const rootSize = builder.size(root.id)

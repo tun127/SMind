@@ -50,9 +50,9 @@ export function parseRange(range: string | undefined): [string, string] | null {
   const text = typeof range === 'string' ? range.trim() : ''
   if (text.length === 0) return null
   const pair = /^\(\s*([^,()]+?)\s*,\s*([^,()]+?)\s*\)$/.exec(text)
-  if (pair) return [pair[1], pair[2]]
+  if (pair) return [pair[1] ?? '', pair[2] ?? '']
   const single = /^\(\s*([^,()]+?)\s*\)$/.exec(text)
-  if (single) return [single[1], single[1]]
+  if (single) return [single[1] ?? '', single[1] ?? '']
   return null
 }
 
@@ -134,15 +134,22 @@ export function buildRange(root: Topic, ids: string[]): string | null {
   }
   if (best.length === 1) return `(${best[0]},${best[0]})`
 
-  const parentId = index.parentOf.get(best[0])
+  const firstBest = best[0]
+  if (!firstBest) return ''
+  const parentId = index.parentOf.get(firstBest)
   const siblings = parentId === undefined ? [] : (index.byId.get(parentId)?.children ?? [])
   const marks = best
     .map((id) => siblings.findIndex((topic) => topic.id === id))
     .filter((position) => position >= 0)
     .sort((a, b) => a - b)
-  if (marks.length === 0) return `(${best[0]},${best[0]})`
+  if (marks.length === 0) return `(${firstBest},${firstBest})`
 
-  return `(${siblings[marks[0]].id},${siblings[marks[marks.length - 1]].id})`
+  const firstMark = marks[0]
+  const lastMark = marks[marks.length - 1]
+  const firstSibling = firstMark === undefined ? undefined : siblings[firstMark]
+  const lastSibling = lastMark === undefined ? undefined : siblings[lastMark]
+  if (!firstSibling || !lastSibling) return `(${firstBest},${firstBest})`
+  return `(${firstSibling.id},${lastSibling.id})`
 }
 
 /* ------------------------------------------------------------------ */
@@ -451,7 +458,8 @@ function summaryOf(
   const labelSize = estimateOverlayLabelSize(title, fontSize)
 
   // 朝哪个方向放括号：由「父节点 -> 区间中心」的主导轴决定
-  const parentId = index.parentOf.get(topics[0].id)
+  const firstTopic = topics[0]
+  const parentId = firstTopic ? index.parentOf.get(firstTopic.id) : undefined
   const parentNode = parentId === undefined ? undefined : result.nodeMap.get(parentId)
   const centerX = (bounds.minX + bounds.maxX) / 2
   const centerY = (bounds.minY + bounds.maxY) / 2
@@ -485,7 +493,7 @@ function summaryOf(
     return {
       id: summary.id,
       title,
-      branchId: topics[0].id,
+      branchId: firstTopic?.id ?? '',
       d: bracePath('v', spanStart, spanEnd, base, spine, nib),
       label,
       anchor,
@@ -507,7 +515,7 @@ function summaryOf(
   return {
     id: summary.id,
     title,
-    branchId: topics[0].id,
+    branchId: firstTopic?.id ?? '',
     d: bracePath('h', spanStart, spanEnd, base, spine, nib),
     label,
     anchor: 'middle',

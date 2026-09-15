@@ -184,14 +184,14 @@ function placeMatrixChildren(
   const colWidths: number[] = []
   for (let c = 0; c < cols; c += 1) {
     let width = 0
-    for (let i = c; i < kids.length; i += cols) width = Math.max(width, extents[i].width)
+    for (let i = c; i < kids.length; i += cols) width = Math.max(width, extents[i]?.width ?? 0)
     colWidths.push(width)
   }
   const rowHeights: number[] = []
   for (let r = 0; r < rows; r += 1) {
     let height = 0
     for (let i = r * cols; i < Math.min((r + 1) * cols, kids.length); i += 1) {
-      height = Math.max(height, extents[i].height)
+      height = Math.max(height, extents[i]?.height ?? 0)
     }
     rowHeights.push(height)
   }
@@ -207,15 +207,16 @@ function placeMatrixChildren(
       const index = r * cols + c
       if (index >= kids.length) break
       const child = kids[index]
+      if (!child) break
       const size = builder.size(child.id)
-      const cellY = cursorY + (rowHeights[r] - size.height) / 2 + (child.position?.y ?? 0)
+      const cellY = cursorY + ((rowHeights[r] ?? 0) - size.height) / 2 + (child.position?.y ?? 0)
       if (declaresOwnStructure(builder, child, inherited)) {
         placeSubtree(builder, child, cellX, cellY, depth + 1, 'right', inherited)
       } else {
         builder.add(child, cellX, cellY, depth + 1, 'right')
         placeMatrixChildren(builder, child, cellX, cellY, depth + 1, inherited)
       }
-      cursorY += rowHeights[r] + builder.gapY
+      cursorY += (rowHeights[r] ?? 0) + builder.gapY
     }
   }
 }

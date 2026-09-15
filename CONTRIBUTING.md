@@ -13,11 +13,16 @@ npm run dev          # 开发模式（热更新）
 ## 提交前请确保这四条都过
 
 ```bash
-npm run typecheck    # TypeScript 零错误
-npm run lint         # ESLint 零 error（warning 允许）
+npm run typecheck    # TypeScript 零错误：跑两份配置（基础 + 严格，见下）
+npm run lint         # ESLint **零 error 且零 warning**（脚本带 --max-warnings 0）
 npm run selfcheck    # 内核自检：1500+ 项断言
 npm run verify       # 用 samples/ 里的真实文件做往返比对
 ```
+
+> `tsconfig.strict.json` 额外开了 `noUncheckedIndexedAccess`（全仓 94 个文件），
+> 它会让每一次"取第几个"都变成"可能是 undefined"，逼你把每个取值点写清楚。
+> 新增代码如果触发它，**请按语义处理**（提前退出 / 给合理兜底 / 只有确证不可能缺时才断言），
+> 不要用 `!` 把提示按掉——那等于把报警器关掉，看着干净、其实没修。
 
 这四条也正是 CI 跑的内容（`.github/workflows/ci.yml`），本地先跑一遍能省一次往返。
 

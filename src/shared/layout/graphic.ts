@@ -49,10 +49,10 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
   const spineY = round(rootFinal.y + rootFinal.height / 2)
 
   // 主脊
-  const spineEnd =
-    anchors.length > 0
-      ? round(anchors[anchors.length - 1].x + 60)
-      : round(rootFinal.x + rootFinal.width + 120)
+  const lastAnchor = anchors[anchors.length - 1]
+  const spineEnd = lastAnchor
+    ? round(lastAnchor.x + 60)
+    : round(rootFinal.x + rootFinal.width + 120)
   addDecoration(result, {
     d: `M ${round(rootFinal.x + rootFinal.width)} ${spineY} L ${spineEnd} ${spineY}`,
     widthScale: 1.3

@@ -38,7 +38,8 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
   const spineY = round(rootFinal.y + rootFinal.height / 2)
 
   if (kids.length > 0) {
-    const lastNode = result.nodeMap.get(kids[kids.length - 1].id)
+    const lastKid = kids[kids.length - 1]
+    const lastNode = lastKid ? result.nodeMap.get(lastKid.id) : undefined
     const endX = lastNode ? round(lastNode.x + lastNode.width + 40) : round(rootFinal.x + rootFinal.width + 80)
     addDecoration(result, {
       d: `M ${round(rootFinal.x + rootFinal.width)} ${spineY} L ${endX} ${spineY}`,
@@ -107,7 +108,8 @@ export function layoutTimelineVertical(root: Topic, builder: LayoutBuilder): Lay
   const spineX = round(rootFinal.x + rootFinal.width / 2)
 
   if (kids.length > 0) {
-    const lastNode = result.nodeMap.get(kids[kids.length - 1].id)
+    const lastKid = kids[kids.length - 1]
+    const lastNode = lastKid ? result.nodeMap.get(lastKid.id) : undefined
     const endY = lastNode ? round(lastNode.y + lastNode.height + 40) : round(rootFinal.y + rootFinal.height + 80)
     addDecoration(result, {
       d: `M ${spineX} ${round(rootFinal.y + rootFinal.height)} L ${spineX} ${endY}`,

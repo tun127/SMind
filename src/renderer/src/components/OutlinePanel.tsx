@@ -100,7 +100,8 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
       const index = parent.children.findIndex((child) => child.id === id)
       if (index <= 0) return
       commitInline()
-      store.moveNode(id, parent.children[index - 1].id)
+      const previous = parent.children[index - 1]
+      if (previous) store.moveNode(id, previous.id)
       focusRow(id)
     },
     [commitInline, focusRow]

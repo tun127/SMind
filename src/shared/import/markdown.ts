@@ -189,8 +189,9 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
       const ch = source[i]
 
       // 1) 反斜杠转义
-      if (ch === '\\' && i + 1 < source.length && ESCAPABLE.includes(source[i + 1])) {
-        buffer += source[i + 1]
+      const escaped = source[i + 1] ?? ''
+      if (ch === '\\' && i + 1 < source.length && ESCAPABLE.includes(escaped)) {
+        buffer += escaped
         i += 2
         continue
       }
@@ -199,7 +200,7 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
       if (ch === '&') {
         const entity = /^&([a-zA-Z]+|#[0-9]+|#x[0-9a-fA-F]+);/.exec(source.slice(i))
         if (entity) {
-          buffer += decodeEntity(entity[1])
+          buffer += decodeEntity(entity[1] ?? '')
           i += entity[0].length
           continue
         }
@@ -252,7 +253,7 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
         const image = /^!\[([^\]]*)\]\(([^)]*)\)/.exec(source.slice(i))
         if (image) {
           flush()
-          push(image[1], style)
+          push(image[1] ?? '', style)
           i += image[0].length
           continue
         }
@@ -263,7 +264,7 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
         const footnote = /^\[\^([^\]]+)\]/.exec(source.slice(i))
         if (footnote) {
           flush()
-          const id = footnote[1]
+          const id = footnote[1] ?? ''
           if (!scanContext.usedFootnotes!.includes(id)) scanContext.usedFootnotes!.push(id)
           push(footnote[0], { ...style, link: true, script: 'super' })
           i += footnote[0].length
@@ -276,28 +277,32 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
         const inlineLink = /^\[([^\]]*)\]\(([^)]*)\)/.exec(source.slice(i))
         if (inlineLink) {
           flush()
-          if (!href && inlineLink[2].length > 0) href = inlineLink[2]
-          push(inlineLink[1], { ...style, link: true })
+          const url = inlineLink[2] ?? ''
+          if (!href && url.length > 0) href = url
+          push(inlineLink[1] ?? '', { ...style, link: true })
           i += inlineLink[0].length
           continue
         }
         const refLink = /^\[([^\]]*)\]\[([^\]]*)\]/.exec(source.slice(i))
         if (refLink) {
-          const id = refLink[2].length > 0 ? refLink[2] : refLink[1]
+          const label = refLink[1] ?? ''
+          const refId = refLink[2] ?? ''
+          const id = refId.length > 0 ? refId : label
           const url = context.linkRefs?.get(id.toLowerCase())
           flush()
           if (!href && url) href = url
-          push(refLink[1], { ...style, link: true })
+          push(label, { ...style, link: true })
           i += refLink[0].length
           continue
         }
         // 快捷引用式 `[id]`
         const shortcut = /^\[([^\]^][^\]]*)\]/.exec(source.slice(i))
-        const shortcutUrl = shortcut ? context.linkRefs?.get(shortcut[1].toLowerCase()) : undefined
+        const shortcutText = shortcut?.[1] ?? ''
+        const shortcutUrl = shortcut ? context.linkRefs?.get(shortcutText.toLowerCase()) : undefined
         if (shortcut && shortcutUrl) {
           flush()
           if (!href) href = shortcutUrl
-          push(shortcut[1], { ...style, link: true })
+          push(shortcutText, { ...style, link: true })
           i += shortcut[0].length
           continue
         }
@@ -322,8 +327,8 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
   const text = runs.map((run) => run.text).join('')
   const trimmed = text.trim()
   if (trimmed.length !== text.length) {
-    while (runs.length > 0 && runs[0].text.trim().length === 0) runs.shift()
-    while (runs.length > 0 && runs[runs.length - 1].text.trim().length === 0) runs.pop()
+    while (runs.length > 0 && (runs[0]?.text.trim().length ?? 0) === 0) runs.shift()
+    while (runs.length > 0 && (runs[runs.length - 1]?.text.trim().length ?? 0) === 0) runs.pop()
   }
   return { runs, text: trimmed, href, usedFootnotes: usedFootnotes.length > 0 ? usedFootnotes : undefined }
 }
@@ -413,13 +418,13 @@ export function parseMarkdownLine(line: string, context: InlineContext = {}): Ma
 
   const heading = /^(#{1,6})\s+(.*)$/.exec(line.trim())
   if (heading) {
-    const body = heading[2].replace(/\s*#+\s*$/, '') // 行尾的标题锚点 ### 之类
+    const level = (heading[1] ?? '').length
+    const body = (heading[2] ?? '').replace(/\s*#+\s*$/, '') // 行尾的标题锚点 ### 之类
     // 整句是数学 → 变成节点的公式
     const math = matchWholeLineMath(body)
-    if (math) return { kind: 'heading', depth: heading[1].length, level: heading[1].length, text: '', formula: math }
+    if (math) return { kind: 'heading', depth: level, level, text: '', formula: math }
     const inline = parseInlineMarkdown(body, context)
     if (inline.text.length === 0) return null
-    const level = heading[1].length
     return {
       kind: 'heading',
       depth: level,
@@ -435,8 +440,8 @@ export function parseMarkdownLine(line: string, context: InlineContext = {}): Ma
   const list = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(expanded)
   if (list) {
     // 任务列表：勾选框不进标题（- [x] 已完成 → 「已完成」）
-    const body = list[3].replace(/^\[[ xX]\]\s+/, '')
-    const depth = Math.floor(list[1].length / 2)
+    const body = (list[3] ?? '').replace(/^\[[ xX]\]\s+/, '')
+    const depth = Math.floor((list[1] ?? '').length / 2)
     // 整句是数学 → 变成节点的公式（节点标题留空，公式自成一块）
     const math = matchWholeLineMath(body)
     if (math) return { kind: 'list', depth, level: 0, text: '', formula: math }
@@ -487,11 +492,13 @@ function collectDefinitions(source: string): { footnotes: Map<string, string>; l
   for (const line of source.split(/\r?\n/)) {
     const footnote = /^\s*\[\^([^\]]+)\]:\s*(.*)$/.exec(line)
     if (footnote) {
-      footnotes.set(footnote[1], footnote[2].trim())
+      footnotes.set(footnote[1] ?? '', (footnote[2] ?? '').trim())
       continue
     }
     const linkRef = /^\s*\[([^\]^][^\]]*)\]:\s*(\S+)(?:\s+["'(].*)?$/.exec(line)
-    if (linkRef) linkRefs.set(linkRef[1].trim().toLowerCase(), linkRef[2].trim())
+    if (linkRef) {
+      linkRefs.set((linkRef[1] ?? '').trim().toLowerCase(), (linkRef[2] ?? '').trim())
+    }
   }
   return { footnotes, linkRefs }
 }
@@ -691,7 +698,9 @@ export function parseMarkdownOutline(text: string, fallbackTitle = '导入的大
     }
 
     if (item.kind === 'heading') {
-      while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= item.level) {
+      while (headingStack.length > 0) {
+        const top = headingStack[headingStack.length - 1]
+        if (!top || top.level < item.level) break
         headingStack.pop()
       }
       const parent = headingStack[headingStack.length - 1]?.node ?? null
@@ -704,7 +713,9 @@ export function parseMarkdownOutline(text: string, fallbackTitle = '导入的大
     }
 
     // 列表项：挂在标题下，或按缩进挂在上一个列表项下
-    while (listStack.length > 0 && listStack[listStack.length - 1].depth >= item.depth) {
+    while (listStack.length > 0) {
+      const top = listStack[listStack.length - 1]
+      if (!top || top.depth < item.depth) break
       listStack.pop()
     }
     const parent = listStack[listStack.length - 1]?.node ?? sectionRoot
@@ -722,14 +733,17 @@ export function parseMarkdownOutline(text: string, fallbackTitle = '导入的大
       return { root: null, count: 0, warnings: ['文件里没有找到标题或列表，无法生成导图'] }
     }
     const fallbackRoots = terse.map<OutlineNode>((title) => ({ title, children: [] }))
-    const root = fallbackRoots.length === 1 ? fallbackRoots[0] : { title: fallbackTitle, children: fallbackRoots }
+    const firstFallback = fallbackRoots[0]
+    let root: OutlineNode = { title: fallbackTitle, children: fallbackRoots }
+    if (fallbackRoots.length === 1 && firstFallback) root = firstFallback
     warnings.push('文件里没有标题/列表，已按「一行一个主题」导入')
     return { root, count: countNodes(root), warnings }
   }
 
   let root: OutlineNode
-  if (roots.length === 1) {
-    root = roots[0]
+  const single = roots[0]
+  if (roots.length === 1 && single) {
+    root = single
   } else {
     root = { title: fallbackTitle, children: roots }
     warnings.push(`文件里有 ${roots.length} 个并列的顶层节点，已统一挂到「${fallbackTitle}」下`)

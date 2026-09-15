@@ -151,7 +151,9 @@ export class LayoutBuilder {
     const kids = topic.collapsed ? [] : topic.children
     let total = 0
     for (let i = 0; i < kids.length; i += 1) {
-      total += this.verticalExtent(kids[i]) + (i > 0 ? this.gapY : 0)
+      const kid = kids[i]
+      if (!kid) continue
+      total += this.verticalExtent(kid) + (i > 0 ? this.gapY : 0)
     }
     const value = Math.max(size.height, kids.length > 0 ? total : 0)
     this.verticalCache.set(topic.id, value)
@@ -166,7 +168,9 @@ export class LayoutBuilder {
     const kids = topic.collapsed ? [] : topic.children
     let total = 0
     for (let i = 0; i < kids.length; i += 1) {
-      total += this.horizontalExtent(kids[i]) + (i > 0 ? this.gapX : 0)
+      const kid = kids[i]
+      if (!kid) continue
+      total += this.horizontalExtent(kid) + (i > 0 ? this.gapX : 0)
     }
     const value = Math.max(size.width, kids.length > 0 ? total : 0)
     this.horizontalCache.set(topic.id, value)
@@ -191,7 +195,9 @@ export class LayoutBuilder {
     const kids = this.visibleChildren(topic)
     let total = 0
     for (let i = 0; i < kids.length; i += 1) {
-      total += this.size(kids[i].id).height + (i > 0 ? this.gapY : 0)
+      const kid = kids[i]
+      if (!kid) continue
+      total += this.size(kid.id).height + (i > 0 ? this.gapY : 0)
     }
     return total
   }

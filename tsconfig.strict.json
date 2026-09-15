@@ -24,11 +24,18 @@
     "src/shared/richtext/**/*.ts",
     "src/shared/xmind/**/*.ts",
     "src/renderer/src/render/**/*.ts",
-    "src/main/**/*.ts"
+    "src/main/**/*.ts",
+    "src/shared/code/**/*.ts",
+    "src/shared/import/**/*.ts",
+    "src/shared/layout/**/*.ts",
+    "src/renderer/src/components/**/*.tsx",
+    "src/renderer/src/store/**/*.ts",
+    "src/renderer/src/export/**/*.ts",
+    "src/renderer/src/hooks/**/*.ts",
+    "src/renderer/src/*.ts",
+    "src/renderer/src/*.tsx",
+    "src/preload/**/*.ts"
   ]
-  // 尚未纳入（清理完各自的下标访问后再加进来）：
-  //   src/shared/code、src/shared/layout、src/shared/import、
-  //   src/renderer/src/store、src/renderer/src/export、src/renderer/src/components
   //
   // 为什么要这样分批：`include` 只决定"从哪些文件开始"，TypeScript 会顺着 import
   // 把被引用到的文件一起纳入程序——所以严格检查的范围实际是**传递闭包**。

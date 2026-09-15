@@ -64,8 +64,9 @@ export function parseOpmlOutline(text: string, fallbackTitle = '导入的大纲'
   const fileTitle = head ? childOf(head, 'title')?.text.trim() : undefined
 
   let root: OutlineNode
-  if (topLevel.length === 1) {
-    root = topLevel[0]
+  const single = topLevel[0]
+  if (topLevel.length === 1 && single) {
+    root = single
   } else {
     const title = fileTitle && fileTitle.length > 0 ? fileTitle : fallbackTitle
     root = { title, children: topLevel }
