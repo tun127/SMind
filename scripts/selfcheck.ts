@@ -2102,6 +2102,33 @@ function testWriteToolsAndTurn(): void {
     nested.ok && nested.intent.kind === 'insert' && nested.intent.nodes[0]?.title === '预算'
   )
 
+  // 防「照抄已有内容」：整理 / 归类时模型爱用新增「重写一遍」，结果在画布上复制出一份
+  // （真出过事故），所以这条必须硬拦，不能只靠提示词
+  const copyTry = plan('insertSubtree', {
+    address: '成本',
+    outline: '- 成本\n- 人力\n- 物料\n- 中心主题\n- 成本\n- 人力'
+  })
+  eq('把已有内容重写一遍会被拦下', copyTry.ok, false)
+  check(
+    '拦截说明点出「重复内容」并指向 moveTopics',
+    !copyTry.ok && copyTry.error.includes('重复内容') && copyTry.error.includes('moveTopics'),
+    copyTry.ok ? '' : copyTry.error
+  )
+  eq(
+    '确实要同名新增时带 allowDuplicate 放行',
+    plan('insertSubtree', {
+      address: '成本',
+      outline: '- 成本\n- 人力\n- 物料\n- 中心主题\n- 成本\n- 人力',
+      allowDuplicate: true
+    }).ok,
+    true
+  )
+  eq(
+    '真正的新内容不受影响（少量撞名不算复制）',
+    plan('insertSubtree', { address: '成本', outline: '- 全新甲\n- 全新乙\n- 人力' }).ok,
+    true
+  )
+
   const del = plan('deleteTopic', { address: '成本' })
   eq('删除是破坏性操作（要确认）', destructiveOf(del), true)
   check('删除摘要带上影响范围', del.summary.includes('3 个节点'))

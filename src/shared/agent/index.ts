@@ -654,11 +654,16 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
     description:
       '在指定主题下面**新增**内容。outline 用缩进大纲写、每行以「- 」开头：' +
       '并列的多行会成为多个**同级**新主题，缩进两格表示更深一级。' +
-      'outline 里只放要新增的主题文字，不要把解释说明或开场白写进去。',
+      'outline 里只放要新增的主题文字，不要把解释说明或开场白写进去。' +
+      '**它只用于真正的新内容**：把画布上已有的节点「重写一遍」等于复制一份（整理 / 归类已有内容请用 moveTopics 移动）。',
     parameters: schema(
       {
         address: { type: 'string', description: '挂在哪个主题下面' },
-        outline: { type: 'string', description: '缩进大纲文本' }
+        outline: { type: 'string', description: '缩进大纲文本' },
+        allowDuplicate: {
+          type: 'boolean',
+          description: 'outline 的标题在文档里大多已存在时会被拦下；确实要新增同名内容才传 true'
+        }
       },
       ['address', 'outline']
     )
@@ -869,6 +874,33 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     // 直接把壳落进画布会凭空多出一个叫「新主题」的垃圾节点——模型没错，是我们的锅。
     const nodes = parsed.wrapped ? parsed.root.children : [parsed.root]
     if (nodes.length === 0) return fail('outline 里没有可插入的主题。')
+
+    // 防「照抄已有内容」：整理 / 归类时模型很容易用新增来"重写一遍"，结果是把内容**复制**一份
+    // （真出过事故：一次整理之后画布上出现了好几套相同的分类与节点）。
+    // 硬判定：outline 里的标题有多大比例**文档里已经存在**——过半数且数量不少就拦下来。
+    if (args.allowDuplicate !== true) {
+      const existing = new Set<string>()
+      const collect = (topic: Topic): void => {
+        if (topic.title.length > 0) existing.add(topic.title)
+        for (const child of topic.children) collect(child)
+      }
+      collect(root)
+      let totalNodes = 0
+      let alreadyExists = 0
+      const walk = (node: OutlineNode): void => {
+        totalNodes += 1
+        if (existing.has(node.title)) alreadyExists += 1
+        for (const child of node.children) walk(child)
+      }
+      for (const node of nodes) walk(node)
+      if (alreadyExists >= 5 && alreadyExists * 2 >= totalNodes) {
+        return fail(
+          `outline 里有 ${alreadyExists}/${totalNodes} 个标题在文档中**已经存在**——这看着像是把已有内容重写一遍，` +
+            '执行后画布上会多出一份重复内容。归置已有主题请改用 moveTopics（按句柄或标题寻址移动）。' +
+            '确实要新增这些同名内容，带上 allowDuplicate: true 再调用一次。'
+        )
+      }
+    }
 
     const host = target.topic.title
     const shown = nodes
