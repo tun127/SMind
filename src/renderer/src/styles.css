@@ -2468,6 +2468,13 @@ textarea {
   line-height: 1.6;
 }
 
+/* 试用 / Pro 徽标现在是个按钮（点它去激活），把 UA 默认样式抹平 */
+button.chat-panel__badge {
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+}
+
 /* 输入区上方的临时提示（粘贴失败等）：小、淡、几秒后自己消失，不抢戏 */
 .chat-panel__hint {
   padding: 6px 12px;

@@ -1,7 +1,25 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { CheckCircle2, Plug, Settings2, XCircle } from 'lucide-react'
 import { AI_PRESETS, DEFAULT_AI_CONFIG, type AiConfigView } from '@shared/ai'
+import type { LicenseView } from '@shared/license'
 import { Modal } from './Dialogs'
+
+/**
+ * 许可状态一句话。
+ *
+ * 为什么必须**常驻**显示这句：以前只有"试用用完"之后，聊天面板里才会露出许可码输入框——
+ * 于是想支持你的用户在试用期里**找不到地方激活**（真被问过）。
+ */
+function licenseSummary(view: LicenseView | null): string {
+  if (!view) return '正在读取许可状态…'
+  if (view.pro) {
+    return `已激活 Pro${view.holder ? `（${view.holder}）` : ''}：AI 可以直接改画布，没有次数限制。`
+  }
+  if (view.remaining > 0) {
+    return `试用中：AI 改画布还剩 ${view.remaining} 次（共 ${view.trialLimit} 次）。只读聊天永久免费。`
+  }
+  return `试用已用完（${view.trialLimit}/${view.trialLimit}）。只读聊天仍然免费；粘入许可码即可继续让 AI 改画布。`
+}
 
 interface Props {
   onClose(): void
@@ -18,6 +36,11 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+  /** 许可状态：Pro / 试用剩余。闸门判定在主进程，这里只负责显示与激活 */
+  const [license, setLicense] = useState<LicenseView | null>(null)
+  const [licenseKey, setLicenseKey] = useState('')
+  const [licenseNote, setLicenseNote] = useState<string | null>(null)
+  const [licenseBusy, setLicenseBusy] = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -32,6 +55,43 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
       }
     })()
   }, [onNotify])
+
+  useEffect(() => {
+    void window.api
+      .licenseGet()
+      .then(setLicense)
+      .catch(() => undefined)
+  }, [])
+
+  /** 激活：许可码只在本机离线验签（Ed25519），不发任何网络请求 */
+  const activate = async (): Promise<void> => {
+    setLicenseBusy(true)
+    try {
+      const result = await window.api.licenseActivate(licenseKey)
+      setLicense(result.view)
+      setLicenseNote(result.message)
+      if (result.ok) {
+        setLicenseKey('')
+        onNotify(result.message)
+      }
+    } catch (error) {
+      setLicenseNote(`激活失败：${(error as Error).message}`)
+    } finally {
+      setLicenseBusy(false)
+    }
+  }
+
+  const deactivate = async (): Promise<void> => {
+    setLicenseBusy(true)
+    try {
+      setLicense(await window.api.licenseDeactivate())
+      setLicenseNote('已取消激活：本机的许可已清除（换机器 / 退货都用它）')
+    } catch (error) {
+      setLicenseNote(`取消失败：${(error as Error).message}`)
+    } finally {
+      setLicenseBusy(false)
+    }
+  }
 
   const save = async (notify = true): Promise<boolean> => {
     try {
@@ -112,6 +172,35 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
               </button>
             ))}
           </div>
+        </div>
+
+        {/* 许可：**常驻**入口。以前只有试用用完后才在聊天面板里露出输入框，
+            想提前支持的人反而找不到地方激活 */}
+        <div className="ai-field">
+          <span className="ai-field__label">许可（Pro）</span>
+          <p className="modal__dim">{licenseSummary(license)}</p>
+          <div className="ai-presets">
+            <input
+              className="input"
+              placeholder="把购买时拿到的许可码整串粘进来（可以带换行）"
+              value={licenseKey}
+              onChange={(event) => setLicenseKey(event.target.value)}
+            />
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={licenseBusy || licenseKey.trim().length === 0}
+              onClick={() => void activate()}
+            >
+              激活
+            </button>
+            {license?.pro && (
+              <button type="button" className="btn" disabled={licenseBusy} onClick={() => void deactivate()}>
+                取消激活
+              </button>
+            )}
+          </div>
+          {licenseNote && <p className="modal__dim">{licenseNote}</p>}
         </div>
 
         <div className="ai-field">
