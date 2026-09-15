@@ -10,4 +10,7 @@ tsconfig.tsbuildinfo
 .npm-cache
 dev.log
 dev.err.log
+# 排查用产物：lint 的 JSON 输出、从 exe 反向提取图标用来核对的图
+lint.json
+.icon-check.png
 .dsh-meow
