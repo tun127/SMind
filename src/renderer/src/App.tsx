@@ -763,9 +763,14 @@ export default function App(): ReactElement {
   const handleRestore = useCallback(async (): Promise<void> => {
     setRecovery(null)
     try {
+      // 分步打点：「点恢复就卡死」这类问题必须能看出卡在哪一步
+      // （否则只能看到"卡住了"，连是读存档还是画布渲染都不知道）
+      setStage('恢复：读取存档')
       const result = await window.api.recoveryLoad(activeDocId())
       if (result) {
+        setStage('恢复：载入工作簿')
         useTabs.getState().openWorkbook(result.workbook, result.path || null)
+        setStage('恢复：完成')
         showToast('已恢复未保存的内容')
       }
     } catch (err) {

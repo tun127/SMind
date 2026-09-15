@@ -26,7 +26,7 @@ import {
 import { applyTopicFilter, hitTopicIds, isFilterActive, searchSheet } from '@shared/search'
 import { DEFAULT_STRUCTURE, getStructureDef } from '@shared/xmind/constants'
 import { measureTopic, bumpMeasureEpoch } from '../render/measure'
-import { setStage } from '../dev/stage'
+import { count, setStage } from '../dev/stage'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
@@ -98,6 +98,9 @@ interface AxisPair {
 }
 
 export default function Canvas(): ReactElement {
+  // 每秒渲染次数：数字爆表就是「重渲染风暴」，是这类卡死最常见的形态
+  count('画布渲染')
+
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
 
@@ -294,6 +297,7 @@ export default function Canvas(): ReactElement {
         ? measureTopic({ ...topic, title: editingText, titleRich: editingRich }, depth)
         : measureTopic(topic, depth)
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
+    count('画布布局')
     setStage('画布布局')
     const computed = layoutSheet(root, measure, {}, sheet)
     setStage('画布布局完成')
@@ -346,6 +350,7 @@ export default function Canvas(): ReactElement {
      * 尺寸没变时返回原对象，React 会直接跳过这次更新，环就断了。
      */
     const update = (): void => {
+      count('容器尺寸回调')
       const width = el.clientWidth
       const height = el.clientHeight
       setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }))
@@ -563,6 +568,7 @@ export default function Canvas(): ReactElement {
      * 直接拖就是了，下一次选择或位置变化它才重新咬住。
      */
     const step = (): void => {
+      count('镜头跟随帧')
       setStage('镜头跟随')
       const node = layoutRef.current?.nodeMap.get(id)
       const width = el.clientWidth
