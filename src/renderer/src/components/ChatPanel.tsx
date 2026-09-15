@@ -478,7 +478,16 @@ export default function ChatPanel({
       }
 
       const applied = applyWriteIntent(plan.intent)
-      pushToolResult(call, applied.ok ? `已执行：${plan.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note)
+      const written = applied.ok ? `已执行：${plan.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note
+      // 有些模型（qwen-plus 这类）一次回复只发**一个**工具调用：搬几十个节点要几十轮，
+      // 用户感受就是「走一步推一步」。在工具结果里**就地**提醒它改用批量——
+      // 比在系统提示词里讲一遍更贴近它当下的决策点
+      const nudge =
+        queue.calls.length === 1 && (call.name === 'moveTopic' || call.name === 'renameTopic')
+          ? '（提示：剩下的同类操作请用 moveTopics 一次批量发出来——一次回复里可以包含多个工具调用，' +
+            '也可以用一条 moveTopics 带很多项；不要一次只搬一个。）'
+          : ''
+      pushToolResult(call, written + nudge)
       if (applied.ok) noteAction(plan.summary, true)
       queue.index += 1
       step()

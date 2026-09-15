@@ -117,7 +117,7 @@ export function segmentTitleMentions(text: string, index: Map<string, TitleIndex
  * 上限是安全阀，不该变成体验问题：撞到上限时渲染层会**去掉工具再问最后一轮**，
  * 让模型把已经看到的东西讲清楚——以前撞上限就直接收尾，用户拿到的是半截话。
  */
-export const AGENT_MAX_ROUNDS = 8
+export const AGENT_MAX_ROUNDS = 16
 /**
  * 一轮对话里最多执行多少次**工具调用**（不是操作数——一次 moveTopics 可以搬很多节点）。
  *
@@ -125,7 +125,7 @@ export const AGENT_MAX_ROUNDS = 8
  * 为什么够用：大导图的整理靠**批量工具**（moveTopics / insertSubtree），
  * 几次调用就能搬完上百个节点，逐个搬的用法本来就不该有。
  */
-export const AGENT_MAX_TOOL_CALLS = 50
+export const AGENT_MAX_TOOL_CALLS = 60
 
 /**
  * 还能不能继续下一轮。

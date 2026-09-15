@@ -130,6 +130,11 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
             value={model}
             onChange={(event) => setModel(event.target.value)}
           />
+          <span className="ai-field__hint">
+            让 AI <strong>直接改画布</strong>时，模型的选择影响很大：优先用支持工具调用的强模型
+            （DeepSeek-V3 系、Qwen3 系、GPT、Claude 等）。上下文太小的模型（8k 级）装不下
+            agent 回合（骨架 + 历史 + 工具往返），会频繁「走一步推一步」。
+          </span>
         </div>
 
         <div className="ai-field">

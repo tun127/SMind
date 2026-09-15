@@ -2030,6 +2030,8 @@ function testAgentTools(): void {
 
   group('Agent：循环上限')
 
+  eq('轮数上限放宽到 16（照顾一次只发一个调用的模型）', AGENT_MAX_ROUNDS, 16)
+  eq('调用次数上限 60', AGENT_MAX_TOOL_CALLS, 60)
   eq('刚起步可以继续', canContinueAgentLoop(0, 0).ok, true)
   eq('到轮数上限就停', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).ok, false)
   check('停下时给出原因（不是静默）', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).reason.includes('轮'))

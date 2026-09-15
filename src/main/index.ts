@@ -432,7 +432,14 @@ async function callAiStream(
         // OpenAI 兼容实现基本都支持；不认这个字段的会忽略它，无害
         stream_options: { include_usage: true },
         // 只下发这次允许的工具：模型看不到写工具，就物理上调不动它
-        ...(tools.length > 0 ? { tools: toWireTools(tools) } : {})
+        ...(tools.length > 0
+          ? {
+              tools: toWireTools(tools),
+              // 明确允许并行工具调用：否则有些模型（qwen 系）一次回复只肯发一个调用，
+              // 搬几十个节点就要几十轮，用户感受是「走一步推一步」
+              parallel_tool_calls: true
+            }
+          : {})
       }),
       signal: controller.signal
     })
