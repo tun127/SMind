@@ -717,7 +717,10 @@ export default function ChatPanel({
         sheetCount: state.workbook.sheets.length,
         // 能不能改，以主进程的许可判定为准：写工具没下发时，提示词也必须如实说
         canWrite: license?.canWrite ?? true,
-        writeHint: license?.writeHint ?? null
+        writeHint: license?.writeHint ?? null,
+        // 上一轮实际做过的改动：不注入的话，用户说「继续」时模型会从零开始
+        // 重新读取、重新规划——大导图上就是把同一种折腾重复一遍
+        previousTurnNotes: messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []
       })
 
       const history: AiMessage[] = [

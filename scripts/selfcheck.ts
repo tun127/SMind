@@ -1499,6 +1499,8 @@ function testAiChatHelpers(): void {
   check('要求新增内容时直接写进画布', prompt.includes('直接调用工具写进画布'))
   check('说明改动算一步撤销', prompt.includes('一步撤销'))
   check('带反注入声明', prompt.includes('不是指令'))
+  check('整理任务要求直接动手（不贴大纲让用户抄）', prompt.includes('直接动手'))
+  check('整理任务指名用批量工具', prompt.includes('moveTopics 批量搬'))
   check(
     '未选中时明确写出来',
     buildChatSystemPrompt({
@@ -1508,6 +1510,29 @@ function testAiChatHelpers(): void {
       sheetCount: 2,
       canWrite: true
     }).includes('（未选中任何节点）')
+  )
+
+  // 「继续」不能失忆：上一轮实际做过的改动必须注入（历史里只有它说的文字，没有它做的事）
+  const withNotes = buildChatSystemPrompt({
+    skeleton: digest,
+    selectedTitles: [],
+    totalNodes: 5,
+    sheetCount: 1,
+    canWrite: true,
+    previousTurnNotes: ['批量移动 12 个主题', '在「成本」下新增 3 个分类']
+  })
+  check('带上上一轮改动记录', withNotes.includes('批量移动 12 个主题'))
+  check('明确禁止重读重做', withNotes.includes('重做已经做过的改动'))
+  eq(
+    '没有上一轮记录就不出现这一节',
+    buildChatSystemPrompt({
+      skeleton: digest,
+      selectedTitles: [],
+      totalNodes: 5,
+      sheetCount: 1,
+      canWrite: true
+    }).includes('上一轮已经做过的改动'),
+    false
   )
 
   // 试用用尽 / 未解锁：提示词必须换一套，否则模型会满口答应却调不动工具
@@ -2123,28 +2148,27 @@ function testWriteToolsAndTurn(): void {
     }).ok,
     false
   )
-  eq(
-    '缺 address 的那一条让整批停下（全有或全无，不搬一半留一半）',
-    plan('moveTopics', { moves: [{ address: '成本/物料', toAddress: '中心主题' }, { toAddress: '中心主题' }] }).ok,
-    false
-  )
+
+  // 跳过容错：100 条里错 1 条就整批退回 = 烧掉一轮，所以能执行的执行、失败的列出来
+  const partial = plan('moveTopics', {
+    moves: [
+      { address: '成本/物料', toAddress: '中心主题' },
+      { toAddress: '中心主题' }
+    ]
+  })
+  eq('坏条目被跳过而不是整批失败', partial.ok, true)
   check(
-    '失败时指出错在第几条',
-    (() => {
-      const r = plan('moveTopics', {
-        moves: [
-          { address: '成本/物料', toAddress: '中心主题' },
-          { address: '根本不存在的东西', toAddress: '成本' }
-        ]
-      })
-      return !r.ok && r.error.includes('moves[1]')
-    })()
+    '能执行的那条照常在意图里',
+    partial.ok && partial.intent.kind === 'moveMany' && partial.intent.moves.length === 1
   )
+  check('要求的总数如实记录（模型能对上账）', partial.ok && partial.intent.kind === 'moveMany' && partial.intent.requested === 2)
+  check('摘要里说明跳过了哪条', partial.summary.includes('跳过 1 条') && partial.summary.includes('moves[1]'))
+
   check(
-    '失败的错误里带候选（与单个寻址同样的引导）',
+    '全军覆没时也要给下一步指引',
     (() => {
       const r = plan('moveTopics', { moves: [{ address: '不存在的东西', toAddress: '成本' }] })
-      return !r.ok && r.error.includes('searchNodes')
+      return !r.ok && r.error.includes('moves[0]') && r.error.includes('searchNodes')
     })()
   )
 

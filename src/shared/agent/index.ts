@@ -645,7 +645,7 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
       '**批量**移动多个主题——整理 / 归类大导图时务必用它：一次调用可以移动很多节点，' +
       '比逐个 moveTopic 省得多（调用次数上限按「调用」算，不按节点算）。' +
       'moves 里每一项的语义与 moveTopic 完全相同（address / toAddress / index?）。' +
-      '只要有一条解析失败，**整批都不会执行**并告诉你错在哪一条——所以先 searchNodes 确认再发。' +
+      '个别条目解析失败会被**跳过**（摘要里说明是哪几条），其余照常执行；全都不行才整体报错。' +
       '列表里有用户手动摆过位置的主题时，同样需要 allowMoved: true。',
     parameters: schema(
       {
@@ -873,35 +873,52 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
   }
 
   if (name === 'moveTopics') {
-    // 批量移动：整理大导图的正路。规划阶段**全有或全无**——有一条解析失败就整批退回，
-    // 并指明是第几条（moves[i]），模型拿到就能精准纠正，不会搬一半留一半。
+    // 批量移动：整理大导图的正路。
+    // 100 条里错 1 条就整批退回 = 烧掉整整一轮（模型重写 100 条 JSON），
+    // 所以这里是**跳过容错**：能执行的执行，解析失败的精确列出来让模型补一次即可。
     const raw = args.moves
     if (!Array.isArray(raw) || raw.length === 0) return fail('moves 必须是非空的数组。')
     if (raw.length > 200) return fail('一次最多移动 200 个主题，更多请分批调用。')
 
     const moves: Array<{ id: string; targetId: string; index: number | null }> = []
+    const skipped: string[] = []
     for (let position = 0; position < raw.length; position += 1) {
       const item = raw[position]
-      if (!isRecord(item)) return fail(`moves[${position}] 不是对象。`)
+      if (!isRecord(item)) {
+        skipped.push(`moves[${position}]（不是对象）`)
+        continue
+      }
       const sourceAddress = typeof item.address === 'string' ? item.address.trim() : ''
-      if (sourceAddress.length === 0) return fail(`moves[${position}] 缺少 address。`)
+      if (sourceAddress.length === 0) {
+        skipped.push(`moves[${position}]（缺 address）`)
+        continue
+      }
       const source = resolveTopicAddress(root, sourceAddress)
-      if (!source.ok) return fail(`moves[${position}]：${source.error}`)
+      if (!source.ok) {
+        skipped.push(`moves[${position}]「${sourceAddress}」`)
+        continue
+      }
       const targetAddress = typeof item.toAddress === 'string' ? item.toAddress.trim() : ''
-      if (targetAddress.length === 0) return fail(`moves[${position}] 缺少 toAddress。`)
+      if (targetAddress.length === 0) {
+        skipped.push(`moves[${position}]（缺 toAddress）`)
+        continue
+      }
       const destination = resolveTopicAddress(root, targetAddress)
-      if (!destination.ok) return fail(`moves[${position}]：${destination.error}`)
+      if (!destination.ok) {
+        skipped.push(`moves[${position}] 的目标「${targetAddress}」`)
+        continue
+      }
       if (source.resolved.topic.id === destination.resolved.topic.id) {
-        return fail(`moves[${position}]：不能把「${source.resolved.topic.title}」移到它自己下面。`)
+        skipped.push(`moves[${position}]（目标是它自己）`)
+        continue
       }
       if (subtreeContains(source.resolved.topic, destination.resolved.topic.id)) {
-        return fail(`moves[${position}]：不能把「${source.resolved.topic.title}」移到它自己的子孙下面。`)
+        skipped.push(`moves[${position}]（目标是它自己的子孙）`)
+        continue
       }
       if (source.resolved.topic.position && args.allowMoved !== true) {
-        return fail(
-          `moves[${position}]：「${source.resolved.topic.title}」是用户手动摆过位置的主题。` +
-            '确实要移动时，整批调用带上 allowMoved: true。'
-        )
+        skipped.push(`moves[${position}]「${source.resolved.topic.title}」（用户手动摆过位置）`)
+        continue
       }
       const rawIndex = item.index
       const slot =
@@ -909,10 +926,20 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       moves.push({ id: source.resolved.topic.id, targetId: destination.resolved.topic.id, index: slot })
     }
 
+    if (moves.length === 0) {
+      return fail(
+        `没有一条能执行。${skipped.length > 0 ? `原因：${skipped.slice(0, 6).join('；')}。` : ''}` +
+          '可以用 searchNodes 搜到正确的标题后再补一次调用。'
+      )
+    }
+    const skippedNote =
+      skipped.length > 0
+        ? `（跳过 ${skipped.length} 条没执行：${skipped.slice(0, 4).join('；')}${skipped.length > 4 ? '…' : ''}）`
+        : ''
     return {
       ok: true,
-      intent: { kind: 'moveMany', moves, requested: moves.length },
-      summary: `批量移动 ${moves.length} 个主题`,
+      intent: { kind: 'moveMany', moves, requested: raw.length },
+      summary: `批量移动 ${moves.length} 个主题${skippedNote}`,
       destructive: false
     }
   }
