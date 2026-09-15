@@ -7,20 +7,24 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement
 } from 'react'
-import { Bot, Eraser, Send, Settings2, Sparkles, Square, X } from 'lucide-react'
+import { Bot, Eraser, Send, Settings2, Sparkles, Square, TriangleAlert, X } from 'lucide-react'
 import {
   buildChatSystemPrompt,
   buildSkeletonDigest,
   countTopicTree,
   type AiMessage,
-  type AiStreamEvent
+  type AiStreamEvent,
+  type ToolCall
 } from '@shared/ai'
 import {
   buildTitleIndex,
   canContinueAgentLoop,
+  isReadToolName,
+  planWriteTool,
   runReadTool,
   segmentTitleMentions,
-  type ToolContext
+  type ToolContext,
+  type WriteIntent
 } from '@shared/agent'
 import { createId } from '@shared/model/factory'
 import { activeRoot, ancestorsOf, findTopic } from '@shared/model/tree'
@@ -35,10 +39,15 @@ interface Props {
   /**
    * 打开会**写入画布**的 AI 流程（润色 / 扩写 / 生成）。
    *
-   * 这些仍走原来的对话框（先预览、确认后才写入）——本期面板是只读的，
-   * 把它们收成面板里的入口，而不是让用户去别处找。
+   * 这些仍走原来的对话框（先预览、确认后才写入）——它们与聊天里的写工具互补：
+   * 对话框适合「我就想让 AI 生成一批内容」，聊天适合「你看着办」。
    */
   onOpenTask(task: AiTask): void
+  /**
+   * AI 要动**第一笔**改动之前调用。
+   * App 层用它存一份盘上快照——撤销栈在内存里，崩溃就没了，这是第二层保险。
+   */
+  onBeforeAiWrite(): void
 }
 
 interface ChatMsg {
@@ -48,13 +57,13 @@ interface ChatMsg {
   content: string
   /** 这条回答被用户手动停止——标注出来，别让人以为说完了 */
   aborted?: boolean
-  /** 这一轮里 AI 翻看过什么（工具调用摘要），让用户看得见它做过的事 */
+  /** 这一轮里 AI 做过什么（工具调用摘要），让用户看得见它干的事 */
   toolNotes?: string[]
 }
 
 /**
  * 发给模型的历史条数上限。
- * 防长对话把上下文撑爆（8k 的模型几轮就满）；真正的「压缩」在二期做。
+ * 防长对话把上下文撑爆（8k 的模型几轮就满）；真正的「压缩」在后续迭代做。
  */
 const MAX_HISTORY = 16
 
@@ -72,19 +81,30 @@ const QUICK_TASKS: Array<{ label: string; task: AiTask }> = [
 ]
 
 /**
- * AI 聊天面板（三期 1a 聊天 + 1b 只读探查工具）。
+ * AI 聊天面板（三期）。
  *
- * 循环：用户提问 → 模型（可能要求调工具）→ 本地执行只读工具 → 结果回喂 → 模型继续，
- * 直到模型不再要求调工具为止。**工具全部只读**，所以这一版仍然不动画布。
+ * 循环：用户提问 → 模型（可能要求调工具）→ 本地执行 → 结果回喂 → 模型继续，直到不再要求调工具。
  *
- * 上下文每次提问时**重新取**（不是挂载时取一次）——用户可能刚改了导图。
+ * 工具的两种命运：
+ * - **只读**（看结构）：立刻执行，没有副作用；
+ * - **写**（改画布）：解析成「操作意图」再落到 store，**破坏性操作会停下来先问用户**。
+ *
+ * 安全网：整个回合的改动并成**一步撤销**（`beginAiTurn`/`commitAiTurn`），
+ * 回合中锁住用户的撤销键，开动前请 App 存一份盘上快照。
  */
-export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props): ReactElement {
+export default function ChatPanel({
+  onClose,
+  onOpenSettings,
+  onOpenTask,
+  onBeforeAiWrite
+}: Props): ReactElement {
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [draft, setDraft] = useState('')
   /** null = 还没查完；false = 没配 Key（显示引导）；true = 可用 */
   const [hasKey, setHasKey] = useState<boolean | null>(null)
   const [streaming, setStreaming] = useState(false)
+  /** 需要用户点头的破坏性操作（删分支等） */
+  const [pendingWrite, setPendingWrite] = useState<{ summary: string } | null>(null)
   const filePath = useEditor((s) => s.filePath)
   const workbook = useEditor((s) => s.workbook)
   /** 标题索引：把回复里提到的节点变成可点击引用（按首字分桶，大文档也不卡） */
@@ -100,8 +120,18 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
   const toolCallsUsedRef = useRef(0)
   /** 模型不支持函数调用时置 false，此后不再带工具定义 */
   const useToolsRef = useRef(true)
-  /** runRound 与 handleEvent 互相需要，用 ref 打破循环引用 */
+  /** runRound / processQueue 与 handleEvent 互相需要，用 ref 打破循环引用 */
   const runRoundRef = useRef<() => void>(() => {})
+  const processQueueRef = useRef<() => void>(() => {})
+  const commitTurnRef = useRef<() => void>(() => {})
+  /** 待处理的工具调用（一次处理一个：破坏性操作要在中间停下来问用户） */
+  const queueRef = useRef<{ calls: ToolCall[]; index: number } | null>(null)
+  /** 待确认的写操作（state 只用于渲染，判定走 ref） */
+  const pendingRef = useRef<{ call: ToolCall; intent: WriteIntent; summary: string } | null>(null)
+  /** 本轮 AI 改了哪些东西（并成撤销标签 + 事后摘要） */
+  const writeLogRef = useRef<string[]>([])
+  /** 本轮是否已经开过事务（只在真有写操作时开） */
+  const turnStartedRef = useRef(false)
 
   /** state 与 ref 一起更新：发请求要读最新历史，state 是给渲染的 */
   const update = useCallback((updater: (prev: ChatMsg[]) => ChatMsg[]) => {
@@ -165,23 +195,216 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
     return () => window.clearTimeout(timer)
   }, [filePath, messages, streaming])
 
+  /* ------------------------------------------------------------------ */
+  /* 工具执行                                                            */
+  /* ------------------------------------------------------------------ */
+
+  /** 往消息线里塞一条工具结果（模型下一轮就看得到） */
+  const pushToolResult = (call: ToolCall, content: string): void => {
+    wireRef.current = [...wireRef.current, { role: 'tool', toolCallId: call.id, content }]
+  }
+
+  /** 把「AI 干了什么」记到界面与日志上 */
+  const noteAction = (summary: string, counts: boolean): void => {
+    if (counts) writeLogRef.current = [...writeLogRef.current, summary]
+    update((prev) => {
+      const last = prev[prev.length - 1]
+      if (!last || last.role !== 'assistant') return prev
+      return [...prev.slice(0, -1), { ...last, toolNotes: [...(last.toolNotes ?? []), summary] }]
+    })
+  }
+
+  /**
+   * 把一条写意图落到 store 上。
+   *
+   * 这里是**唯一**执行写操作的地方：撤销事务、快照、摘要都在这一处收口，
+   * 免得以后新增工具时漏掉某一步安全网。
+   */
+  const applyWriteIntent = (intent: WriteIntent): { ok: boolean; note: string } => {
+    const store = useEditor.getState()
+
+    if (!turnStartedRef.current) {
+      turnStartedRef.current = true
+      store.beginAiTurn()
+      onBeforeAiWrite()
+    }
+
+    switch (intent.kind) {
+      case 'rename':
+        store.setTitle(intent.id, intent.title)
+        return { ok: true, note: '' }
+      case 'insert': {
+        const added = store.applyOutlineTree(intent.id, intent.node)
+        return added > 0 ? { ok: true, note: '' } : { ok: false, note: '目标主题已不存在，插入没有生效。' }
+      }
+      case 'delete':
+        return store.deleteTopic(intent.id)
+          ? { ok: true, note: '' }
+          : { ok: false, note: '目标主题已不存在，删除没有生效。' }
+      case 'move': {
+        const moved = store.moveNode(intent.id, intent.targetId, intent.index ?? undefined)
+        return moved ? { ok: true, note: '' } : { ok: false, note: '移动没有生效：目标位置不合法。' }
+      }
+      case 'collapse':
+        store.setCollapsed(intent.id, intent.collapsed)
+        return { ok: true, note: '' }
+      case 'notes':
+        store.setNotes(intent.id, intent.text)
+        return { ok: true, note: '' }
+      case 'code':
+        store.setCode(intent.id, intent.code)
+        return { ok: true, note: '' }
+      case 'formula':
+        store.setFormula(intent.id, intent.formula)
+        return { ok: true, note: '' }
+      case 'ask':
+        return { ok: true, note: '' }
+      default:
+        return { ok: false, note: '未知操作。' }
+    }
+  }
+
+  const setPending = (value: { call: ToolCall; intent: WriteIntent; summary: string } | null): void => {
+    pendingRef.current = value
+    setPendingWrite(value ? { summary: value.summary } : null)
+  }
+
+  /** 结束本轮：把 AI 的改动并成一步撤销，并把「改了什么」留在气泡里 */
+  const commitTurn = (): void => {
+    const log = writeLogRef.current
+    if (turnStartedRef.current) {
+      const label = log.length > 0 ? `AI · ${log.slice(0, 2).join('、')}` : 'AI · 修改导图'
+      useEditor.getState().commitAiTurn(label)
+    }
+    if (log.length > 0) {
+      const text =
+        log.length > 6 ? `${log.slice(0, 6).join('；')}…` : log.join('；')
+      update((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant') return prev
+        return [
+          ...prev.slice(0, -1),
+          { ...last, content: `${last.content}\n\n——\n已改动：${text}（共 ${log.length} 处，Ctrl+Z 一次全部撤销）` }
+        ]
+      })
+    }
+    writeLogRef.current = []
+    turnStartedRef.current = false
+    setPending(null)
+  }
+
+  /**
+   * 依次处理这一轮的工具调用。
+   *
+   * **一次只处理一个**：破坏性操作要在中间停下来问用户，不能一口气执行完
+   * （用户点完「执行」再从断点继续）。读工具没有副作用，直接跑。
+   */
+  const processQueue = (): void => {
+    const step = (): void => {
+      const queue = queueRef.current
+      if (!queue) return
+      const call = queue.calls[queue.index]
+      if (!call) {
+        queueRef.current = null
+        runRoundRef.current()
+        return
+      }
+
+      if (isReadToolName(call.name)) {
+        const state = useEditor.getState()
+        const context: ToolContext = {
+          root: activeRoot(state.workbook),
+          selectedId: state.selection[0] ?? null,
+          sheetCount: state.workbook.sheets.length
+        }
+        const result = runReadTool(call.name, call.argumentsText, context)
+        pushToolResult(call, result.content)
+        noteAction(result.summary, false)
+        queue.index += 1
+        step()
+        return
+      }
+
+      const plan = planWriteTool(call.name, call.argumentsText, activeRoot(useEditor.getState().workbook))
+      if (!plan.ok) {
+        // 规划失败：把原因回喂给模型让它自己纠正，不打断整轮
+        pushToolResult(call, plan.error)
+        noteAction(plan.summary, false)
+        queue.index += 1
+        step()
+        return
+      }
+
+      if (plan.intent.kind === 'ask') {
+        // 模型主动提问：呈现问题、本轮到此为止（等用户回答）
+        queueRef.current = null
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          const options = plan.intent.kind === 'ask' && plan.intent.options.length > 0 ? `\n可选：${plan.intent.options.join(' / ')}` : ''
+          return [
+            ...prev.slice(0, -1),
+            { ...last, content: `${last.content}\n\n${plan.intent.kind === 'ask' ? plan.intent.question : ''}${options}` }
+          ]
+        })
+        requestIdRef.current = null
+        setStreaming(false)
+        commitTurn()
+        return
+      }
+
+      if (plan.destructive) {
+        // 破坏性操作：停下来等用户点头（这一步就是「确认分级」）
+        setPending({ call, intent: plan.intent, summary: plan.summary })
+        return
+      }
+
+      const applied = applyWriteIntent(plan.intent)
+      pushToolResult(call, applied.ok ? `已执行：${plan.summary}` : applied.note)
+      if (applied.ok) noteAction(plan.summary, true)
+      queue.index += 1
+      step()
+    }
+
+    step()
+  }
+
+  /** 用户对破坏性操作表态后继续（从断点接着处理剩下的调用） */
+  const resolvePending = useCallback((approve: boolean): void => {
+    const pending = pendingRef.current
+    setPending(null)
+    if (!pending) return
+
+    if (approve) {
+      const applied = applyWriteIntent(pending.intent)
+      pushToolResult(pending.call, applied.ok ? `已执行：${pending.summary}` : applied.note)
+      if (applied.ok) noteAction(pending.summary, true)
+    } else {
+      // 拒绝也要如实回喂：否则模型以为删掉了，后面的判断全错
+      pushToolResult(
+        pending.call,
+        '用户拒绝了这次操作，没有执行。请不要重试同一个操作，改为向用户说明你原本打算做什么。'
+      )
+      noteAction(`已跳过：${pending.summary}`, false)
+    }
+
+    const queue = queueRef.current
+    if (queue) {
+      queue.index += 1
+      processQueueRef.current()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* ------------------------------------------------------------------ */
+  /* 流式事件                                                            */
+  /* ------------------------------------------------------------------ */
+
   const handleEvent = useCallback(
     (event: AiStreamEvent): void => {
       if (event.requestId !== requestIdRef.current) return
 
-      /** 结束本轮：清空进行中的请求，解锁输入 */
-      const finishTurn = (): void => {
-        requestIdRef.current = null
-        setStreaming(false)
-      }
-
-      /**
-       * 往最后一条助手消息上补字段（工具痕迹 / 收尾文案）。
-       *
-       * **只覆盖真正给了值的键**：`{ ...last, content: undefined }` 会把 content
-       * 清成 undefined，下一次渲染读它的 length 就直接崩（这个坑真踩过，
-       * 表现为点「停止生成」后整块界面报错）。
-       */
+      /** 往最后一条助手消息上补字段（工具痕迹 / 收尾文案） */
       const patchLast = (patch: Partial<ChatMsg>): void => {
         update((prev) => {
           const last = prev[prev.length - 1]
@@ -223,7 +446,9 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
           return
         }
         patchLast({ content: `出错了：${event.message}` })
-        finishTurn()
+        requestIdRef.current = null
+        setStreaming(false)
+        commitTurnRef.current()
         return
       }
 
@@ -235,7 +460,10 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
           const content = last.content.trim().length > 0 ? last.content : '（已停止）'
           return [...prev.slice(0, -1), { ...last, content, aborted: true }]
         })
-        finishTurn()
+        requestIdRef.current = null
+        setStreaming(false)
+        queueRef.current = null
+        commitTurnRef.current()
         return
       }
 
@@ -247,52 +475,29 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
           const content = last.content.trim().length > 0 ? last.content : '（模型没有返回内容，换个说法或换个模型再试）'
           return [...prev.slice(0, -1), { ...last, content }]
         })
-        finishTurn()
+        requestIdRef.current = null
+        setStreaming(false)
+        commitTurnRef.current()
         return
       }
 
-      // 有工具调用：把助手这一轮记进消息线（协议要求带上 tool_calls），再执行工具
+      // 有工具调用：把助手这一轮记进消息线（协议要求带上 tool_calls），然后逐个处理
       wireRef.current = [...wireRef.current, { role: 'assistant', content: event.content, toolCalls: calls }]
       roundRef.current += 1
 
       const gate = canContinueAgentLoop(roundRef.current, toolCallsUsedRef.current + calls.length)
       if (!gate.ok) {
         toolCallsUsedRef.current += calls.length
-        update((prev) => {
-          const last = prev[prev.length - 1]
-          if (!last || last.role !== 'assistant') return prev
-          return [
-            ...prev.slice(0, -1),
-            { ...last, content: `${last.content}\n\n（${gate.reason}，先基于已看到的内容作答）` }
-          ]
-        })
-        finishTurn()
+        patchLast({ content: `${messagesRef.current[messagesRef.current.length - 1]?.content ?? ''}\n\n（${gate.reason}，先基于已看到的内容作答）` })
+        requestIdRef.current = null
+        setStreaming(false)
+        commitTurnRef.current()
         return
       }
 
       toolCallsUsedRef.current += calls.length
-
-      const state = useEditor.getState()
-      const context: ToolContext = {
-        root: activeRoot(state.workbook),
-        selectedId: state.selection[0] ?? null,
-        sheetCount: state.workbook.sheets.length
-      }
-
-      const notes: string[] = []
-      const toolMessages: AiMessage[] = []
-      for (const call of calls) {
-        // 工具失败也会返回可读文本（见 runReadTool）：让模型自己纠正，而不是整轮中断
-        const result = runReadTool(call.name, call.argumentsText, context)
-        notes.push(result.summary)
-        toolMessages.push({ role: 'tool', toolCallId: call.id, content: result.content })
-      }
-      wireRef.current = [...wireRef.current, ...toolMessages]
-
-      patchLast({ toolNotes: [...(messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []), ...notes] })
-
-      // 继续下一轮：模型拿到结果后再决定是继续调工具还是作答
-      runRoundRef.current()
+      queueRef.current = { calls, index: 0 }
+      processQueueRef.current()
     },
     [update]
   )
@@ -311,7 +516,9 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
 
   useEffect(() => {
     runRoundRef.current = runRound
-  }, [runRound])
+    processQueueRef.current = processQueue
+    commitTurnRef.current = commitTurn
+  })
 
   useEffect(() => window.api.onAiStreamEvent(handleEvent), [handleEvent])
 
@@ -355,6 +562,11 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
       wireRef.current = [{ role: 'system', content: system }, ...history]
       roundRef.current = 0
       toolCallsUsedRef.current = 0
+      writeLogRef.current = []
+      turnStartedRef.current = false
+      queueRef.current = null
+      setPending(null)
+      setPendingWrite(null)
 
       update((prev) => [
         ...prev,
@@ -469,10 +681,10 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
               <div className="chat-panel__hint">
                 <Sparkles size={16} />
                 <p>
-                  用自然语言聊聊这页导图。
+                  用自然语言聊这页导图，也可以直接让它改图。
                   <br />
-                  它会自己翻看结构（搜索主题、读分支），但<strong>不会改</strong>你的画布；
-                  要它动图请用下面的「润色 / 扩写 / 生成」——那几个会先给你预览。
+                  它会自己翻看结构；删分支这类操作会<strong>先问你</strong>，
+                  改完按一次 <strong>Ctrl+Z</strong> 可以整体撤销。
                 </p>
               </div>
             )}
@@ -524,6 +736,23 @@ export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props
               </button>
             ))}
           </div>
+
+          {pendingWrite && (
+            <div className="chat-panel__confirm">
+              <div className="chat-panel__confirm-text">
+                <TriangleAlert size={14} />
+                <span>{pendingWrite.summary}</span>
+              </div>
+              <div className="chat-panel__confirm-actions">
+                <button type="button" className="btn" onClick={() => resolvePending(false)}>
+                  跳过
+                </button>
+                <button type="button" className="btn btn--primary" onClick={() => resolvePending(true)}>
+                  执行
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="chat-panel__input">
             <textarea

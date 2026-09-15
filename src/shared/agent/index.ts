@@ -6,6 +6,7 @@
  * 「回复 → 画布」的反向链接；1b 的探查工具与循环状态机也会落在这里。
  */
 
+import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { isRecord } from '../guards'
 import { ancestorsOf, findTopic } from '../model/tree'
 import type { Topic } from '../model/types'
@@ -513,4 +514,345 @@ export function runReadTool(name: string, argumentsText: string, context: ToolCo
   const result = executeReadTool(name, argumentsText, context)
   if (result.content.length <= AGENT_TOOL_RESULT_MAX) return result
   return { ...result, content: `${result.content.slice(0, AGENT_TOOL_RESULT_MAX)}\n…（结果过长已截断）` }
+}
+
+/* ------------------------------------------------------------------ */
+/* 写工具（三期二期）：能真正改画布的那一批                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 写工具**不在这里直接改 store**。
+ *
+ * `planWriteTool` 只把模型给的参数解析成一条「操作意图」，由渲染层执行。这样：
+ * ① 这一层保持纯逻辑（自检能直接跑，不用起 React）；
+ * ② 解析/寻址失败时能把可读原因原样回喂给模型，让它自己纠正；
+ * ③ 破坏性操作有地方插「确认」这一步（执行前拦一道）。
+ */
+export type WriteIntent =
+  | { kind: 'rename'; id: string; title: string }
+  | { kind: 'insert'; id: string; node: OutlineNode; count: number }
+  | { kind: 'delete'; id: string; title: string; size: number }
+  | { kind: 'move'; id: string; targetId: string; index: number | null }
+  | { kind: 'collapse'; id: string; collapsed: boolean }
+  | { kind: 'notes'; id: string; text: string }
+  | { kind: 'code'; id: string; code: { language: string; text: string } | null }
+  | { kind: 'formula'; id: string; formula: string }
+  | { kind: 'ask'; question: string; options: string[] }
+
+export type WritePlan =
+  | { ok: true; intent: WriteIntent; summary: string; destructive: boolean }
+  | { ok: false; error: string; summary: string }
+
+export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
+  {
+    name: 'renameTopic',
+    description:
+      '修改一个主题的标题。address 可以是主题 id、标题路径（如 中心主题/成本/人力），或唯一的标题原文。' +
+      '改名前先确认目标是谁（用 getSelection 或 searchNodes 看过的 id），不要用近似标题硬猜。' +
+      '注意：改名会清掉该标题上的局部格式（加粗/颜色），与手工改名行为一致。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '主题 id、标题路径或唯一标题' },
+        title: { type: 'string', description: '新的标题文字（不要带引号）' }
+      },
+      ['address', 'title']
+    )
+  },
+  {
+    name: 'insertSubtree',
+    description:
+      '在指定主题下面**新增**一棵子树。outline 用缩进大纲写：第一行是新主题的标题，' +
+      '每多两个空格缩进一层表示更深一级，每行以「- 」开头。' +
+      '要加多个**同级**主题请多次调用本工具，不要把它们写成并列行。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '挂在哪个主题下面' },
+        outline: { type: 'string', description: '缩进大纲文本' }
+      },
+      ['address', 'outline']
+    )
+  },
+  {
+    name: 'deleteTopic',
+    description:
+      '删除一个主题**连同它的整棵子树**。这是破坏性操作，界面上会先请你（用户）确认。' +
+      '删除前务必确认目标正确——宁可先用 searchNodes 查清楚。',
+    parameters: schema({ address: { type: 'string', description: '要删除的主题' } }, ['address'])
+  },
+  {
+    name: 'moveTopic',
+    description:
+      '把一个主题（连同子树）移动到另一个主题下面。index 是插到第几个子节点（从 0 开始；省略表示放到最后）。' +
+      '不能移动到自己的子孙下面。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '要移动的主题' },
+        toAddress: { type: 'string', description: '新的父主题' },
+        index: { type: 'integer', description: '插到第几个位置（可省略）' }
+      },
+      ['address', 'toAddress']
+    )
+  },
+  {
+    name: 'setCollapsed',
+    description: '折叠或展开一个主题（只影响显示，不改内容）。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '目标主题' },
+        collapsed: { type: 'boolean', description: 'true = 折叠，false = 展开' }
+      },
+      ['address', 'collapsed']
+    )
+  },
+  {
+    name: 'setNotes',
+    description: '写主题的备注（多行纯文本）。传空字符串即清空备注。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '目标主题' },
+        text: { type: 'string', description: '备注正文' }
+      },
+      ['address', 'text']
+    )
+  },
+  {
+    name: 'setCode',
+    description:
+      '写主题的代码块（会按语言语法高亮）。text 传空字符串即移除代码块。' +
+      'language 用常见名：js / ts / python / java / c / cpp / csharp / go / rust / sql / json / yaml / bash / html / css / text。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '目标主题' },
+        language: { type: 'string', description: '语言（可省略，默认 text）' },
+        text: { type: 'string', description: '代码正文' }
+      },
+      ['address', 'text']
+    )
+  },
+  {
+    name: 'setFormula',
+    description:
+      '写主题的 LaTeX 公式。formula 只填正文（如 \\frac{a}{b}），**不要**带 $ 或 $$ 包裹。传空字符串即移除公式。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '目标主题' },
+        formula: { type: 'string', description: 'LaTeX 正文' }
+      },
+      ['address', 'formula']
+    )
+  },
+  {
+    name: 'askUser',
+    description:
+      '当指令指向不明、有多个候选、或你不确定用户想改哪一支（哪张分支）时，用这个工具提问，' +
+      '**不要猜着改**。一次只问一个问题，问题要短；能给出候选就放到 options 里。',
+    parameters: schema(
+      {
+        question: { type: 'string', description: '要问用户的问题' },
+        options: { type: 'array', items: { type: 'string' }, description: '可选的候选答案（最多 5 个）' }
+      },
+      ['question']
+    )
+  }
+]
+
+/** 一次对话可用的全部工具（读 + 写） */
+export const AGENT_ALL_TOOLS: AgentToolDef[] = [...AGENT_TOOLS, ...AGENT_WRITE_TOOLS]
+
+/** 目标节点自己或它的某个子孙是不是 `id` */
+function subtreeContains(node: Topic, id: string): boolean {
+  if (node.id === id) return true
+  return node.children.some((child) => subtreeContains(child, id))
+}
+
+/**
+ * 把写工具的调用解析成一条「操作意图」。
+ *
+ * 失败也返回文本（`error`）而不是抛错：这段文字会原样回喂给模型，
+ * 它看到「标题「成本」出现 2 次，请改用路径」才知道下一步怎么改。
+ */
+export function planWriteTool(name: string, argumentsText: string, root: Topic): WritePlan {
+  const fail = (error: string): WritePlan => ({
+    ok: false,
+    error: `调用 ${name} 失败：${error}`,
+    summary: `${name}：${error.length > 30 ? `${error.slice(0, 30)}…` : error}`
+  })
+
+  let args: Record<string, unknown> = {}
+  const trimmed = argumentsText.trim()
+  if (trimmed.length > 0) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch (error) {
+      return fail(`参数不是合法 JSON（${(error as Error).message}）。请重新调用并传入合法参数。`)
+    }
+    if (!isRecord(parsed)) return fail('参数必须是 JSON 对象。')
+    args = parsed
+  }
+
+  /** 解析 address 并给出「找到的那个节点」 */
+  const resolve = (key: string): { topic: Topic } | { problem: WritePlan } => {
+    const address = stringArg(args, key)
+    if (address.length === 0) return { problem: fail(`${key} 不能为空。`) }
+    const resolved = resolveTopicAddress(root, address)
+    if (!resolved.ok) return { problem: fail(resolved.error) }
+    return { topic: resolved.resolved.topic }
+  }
+
+  if (name === 'renameTopic') {
+    const target = resolve('address')
+    if ('problem' in target) return target.problem
+    if (typeof args.title !== 'string') return fail('title 必须是字符串。')
+    const title = args.title.trim()
+    return {
+      ok: true,
+      intent: { kind: 'rename', id: target.topic.id, title },
+      summary:
+        title.length === 0
+          ? `清空「${target.topic.title}」的标题`
+          : `改名「${target.topic.title}」→「${title}」`,
+      destructive: false
+    }
+  }
+
+  if (name === 'insertSubtree') {
+    const target = resolve('address')
+    if ('problem' in target) return target.problem
+    const outline = stringArg(args, 'outline')
+    if (outline.length === 0) return fail('outline 不能为空。')
+    const parsed = parseOutline(outline, '新主题')
+    if (!parsed.root) return fail(parsed.warnings.join('；') || 'outline 里解析不出任何主题。')
+    const node = parsed.root
+    return {
+      ok: true,
+      intent: { kind: 'insert', id: target.topic.id, node, count: parsed.count },
+      // 「第一行是新节点标题」这条契约写进描述里了，所以这里永远只插一个根 + 它的子孙
+      summary: `在「${target.topic.title}」下新增「${node.title}」（共 ${parsed.count} 个节点）`,
+      destructive: false
+    }
+  }
+
+  if (name === 'deleteTopic') {
+    const target = resolve('address')
+    if ('problem' in target) return target.problem
+    const size = countTopicTree(target.topic)
+    return {
+      ok: true,
+      intent: { kind: 'delete', id: target.topic.id, title: target.topic.title, size },
+      summary: `删除「${target.topic.title}」（含 ${size} 个节点）`,
+      destructive: true
+    }
+  }
+
+  if (name === 'moveTopic') {
+    const source = resolve('address')
+    if ('problem' in source) return source.problem
+    const destination = resolve('toAddress')
+    if ('problem' in destination) return destination.problem
+    if (source.topic.id === destination.topic.id) return fail('不能把一个主题移到它自己下面。')
+    if (subtreeContains(source.topic, destination.topic.id)) {
+      return fail('不能把一个主题移到它自己的子孙下面。')
+    }
+    const rawIndex = args.index
+    const index = typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.max(0, Math.round(rawIndex)) : null
+    return {
+      ok: true,
+      intent: { kind: 'move', id: source.topic.id, targetId: destination.topic.id, index },
+      summary: `移动「${source.topic.title}」到「${destination.topic.title}」下`,
+      destructive: false
+    }
+  }
+
+  if (name === 'setCollapsed') {
+    const target = resolve('address')
+    if ('problem' in target) return target.problem
+    if (typeof args.collapsed !== 'boolean') return fail('collapsed 必须是 true 或 false。')
+    return {
+      ok: true,
+      intent: { kind: 'collapse', id: target.topic.id, collapsed: args.collapsed },
+      summary: `${args.collapsed ? '折叠' : '展开'}「${target.topic.title}」`,
+      destructive: false
+    }
+  }
+
+  if (name === 'setNotes') {
+    const target = resolve('address')
+    if ('problem' in target) return target.problem
+    if (typeof args.text !== 'string') return fail('text 必须是字符串。')
+    const text = args.text
+    return {
+      ok: true,
+      intent: { kind: 'notes', id: target.topic.id, text },
+      summary:
+        text.trim().length === 0
+          ? `清空「${target.topic.title}」的备注`
+          : `给「${target.topic.title}」写备注（${text.trim().length} 字）`,
+      destructive: false
+    }
+  }
+
+  if (name === 'setCode') {
+    const target = resolve('address')
+    if ('problem' in target) return target.problem
+    if (typeof args.text !== 'string') return fail('text 必须是字符串。')
+    const text = args.text
+    if (text.trim().length === 0) {
+      return {
+        ok: true,
+        intent: { kind: 'code', id: target.topic.id, code: null },
+        summary: `移除「${target.topic.title}」的代码块`,
+        destructive: false
+      }
+    }
+    const language = stringArg(args, 'language')
+    return {
+      ok: true,
+      intent: { kind: 'code', id: target.topic.id, code: { language: language.length > 0 ? language : 'text', text } },
+      summary: `给「${target.topic.title}」写代码块（${language.length > 0 ? language : 'text'}）`,
+      destructive: false
+    }
+  }
+
+  if (name === 'setFormula') {
+    const target = resolve('address')
+    if ('problem' in target) return target.problem
+    if (typeof args.formula !== 'string') return fail('formula 必须是字符串。')
+    // 模型常常好心地把公式包在 $…$ 里，这里替它剥掉（与公式输入框的处理一致）
+    const formula = args.formula.trim().replace(/^\$\$?/, '').replace(/\$\$?$/, '').trim()
+    return {
+      ok: true,
+      intent: { kind: 'formula', id: target.topic.id, formula },
+      summary:
+        formula.length === 0 ? `移除「${target.topic.title}」的公式` : `给「${target.topic.title}」写公式`,
+      destructive: false
+    }
+  }
+
+  if (name === 'askUser') {
+    const question = stringArg(args, 'question')
+    if (question.length === 0) return fail('question 不能为空。')
+    const rawOptions = args.options
+    const options = Array.isArray(rawOptions)
+      ? rawOptions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 5)
+      : []
+    return {
+      ok: true,
+      intent: { kind: 'ask', question, options },
+      summary: `提问：${question.length > 24 ? `${question.slice(0, 24)}…` : question}`,
+      destructive: false
+    }
+  }
+
+  return fail('不是可用的写工具。')
+}
+
+/** 写意图是不是「会改动画布」的那种（askUser 只提问，不改任何东西） */
+export function isMutatingIntent(intent: WriteIntent): boolean {
+  return intent.kind !== 'ask'
+}
+
+/** 这个名字是不是只读工具（渲染层据此决定「直接执行」还是「走写工具流程」） */
+export function isReadToolName(name: string): boolean {
+  return AGENT_TOOLS.some((tool) => tool.name === name)
 }

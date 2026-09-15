@@ -2296,6 +2296,34 @@ textarea {
   background: rgba(47, 107, 255, 0.08);
 }
 
+/* 破坏性操作的确认条：AI 要删东西时先在这儿等用户点头 */
+.chat-panel__confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(229, 72, 77, 0.35);
+  border-radius: 8px;
+  background: rgba(229, 72, 77, 0.06);
+  font-size: 12px;
+}
+
+.chat-panel__confirm-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--danger);
+}
+
+.chat-panel__confirm-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
 .chat-panel__input {
   display: flex;
   gap: 8px;

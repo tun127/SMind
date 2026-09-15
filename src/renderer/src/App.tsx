@@ -1105,6 +1105,20 @@ export default function App(): ReactElement {
             onClose={() => setSidePanel('none')}
             onOpenSettings={() => setShowAiSettings(true)}
             onOpenTask={(task) => setAiTask(task)}
+            onBeforeAiWrite={() => {
+              const store = useEditor.getState()
+              // 撤销栈在内存里，崩溃就没了：AI 动手前先存一份盘上的（未保存的文档不进版本快照）
+              if (!store.filePath) return
+              void window.api
+                .snapshotCreate(activeDocId(), {
+                  workbook: snapshotForSave(store),
+                  path: store.filePath,
+                  title: defaultDocumentName(store.workbook),
+                  reason: 'manual',
+                  note: 'AI 动手前的自动存档'
+                })
+                .catch(() => undefined)
+            }}
           />
         )}
       </div>

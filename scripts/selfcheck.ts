@@ -47,10 +47,14 @@ import {
   toWireMessages
 } from '../src/shared/ai'
 import {
+  AGENT_ALL_TOOLS,
   AGENT_MAX_ROUNDS,
   AGENT_MAX_TOOL_CALLS,
+  AGENT_WRITE_TOOLS,
   buildTitleIndex,
   canContinueAgentLoop,
+  isMutatingIntent,
+  planWriteTool,
   resolveTopicAddress,
   runReadTool,
   segmentTitleMentions,
@@ -1689,6 +1693,119 @@ function testAgentTools(): void {
   check('停下时给出原因（不是静默）', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).reason.includes('轮'))
   eq('到调用次数上限就停', canContinueAgentLoop(0, AGENT_MAX_TOOL_CALLS).ok, false)
   eq('刚好在上限之前还能继续', canContinueAgentLoop(AGENT_MAX_ROUNDS - 1, AGENT_MAX_TOOL_CALLS - 1).ok, true)
+}
+
+/* ------------------------------------------------------------------ */
+/* 7.11 写工具与「一次命令 = 一步撤销」的事务                            */
+/* ------------------------------------------------------------------ */
+
+function testWriteToolsAndTurn(): void {
+  group('Agent：写工具的意图规划')
+
+  eq('写工具一共 9 个（第一批）', AGENT_WRITE_TOOLS.length, 9)
+  eq('全部工具 = 读 4 + 写 9', AGENT_ALL_TOOLS.length, 13)
+
+  // 注意别把这个变量叫 root：会遮蔽上面那个 root() 助手
+  const tree = createTopic('中心主题')
+  const cost = createTopic('成本')
+  const labor = createTopic('人力')
+  const material = createTopic('物料')
+  cost.children.push(labor, material)
+  tree.children.push(cost)
+
+  const plan = (name: string, args: Record<string, unknown>): ReturnType<typeof planWriteTool> =>
+    planWriteTool(name, JSON.stringify(args), tree)
+  /** 取「是不是破坏性操作」；规划失败时按 false 处理（失败的断言在别处） */
+  const destructiveOf = (p: ReturnType<typeof planWriteTool>): boolean => (p.ok ? p.destructive : false)
+
+  const rename = plan('renameTopic', { address: '中心主题/成本/人力', title: '人力成本' })
+  eq('改名规划成功', rename.ok, true)
+  check('改名指向正确节点', rename.ok && rename.intent.kind === 'rename' && rename.intent.id === labor.id)
+  check('改名摘要给人看', rename.summary.includes('人力') && rename.summary.includes('人力成本'))
+  eq('改名不算破坏性', destructiveOf(plan('renameTopic', { address: '成本', title: 'X' })), false)
+
+  const bad = plan('renameTopic', { address: '找不到的', title: 'X' })
+  eq('地址无效时规划失败', bad.ok, false)
+  check('失败原因可读（要能回喂给模型）', !bad.ok && bad.error.includes('searchNodes'))
+  eq('title 类型不对被拦下', plan('renameTopic', { address: '成本', title: 5 }).ok, false)
+
+  const insert = plan('insertSubtree', { address: '成本', outline: '- 预算\n  - 人力\n  - 物料' })
+  eq('插入子树规划成功', insert.ok, true)
+  check('插入带上节点数', insert.ok && insert.intent.kind === 'insert' && insert.intent.count === 3)
+  check('插入摘要有层级说明', insert.summary.includes('预算') && insert.summary.includes('3 个节点'))
+  eq('outline 为空被拦下', plan('insertSubtree', { address: '成本', outline: '   ' }).ok, false)
+
+  const del = plan('deleteTopic', { address: '成本' })
+  eq('删除是破坏性操作（要确认）', destructiveOf(del), true)
+  check('删除摘要带上影响范围', del.summary.includes('3 个节点'))
+
+  const move = plan('moveTopic', { address: '人力', toAddress: '中心主题/成本' })
+  eq('移动规划成功', move.ok, true)
+  eq('移动不算破坏性', destructiveOf(move), false)
+  eq('不能移到自己下面', plan('moveTopic', { address: '成本', toAddress: '成本' }).ok, false)
+  eq('不能移到自己的子孙下面', plan('moveTopic', { address: '成本', toAddress: '人力' }).ok, false)
+
+  eq('折叠必须给布尔值', plan('setCollapsed', { address: '成本', collapsed: 'yes' }).ok, false)
+  check('折叠摘要可读', plan('setCollapsed', { address: '成本', collapsed: true }).summary.includes('折叠'))
+  check('备注为空即清空', plan('setNotes', { address: '成本', text: '  ' }).summary.includes('清空'))
+  check('代码块为空即移除', plan('setCode', { address: '成本', text: '' }).summary.includes('移除'))
+
+  const formula = plan('setFormula', { address: '成本', formula: '$$E=mc^2$$' })
+  check(
+    '公式自动剥掉 $ 包裹',
+    formula.ok && formula.intent.kind === 'formula' && formula.intent.formula === 'E=mc^2'
+  )
+
+  const ask = plan('askUser', { question: '要改哪一支？', options: ['成本', '收入', 'a', 'b', 'c', 'd'] })
+  check('提问被规划', ask.ok && ask.intent.kind === 'ask')
+  check('候选最多留 5 个', ask.ok && ask.intent.kind === 'ask' && ask.intent.options.length === 5)
+  eq('空问题被拦下', plan('askUser', { question: ' ' }).ok, false)
+  eq('askUser 不算改动画布', isMutatingIntent({ kind: 'ask', question: 'q', options: [] }), false)
+
+  const broken = planWriteTool('setNotes', '{"address"', tree)
+  eq('非法 JSON 被拦下', broken.ok, false)
+  check('非法 JSON 的提示点明 JSON', !broken.ok && broken.error.includes('JSON'))
+  eq('未知工具被拦住', planWriteTool('dropTable', '{}', tree).ok, false)
+
+  group('Agent 回合事务：一次命令 = 一步撤销')
+
+  reset()
+  const turnRoot = root()
+  const a = addChildOf(turnRoot.id, '甲')
+  const b = addChildOf(turnRoot.id, '乙')
+  const c = addChildOf(turnRoot.id, '丙')
+  const ours = [a, b, c]
+  const order = (): string[] =>
+    (find(turnRoot.id)?.children ?? []).filter((topic) => ours.includes(topic.id)).map((topic) => topic.title)
+
+  const base = store().undoStack.length
+  store().beginAiTurn()
+  store().setTitle(a, '甲改名')
+  // 故意混入**换父 + 数组重排**：当年把 inverse 合成一份时，正是这种操作坏掉了 children
+  store().moveNode(a, b)
+  store().setCollapsed(turnRoot.id, true)
+
+  const lockedLen = store().undoStack.length
+  store().undo()
+  eq('回合中撤销被锁住（否则历史会错位）', store().undoStack.length, lockedLen)
+
+  check('回合确实产生了改动', store().commitAiTurn('AI · 一次命令'))
+  eq('三处改动并成一步', store().undoStack.length, base + 1)
+
+  store().undo()
+  eq('一次撤销回到家门口（顺序）', order(), ['甲', '乙', '丙'])
+  eq('一次撤销回到标题', find(a)?.title, '甲')
+  eq('一次撤销回到折叠状态', find(turnRoot.id)?.collapsed, undefined)
+  eq('换父移动也被整体撤回（乙名下重新变空）', find(b)?.children.length, 0)
+
+  store().redo()
+  eq('重做后甲不再挂在根下（重排生效）', order(), ['乙', '丙'])
+  eq('重做后甲挂在乙下面、且带着新名字', find(b)?.children[0]?.title, '甲改名')
+
+  const beforeEmpty = store().undoStack.length
+  store().beginAiTurn()
+  eq('没改东西的回合不产生条目', store().commitAiTurn('AI · 什么也没做'), false)
+  eq('栈长度不变（Ctrl+Z 不会"没反应"）', store().undoStack.length, beforeEmpty)
 }
 
 /* ------------------------------------------------------------------ */
@@ -6197,6 +6314,7 @@ async function main(): Promise<void> {
   testAiChatHelpers()
   testAgentHelpers()
   testAgentTools()
+  testWriteToolsAndTurn()
   await testSafetyHelpers()
   testMisc()
   testTypedChar()

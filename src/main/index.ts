@@ -43,7 +43,7 @@ import {
   type ChatHistoryEntry,
   type ToolCall
 } from '@shared/ai'
-import { toWireTools } from '@shared/agent'
+import { AGENT_ALL_TOOLS, toWireTools } from '@shared/agent'
 import type { Workbook } from '@shared/model/types'
 import { createId } from '@shared/model/factory'
 import {
@@ -413,8 +413,8 @@ async function callAiStream(
         messages: toWireMessages(messages),
         temperature: config.temperature,
         stream: true,
-        // 只读工具：模型据此决定要不要先看一眼导图再回答
-        ...(useTools ? { tools: toWireTools() } : {})
+        // 读 + 写工具：模型据此决定先看哪一眼、以及要不要动手
+        ...(useTools ? { tools: toWireTools(AGENT_ALL_TOOLS) } : {})
       }),
       signal: controller.signal
     })

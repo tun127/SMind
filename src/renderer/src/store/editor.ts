@@ -119,6 +119,8 @@ export interface EditorState {
 
   undoStack: HistoryEntry[]
   redoStack: HistoryEntry[]
+  /** 进行中的 AI 回合（null = 不在 AI 操作中；此时禁止撤销，见 undo 的说明） */
+  aiTurn: { depth: number; selectionBefore: string[] } | null
 
   /* ---- 检索（P7） ---- */
   setSearchQuery(query: string): void
@@ -184,6 +186,15 @@ export interface EditorState {
   mutate(recipe: (draft: Workbook) => void, label: string, coalesceKey?: string): boolean
   undo(): void
   redo(): void
+  /**
+   * 开始一个 AI 回合。
+   *
+   * AI 一次命令可能改几十个节点——每个改动各记一步撤销等于没有撤销。
+   * 从 begin 到 commit 之间的所有改动会在结束时**并成一步**，用户按一下 `Ctrl+Z` 全回来。
+   */
+  beginAiTurn(): void
+  /** 结束 AI 回合并合并；返回这一步是否真的产生了改动 */
+  commitAiTurn(label: string): boolean
 
   /* ---- 选择与编辑态 ---- */
   select(id: string | null, additive?: boolean): void
@@ -211,6 +222,13 @@ export interface EditorState {
   addChild(parentId?: string): string
   addSibling(id?: string): string
   deleteSelection(): void
+  /**
+   * 删除指定主题（连同子树）。
+   *
+   * AI 写工具用：`deleteSelection` 是给键盘操作的，会连带改用户的选择；
+   * AI 不该有这种副作用，所以按 id 删、只在必要时把选择挪到父级。
+   */
+  deleteTopic(id: string): boolean
   setTitle(id: string, title: string): void
   setRichText(id: string, rich: RichText | null): void
   toggleCollapse(id: string): void
@@ -504,6 +522,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   undoStack: [],
   redoStack: [],
+  aiTurn: null,
 
   /* ------------------------------------------------------------------ */
   /* 视图                                                                */
@@ -773,7 +792,55 @@ export const useEditor = create<EditorState>()((set, get) => ({
     return true
   },
 
+  beginAiTurn: () => {
+    // 已经在回合里就别重入：同一份文档同时只允许一个 AI 回合
+    if (get().aiTurn) return
+    set({ aiTurn: { depth: get().undoStack.length, selectionBefore: get().selection } })
+  },
+
+  /**
+   * 结束 AI 回合，把期间的所有改动**并成一步撤销**。
+   *
+   * 合成规则是这件事的关键：
+   * - `patches` 按**发生顺序**拼（撤销栈里的顺序就是发生顺序）；
+   * - `inverse` 按**条目倒序**拼（每个 inverse 是针对它自己那次改动**之前**的状态算出来的，
+   *   必须从最后一步往前依次套用）。
+   *
+   * 反过来做（把 inverse 合成一份、正向套到"后来的状态"上）会踩坑：数组重排的 patch 带下标，
+   * 套错状态就会改坏 `children`——早期做「连按方向键合并成一步」时就这么坏过数据。
+   */
+  commitAiTurn: (label) => {
+    const turn = get().aiTurn
+    if (!turn) return false
+    const { undoStack } = get()
+    const batch = undoStack.slice(turn.depth)
+    if (batch.length === 0) {
+      // AI 没改任何东西：不留空条目（否则用户按 Ctrl+Z 会"没反应"）
+      set({ aiTurn: null })
+      return false
+    }
+
+    const patches = batch.flatMap((entry) => entry.patches)
+    const inverse: Patch[] = []
+    for (let index = batch.length - 1; index >= 0; index -= 1) {
+      const entry = batch[index]
+      if (entry) inverse.push(...entry.inverse)
+    }
+
+    set({
+      aiTurn: null,
+      undoStack: [
+        ...undoStack.slice(0, turn.depth),
+        { label, patches, inverse, time: Date.now(), selectionBefore: turn.selectionBefore }
+      ].slice(-HISTORY_LIMIT),
+      redoStack: []
+    })
+    return true
+  },
+
   undo: () => {
+    // AI 回合进行中禁止撤销：中途把撤销栈抽走，会让后续步骤全部错位
+    if (get().aiTurn) return
     const { workbook, undoStack, redoStack } = get()
     const entry = undoStack[undoStack.length - 1]
     if (!entry) return
@@ -792,6 +859,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   redo: () => {
+    // 同 undo：AI 回合进行中不许动历史
+    if (get().aiTurn) return
     const { workbook, undoStack, redoStack } = get()
     const entry = redoStack[redoStack.length - 1]
     if (!entry) return
@@ -969,6 +1038,28 @@ export const useEditor = create<EditorState>()((set, get) => ({
       selection: nextId ? [nextId] : [],
       ...NO_EDITING
     })
+  },
+
+  deleteTopic: (id) => {
+    const { workbook } = get()
+    const root = activeRoot(workbook)
+    if (id === root.id || !findTopic(root, id)) return false
+
+    const parent = findParent(root, id)
+    get().mutate((draft) => {
+      const draftRoot = activeRoot(draft)
+      detachTopic(draftRoot, id)
+      // 指向已删除主题的关系线/边界/概要会变成悬空元素，必须一起清掉
+      pruneOverlays(activeSheet(draft))
+    }, '删除主题')
+
+    // 选择落在**被删节点的父级**上（不是随便挑一个），用户不会觉得焦点丢了；
+    // 原本还选着的其它节点仍然保留
+    const stillThere = get().selection.filter(
+      (item) => item !== id && findTopic(activeRoot(get().workbook), item) !== null
+    )
+    set({ selection: stillThere.length > 0 ? stillThere : parent ? [parent.id] : [], ...NO_EDITING })
+    return true
   },
 
   setTitle: (id, title) => {
