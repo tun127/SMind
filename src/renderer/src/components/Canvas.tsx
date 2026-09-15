@@ -796,7 +796,7 @@ export default function Canvas(): ReactElement {
         height: rect.height + top + bottom
       }
     },
-    [axesOf, growthAxis, insertAxis, siblingStacks]
+    [axesOf, growthAxis, insertAxis, dropIndex]
   )
 
   /**
@@ -1093,7 +1093,6 @@ export default function Canvas(): ReactElement {
     },
     [
       screenToWorld,
-      axesOf,
       zoneForPointer,
       snapRegionOf,
       siblingStacks,

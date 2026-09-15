@@ -82,6 +82,9 @@ export default function HistoryDialog({ onClose, onNotify, onOpenFile, onRestore
   }, [onNotify])
 
   useEffect(() => {
+    // 从主进程读一次磁盘数据（异步）：首屏就是"加载中"，加载完再填进来。
+    // setState 发生在 await 之后，属于与外部系统同步，不是从 props 派生 UI。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshHistory()
   }, [refreshHistory])
 
@@ -98,6 +101,8 @@ export default function HistoryDialog({ onClose, onNotify, onOpenFile, onRestore
   }, [filePath, onNotify])
 
   useEffect(() => {
+    // 同上：读磁盘上的版本快照目录
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshSnapshots()
   }, [refreshSnapshots])
 

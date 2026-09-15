@@ -113,6 +113,10 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
   // 只在「切换所选节点」时同步草稿，输入过程中绝不覆盖用户正在敲的内容
   useEffect(() => {
+    // 「换了对象就把草稿重置掉」这类同步 setState 规则会报警，但这里正是它的经典场景：
+    // 依赖数组限定为节点而**不是**草稿本身，所以用户打字时不会被覆盖。
+    // 想彻底消除告警得改 remount 或派生状态，代价是面板里其它状态（滚动、焦点）一起丢。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLabelDraft('')
     setNotesDraft(topic?.notes ?? '')
     setHrefDraft(topic?.href ?? '')

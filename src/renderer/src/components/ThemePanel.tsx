@@ -50,6 +50,8 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
   }
 
   useEffect(() => {
+    // 打开面板时从磁盘读一次自定义主题（异步）
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshCustom()
   }, [])
 

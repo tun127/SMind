@@ -668,7 +668,8 @@ export default function App(): ReactElement {
       return
     }
     closeApp()
-  }, [commitPending])
+    // closeApp 是 settle 后的最终动作：漏了它这里会一直调用**首次渲染时**的那个闭包
+  }, [commitPending, closeApp])
 
   useEffect(() => {
     const off = window.api.onCloseRequest(() => {
@@ -791,6 +792,10 @@ export default function App(): ReactElement {
    */
   const nodePanelTick = useEditor((state) => state.nodePanelTick)
   useEffect(() => {
+    // 这是「响应 store 里的一个一次性信号」，不是从数据派生 UI：
+    // 信号本身没有可比较的前后值，只能这样处理。用 disable 而不是硬凑成
+    // 派生状态或 remount，是因为后者会把面板里其它状态一起丢掉。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (nodePanelTick > 0) setSidePanel('node')
   }, [nodePanelTick])
 
@@ -971,7 +976,8 @@ export default function App(): ReactElement {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+    // showToast 是 useCallback([]) 出来的稳定引用，列进来只是为了让依赖完整
+  }, [showToast])
 
   /* ------------------------------------------------------------------ */
   /* 拖拽图片文件到窗口：贴到选中的主题                                     */
