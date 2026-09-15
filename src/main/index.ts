@@ -1410,16 +1410,32 @@ function registerIpc(): void {
       if (typeof requestId !== 'string' || requestId.length === 0 || requestId.length > 128) {
         throw new Error('流式请求标识无效')
       }
-      // 工具往返会多出 assistant(带 tool_calls) 与 tool 两类消息，上限放宽到 120
-      if (!Array.isArray(messages) || messages.length === 0 || messages.length > 120) {
+      // 额度按**真实使用**定，不按想象的边界定：粘贴一整篇长文档、很长的会话都可能很大。
+      // 「超了就只回一句『对话内容无效』」是最糟的做法——用户不知道自己做错了什么
+      // （真被投诉过：粘一长段内容 → 发送失败，只看到一句无效）。所以：额度放宽 + 说清原因。
+      const MAX_MESSAGES = 400
+      const MAX_CONTENT = 200_000
+
+      if (!Array.isArray(messages) || messages.length === 0) {
         throw new Error('对话内容无效')
+      }
+      if (messages.length > MAX_MESSAGES) {
+        throw new Error(
+          `对话太长了（${messages.length} 条，上限 ${MAX_MESSAGES} 条）：` +
+            '请点聊天面板右上角的「清空对话」后再继续。'
+        )
       }
       for (const item of messages) {
         if (!isRecord(item)) throw new Error('对话内容无效')
         const role = item.role
         const knownRole = role === 'system' || role === 'user' || role === 'assistant' || role === 'tool'
-        if (!knownRole || typeof item.content !== 'string' || item.content.length > 60000) {
-          throw new Error('对话内容无效')
+        if (!knownRole) throw new Error('对话内容无效')
+        if (typeof item.content !== 'string') throw new Error('对话内容无效')
+        if (item.content.length > MAX_CONTENT) {
+          throw new Error(
+            `这条消息太长了（${item.content.length.toLocaleString()} 字，上限 ` +
+              `${MAX_CONTENT.toLocaleString()} 字）：请拆成几条发，或先精简一下。`
+          )
         }
         if (item.toolCallId !== undefined && typeof item.toolCallId !== 'string') {
           throw new Error('对话内容无效')

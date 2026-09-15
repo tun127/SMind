@@ -725,6 +725,21 @@ export function claimsAppliedChange(text: string): boolean {
   )
 }
 
+/**
+ * 把 Electron 的 invoke 拒绝信息还原成人话。
+ *
+ * 主进程 throw 的错会被包成 `Error invoking remote method 'ai:chat-stream': Error: 真正的话`，
+ * 原样显示给用户等于让他看一行技术噪声（真出现过：粘一长段内容后，面板上就这一行）。
+ */
+export function readableIpcError(message: string): string {
+  const marker = 'Error invoking remote method'
+  const at = message.indexOf(marker)
+  if (at < 0) return message
+  const colon = message.indexOf(': ', at)
+  if (colon < 0) return message
+  return message.slice(colon + 2).replace(/^Error:\s*/, '')
+}
+
 /** 展示用：1234 → 「1.2k」；45 → 「45」 */
 export function formatTokenCount(count: number): string {
   if (!Number.isFinite(count) || count <= 0) return '0'

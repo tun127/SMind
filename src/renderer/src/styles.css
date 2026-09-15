@@ -2468,6 +2468,12 @@ textarea {
   line-height: 1.6;
 }
 
+/* 输入区上方的临时提示（粘贴失败等）：小、淡、几秒后自己消失，不抢戏 */
+.chat-panel__hint {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+}
+
 .chat-panel__activate-actions {
   display: flex;
   justify-content: flex-end;

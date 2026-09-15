@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useRef, type ReactElement, type ReactNode } from 'react'
 import { AlertTriangle, HardDriveDownload } from 'lucide-react'
 import type { RecoveryInfo } from '@shared/ipc'
 
@@ -11,8 +11,26 @@ interface ModalProps {
 }
 
 export function Modal({ title, icon, children, footer, onMaskClick }: ModalProps): ReactElement {
+  /**
+   * 只有「按下与松开**都**落在遮罩上」才算点了遮罩。
+   *
+   * 单用 onClick 会误判：用户按在弹窗内部、把鼠标划到外面才松开时，浏览器仍会
+   * 往共同祖先（遮罩）冒泡一个 click —— 表现出来就是「鼠标只是划出去，弹窗就没了」
+   * （AI 设置里试连接时尤其容易划过界，真被投诉过）。
+   */
+  const pressedOnMask = useRef(false)
   return (
-    <div className="modal-mask" onClick={onMaskClick}>
+    <div
+      className="modal-mask"
+      onMouseDown={(event) => {
+        pressedOnMask.current = event.target === event.currentTarget
+      }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget || !pressedOnMask.current) return
+        pressedOnMask.current = false
+        onMaskClick?.()
+      }}
+    >
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">
           {icon && <span className="modal__icon">{icon}</span>}

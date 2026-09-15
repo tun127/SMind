@@ -41,6 +41,7 @@ import {
   accumulateToolCalls,
   addUsage,
   claimsAppliedChange,
+  readableIpcError,
   countTopicTree,
   createSseLineSplitter,
   createThinkingFilter,
@@ -1565,6 +1566,18 @@ function testAiChatHelpers(): void {
   eq('「已完成」算声明', claimsAppliedChange('已完成全部改动'), true)
   eq('纯计划不算声明', claimsAppliedChange('我建议把它拆成三类，需要我动手吗？'), false)
   eq('空文本不算', claimsAppliedChange('   '), false)
+
+  group('AI 聊天：错误信息还原（别让用户看技术噪声）')
+
+  eq(
+    '剥掉 Electron 的 invoke 包装，只留人话',
+    readableIpcError(
+      "Error invoking remote method 'ai:chat-stream': Error: 这条消息太长了（200001 字，上限 200000 字）"
+    ),
+    '这条消息太长了（200001 字，上限 200000 字）'
+  )
+  eq('本来是人话就原样返回', readableIpcError('还没有配置 API Key'), '还没有配置 API Key')
+  eq('没有「: 」时不乱切', readableIpcError('Error invoking remote method'), 'Error invoking remote method')
   check(
     '未选中时明确写出来',
     buildChatSystemPrompt({

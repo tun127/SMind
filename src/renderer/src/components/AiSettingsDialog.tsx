@@ -40,7 +40,12 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
       const next = await window.api.aiConfigSave({ baseUrl, model, temperature, apiKey })
       setView(next)
       setApiKey('')
-      if (notify) onNotify('AI 设置已保存（Key 只存在本机配置文件里，不会写进 .xmind）')
+      if (notify) {
+        onNotify('AI 设置已保存（Key 只存在本机配置文件里，不会写进 .xmind）')
+        // 保存成功就直接关掉：用户的意图已经完成，不该再要求他点一次「关闭」
+        // （「测试连接」里也会调 save(false)，那条路不能关，所以放在 notify 分支里）
+        onClose()
+      }
       return true
     } catch (error) {
       onNotify(`保存失败：${(error as Error).message}`)

@@ -14,6 +14,7 @@ import {
   buildSkeletonDigest,
   claimsAppliedChange,
   countTopicTree,
+  readableIpcError,
   formatTokenCount,
   type AiMessage,
   type AiStreamEvent,
@@ -126,6 +127,8 @@ export default function ChatPanel({
   const [licenseMessage, setLicenseMessage] = useState<string | null>(null)
   /** 本次会话累计的 token 消耗（按服务商回报累计；换会话/清空时归零） */
   const [sessionTokens, setSessionTokens] = useState(0)
+  /** 输入区上方的一句临时提示（粘贴失败之类），几秒后自己消失 */
+  const [hint, setHint] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   /** 需要用户点头的破坏性操作（删分支等） */
   const [pendingWrite, setPendingWrite] = useState<{ summary: string } | null>(null)
@@ -193,6 +196,13 @@ export default function ChatPanel({
   }, [])
 
   useEffect(() => refreshLicense(), [refreshLicense])
+
+  /** 临时提示几秒后自己消失：不占地方、也不用用户去关 */
+  useEffect(() => {
+    if (hint === null) return
+    const timer = window.setTimeout(() => setHint(null), 8000)
+    return () => window.clearTimeout(timer)
+  }, [hint])
 
   /**
    * 按文档恢复聊天记录。
@@ -726,8 +736,9 @@ export default function ChatPanel({
         useTools: useToolsRef.current && !forceNoToolsRef.current
       })
       .catch((error: unknown) => {
-        // invoke 被拒（参数无效 / 没配 Key）：同样以事件形式收尾，只有一条代码路径
-        handleEvent({ requestId, kind: 'error', message: (error as Error).message })
+        // invoke 被拒（参数无效 / 没配 Key）：同样以事件形式收尾，只有一条代码路径。
+        // 顺手剥掉 Electron 那层「Error invoking remote method …」包装，只留人话
+        handleEvent({ requestId, kind: 'error', message: readableIpcError((error as Error).message) })
       })
   }, [handleEvent])
 
@@ -842,7 +853,11 @@ export default function ChatPanel({
           .replace(/\r\n?/g, '\n')
           .replace(/[ \t]+$/gm, '')
           .trim()
-        if (clip.length === 0) return
+        if (clip.length === 0) {
+          // 剪贴板里没有文字（多半是图片）——静悄悄没反应最容易被当成「功能坏了」
+          setHint('剪贴板里没有文字。如果复制的是图片：聊天目前只能发文字，可以把图里的文字打出来，或直接问我。')
+          return
+        }
         const el = inputRef.current
         const start = el && el.selectionStart !== null ? el.selectionStart : draft.length
         const end = el && el.selectionEnd !== null ? el.selectionEnd : draft.length
@@ -1111,6 +1126,8 @@ export default function ChatPanel({
               )}
             </div>
           )}
+
+          {hint && <div className="chat-panel__activate-msg chat-panel__hint">{hint}</div>}
 
           <div className="chat-panel__input">
             <textarea
