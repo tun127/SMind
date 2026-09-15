@@ -1,10 +1,10 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
-import { isRecord, isSelfNavigation } from '../shared/guards'
+import { isInstanceAlive, isRecord, isSelfNavigation } from '../shared/guards'
 import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
 import { writeFileAtomic } from './atomic-write'
 import { logDirectory, logMain } from './log'
 import { createHash } from 'node:crypto'
-import { promises as fs, existsSync } from 'node:fs'
+import { promises as fs, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -1641,7 +1641,72 @@ function registerIpc(): void {
 
 // 单实例：两个进程同时读写同一份自动存档与主题文件会互相覆盖。
 // 注意「单实例」指的是**一个进程**，不是「一个窗口」——多窗口由本进程内管。
-if (!app.requestSingleInstanceLock()) {
+/** 心跳文件：用来区分「真的有实例在跑」与「上次被强杀留下的残留锁」 */
+const instanceFile = (): string => join(app.getPath('userData'), 'instance.json')
+/** 心跳超过这个时间就算上一个实例已经死了 */
+const HEARTBEAT_STALE_MS = 30000
+const HEARTBEAT_INTERVAL_MS = 10000
+
+/** 定期写下「我还活着」，退出时抹掉 */
+function startHeartbeat(): void {
+  const write = (): void => {
+    try {
+      writeFileSync(instanceFile(), JSON.stringify({ pid: process.pid, time: Date.now() }))
+    } catch {
+      /* 心跳写不进去不影响使用 */
+    }
+  }
+  write()
+  const timer = setInterval(write, HEARTBEAT_INTERVAL_MS)
+  app.on('will-quit', () => {
+    clearInterval(timer)
+    try {
+      rmSync(instanceFile(), { force: true })
+    } catch {
+      /* 清不掉也无所谓：过期心跳不会被当成活实例 */
+    }
+  })
+}
+
+/**
+ * 单实例闸门。
+ *
+ * 光靠 `requestSingleInstanceLock()` 不够：上一次被**强杀**（任务管理器结束进程）会留下
+ * 残留的锁文件，之后每次启动都会被判成「已有实例在运行」——用户双击图标毫无反应、
+ * 也看不到任何提示（这正是我们真遇到过的现象）。
+ *
+ * 所以再加一道心跳：确实有活着的实例（心跳新鲜）才安静退出；
+ * 心跳过期或读不到，就当作残留锁清掉再要一次。
+ */
+function acquireSingleInstance(): boolean {
+  if (app.requestSingleInstanceLock()) {
+    startHeartbeat()
+    return true
+  }
+
+  let live = false
+  try {
+    live = isInstanceAlive(JSON.parse(readFileSync(instanceFile(), 'utf8')), Date.now(), HEARTBEAT_STALE_MS)
+  } catch {
+    live = false
+  }
+  if (live) return false
+
+  logMain('single-instance', '检测到残留的单实例锁（上次可能是被强杀），已清理并重试')
+  try {
+    rmSync(join(app.getPath('userData'), 'lockfile'), { force: true })
+  } catch {
+    // 删不掉说明锁正被别的进程占用：那确实有实例在跑
+    return false
+  }
+  if (app.requestSingleInstanceLock()) {
+    startHeartbeat()
+    return true
+  }
+  return false
+}
+
+if (!acquireSingleInstance()) {
   // 这里**必须**留一行日志：静默退出是最难查的一类现象，
   // 排查者看到的会是"启动干干净净、然后什么都没了"，很容易误判成崩溃。
   // 真实原因通常只是"已经开着一个实例（比如打包版）占用了单实例锁"。

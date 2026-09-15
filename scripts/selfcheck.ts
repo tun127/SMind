@@ -33,7 +33,7 @@ import { activeRoot, activeSheet, countCharacters, countDescendants, countTopics
 import { createSheet, createTopic, createWorkbook } from '../src/shared/model/factory'
 import { coerceCode, coerceRichText } from '../src/shared/model/coerce'
 import { checkImagePayload, isPlausibleFilePath, MAX_IMAGE_BYTES } from '../src/shared/ipc-args'
-import { isSelfNavigation } from '../src/shared/guards'
+import { isInstanceAlive, isSelfNavigation } from '../src/shared/guards'
 import { writeFileAtomic } from '../src/main/atomic-write'
 import {
   buildChatSystemPrompt,
@@ -1391,6 +1391,20 @@ async function testSafetyHelpers(): Promise<void> {
   )
   check('跳到别的站点 → 拦下', !isSelfNavigation('http://localhost:5173/', 'https://example.com/'))
   check('当前地址为空 → 拦下（保守处理）', !isSelfNavigation('', 'https://example.com/'))
+
+  group('单实例心跳：残留锁与活实例要分得清')
+
+  const heartbeatNow = 1_700_000_000_000
+  eq('刚写的心跳算活着', isInstanceAlive({ pid: 1, time: heartbeatNow - 1000 }, heartbeatNow), true)
+  eq(
+    '过期心跳算死了（可以放心清残留锁）',
+    isInstanceAlive({ pid: 1, time: heartbeatNow - 60000 }, heartbeatNow),
+    false
+  )
+  eq('还没超时仍算活着', isInstanceAlive({ pid: 1, time: heartbeatNow - 29000 }, heartbeatNow), true)
+  eq('读不到心跳就算死了', isInstanceAlive(null, heartbeatNow), false)
+  eq('坏数据算死了', isInstanceAlive({ time: 'x' }, heartbeatNow), false)
+  eq('时间戳在未来按活着处理（宁可多等，也不双开）', isInstanceAlive({ time: heartbeatNow + 5000 }, heartbeatNow), true)
 
   group('IPC 入参校验：路径')
 

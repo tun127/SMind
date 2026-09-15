@@ -12,6 +12,21 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 心跳文件里的实例还活着吗。
+ *
+ * 单实例判断不能只看锁文件：上一次被**强杀**会留下残留锁，之后每次启动都会被
+ * 误判成「已有实例在运行」→ 双击图标毫无反应（真踩过）。所以让正在跑的实例
+ * 定期写下心跳，启动时用它区分「真有实例在跑」和「残留锁」。
+ */
+export function isInstanceAlive(raw: unknown, now: number, staleMs = 30000): boolean {
+  if (!isRecord(raw)) return false
+  const time = typeof raw.time === 'number' && Number.isFinite(raw.time) ? raw.time : 0
+  if (time <= 0) return false
+  // 时间戳在未来（系统时间被改过）也按「活着」处理：宁可多等，也不要误判成残留锁而双开
+  return now - time < staleMs
+}
+
+/**
  * 这次导航是不是「回到自身页面」（刷新、同源跳转）。
  *
  * 为什么要单独判断：`will-navigate` 里一刀切 `preventDefault()` 会把**刷新**也拦掉，
