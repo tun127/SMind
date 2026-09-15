@@ -838,7 +838,7 @@ export default function ChatPanel({
                 : `免费试用：还能让 AI 改 ${license.remaining} 次（只读聊天不限次）`
             }
           >
-            {license.pro ? 'Pro' : `试用 ${license.remaining}/${license.trialLimit}`}
+            {license.pro ? 'Pro' : `试用剩 ${license.remaining} 次`}
           </span>
         )}
         {sessionTokens > 0 && (
