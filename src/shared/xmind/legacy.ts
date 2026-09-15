@@ -219,7 +219,8 @@ function parseTopic(node: XmlNode): Topic {
 
 function parseSheet(node: XmlNode, index: number): Sheet | null {
   const topics = childrenOf(node, 'topic')
-  if (topics.length === 0) return null
+  const rootTopic = topics[0]
+  if (!rootTopic) return null
 
   const extensions: unknown[] = []
   collectUnknown(node, new Set(['topic', 'relationships', 'boundaries', 'summaries', 'title']), extensions)
@@ -254,7 +255,7 @@ function parseSheet(node: XmlNode, index: number): Sheet | null {
   const sheet: Sheet = {
     id: attr(node, 'id') ?? createId('sheet'),
     title: childText(node, 'title') ?? `画布 ${index + 1}`,
-    rootTopic: parseTopic(topics[0]),
+    rootTopic: parseTopic(rootTopic),
     relationships,
     boundaries,
     summaries
@@ -279,7 +280,8 @@ export function parseLegacyContent(tree: XmlNode): LegacyParseResult {
     .map((node, index) => parseSheet(node, index))
     .filter((sheet): sheet is Sheet => sheet !== null)
 
-  if (sheets.length === 0) {
+  const first = sheets[0]
+  if (!first) {
     throw new Error('content.xml 里没有找到任何画布')
   }
 
@@ -289,7 +291,7 @@ export function parseLegacyContent(tree: XmlNode): LegacyParseResult {
   const workbook: Workbook = {
     version: MODEL_VERSION,
     sheets,
-    activeSheetId: sheets[0].id,
+    activeSheetId: first.id,
     creator: { ...CREATOR }
   }
 

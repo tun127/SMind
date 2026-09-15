@@ -323,6 +323,8 @@ export function nearestSiblingGap(
     for (let i = 0; i + 1 < stack.children.length; i += 1) {
       const before = stack.children[i]
       const after = stack.children[i + 1]
+      // 循环条件已经保证 i 与 i+1 都在范围内，这里只是让类型收窄
+      if (!before || !after) continue
       const direction = stackDirection(before.rect, after.rect)
       const a = axisEdge(before.rect, direction, true)
       const b = axisEdge(after.rect, direction, false)

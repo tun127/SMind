@@ -24,7 +24,8 @@ export function branchColorOf(colors: ThemeColors, layout: LayoutResult, nodeId:
   const index = layout.branchIndex.get(nodeId)
   const palette = colors.branches.length > 0 ? colors.branches : [colors.rootFill]
   if (index === undefined || index < 0) return colors.rootFill
-  return palette[index % palette.length]
+  // palette 在上面已保证非空；万一取不到就退回中心主题色
+  return palette[index % palette.length] ?? colors.rootFill
 }
 
 export interface NodeVisual {

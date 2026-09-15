@@ -228,7 +228,9 @@ function arrowPath(x: number, y: number, angle: number): string {
     [-10, 4]
   ]
   const mapped = points.map(([px, py]) => [x + px * cos - py * sin, y + px * sin + py * cos] as const)
-  return `M ${mapped[0][0].toFixed(2)} ${mapped[0][1].toFixed(2)} L ${mapped[1][0].toFixed(2)} ${mapped[1][1].toFixed(2)} L ${mapped[2][0].toFixed(2)} ${mapped[2][1].toFixed(2)} Z`
+  const [a, b, c] = mapped
+  if (!a || !b || !c) return ''
+  return `M ${a[0].toFixed(2)} ${a[1].toFixed(2)} L ${b[0].toFixed(2)} ${b[1].toFixed(2)} L ${c[0].toFixed(2)} ${c[1].toFixed(2)} Z`
 }
 
 /** 图标行里的标记图标：优先/进度/图形三种画法 */
@@ -346,9 +348,10 @@ function nodeOps(
       const total = widths.reduce((sum, width) => sum + width, 0)
       let cursorX = line.align === 'center' ? anchorX - total / 2 : line.align === 'right' ? anchorX - total : anchorX
       segments.forEach((segment, index) => {
+        const width = widths[index] ?? 0
         segment.x = cursorX
-        segment.width = widths[index]
-        cursorX += widths[index]
+        segment.width = width
+        cursorX += width
       })
 
       // 高亮底色：先铺矩形，再让文字压在上面

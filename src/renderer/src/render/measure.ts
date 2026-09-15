@@ -235,11 +235,12 @@ export function nodePaddingOf(depth: number): { x: number; y: number } {
 }
 
 function baseOf(depth: number): BaseStyle {
+  // index 已经 clamp 在 [0, 2]，而这两个数组都有 3 项
   const index = Math.min(depth, 2)
   const isRoot = depth === 0
   return {
-    fontSize: NODE_FONT_SIZES[index],
-    weight: NODE_FONT_WEIGHTS[index],
+    fontSize: NODE_FONT_SIZES[index]!,
+    weight: NODE_FONT_WEIGHTS[index]!,
     paddingX: isRoot ? PADDING_X_ROOT : PADDING_X,
     paddingY: isRoot ? PADDING_Y_ROOT : PADDING_Y,
     maxTextWidth: isRoot ? TEXT_MAX_ROOT : TEXT_MAX,
@@ -309,19 +310,21 @@ function wrapChars(chars: StyledChar[], maxWidth: number): StyledChar[][] {
   let lastSpace = -1
 
   while (index < chars.length) {
-    const charWidth = widthOf(chars[index])
+    const char = chars[index]
+    if (!char) break
+    const charWidth = widthOf(char)
     if (width + charWidth > maxWidth && index > start) {
       const breakAt = lastSpace > start ? lastSpace + 1 : index
       lines.push(chars.slice(start, breakAt))
       start = breakAt
       // 行首空格不参与排版
-      while (start < chars.length && chars[start].ch === ' ') start += 1
+      while (start < chars.length && chars[start]?.ch === ' ') start += 1
       index = start
       width = 0
       lastSpace = -1
       continue
     }
-    if (chars[index].ch === ' ') lastSpace = index
+    if (char.ch === ' ') lastSpace = index
     width += charWidth
     index += 1
   }

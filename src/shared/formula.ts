@@ -53,7 +53,7 @@ export function splitInlineMath(text: string): InlineMathSegment[] {
   for (const match of text.matchAll(pattern)) {
     const start = match.index ?? 0
     if (start > last) parts.push({ text: text.slice(last, start) })
-    parts.push({ formula: match[1].trim() })
+    parts.push({ formula: (match[1] ?? '').trim() })
     last = start + match[0].length
   }
   if (last < text.length) parts.push({ text: text.slice(last) })
@@ -66,7 +66,8 @@ export function matchWholeLineMath(line: string): string | null {
   const patterns = [/^\$\$([\s\S]+?)\$\$$/, /^\$([\s\S]+?)\$$/, /^\\\[([\s\S]+?)\\\]$/, /^\\\(([\s\S]+?)\\\)$/]
   for (const pattern of patterns) {
     const hit = pattern.exec(text)
-    if (hit && hit[1].trim().length > 0) return hit[1].trim()
+    const inner = (hit?.[1] ?? '').trim()
+    if (inner.length > 0) return inner
   }
   return null
 }

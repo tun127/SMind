@@ -315,10 +315,12 @@ export function canvasToRgbBytes(canvas: HTMLCanvasElement): Uint8Array {
   const out = new Uint8Array(canvas.width * canvas.height * 3)
 
   for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
-    const alpha = data[i + 3] / 255
-    out[j] = Math.round(data[i] * alpha + 255 * (1 - alpha))
-    out[j + 1] = Math.round(data[i + 1] * alpha + 255 * (1 - alpha))
-    out[j + 2] = Math.round(data[i + 2] * alpha + 255 * (1 - alpha))
+    // 取不到就按"不透明黑"处理：这只会在缓冲区长度异常时发生，
+    // 比让 undefined 参与算术、把整张图算成 NaN 要好
+    const alpha = (data[i + 3] ?? 255) / 255
+    out[j] = Math.round((data[i] ?? 0) * alpha + 255 * (1 - alpha))
+    out[j + 1] = Math.round((data[i + 1] ?? 0) * alpha + 255 * (1 - alpha))
+    out[j + 2] = Math.round((data[i + 2] ?? 0) * alpha + 255 * (1 - alpha))
   }
   return out
 }

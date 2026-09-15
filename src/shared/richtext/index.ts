@@ -42,7 +42,8 @@ export function appendToRich(rich: RichText, text: string): RichText {
     rich.paragraphs.length > 0
       ? rich.paragraphs.map((paragraph) => ({ ...paragraph, runs: [...paragraph.runs] }))
       : [{ runs: [] }]
-  paragraphs[paragraphs.length - 1].runs.push({ text })
+  const last = paragraphs[paragraphs.length - 1]
+  if (last) last.runs.push({ text })
   return { paragraphs }
 }
 
@@ -165,7 +166,9 @@ export function normalizeRich(rich: RichText): RichText {
     if (paragraph.bullet) next.bullet = true
     return next
   })
-  while (paragraphs.length > 1 && paragraphs[paragraphs.length - 1].runs.length === 0) {
+  while (paragraphs.length > 1) {
+    const last = paragraphs[paragraphs.length - 1]
+    if (!last || last.runs.length > 0) break
     paragraphs.pop()
   }
   return { paragraphs: paragraphs.length > 0 ? paragraphs : [{ runs: [] }] }
@@ -320,7 +323,7 @@ function splitRunsIntoParagraphs(
     parts.forEach((part, index) => {
       if (index > 0) buckets.push([])
       if (part.length === 0) return
-      buckets[buckets.length - 1].push({ ...run, text: part })
+      buckets[buckets.length - 1]?.push({ ...run, text: part })
     })
   }
   return buckets.map((bucket) => {

@@ -1,0 +1,37 @@
+{
+  // 「更严一档」的类型检查配置，与主 tsconfig 并行运行（见 package.json 的 typecheck）。
+  //
+  // 为什么单独一个配置、而不是直接开在主配置里：
+  // `noUncheckedIndexedAccess` 会让**每一次数组下标访问**都变成"可能是 undefined"，
+  // 存量代码里有 500 处（其中 300 处集中在自检脚本的断言里）。一次性全改会得到一个
+  // 没人能审阅的巨大 diff——那正是引入新问题的温床。
+  //
+  // 所以这里用「**清理完一个目录，就把它加进 include**」的推进方式：
+  // 仓库在任何时刻都是全绿的，剩下的目录在清理完之前不纳入，而不是把检查关掉。
+  // 自检脚本 `scripts/selfcheck.ts` 刻意不纳入：那里的下标都是断言里写死的，
+  // 加一堆 `!` 只会让断言更难读，而那 300 处正是这个取舍的来源。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true
+  },
+  "include": [
+    "src/renderer/src/global.d.ts",
+    "src/shared/*.ts",
+    "src/shared/theme/**/*.ts",
+    "src/shared/ai/**/*.ts",
+    "src/shared/model/**/*.ts",
+    "src/shared/richtext/**/*.ts",
+    "src/shared/xmind/**/*.ts",
+    "src/renderer/src/render/**/*.ts",
+    "src/main/**/*.ts"
+  ]
+  // 尚未纳入（清理完各自的下标访问后再加进来）：
+  //   src/shared/code、src/shared/layout、src/shared/import、
+  //   src/renderer/src/store、src/renderer/src/export、src/renderer/src/components
+  //
+  // 为什么要这样分批：`include` 只决定"从哪些文件开始"，TypeScript 会顺着 import
+  // 把被引用到的文件一起纳入程序——所以严格检查的范围实际是**传递闭包**。
+  // 先把闭包已经干净的部分纳入，才能保证 `npm run typecheck` 始终是全绿的；
+  // 反过来先纳入一个还依赖着未清理文件的目录，检查会立刻变红，CI 跟着失败。
+}

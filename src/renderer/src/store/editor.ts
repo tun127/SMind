@@ -944,6 +944,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     // （这就是反馈里的「删除节点后选择失效，必须鼠标点击才能生效」）。
     // 落点顺序：原位置**之后**的下一个未删除兄弟 → **之前**的上一个 → 父级。
     const first = targets[0]
+    if (!first) return
     const parent = findParent(root, first)
     let nextId: string | null = null
     if (parent) {
@@ -1051,7 +1052,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
           cursor = parent
         }
         const padding = nodePaddingOf(depth)
-        const fontSize = NODE_FONT_SIZES[Math.min(depth, NODE_FONT_SIZES.length - 1)]
+        // 下标已经 clamp 在数组范围内
+        const fontSize = NODE_FONT_SIZES[Math.min(depth, NODE_FONT_SIZES.length - 1)]!
         const mins: Size[] = []
         const codeMin = codeMinNodeSize(topic.code, padding)
         if (codeMin) mins.push(codeMin)
@@ -1130,8 +1132,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
       return
     }
     if (key === 'ArrowRight') {
-      const node = findTopic(root, currentId)
-      if (node && node.children.length > 0) set({ selection: [node.children[0].id] })
+      const firstChild = findTopic(root, currentId)?.children[0]
+      if (firstChild) set({ selection: [firstChild.id] })
       return
     }
     const parent = findParent(root, currentId) ?? root
@@ -1139,7 +1141,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (index < 0) return
     const nextIndex = key === 'ArrowUp' ? index - 1 : index + 1
     if (nextIndex >= 0 && nextIndex < parent.children.length) {
-      set({ selection: [parent.children[nextIndex].id] })
+      const next = parent.children[nextIndex]
+      if (next) set({ selection: [next.id] })
     }
   },
 
@@ -1404,7 +1407,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const { selection, workbook } = get()
     if (selection.length !== 2) return null
     const [end1Id, end2Id] = selection
-    if (end1Id === end2Id) return null
+    if (!end1Id || !end2Id || end1Id === end2Id) return null
 
     const existing = activeSheet(workbook).relationships.find(
       (item) =>

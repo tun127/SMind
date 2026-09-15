@@ -93,7 +93,7 @@ export function markerVisualOf(markerId: string): MarkerVisual {
 
   const task = /^task-(start|oct|quarter|3quar|done)$/.exec(markerId)
   if (task) {
-    const key = task[1]
+    const key = task[1] ?? ''
     return {
       kind: 'progress',
       ratio: TASK_RATIOS[key] ?? 0,
@@ -112,17 +112,17 @@ export function markerVisualOf(markerId: string): MarkerVisual {
 
   const star = /^star-(\w+)$/.exec(markerId)
   if (star) {
-    return { kind: 'glyph', glyph: 'star', color: COLOR_WORDS[star[1]] ?? '#E2B93B', label: labelOf(markerId) }
+    return { kind: 'glyph', glyph: 'star', color: COLOR_WORDS[star[1] ?? ''] ?? '#E2B93B', label: labelOf(markerId) }
   }
 
   const flag = /^flag-(\w+)$/.exec(markerId)
   if (flag) {
-    return { kind: 'glyph', glyph: 'flag', color: COLOR_WORDS[flag[1]] ?? NEUTRAL, label: labelOf(markerId) }
+    return { kind: 'glyph', glyph: 'flag', color: COLOR_WORDS[flag[1] ?? ''] ?? NEUTRAL, label: labelOf(markerId) }
   }
 
   const symbol = /^symbol-(\w+)$/.exec(markerId)
   if (symbol) {
-    const hit = SYMBOL_GLYPHS[symbol[1]]
+    const hit = SYMBOL_GLYPHS[symbol[1] ?? '']
     if (hit) return { kind: 'glyph', glyph: hit.glyph, color: hit.color, label: labelOf(markerId) }
   }
 

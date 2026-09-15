@@ -157,10 +157,12 @@ export const useTabs = create<TabsState>()((set, get) => ({
     // 「就地替换」的条件：只有一个标签，而且它是空白未改动的——
     // 浏览器打开第一个文件也不会给你留一个空标签
     const editor = useEditor.getState()
+    const only = tabs[0]
     const singlePristine =
       tabs.length === 1 &&
-      tabs[0].filePath === null &&
-      !tabs[0].dirty &&
+      only !== undefined &&
+      only.filePath === null &&
+      !only.dirty &&
       editor.filePath === null &&
       !editor.dirty
     const parked = singlePristine
@@ -168,7 +170,7 @@ export const useTabs = create<TabsState>()((set, get) => ({
       : tabs.map((t) => (t.id === activeId ? { ...t, ...captureOf(t.id) } : t))
     useEditor.getState().loadDocument(workbook, path)
     // 就地替换时沿用原标签的 id（主进程资源表里它已经登记过）
-    const fresh = captureOf(singlePristine ? tabs[0].id : createDocId())
+    const fresh = captureOf(singlePristine && only ? only.id : createDocId())
     set({ tabs: [...parked, fresh], activeId: fresh.id })
   },
 

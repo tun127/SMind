@@ -113,7 +113,8 @@ export function extractEmmxTexts(pageBin: Uint8Array): string[] {
   }
 
   for (let index = 0; index < pageBin.length; index += 1) {
-    if (isTextByte(pageBin[index])) {
+    const byte = pageBin[index]
+    if (byte !== undefined && isTextByte(byte)) {
       if (start < 0) start = index
       continue
     }
@@ -177,7 +178,9 @@ function richOf(data: Record<string, unknown>): RichText | undefined {
     parts.forEach((part, index) => {
       if (index > 0) paragraphs.push({ runs: [] })
       if (part.length === 0) return
-      paragraphs[paragraphs.length - 1].runs.push(color ? { text: part, color } : { text: part })
+      const last = paragraphs[paragraphs.length - 1]
+      if (!last) return
+      last.runs.push(color ? { text: part, color } : { text: part })
     })
   }
 
@@ -210,9 +213,10 @@ export function parseEmmxDocument(
     const sheet = parseEmmxSheet(content, index, fileName)
     if (sheet) sheets.push(sheet)
   })
-  if (sheets.length === 0) return null
+  const first = sheets[0]
+  if (!first) return null
 
-  const rootTitle = sheets[0].rootTopic.title
+  const rootTitle = first.rootTopic.title
   const warnings = [
     '这是亿图脑图（EdrawMind / MindMaster）的 .emmx 文件，已按兼容方式读取。',
     `文字、层级、概要、关系线均已还原（中心主题「${rootTitle}」）。`,
@@ -223,7 +227,7 @@ export function parseEmmxDocument(
     workbook: {
       version: MODEL_VERSION,
       sheets,
-      activeSheetId: sheets[0].id,
+      activeSheetId: first.id,
       creator: { ...CREATOR }
     },
     warnings

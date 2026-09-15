@@ -291,6 +291,18 @@ async function writeDocument(
   return { path }
 }
 
+/**
+ * 从「打开 / 保存对话框」的结果里取用户选中的第一个路径。
+ *
+ * 各处原本都写成「先判 `filePaths.length === 0`、再取 `filePaths[0]`」——
+ * 逻辑没错，但取下标那一步没有类型保证，于是这段判断在每个调用点都重复了一遍。
+ * 收成一个函数：判断只写一次，也不会再出现"忘了判"的新代码。
+ */
+function firstPathOf(result: { canceled: boolean; filePaths: string[] }): string | null {
+  if (result.canceled) return null
+  return result.filePaths[0] ?? null
+}
+
 function ensureXmindExt(p: string): string {
   return p.toLowerCase().endsWith('.xmind') ? p : `${p}.xmind`
 }
@@ -717,8 +729,9 @@ function registerIpc(): void {
       ],
       properties: ['openFile']
     })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return readDocumentInto(stateOf(e.sender), docId, result.filePaths[0])
+    const file = firstPathOf(result)
+    if (!file) return null
+    return readDocumentInto(stateOf(e.sender), docId, file)
   })
 
   ipcMain.handle(IPC.openPath, async (e, docId: string, path: string): Promise<OpenResult> => {
@@ -941,9 +954,10 @@ function registerIpc(): void {
       filters: [{ name: '主题文件', extensions: ['json'] }],
       properties: ['openFile']
     })
-    if (result.canceled || result.filePaths.length === 0) return null
+    const file = firstPathOf(result)
+    if (!file) return null
 
-    const parsed: unknown = JSON.parse(await fs.readFile(result.filePaths[0], 'utf8'))
+    const parsed: unknown = JSON.parse(await fs.readFile(file, 'utf8'))
     const candidate = isRecord(parsed) && 'theme' in parsed ? parsed.theme : parsed
     const theme = normalizeThemeDefinition(candidate, { builtin: false })
     if (!theme) throw new Error('主题文件格式不正确，请确认是本软件导出的主题文件')
@@ -973,9 +987,9 @@ function registerIpc(): void {
       filters: [{ name: '图片', extensions: IMAGE_EXTENSIONS }],
       properties: ['openFile']
     })
-    if (result.canceled || result.filePaths.length === 0) return null
+    const file = firstPathOf(result)
+    if (!file) return null
 
-    const file = result.filePaths[0]
     const buf = await fs.readFile(file)
     return registerImageBytes(stateOf(e.sender), docId, safeResourceName(file), buf)
   })
@@ -1055,9 +1069,9 @@ function registerIpc(): void {
       filters: [{ name: '所有文件', extensions: ['*'] }],
       properties: ['openFile']
     })
-    if (result.canceled || result.filePaths.length === 0) return null
+    const file = firstPathOf(result)
+    if (!file) return null
 
-    const file = result.filePaths[0]
     const buf = await fs.readFile(file)
     const path = resourcePathFor(createId('att'), file)
     const state = stateOf(e.sender)
@@ -1214,9 +1228,9 @@ function registerIpc(): void {
           ],
       properties: ['openFile']
     })
-    if (result.canceled || result.filePaths.length === 0) return null
+    const path = firstPathOf(result)
+    if (!path) return null
 
-    const path = result.filePaths[0]
     let text: string
     try {
       text = await fs.readFile(path, 'utf8')
@@ -1248,8 +1262,8 @@ function registerIpc(): void {
       defaultPath: await currentSaveDir(),
       properties: ['openDirectory', 'createDirectory']
     })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return rememberSaveDir(result.filePaths[0])
+    const dir = firstPathOf(result)
+    return dir ? rememberSaveDir(dir) : null
   })
 
   ipcMain.handle(IPC.historyReveal, async (_e, path: string): Promise<void> => {

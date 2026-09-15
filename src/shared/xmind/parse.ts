@@ -360,7 +360,8 @@ export async function parseXmind(
     .map((s, i) => parseSheet(s, i))
     .filter((s): s is Sheet => s !== null)
 
-  if (sheets.length === 0) {
+  const firstSheet = sheets[0]
+  if (!firstSheet) {
     throw new Error('文件中没有找到任何画布')
   }
 
@@ -382,7 +383,7 @@ export async function parseXmind(
   const workbook: Workbook = {
     version: MODEL_VERSION,
     sheets,
-    activeSheetId: sheets[0].id,
+    activeSheetId: firstSheet.id,
     creator: { ...CREATOR }
   }
 

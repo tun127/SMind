@@ -102,7 +102,8 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
   })
 ]
 
-export const DEFAULT_THEME: ThemeDefinition = BUILTIN_THEMES[0]
+// 内置主题是紧挨着的数组字面量、恒非空，所以这里断言取值而不是判空
+export const DEFAULT_THEME: ThemeDefinition = BUILTIN_THEMES[0]!
 
 export function findBuiltinTheme(id: string | undefined): ThemeDefinition | undefined {
   if (!id) return undefined

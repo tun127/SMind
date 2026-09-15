@@ -214,7 +214,8 @@ export function stripCodeFence(text: string): string {
   const lines = trimmed.split(/\r?\n/)
   const first = lines.shift() ?? ''
   void first
-  if (lines.length > 0 && lines[lines.length - 1].trim().startsWith('```')) lines.pop()
+  const lastLine = lines[lines.length - 1]
+  if (lastLine && lastLine.trim().startsWith('```')) lines.pop()
   return lines.join('\n')
 }
 
@@ -286,7 +287,9 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
   }
 
   // 归一化深度：第一行深度当作 0，避免模型整体缩进导致层级错位
-  const baseDepth = parsed[0].depth
+  // 模型偶尔会回一段没有任何大纲行的内容：这时 parsed 为空，
+  // 直接取 parsed[0].depth 会抛异常，把"模型答得不好"升级成一次崩溃
+  const baseDepth = parsed[0]?.depth ?? 0
   for (const item of parsed) item.depth = Math.max(0, item.depth - baseDepth)
 
   const roots: OutlineNode[] = []
@@ -294,7 +297,11 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
 
   for (const item of parsed) {
     const node: OutlineNode = { title: item.text, children: [] }
-    while (stack.length > 0 && stack[stack.length - 1].depth >= item.depth) stack.pop()
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]
+      if (!top || top.depth < item.depth) break
+      stack.pop()
+    }
 
     const parent = stack[stack.length - 1]
     if (parent) parent.node.children.push(node)
@@ -304,8 +311,9 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
   }
 
   let root: OutlineNode
-  if (roots.length === 1) {
-    root = roots[0]
+  const onlyRoot = roots[0]
+  if (roots.length === 1 && onlyRoot) {
+    root = onlyRoot
   } else {
     // 模型给了并列的多个顶层节点：套一个根节点，别让它们散着
     root = { title: fallbackRootTitle, children: roots }

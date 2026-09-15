@@ -58,11 +58,12 @@ function parseAttrs(source: string): Record<string, string> {
   let match: RegExpExecArray | null
   while ((match = re.exec(source)) !== null) {
     const key = match[1]
-    const raw = match[3] !== undefined ? match[3] : match[4] ?? ''
+    if (!key) continue
+    const raw = match[3] !== undefined ? match[3] : (match[4] ?? '')
     attrs[key] = decodeEntities(raw)
     // 同时用去前缀的名字存一份，方便 <xhtml:img> 这类带前缀的属性
     const short = localName(key)
-    if (!(short in attrs)) attrs[short] = attrs[key]
+    if (!(short in attrs)) attrs[short] = attrs[key] ?? ''
   }
   return attrs
 }

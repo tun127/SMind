@@ -84,7 +84,7 @@ export function detachTopic(root: Topic, id: string): Topic | null {
     if (!parent || removed) return
     const i = parent.children.findIndex((c) => c.id === id)
     if (i >= 0) {
-      removed = parent.children.splice(i, 1)[0]
+      removed = parent.children.splice(i, 1)[0] ?? null
     }
   })
   return removed
@@ -164,7 +164,10 @@ export function cloneTopicDeep(source: Topic): Topic {
 
 /** 获取当前激活画布 */
 export function activeSheet(workbook: Workbook): Sheet {
-  return workbook.sheets.find((s) => s.id === workbook.activeSheetId) ?? workbook.sheets[0]
+  // 正常构造的工作簿至少有 1 张画布（新建与解析都保证）。
+  // 这里刻意用断言而不是抛错：这个函数在渲染热路径上，一旦为"数据异常"抛错，
+  // 会把一次显示问题放大成白屏；而上游（解析/新建）会先发现空工作簿。
+  return (workbook.sheets.find((s) => s.id === workbook.activeSheetId) ?? workbook.sheets[0])!
 }
 
 /** 当前激活画布的根主题 */
