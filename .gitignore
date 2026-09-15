@@ -13,4 +13,7 @@ dev.err.log
 # 排查用产物：lint 的 JSON 输出、从 exe 反向提取图标用来核对的图
 lint.json
 .icon-check.png
+# 商业计划（定价 / 路线 / 文案）：仓库是公开的，这些不进版本库。
+# 若要把它们纳入版本管理（比如放私有仓库），删掉这一行即可。
+commercialization/
 .dsh-meow

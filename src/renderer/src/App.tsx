@@ -1104,6 +1104,7 @@ export default function App(): ReactElement {
           <ChatPanel
             onClose={() => setSidePanel('none')}
             onOpenSettings={() => setShowAiSettings(true)}
+            onOpenTask={(task) => setAiTask(task)}
           />
         )}
       </div>

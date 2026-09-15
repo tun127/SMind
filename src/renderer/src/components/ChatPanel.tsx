@@ -26,11 +26,19 @@ import { createId } from '@shared/model/factory'
 import { activeRoot, ancestorsOf, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
 import { useEditor } from '../store/editor'
+import type { AiTask } from './AiDialog'
 
 interface Props {
   onClose(): void
   /** 面板自己不做配置界面，只负责把用户送去「AI 设置」 */
   onOpenSettings(): void
+  /**
+   * 打开会**写入画布**的 AI 流程（润色 / 扩写 / 生成）。
+   *
+   * 这些仍走原来的对话框（先预览、确认后才写入）——本期面板是只读的，
+   * 把它们收成面板里的入口，而不是让用户去别处找。
+   */
+  onOpenTask(task: AiTask): void
 }
 
 interface ChatMsg {
@@ -50,10 +58,17 @@ interface ChatMsg {
  */
 const MAX_HISTORY = 16
 
-const QUICK_PROMPTS = [
-  '总结这页导图的主要内容',
-  '指出这个导图结构上薄弱的地方',
-  '给选中的主题想几个更好的标题'
+/** 快捷提问：只跟 AI 聊，不动画布 */
+const QUICK_PROMPTS = ['总结这页导图的主要内容', '指出这个导图结构上薄弱的地方']
+
+/**
+ * 快捷任务：这些会**真的改画布**（走原对话框：先预览、确认后才写入）。
+ * 与上面的提问分开一排，免得用户分不清哪个会改文件。
+ */
+const QUICK_TASKS: Array<{ label: string; task: AiTask }> = [
+  { label: '润色选中标题', task: 'polish' },
+  { label: '扩写选中主题', task: 'expand' },
+  { label: '生成新导图', task: 'generate' }
 ]
 
 /**
@@ -64,7 +79,7 @@ const QUICK_PROMPTS = [
  *
  * 上下文每次提问时**重新取**（不是挂载时取一次）——用户可能刚改了导图。
  */
-export default function ChatPanel({ onClose, onOpenSettings }: Props): ReactElement {
+export default function ChatPanel({ onClose, onOpenSettings, onOpenTask }: Props): ReactElement {
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [draft, setDraft] = useState('')
   /** null = 还没查完；false = 没配 Key（显示引导）；true = 可用 */
@@ -456,7 +471,8 @@ export default function ChatPanel({ onClose, onOpenSettings }: Props): ReactElem
                 <p>
                   用自然语言聊聊这页导图。
                   <br />
-                  它会自己翻看结构（搜索主题、读分支），但<strong>不会改</strong>你的画布。
+                  它会自己翻看结构（搜索主题、读分支），但<strong>不会改</strong>你的画布；
+                  要它动图请用下面的「润色 / 扩写 / 生成」——那几个会先给你预览。
                 </p>
               </div>
             )}
@@ -489,6 +505,22 @@ export default function ChatPanel({ onClose, onOpenSettings }: Props): ReactElem
                 onClick={() => send(prompt)}
               >
                 {prompt}
+              </button>
+            ))}
+          </div>
+
+          {/* 会改画布的三个入口：视觉上与「只聊」的区分开 */}
+          <div className="chat-panel__quick">
+            {QUICK_TASKS.map((item) => (
+              <button
+                key={item.task}
+                type="button"
+                className="chat-panel__chip chat-panel__chip--task"
+                disabled={streaming}
+                title="会先预览、确认后才写入画布"
+                onClick={() => onOpenTask(item.task)}
+              >
+                {item.label}
               </button>
             ))}
           </div>
