@@ -17,3 +17,5 @@ lint.json
 # 若要把它们纳入版本管理（比如放私有仓库），删掉这一行即可。
 commercialization/
 .dsh-meow
+# 用文件传中文提交信息时产生的临时文件（误提交过一次）
+.commit-msg.txt
