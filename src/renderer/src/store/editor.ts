@@ -7,10 +7,9 @@ import {
   type OverlayTextStylePatch
 } from '@shared/model/overlay-style'
 import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
-import { createId, createSheet, createTopic, createWorkbook } from '@shared/model/factory'
+import { createId, createTopic, createWorkbook } from '@shared/model/factory'
 import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
 import { appendToRich, hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
-import type { RichTextRun } from '@shared/model/types'
 import {
   EMPTY_FILTER,
   countOccurrences,
@@ -46,7 +45,7 @@ import {
   withCurveOffset
 } from '@shared/layout'
 import { RELATIONSHIP_CURVE_KEY, TOPIC_SIDE_KEY } from '@shared/xmind/constants'
-import { escapeHtml } from '@shared/richtext'
+import { notesHtmlFrom } from '@shared/richtext'
 import { resolveDrop, type DropMode } from '@shared/model/drop'
 
 enablePatches()
@@ -101,6 +100,13 @@ export interface EditorState {
   editingText: string
   /** 正在编辑的富文本内容 */
   editingRich: RichText | null
+  /**
+   * 渲染默认值（默认对齐 / 代码块基准字号）的变更计数。
+   *
+   * 这些默认值作用于**没有显式样式**的节点，改了会让测量结果变化，所以布局必须依赖它——
+   * 否则改了设置要等到别的操作才生效（画布上表现为"设置似乎没起作用"）。
+   */
+  renderEpoch: number
   clipboard: Topic | null
 
   zoom: number
@@ -213,6 +219,8 @@ export interface EditorState {
    * 不展开就看不见新子主题会落在哪，落点预览成了空谈。
    */
   setCollapsed(id: string, collapsed: boolean): void
+  /** 渲染默认值变更后调用：让布局与画布重算 */
+  bumpRenderEpoch(): void
   setStructure(structureClass: string, targetId?: string): void
   /**
    * 移动主题。
@@ -484,6 +492,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   selection: [],
   ...NO_EDITING,
+  renderEpoch: 0,
   clipboard: null,
 
   zoom: 1,
@@ -855,6 +864,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   cancelEdit: () => set(NO_EDITING),
+
+  bumpRenderEpoch: () => set((state) => ({ renderEpoch: state.renderEpoch + 1 })),
 
   commitAndAddChild: () => {
     const id = get().editingId
@@ -1298,7 +1309,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       if (topic.notes === text) return
       topic.notes = text
       // notesHtml 由纯文本派生，避免两者说法不一致
-      topic.notesHtml = `<p>${escapeHtml(text).replace(/\n/g, '<br/>')}</p>`
+      topic.notesHtml = notesHtmlFrom(text)
     }, '修改备注')
   },
 

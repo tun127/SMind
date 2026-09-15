@@ -10,6 +10,8 @@
  */
 import katex from 'katex'
 import { pureFormulaSize, FORMULA_MAX_WIDTH, type Size } from '@shared/layout/accessory'
+import { escapeHtml } from '@shared/richtext'
+import { evictOldest } from '@shared/cache'
 
 const htmlCache = new Map<string, string>()
 const sizeCache = new Map<string, Size>()
@@ -35,10 +37,13 @@ export function formulaHtml(source: string): string {
       errorColor: '#d9534f'
     })
   } catch (error) {
-    html = `<span class="formula-error" title="${String((error as Error).message ?? '')}">公式无法解析</span>`
+    // 异常消息必须转义：这段 HTML 是交给 dangerouslySetInnerHTML 注入的，
+    // 而公式文本来自文件（是可以被构造的外部输入），未转义就等于给它一条逃逸出属性的路
+    const detail = escapeHtml(String((error as Error).message ?? ''))
+    html = `<span class="formula-error" title="${detail}">公式无法解析</span>`
   }
 
-  if (htmlCache.size >= CACHE_LIMIT) htmlCache.clear()
+  evictOldest(htmlCache, CACHE_LIMIT)
   htmlCache.set(source, html)
   return html
 }
@@ -88,7 +93,7 @@ export function formulaSize(source: string, fontSize: number): Size {
     }
   }
 
-  if (sizeCache.size >= CACHE_LIMIT) sizeCache.clear()
+  evictOldest(sizeCache, CACHE_LIMIT)
   sizeCache.set(key, size)
   return size
 }

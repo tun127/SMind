@@ -7,20 +7,10 @@
 
 import { FONT_FAMILY } from '../render/measure'
 import { HIGHLIGHT_BG } from '@shared/richtext'
+import { escapeXmlAttr, escapeXmlText } from '@shared/xml-escape'
 import type { Drawing, DrawOp } from './drawing'
 
 const FONT_STACK = `${FONT_FAMILY.replace(/"/g, "'")}`
-
-function escapeText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-function escapeAttr(value: string): string {
-  return escapeText(value).replace(/"/g, '&quot;')
-}
 
 function num(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
@@ -30,7 +20,7 @@ function attrs(pairs: Array<[string, string | number | undefined]>): string {
   const parts: string[] = []
   for (const [key, value] of pairs) {
     if (value === undefined || value === '') continue
-    parts.push(`${key}="${typeof value === 'number' ? num(value) : escapeAttr(value)}"`)
+    parts.push(`${key}="${typeof value === 'number' ? num(value) : escapeXmlAttr(value)}"`)
   }
   return parts.length > 0 ? ` ${parts.join(' ')}` : ''
 }
@@ -67,7 +57,7 @@ function opToSvg(op: DrawOp): string {
       ])}/>`
 
     case 'text': {
-      const paint = op.stroke ? ` stroke="${escapeAttr(op.stroke)}" stroke-width="${num(op.strokeWidth ?? 4)}" paint-order="stroke" stroke-linejoin="round"` : ''
+      const paint = op.stroke ? ` stroke="${escapeXmlAttr(op.stroke)}" stroke-width="${num(op.strokeWidth ?? 4)}" paint-order="stroke" stroke-linejoin="round"` : ''
       return `<text${attrs([
         ['x', op.x],
         ['y', op.y],
@@ -78,7 +68,7 @@ function opToSvg(op: DrawOp): string {
         ['fill', op.fill],
         ['text-anchor', op.anchor],
         ['dominant-baseline', op.baseline === 'middle' ? 'middle' : 'auto']
-      ])}${paint}>${escapeText(op.text)}</text>`
+      ])}${paint}>${escapeXmlText(op.text)}</text>`
     }
 
     case 'lineText': {
@@ -99,7 +89,7 @@ function opToSvg(op: DrawOp): string {
               ],
               ['fill', segment.color ?? op.color],
               ['text-decoration', segment.underline || segment.strike ? 'underline' : undefined]
-            ])}>${escapeText(segment.text)}</tspan>`
+            ])}>${escapeXmlText(segment.text)}</tspan>`
         )
         .join('')
       // 高亮底色：先铺矩形再画文字
@@ -155,7 +145,7 @@ function opToSvg(op: DrawOp): string {
         ['font-size', Math.max(10, op.fontSize - 2)],
         ['fill', op.color],
         ['dominant-baseline', 'middle']
-      ])}>${escapeText(op.fallbackText)}</text>`
+      ])}>${escapeXmlText(op.fallbackText)}</text>`
     }
 
     case 'badge': {
@@ -173,7 +163,7 @@ function opToSvg(op: DrawOp): string {
           ['fill', '#ffffff'],
           ['text-anchor', 'middle'],
           ['dominant-baseline', 'middle']
-        ])}>${escapeText(op.text)}</text>`
+        ])}>${escapeXmlText(op.text)}</text>`
       )
     }
 
@@ -203,7 +193,7 @@ function opToSvg(op: DrawOp): string {
         const y = cy + radius * Math.sin(angle)
         d = `M ${cx} ${cy} L ${cx} ${cy - radius} A ${radius} ${radius} 0 ${clamped > 0.5 ? 1 : 0} 1 ${num(x)} ${num(y)} Z`
       }
-      return circle + `<path d="${escapeAttr(d)}" fill="${escapeAttr(op.color)}"/>`
+      return circle + `<path d="${escapeXmlAttr(d)}" fill="${escapeXmlAttr(op.color)}"/>`
     }
 
     case 'glyph': {
@@ -218,7 +208,7 @@ function opToSvg(op: DrawOp): string {
           const angle = -Math.PI / 2 + (i * Math.PI) / 5
           points.push(`${num(cx + radius * Math.cos(angle))},${num(cy + radius * Math.sin(angle))}`)
         }
-        return `<polygon points="${points.join(' ')}" fill="${escapeAttr(op.color)}"/>`
+        return `<polygon points="${points.join(' ')}" fill="${escapeXmlAttr(op.color)}"/>`
       }
       if (op.glyph === 'flag') {
         return `<path${attrs([
@@ -244,7 +234,7 @@ export function drawingToSvg(drawing: Drawing): string {
   const background =
     drawing.background === null
       ? ''
-      : `\n  <rect x="0" y="0" width="${num(drawing.width)}" height="${num(drawing.height)}" fill="${escapeAttr(drawing.background)}"/>`
+      : `\n  <rect x="0" y="0" width="${num(drawing.width)}" height="${num(drawing.height)}" fill="${escapeXmlAttr(drawing.background)}"/>`
 
   // 中心主题的投影：定义一次，按 id 复用
   const defs = `  <defs>

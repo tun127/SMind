@@ -358,7 +358,7 @@ export function connectTree(
 }
 
 /** 水平方向堆叠时的默认锚点：父的右/左边 -> 子的左/右边 */
-export function horizontalAnchors(parent: NodeLayout, child: NodeLayout): { from: Anchor; to: Anchor } {
+export function horizontalAnchors(_parent: NodeLayout, child: NodeLayout): { from: Anchor; to: Anchor } {
   return child.side === 'left' ? { from: 'left', to: 'right' } : { from: 'right', to: 'left' }
 }
 

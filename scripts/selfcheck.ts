@@ -31,6 +31,10 @@ import {
 } from '../src/shared/theme'
 import { activeRoot, activeSheet, countCharacters, countDescendants, countTopics, findParent, findTopic, subtreeIds } from '../src/shared/model/tree'
 import { createSheet, createTopic, createWorkbook } from '../src/shared/model/factory'
+import { coerceCode, coerceRichText } from '../src/shared/model/coerce'
+import { checkImagePayload, isPlausibleFilePath, MAX_IMAGE_BYTES } from '../src/shared/ipc-args'
+import { writeFileAtomic } from '../src/main/atomic-write'
+import { evictOldest } from '../src/shared/cache'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove } from '../src/shared/model/dragmove'
 import {
   blockReasonOf,
@@ -90,7 +94,8 @@ import {
   STRUCTURES
 } from '../src/shared/xmind/constants'
 import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument } from '../src/shared/xmind/emmx'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { ALL_PICKABLE_MARKERS, markerVisualOf } from '../src/renderer/src/render/markers'
 import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
 import { buildDrawing } from '../src/renderer/src/export/drawing'
@@ -1223,6 +1228,150 @@ function testUndoGranularity(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 7.7 安全与健壮性的纯逻辑：原子写 / 外部数据收敛 / IPC 入参            */
+/* ------------------------------------------------------------------ */
+
+async function testSafetyHelpers(): Promise<void> {
+  /** 对象比较统一转 JSON 串，避免依赖断言器的深比较行为 */
+  const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined'
+
+  group('原子写文件')
+
+  const dir = mkdtempSync(`${tmpdir()}/smind-atomic-`)
+  const leftover = (): number => readdirSync(dir).filter((name) => name.endsWith('.tmp')).length
+  const target = `${dir}/doc.xmind`
+
+  writeFileSync(target, 'old')
+  await writeFileAtomic(target, Buffer.from('new'))
+  eq('覆盖后是新内容', readFileSync(target, 'utf8'), 'new')
+  eq('不留下临时文件', leftover(), 0)
+
+  await writeFileAtomic(`${dir}/fresh.xmind`, Buffer.from('first'))
+  eq('目标不存在时直接创建', readFileSync(`${dir}/fresh.xmind`, 'utf8'), 'first')
+
+  // 父目录不存在 → 写入失败，但**不能**留下半截临时文件
+  let failed = false
+  try {
+    await writeFileAtomic(`${dir}/no-such-dir/x.xmind`, Buffer.from('x'))
+  } catch {
+    failed = true
+  }
+  check('写入失败会抛错（调用方能据此提示用户）', failed)
+  eq('失败也不留下临时文件', leftover(), 0)
+
+  // 原文件不能被破坏：这是原子写存在的唯一理由
+  writeFileSync(target, 'keep-me')
+  try {
+    await writeFileAtomic(`${dir}/no-such-dir/y.xmind`, Buffer.from('y'))
+  } catch {
+    // 已在上一条断言覆盖
+  }
+  eq('失败的写入不会碰到别的文件', readFileSync(target, 'utf8'), 'keep-me')
+
+  group('外部数据收敛：富文本')
+
+  eq('不是对象 → 丢弃', json(coerceRichText('nope')), 'undefined')
+  eq('缺 paragraphs → 丢弃', json(coerceRichText({ runs: [] })), 'undefined')
+  eq('paragraphs 不是数组 → 丢弃', json(coerceRichText({ paragraphs: 'x' })), 'undefined')
+  eq('空数组 → 丢弃（让调用方回退纯文本）', json(coerceRichText({ paragraphs: [] })), 'undefined')
+  eq(
+    '合法结构被保留',
+    json(coerceRichText({ paragraphs: [{ runs: [{ text: '你好', bold: true }] }] })),
+    json({ paragraphs: [{ runs: [{ text: '你好', bold: true }] }] })
+  )
+  eq(
+    'text 不是字符串的 run 被丢掉',
+    json(coerceRichText({ paragraphs: [{ runs: [{ text: 1 }, { text: 'ok' }] }] })),
+    json({ paragraphs: [{ runs: [{ text: 'ok' }] }] })
+  )
+  eq(
+    '布尔字段只认真正的 true',
+    json(coerceRichText({ paragraphs: [{ runs: [{ text: 'a', bold: 'true' }] }] })),
+    json({ paragraphs: [{ runs: [{ text: 'a' }] }] })
+  )
+  eq(
+    '非法 align / bullet 被丢掉',
+    json(coerceRichText({ paragraphs: [{ align: 'middle', bullet: 'yes', runs: [{ text: 'a' }] }] })),
+    json({ paragraphs: [{ runs: [{ text: 'a' }] }] })
+  )
+  eq(
+    '颜色里的引号与分号被挡掉（导出时不再有逃逸风险）',
+    json(coerceRichText({ paragraphs: [{ runs: [{ text: 'a', color: '" onload="x' }] }] })),
+    json({ paragraphs: [{ runs: [{ text: 'a' }] }] })
+  )
+  eq(
+    '正常色值保留',
+    json(coerceRichText({ paragraphs: [{ runs: [{ text: 'a', color: '#ff0000' }] }] })),
+    json({ paragraphs: [{ runs: [{ text: 'a', color: '#ff0000' }] }] })
+  )
+  eq(
+    '离谱字号被丢掉',
+    json(coerceRichText({ paragraphs: [{ runs: [{ text: 'a', fontSize: 9999 }] }] })),
+    json({ paragraphs: [{ runs: [{ text: 'a' }] }] })
+  )
+  eq(
+    'script 只认 super / sub',
+    json(coerceRichText({ paragraphs: [{ runs: [{ text: 'a', script: 'top' }] }] })),
+    json({ paragraphs: [{ runs: [{ text: 'a' }] }] })
+  )
+
+  group('外部数据收敛：代码块')
+
+  eq('缺 text → 丢弃', json(coerceCode({ language: 'python' })), 'undefined')
+  eq('text 不是字符串 → 丢弃', json(coerceCode({ language: 'python', text: 3 })), 'undefined')
+  eq(
+    '语言缺失时退回 text（不因为少个字段就把整段代码丢掉）',
+    json(coerceCode({ text: 'print(1)' })),
+    json({ language: 'text', text: 'print(1)' })
+  )
+  eq(
+    '合法代码块原样保留',
+    json(coerceCode({ language: 'python', text: 'print(1)' })),
+    json({ language: 'python', text: 'print(1)' })
+  )
+
+  group('缓存淘汰策略')
+
+  const cache = new Map<number, number>()
+  for (let i = 0; i < 100; i += 1) cache.set(i, i)
+  evictOldest(cache, 100)
+  check('到上限时才开始淘汰', cache.size < 100)
+  check('淘汰的是最旧的（保留了后面写入的）', cache.has(99) && cache.has(90))
+  check('没有一刀切清空（否则等于缓存全废）', cache.size > 50)
+
+  const small = new Map<number, number>()
+  small.set(1, 1)
+  evictOldest(small, 100)
+  eq('没到上限时不动它', small.size, 1)
+
+  group('IPC 入参校验：路径')
+
+  check('Windows 绝对路径通过', isPlausibleFilePath('D:\\a\\b.xmind'))
+  check('POSIX 绝对路径通过', isPlausibleFilePath('/home/u/a.xmind'))
+  check('UNC 路径通过', isPlausibleFilePath('\\\\server\\share\\a.xmind'))
+  check('相对路径不通过', !isPlausibleFilePath('a.xmind'))
+  check('空字符串不通过', !isPlausibleFilePath(''))
+  check('非字符串不通过', !isPlausibleFilePath(null))
+  check('含 NUL 不通过', !isPlausibleFilePath('D:\\a\0b.xmind'))
+  check('超长路径不通过', !isPlausibleFilePath(`D:\\${'a'.repeat(5000)}.xmind`))
+  check(
+    '任意扩展名都放行（改名后打开应给出业务提示，而不是"路径非法"）',
+    isPlausibleFilePath('D:\\a\\b.txt')
+  )
+
+  group('IPC 入参校验：图片')
+
+  eq('空字节被拒', checkImagePayload(new Uint8Array(0)) !== null, true)
+  eq('正常字节通过', checkImagePayload(new Uint8Array(8)), null)
+  eq('非字节数组被拒', checkImagePayload('abc') !== null, true)
+  eq('超上限被拒', checkImagePayload(new Uint8Array(MAX_IMAGE_BYTES + 1)) !== null, true)
+  eq('刚好到上限通过', checkImagePayload(new Uint8Array(MAX_IMAGE_BYTES)), null)
+  eq('名字过长被拒', checkImagePayload(new Uint8Array(4), 'x'.repeat(300)) !== null, true)
+
+  rmSync(dir, { recursive: true, force: true })
+}
+
+/* ------------------------------------------------------------------ */
 /* 8. 复制粘贴 / 折叠 / 结构 / 自由定位                                 */
 /* ------------------------------------------------------------------ */
 
@@ -1822,9 +1971,10 @@ function testDefaultStyles(): void {
     }
   ])
   eq('添加成功', richAdded, 1)
-  const richNode = find(dsChild)?.children[find(dsChild)!.children.length - 1]!
-  eq('显式颜色不被默认覆盖', richNode.titleRich?.paragraphs[0]?.runs[0]?.color, '#EB5757')
-  eq('缺失的字体补上默认值', richNode.titleRich?.paragraphs[0]?.runs[0]?.fontFamily, '楷体')
+  const richKids = find(dsChild)?.children ?? []
+  const richNode = richKids[richKids.length - 1]
+  eq('显式颜色不被默认覆盖', richNode?.titleRich?.paragraphs[0]?.runs[0]?.color, '#EB5757')
+  eq('缺失的字体补上默认值', richNode?.titleRich?.paragraphs[0]?.runs[0]?.fontFamily, '楷体')
 
   group('默认文字样式：应用到全部现有节点')
 
@@ -2415,7 +2565,7 @@ function testLayout(): void {
   const rootId = root().id
   const b1 = addChildOf(rootId, '分支一')
   const b2 = addChildOf(rootId, '分支二')
-  const b3 = addChildOf(rootId, '分支三')
+  addChildOf(rootId, '分支三')
   addChildOf(b1, '一甲')
   addChildOf(b1, '一乙')
   addChildOf(b2, '二甲')
@@ -5724,6 +5874,7 @@ async function main(): Promise<void> {
   testMove()
   testNodeDrag()
   testUndoGranularity()
+  await testSafetyHelpers()
   testMisc()
   testTypedChar()
   testBranchStructure()

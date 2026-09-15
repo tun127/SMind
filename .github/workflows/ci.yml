@@ -1,0 +1,39 @@
+# 持续集成：每次推送与 PR 都跑一遍「类型 + 自检 + 样本往返」。
+#
+# 为什么是这三样：它们是这个项目最值钱、也最容易悄悄退化的三道防线——
+#   - tsc       ：类型是这次改动的第一道网
+#   - selfcheck ：1515 项断言，覆盖编辑器内核、布局、导入导出、拖拽裁决等纯逻辑
+#   - verify    ：用仓库里的真实 .xmind / .emmx 样本做往返比对，防止"另存后丢数据"
+# 全部是纯 Node 环境，不需要图形界面，所以在 ubuntu 上跑即可，比 Windows runner 快得多。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 代码规范
+        run: npm run lint
+
+      - name: 内核自检
+        run: npm run selfcheck
+
+      - name: 样本往返一致
+        run: npm run verify

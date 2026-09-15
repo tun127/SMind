@@ -34,7 +34,6 @@ import {
   Sigma,
   Sparkles,
   Spline,
-  Tag,
   Trash2,
   Undo2,
   Wand2,
@@ -259,11 +258,18 @@ function ToolMenu({
  */
 function PinWrap({
   title,
+  hint,
   shown,
   onHide,
   children
 }: {
   title: string
+  /**
+   * 补充说明（例如"为什么这个按钮现在点不了"）。
+   * 必须挂在外层 span 上：**禁用状态的 button 不弹 title**，
+   * 挂在按钮上等于用户永远看不到。
+   */
+  hint?: string
   /** false＝已收进「更多 ▾」，不占快捷栏的位置 */
   shown: boolean
   /** 右键「收进更多 ▾」的统一收尾（快捷项与「拿出」的菜单项动作不同，由调用方决定） */
@@ -297,7 +303,7 @@ function PinWrap({
   return (
     <span
       className="tool-btn-wrap"
-      title={`${title}（右键可收进「更多 ▾」）`}
+      title={`${hint ?? title}（右键可收进「更多 ▾」）`}
       onContextMenu={(event) => {
         event.preventDefault()
         setMenu({ x: event.clientX, y: event.clientY })
@@ -503,8 +509,17 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
   }
 
   /** 快捷栏按钮：pinned 收纳外壳 + 更多菜单里的对应条目 */
-  const quick = (id: keyof typeof quickMeta & string, node: ReactNode): ReactElement | null => (
-    <PinWrap title={quickMeta[id].label} shown={isShown(id)} onHide={() => hideFromBar(id)}>
+  const quick = (
+    id: keyof typeof quickMeta & string,
+    node: ReactNode,
+    hint?: string
+  ): ReactElement | null => (
+    <PinWrap
+      title={quickMeta[id].label}
+      hint={hint}
+      shown={isShown(id)}
+      onHide={() => hideFromBar(id)}
+    >
       {node}
     </PinWrap>
   )
@@ -727,7 +742,8 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
             onClick={() => store().addRelationship()}
           >
             <Spline size={17} />
-          </button>
+          </button>,
+          relationshipHint
         )}
         {quick(
           'summary',
@@ -738,7 +754,8 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
             onClick={() => store().addSummary()}
           >
             <Braces size={17} />
-          </button>
+          </button>,
+          summaryHint
         )}
         {quick(
           'boundary',
@@ -749,7 +766,8 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
             onClick={() => store().addBoundary()}
           >
             <Frame size={17} />
-          </button>
+          </button>,
+          boundaryHint
         )}
       </div>
 

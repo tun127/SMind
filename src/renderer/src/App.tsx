@@ -33,7 +33,7 @@ import { stageTypedChar } from './editor/typedChar'
 import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
 import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
 import TabBar from './components/TabBar'
-import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
+import { type AppSettings } from '@shared/ipc'
 import { BUILTIN_THEMES, type ThemeDefinition } from '@shared/theme'
 
 /**
@@ -45,6 +45,8 @@ function applyRenderDefaults(settings: AppSettings): void {
   // 代码块基准字号：布局测量 / 画布 / 导出共用（改了必须重算测量）
   setCodeFontSizeBase(settings.defaultCodeFontSize)
   bumpMeasureEpoch()
+  // 光让缓存失效还不够：布局自身也要重跑，否则改了设置要等别的操作才生效
+  useEditor.getState().bumpRenderEpoch()
 }
 
 function fileNameOf(path: string | null): string | null {
@@ -317,14 +319,6 @@ export default function App(): ReactElement {
     })()
   }, [resolveTheme])
 
-  /**
-   * 改「默认对齐 / 默认字体」这类渲染兜底值后，让测量缓存失效。
-   * 设置值本身的写入与落盘统一走 `patchAppSettings`（各面板各自调用）。
-   */
-  const handleRenderDefaults = useCallback((next: AppSettings): void => {
-    applyRenderDefaults(next)
-  }, [])
-
   /** 「默认样式」改动后的统一收尾：渲染兜底值失效 */
   const onDefaultStyleChanged = useCallback((): void => {
     applyRenderDefaults(useEditor.getState().appSettings)
@@ -380,7 +374,6 @@ export default function App(): ReactElement {
     (run: () => void): void => {
       commitPending()
       if (useEditor.getState().dirty) {
-        const state = useEditor.getState()
         const active = useTabs.getState().tabs.find((item) => item.id === useTabs.getState().activeId)
         setPending({ fileName: active ? tabTitleOf(active) : '当前文档', run })
       } else run()
@@ -695,15 +688,22 @@ export default function App(): ReactElement {
       if (!store.dirty) return
       // 用快照而不是直接落库：把正在输入但还没提交的文本也写进去，
       // 同时不打断用户的输入（不会退出编辑态）
-      void window.api.autosave(
-        activeDocId(),
-        snapshotForSave(store),
-        store.filePath,
-        fileNameOf(store.filePath) ?? '未命名导图'
-      )
+      void window.api
+        .autosave(
+          activeDocId(),
+          snapshotForSave(store),
+          store.filePath,
+          fileNameOf(store.filePath) ?? '未命名导图'
+        )
+        .catch((error: unknown) => {
+          // 自动保存失败必须让用户知道：最坏的情况不是"存不上"，
+          // 而是用户以为存上了、其实没有
+          const detail = error instanceof Error ? error.message : String(error)
+          showToast(`自动保存失败：${detail}（请尽快手动保存一次）`)
+        })
     }, 30000)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [showToast])
 
   /* ------------------------------------------------------------------ */
   /* 自动版本快照                                                        */

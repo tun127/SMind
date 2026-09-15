@@ -97,6 +97,17 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * 由纯文本派生备注的 HTML。
+ *
+ * `notes`（纯文本）与 `notesHtml`（XHTML）在 .xmind 里是同一份内容的两种表示，
+ * 必须从**同一处**派生——这个表达式原先在两个文件里一字不差地各写了一遍，
+ * 哪天要调整（比如换行改用 `<br />`）很容易只改一处、留下不一致。
+ */
+export function notesHtmlFrom(text: string): string {
+  return `<p>${escapeHtml(text).replace(/\n/g, '<br/>')}</p>`
+}
+
+/**
  * 行内 run → HTML 片段。
  *
  * 用途：把 Markdown 行内语法**粘贴进节点**时，先转成 HTML 再交给编辑器，

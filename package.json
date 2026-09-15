@@ -11,6 +11,10 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.{ts,mjs,cjs}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
     "samples": "node scripts/make-samples.mjs",
     "fonts": "node scripts/make-katex-assets.mjs",
     "icon": "node scripts/make-icon.mjs",
@@ -22,6 +26,7 @@
     "jszip": "^3.10.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tiptap/extension-text-align": "^3.31.3",
     "@tiptap/extension-text-style": "^3.31.3",
     "@tiptap/extension-underline": "^3.31.3",
@@ -35,12 +40,17 @@
     "electron": "^44.3.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "eslint": "^10.10.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-unused-imports": "^4.4.1",
     "immer": "^11.1.18",
     "katex": "^0.18.7",
     "lucide-react": "^1.45.0",
+    "prettier": "^3.9.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "typescript": "^5.9.0",
+    "typescript-eslint": "^8.70.0",
     "vite": "^7.3.6",
     "zustand": "^5.0.15"
   }

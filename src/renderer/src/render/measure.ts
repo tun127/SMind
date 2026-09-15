@@ -11,7 +11,6 @@ import type {
 import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/model/types'
 import {
   BLOCK_GAP,
-  MARKER_STRIP_GAP,
   codeBlockMetrics,
   imageBoxSize,
   markerStripSize,
@@ -22,6 +21,7 @@ import { SCRIPT_FONT_RATIO, richFromPlain } from '@shared/richtext'
 import { splitInlineMath } from '@shared/formula'
 import { formulaSize } from './formula'
 import { defaultTextAlignOf } from './defaults'
+import { evictOldest } from '@shared/cache'
 
 export const FONT_FAMILY =
   '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", system-ui, sans-serif'
@@ -287,7 +287,7 @@ function widthOf(char: StyledChar): number {
     lastFont = font
   }
   const width = ctx.measureText(ch).width
-  if (charWidthCache.size >= CHAR_CACHE_LIMIT) charWidthCache.clear()
+  evictOldest(charWidthCache, CHAR_CACHE_LIMIT)
   charWidthCache.set(key, width)
   return width
 }
@@ -569,6 +569,22 @@ const PLAIN_CACHE_LIMIT = 20000
 const richCache = new WeakMap<RichText, Map<string, MeasureResult>>()
 
 /**
+ * 按**主题对象身份**缓存测量结果（WeakMap，不阻碍旧对象回收）。
+ *
+ * immer 的不可变更新保证：没被改动的主题，对象引用不变。
+ * 而"编辑某个节点"时每敲一个字都会重跑全量布局，其中绝大多数节点压根没变——
+ * 以前仍要逐个重建缓存键（拼字符串 + 扫一遍标记/标签/备注/附件），节点一多就白烧 CPU。
+ *
+ * 失效跟测量代次绑定：代次一变（字体就绪、默认对齐/字号改变），旧条目直接作废，
+ * 不需要也无法显式清空 WeakMap。
+ */
+interface IdentityEntry {
+  epoch: number
+  byDepth: Map<number, MeasureResult>
+}
+const identityCache = new WeakMap<Topic, IdentityEntry>()
+
+/**
  * 测量代次。
  * 公式的真实尺寸依赖「字体是否已经加载」，字体就绪后必须让旧结果失效；
  * WeakMap 没法清空，所以用一个代次号参与缓存键。
@@ -622,6 +638,27 @@ export function measureTextWidth(
 }
 
 export function measureTopic(topic: Topic, depth: number): MeasureResult {
+  // 身份快路径：没被改动的主题引用不变，直接命中——连缓存键都不用拼
+  const entry = identityCache.get(topic)
+  if (entry && entry.epoch === epoch) {
+    const hit = entry.byDepth.get(depth)
+    if (hit) return hit
+  }
+
+  const result = measureByKey(topic, depth)
+
+  const fresh =
+    entry && entry.epoch === epoch ? entry : { epoch, byDepth: new Map<number, MeasureResult>() }
+  fresh.byDepth.set(depth, result)
+  if (fresh !== entry) identityCache.set(topic, fresh)
+  return result
+}
+
+/**
+ * 原有的字符串键缓存：同一份内容出现在不同节点上（复制粘贴出来的副本）也能复用。
+ * 身份缓存已经挡掉绝大多数重复计算，这层是兜底。
+ */
+function measureByKey(topic: Topic, depth: number): MeasureResult {
   const extra = accessoryKey(topic)
   const rich = topic.titleRich
 
@@ -643,7 +680,7 @@ export function measureTopic(topic: Topic, depth: number): MeasureResult {
   const cached = plainCache.get(key)
   if (cached) return cached
   const result = compute(topic, depth)
-  if (plainCache.size >= PLAIN_CACHE_LIMIT) plainCache.clear()
+  evictOldest(plainCache, PLAIN_CACHE_LIMIT)
   plainCache.set(key, result)
   return result
 }

@@ -7,6 +7,9 @@
     "jsx": "react-jsx",
     "types": ["node"],
     "strict": true,
+    /* 未使用的局部变量与参数一律报错（下划线开头的参数例外，用于占位） */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,

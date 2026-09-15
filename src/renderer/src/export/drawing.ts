@@ -200,7 +200,6 @@ export interface BuildDrawingInput {
 
 const LABEL_GAP = 4
 const LABEL_HEIGHT = 18
-const LABEL_PADDING_X = 7
 
 /** 文字基线：把字号换算成「垂直居中所需的基线偏移」 */
 function baselineIn(boxTop: number, boxHeight: number, fontSize: number): number {

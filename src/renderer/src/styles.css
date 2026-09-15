@@ -232,6 +232,11 @@ textarea {
   border-radius: 4px;
   cursor: default;
   outline: none;
+  /* 大纲可能上万行：跳过视口外的行，不让浏览器为看不见的内容排队做布局与绘制。
+     `contain-intrinsic-size: auto 26px` 里的 auto 会**记住**量过的高度，
+     所以滚动条不会随着滚动一跳一跳。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 26px;
 }
 
 .outline-row:hover {

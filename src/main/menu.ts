@@ -4,6 +4,8 @@ import { IPC, type MenuCommand } from '@shared/ipc'
 interface MenuActions {
   /** 开一个新窗口（= 新的一份文档）；由主进程处理，不走渲染进程命令 */
   newWindow: () => void
+  /** 打开日志目录（排查崩溃与异常用） */
+  openLogs: () => void
 }
 
 function send(command: MenuCommand): void {
@@ -92,6 +94,7 @@ export function buildAppMenu(actions: MenuActions): void {
       label: '帮助',
       submenu: [
         { label: '快捷键说明', click: () => send('help:shortcuts') },
+        { label: '打开日志目录', click: () => actions.openLogs() },
         { type: 'separator' },
         {
           label: `版本 ${app.getVersion()}`,

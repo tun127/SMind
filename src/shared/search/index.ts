@@ -238,18 +238,31 @@ export function applyTopicFilter(root: Topic, filter: TopicFilter): FilterResult
 
   if (!isFilterActive(filter)) return { hits, keep }
 
-  const visit = (topic: Topic, trail: string[]): boolean => {
-    const matched = topicMatchesFilter(topic, filter)
-    const childMatched = topic.children.map((child) => visit(child, [...trail, topic.id])).some(Boolean)
-    const floatingMatched = topic.detachedChildren
-      .map((child) => visit(child, [...trail, topic.id]))
-      .some(Boolean)
+  /**
+   * 父指针表。
+   * 原先每个子节点都要复制一份路径数组（`[...trail, topic.id]`），
+   * 开销随「节点数 × 深度」放大——深树大树上很可观。
+   * 换成"记下父节点、需要时沿链回溯"，一次遍历就够。
+   */
+  const parentOf = new Map<string, string | null>()
 
-    const anyBelow = childMatched || floatingMatched
+  const visit = (topic: Topic, parentId: string | null): boolean => {
+    parentOf.set(topic.id, parentId)
+
+    let anyBelow = false
+    for (const child of topic.children) {
+      if (visit(child, topic.id)) anyBelow = true
+    }
+    for (const child of topic.detachedChildren) {
+      if (visit(child, topic.id)) anyBelow = true
+    }
+
+    const matched = topicMatchesFilter(topic, filter)
     if (matched) {
       hits.add(topic.id)
       keep.add(topic.id)
-      for (const id of trail) keep.add(id)
+      // 命中节点的祖先要保留，否则会被折叠逻辑挡在外面看不见
+      for (let id = parentId; id !== null; id = parentOf.get(id) ?? null) keep.add(id)
     } else if (anyBelow) {
       // 没命中但有后代命中：保留路径，保证命中节点可见
       keep.add(topic.id)
@@ -257,7 +270,7 @@ export function applyTopicFilter(root: Topic, filter: TopicFilter): FilterResult
     return matched || anyBelow
   }
 
-  visit(root, [])
+  visit(root, null)
   return { hits, keep }
 }
 

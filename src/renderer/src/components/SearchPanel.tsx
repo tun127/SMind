@@ -1,6 +1,6 @@
 import { useMemo, type ReactElement } from 'react'
 import { ArrowRight, BarChart3, Filter, Search, X } from 'lucide-react'
-import { activeSheet, findTopic } from '@shared/model/tree'
+import { activeSheet } from '@shared/model/tree'
 import {
   applyTopicFilter,
   collectLabels,
@@ -12,6 +12,7 @@ import {
 import { MARKER_GROUPS } from '../render/markers'
 import { viewportActions } from '../render/viewport'
 import { useEditor } from '../store/editor'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import MarkerIcon from './MarkerIcon'
 
 interface Props {
@@ -41,11 +42,13 @@ export default function SearchPanel({ onClose, onNotify }: Props): ReactElement 
   const clearFilter = useEditor((s) => s.clearFilter)
 
   const sheet = useMemo(() => activeSheet(workbook), [workbook])
+  const activeQuery = useDebouncedValue(search.query)
 
-  // 与画布用同一份条件算命中，保证列表与高亮一致
+  // 与画布用同一份条件算命中，保证列表与高亮一致。
+  // 搜索词用防抖后的值：每敲一个键就全树扫描一遍，大文档下纯属白费
   const hits = useMemo(
-    () => (search.query.trim().length > 0 ? searchSheet(sheet, search.query, search.options) : []),
-    [sheet, search.query, search.options]
+    () => (activeQuery.trim().length > 0 ? searchSheet(sheet, activeQuery, search.options) : []),
+    [sheet, activeQuery, search.options]
   )
   const hitTotal = hits.reduce((sum, hit) => sum + hit.count, 0)
   const stats = useMemo(() => sheetStats(sheet), [sheet])

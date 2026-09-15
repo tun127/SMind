@@ -26,6 +26,7 @@ import {
 import { applyTopicFilter, hitTopicIds, isFilterActive, searchSheet } from '@shared/search'
 import { DEFAULT_STRUCTURE, getStructureDef } from '@shared/xmind/constants'
 import { measureTopic, bumpMeasureEpoch } from '../render/measure'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
 import { viewportActions } from '../render/viewport'
@@ -187,8 +188,6 @@ export default function Canvas(): ReactElement {
    */
   const selectionRef = useRef(selection)
   selectionRef.current = selection
-  /** 拖动期间固定不变：这次到底在拖哪些主题 */
-  const dragNodesRef = useRef<DragMove | null>(null)
   /** 当前裁决出的落点（松手就按它落） */
   const dropPlanRef = useRef<DropResult | null>(null)
   /**
@@ -257,6 +256,8 @@ export default function Canvas(): ReactElement {
     }
   }, [])
 
+  const renderEpoch = useEditor((s) => s.renderEpoch)
+
   const layout: LayoutResult = useMemo(() => {
     const root = activeRoot(workbook)
     const sheet = activeSheet(workbook)
@@ -267,9 +268,9 @@ export default function Canvas(): ReactElement {
         : measureTopic(topic, depth)
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
     return layoutSheet(root, measure, {}, sheet)
-    // fontEpoch 只用于「字体就绪后强制重新布局」，不是布局的输入
+    // fontEpoch / renderEpoch 只用于「强制重新布局」，不是布局的输入
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbook, editingId, editingText, editingRich, fontEpoch])
+  }, [workbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
 
   const layoutRef = useRef<LayoutResult>(layout)
   layoutRef.current = layout
@@ -1477,14 +1478,16 @@ export default function Canvas(): ReactElement {
     )
   }, [layout, pan.x, pan.y, zoom, size.width, size.height, editingId])
 
-  const visibleIds = useMemo(() => new Set(visibleNodes.map((n) => n.id)), [visibleNodes])
-
   /* ---- 搜索命中与筛选：面板与画布共用 store 里的同一份条件 ---- */
   const sheet = useMemo(() => activeSheet(workbook), [workbook])
 
+  // 搜索词用防抖后的值：每敲一个键都要全树扫一遍，大文档下纯属白费
+  const activeQuery = useDebouncedValue(search.query)
+
   const searchHits = useMemo(
-    () => (search.query.trim().length > 0 ? hitTopicIds(searchSheet(sheet, search.query, search.options)) : null),
-    [sheet, search.query, search.options]
+    () =>
+      activeQuery.trim().length > 0 ? hitTopicIds(searchSheet(sheet, activeQuery, search.options)) : null,
+    [sheet, activeQuery, search.options]
   )
 
   const filterResult = useMemo(

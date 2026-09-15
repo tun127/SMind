@@ -5,7 +5,7 @@
  *  - 主轴本身作为装饰线绘制，一级主题的连线直接从主轴上连出
  */
 import type { Topic } from '../model/types'
-import type { LayoutResult, NodeLayout } from './types'
+import type { LayoutResult } from './types'
 import { LayoutBuilder, addDecoration, addEdge, anchorPoint, round } from './core'
 import { placeHorizontalColumn, placeVerticalColumn } from './stack'
 

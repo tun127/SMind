@@ -14,7 +14,7 @@
 
 import { createTopic } from '../model/factory'
 import { isRecord } from '../guards'
-import { escapeHtml } from '../richtext'
+import { notesHtmlFrom } from '../richtext'
 import type { RichText, Topic, TopicCode } from '../model/types'
 
 export interface AiConfig {
@@ -333,13 +333,11 @@ export function outlineToTopic(node: OutlineNode, structureClass?: string): Topi
   if (node.formula) topic.formula = node.formula
   if (node.notes && node.notes.trim().length > 0) {
     topic.notes = node.notes
-    topic.notesHtml = `<p>${escapeHtmlForNotes(node.notes).replace(/\n/g, '<br/>')}</p>`
+    topic.notesHtml = notesHtmlFrom(node.notes)
   }
   return topic
 }
 
-/** 备注 HTML 由纯文本派生时的转义：统一走共享实现，保证与编辑器完全一致 */
-const escapeHtmlForNotes = escapeHtml
 
 /** 解析「一行一个」的列表（扩写结果那种） */
 export function parseFlatList(text: string): string[] {

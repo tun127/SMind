@@ -16,7 +16,7 @@ import type { StructureClass, Topic } from '../model/types'
 import { getStructureDef, TOPIC_SIDE_KEY } from '../xmind/constants'
 import type { NodeLayout, Side } from './types'
 import type { Anchor, LayoutBuilder } from './core'
-import { addDecoration, addEdge, anchorPoint, bracePath, round, verticalAnchors } from './core'
+import { addDecoration, bracePath, verticalAnchors } from './core'
 import { placeVerticalChildren, placeVerticalColumn } from './stack'
 import { placeOrgChartChildren } from './orgchart'
 import { placeFishboneSubtree } from './fishbone-subtree'
@@ -196,7 +196,6 @@ function placeMatrixChildren(
     rowHeights.push(height)
   }
 
-  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + builder.gapX * (cols - 1)
   const totalHeight = rowHeights.reduce((a, b) => a + b, 0) + builder.gapY * (rows - 1)
   const top = y + node.height / 2 - totalHeight / 2
   const left = x + node.width + builder.gapX
@@ -229,7 +228,7 @@ function placeBraceChildren(
   builder: LayoutBuilder,
   topic: Topic,
   x: number,
-  y: number,
+  _y: number,
   depth: number,
   inherited: StructureClass
 ): void {

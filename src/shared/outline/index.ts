@@ -7,6 +7,7 @@
  */
 
 import type { RichText, Sheet, Topic, Workbook } from '../model/types'
+import { escapeXmlAttr } from '../xml-escape'
 
 export type OutlineFormat = 'txt' | 'md' | 'opml'
 
@@ -167,18 +168,9 @@ export function toMarkdown(root: Topic): string {
   return out.join('\n') + '\n'
 }
 
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-}
-
 /** OPML 2.0：属性里的换行与制表符会被折叠，避免破坏 XML 结构 */
 function opmlAttr(value: string): string {
-  return escapeXml(value.replace(/[\r\n\t]+/g, ' ').trim())
+  return escapeXmlAttr(value.replace(/[\r\n\t]+/g, ' ').trim())
 }
 
 function outlineNode(topic: Topic, depth: number): string {
@@ -199,7 +191,7 @@ export function toOpml(sheet: Sheet): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
   <head>
-    <title>${escapeXml(sheet.title)}</title>
+    <title>${escapeXmlAttr(sheet.title)}</title>
   </head>
   <body>
 ${outlineNode(sheet.rootTopic, 0)}

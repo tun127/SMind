@@ -50,7 +50,6 @@ function pad10(value: number): string {
  */
 export function pdfTextString(value: string): string {
   const ascii = value.replace(/([\\()])/g, '\\$1')
-  // eslint-disable-next-line no-control-regex
   if (/^[\x20-\x7e]*$/.test(value)) return `(${ascii})`
 
   let hex = 'FEFF'

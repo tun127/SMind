@@ -15,8 +15,9 @@ import {
   type Workbook
 } from '../model/types'
 import { createId } from '../model/factory'
+import { coerceCode, coerceRichText } from '../model/coerce'
 import { normalizeThemeColors } from '../theme'
-import { DEFAULT_STRUCTURE, STRUCTURES, THEME_NAMESPACE, XMIND_FILES } from './constants'
+import { STRUCTURES, THEME_NAMESPACE, XMIND_FILES } from './constants'
 import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument, EMMX_PAGE_FILE } from './emmx'
 import { parseLegacyContent } from './legacy'
 import { parseXml } from './xml'
@@ -119,13 +120,13 @@ function readOurExtensions(raw: unknown): {
     if (item.provider !== OUR_PROVIDER) continue
     const content = item.content
     if (isRecord(content)) {
-      if (isRecord(content.titleRich) && Array.isArray(content.titleRich.paragraphs)) {
-        out.titleRich = content.titleRich as unknown as Topic['titleRich']
-      }
+      // 逐字段收敛后再收下：这是**别人的文件**，字段缺失/类型不对都是常态，
+      // 强转会让坏数据一路流进测量与渲染
+      const titleRich = coerceRichText(content.titleRich)
+      if (titleRich) out.titleRich = titleRich
       if (typeof content.formula === 'string') out.formula = content.formula
-      if (isRecord(content.code) && typeof content.code.text === 'string') {
-        out.code = content.code as unknown as Topic['code']
-      }
+      const code = coerceCode(content.code)
+      if (code) out.code = code
       if (isRecord(content.sizeOverride)) {
         const width = asNumber(content.sizeOverride.width)
         const height = asNumber(content.sizeOverride.height)
@@ -300,6 +301,20 @@ export async function isLegacyXmind(data: Uint8Array): Promise<boolean> {
 }
 
 /**
+ * 打开压缩包。
+ *
+ * JSZip 抛的是英文原文（`Corrupted zip: can't find end of central directory` 之类），
+ * 直接摊给用户看没有任何意义——换成能指导下一步动作的说法。
+ */
+async function loadZip(data: Uint8Array): Promise<JSZip> {
+  try {
+    return await JSZip.loadAsync(data)
+  } catch {
+    throw new Error('这个文件不是有效的 .xmind：压缩包已损坏或不完整（可试试在原软件里重新导出）')
+  }
+}
+
+/**
  * 解析 .xmind / .emmx 文件。
  * 兼容 Xmind 2020+（content.json）、Xmind 8 旧版（content.xml），
  * 以及亿图脑图的 .emmx（本身是 Xmind 格式时走正常解析；专有二进制格式走文字提取）。
@@ -311,7 +326,7 @@ export async function parseXmind(
   options: { fileName?: string } = {}
 ): Promise<ParseResult> {
   const warnings: string[] = []
-  const zip = await JSZip.loadAsync(data)
+  const zip = await loadZip(data)
 
   const contentFile = zip.file(XMIND_FILES.content)
   if (!contentFile) {

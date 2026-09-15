@@ -1,5 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
 import { isRecord } from '../shared/guards'
+import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
+import { writeFileAtomic } from './atomic-write'
+import { logDirectory, logMain } from './log'
 import { createHash } from 'node:crypto'
 import { promises as fs, existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -42,7 +45,7 @@ import {
 } from '@shared/model/resources'
 import { parseXmind } from '@shared/xmind/parse'
 import { serializeXmind } from '@shared/xmind/serialize'
-import { activeSheetOf, buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
+import { buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
 import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
 import type { HistoryEntry } from '@shared/history'
 import type { SnapshotItem, SnapshotReason } from '@shared/snapshot'
@@ -110,7 +113,6 @@ const copyDir = (): string => join(app.getPath('userData'), 'copies')
  */
 const autosaveFile = (slot: string): string => join(autosaveDir(), `${slot}.xmind`)
 const autosaveMeta = (slot: string): string => join(autosaveDir(), `${slot}.json`)
-const slotName = (index: number): string => `slot-${index}`
 
 async function readAutosaveMeta(slot: string): Promise<RecoveryMeta | null> {
   try {
@@ -281,7 +283,7 @@ async function writeDocument(
   const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
   if (doc) pruneForSave(doc, workbook)
   const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
-  await fs.writeFile(path, Buffer.from(bytes))
+  await writeFileAtomic(path, bytes)
   if (doc) doc.docPath = path
   // 保存成功也记一笔，并记住这次用的目录（下次「另存为」默认落在这里）
   await rememberSaveDir(dirname(path)).catch(() => undefined)
@@ -299,13 +301,10 @@ function ensureXmindExt(p: string): string {
 
 const themesFile = (): string => join(app.getPath('userData'), 'themes.json')
 
-/** 「是不是普通对象」统一用共享实现（原先这里另写了一份一模一样的），保留旧名免得改一堆调用点 */
-const isPlainRecord = isRecord
-
 async function readThemes(): Promise<ThemeDefinition[]> {
   try {
     const raw: unknown = JSON.parse(await fs.readFile(themesFile(), 'utf8'))
-    const list = isPlainRecord(raw) && Array.isArray(raw.themes) ? raw.themes : []
+    const list = isRecord(raw) && Array.isArray(raw.themes) ? raw.themes : []
     return list
       .map((item) => normalizeThemeDefinition(item, { builtin: false }))
       .filter((item): item is ThemeDefinition => item !== null)
@@ -395,11 +394,16 @@ async function callAi(
     return { content, model, totalTokens }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`请求超时（超过 ${Math.round(timeoutMs / 1000)} 秒）：网络慢或模型响应太慢，可以稍后再试`)
+      throw new Error(
+        `请求超时（超过 ${Math.round(timeoutMs / 1000)} 秒）：网络慢或模型响应太慢，可以稍后再试`,
+        { cause: error }
+      )
     }
     if (error instanceof TypeError) {
       // fetch 的网络层错误（DNS/连接被拒/证书）
-      throw new Error(`连不上 AI 服务：请检查 BaseURL 是否正确、网络是否可用（${error.message}）`)
+      throw new Error(`连不上 AI 服务：请检查 BaseURL 是否正确、网络是否可用（${error.message}）`, {
+        cause: error
+      })
     }
     throw error
   } finally {
@@ -433,7 +437,8 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
     ...(existsSync(devIconFile) ? { icon: devIconFile } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      // 沙箱开着更安全；preload 只用了 contextBridge + ipcRenderer，两者在沙箱里都可用
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -470,6 +475,36 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  /**
+   * 渲染进程崩溃 / 无响应 / 页面加载失败。
+   * 不处理的话用户只会看到一个**空窗口或卡住的窗口**，不知道发生了什么、也不知道能不能救。
+   */
+  win.webContents.on('render-process-gone', (_event, details) => {
+    logMain('render-process-gone', details.reason, { exitCode: details.exitCode })
+    if (win.isDestroyed()) return
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'error',
+      title: '界面进程已退出',
+      message: '界面进程意外退出了。文档有自动存档（每 30 秒一份），重新加载即可继续。',
+      detail: `退出原因：${details.reason}`,
+      buttons: ['重新加载界面', '关闭这个窗口'],
+      defaultId: 0,
+      cancelId: 0
+    })
+    if (choice === 0) win.reload()
+    else win.close()
+  })
+
+  win.webContents.on('unresponsive', () => {
+    logMain('unresponsive', '渲染进程无响应')
+  })
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    // -3 是主动中止（正常的导航取消），不必记
+    if (errorCode === -3) return
+    logMain('did-fail-load', `${errorCode} ${errorDescription}`, validatedURL)
   })
 
   /**
@@ -686,13 +721,16 @@ function registerIpc(): void {
     return readDocumentInto(stateOf(e.sender), docId, result.filePaths[0])
   })
 
-  ipcMain.handle(IPC.openPath, async (e, docId: string, path: string): Promise<OpenResult> =>
-    readDocumentInto(stateOf(e.sender), docId, path)
-  )
+  ipcMain.handle(IPC.openPath, async (e, docId: string, path: string): Promise<OpenResult> => {
+    if (!isPlausibleFilePath(path)) throw new Error('文件路径无效，无法打开')
+    return readDocumentInto(stateOf(e.sender), docId, path)
+  })
 
   ipcMain.handle(
     IPC.saveToPath,
     async (e, docId: string, path: string, workbook: Workbook): Promise<SaveResult> => {
+      // 写文件比读文件更值得拦：这条通道决定了"能往哪里写"
+      if (!isPlausibleFilePath(path)) throw new Error('保存路径无效')
       return writeDocument(stateOf(e.sender), docId, ensureXmindExt(path), workbook)
     }
   )
@@ -721,7 +759,8 @@ function registerIpc(): void {
       await fs.mkdir(autosaveDir(), { recursive: true })
       if (doc) pruneForSave(doc, workbook)
       const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
-      await fs.writeFile(autosaveFile(state.slot), Buffer.from(bytes))
+      // 存档也走原子写：半截的存档在恢复时会被判为损坏，等于白存一份
+      await writeFileAtomic(autosaveFile(state.slot), bytes)
       const meta: RecoveryMeta = {
         originalPath: originalPath ?? null,
         title: title || '未命名导图',
@@ -905,7 +944,7 @@ function registerIpc(): void {
     if (result.canceled || result.filePaths.length === 0) return null
 
     const parsed: unknown = JSON.parse(await fs.readFile(result.filePaths[0], 'utf8'))
-    const candidate = isPlainRecord(parsed) && 'theme' in parsed ? parsed.theme : parsed
+    const candidate = isRecord(parsed) && 'theme' in parsed ? parsed.theme : parsed
     const theme = normalizeThemeDefinition(candidate, { builtin: false })
     if (!theme) throw new Error('主题文件格式不正确，请确认是本软件导出的主题文件')
     // 分配新 id，避免覆盖已有的自定义主题
@@ -951,7 +990,9 @@ function registerIpc(): void {
     name: string,
     buf: Buffer
   ): PickedImage => {
-    if (buf.byteLength === 0) throw new Error('这张图片是空文件，无法插入')
+    // 上限既挡"手滑选中超大图"，也挡渲染层被注入后拿 IPC 当放大器
+    const problem = checkImagePayload(buf, name)
+    if (problem) throw new Error(problem)
     const path = resourcePathFor(createId('img'), name)
 
     // 用 Electron 自带的解码器拿真实像素尺寸，节点才能按原始宽高比显示
@@ -1035,7 +1076,7 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.openAttachment, async (e, path: string, name: string): Promise<boolean> => {
+  ipcMain.handle(IPC.openAttachment, async (_e, path: string, name: string): Promise<boolean> => {
     // 附件资源路径全局唯一：直接跨窗口/跨标签找
     const bytes = resourceBytesOf(path)
     if (!bytes) return false
@@ -1180,7 +1221,7 @@ function registerIpc(): void {
     try {
       text = await fs.readFile(path, 'utf8')
     } catch (error) {
-      throw new Error(`读取文件失败：${(error as Error).message}`)
+      throw new Error(`读取文件失败：${(error as Error).message}`, { cause: error })
     }
     // 去掉 UTF-8 BOM，否则第一行会被当成乱码
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
@@ -1212,7 +1253,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.historyReveal, async (_e, path: string): Promise<void> => {
-    if (existsSync(path)) shell.showItemInFolder(path)
+    if (isPlausibleFilePath(path) && existsSync(path)) shell.showItemInFolder(path)
   })
 
   /* ---- 文档版本快照（P9+） ---- */
@@ -1313,7 +1354,7 @@ function registerIpc(): void {
   })
 
   ipcMain.on(IPC.showInFolder, (_e, path: string) => {
-    if (existsSync(path)) shell.showItemInFolder(path)
+    if (isPlausibleFilePath(path) && existsSync(path)) shell.showItemInFolder(path)
   })
 }
 
@@ -1353,7 +1394,13 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     registerResourceProtocol()
     registerIpc()
-    buildAppMenu({ newWindow: () => createWindow() })
+    buildAppMenu({
+      newWindow: () => createWindow(),
+      // 目录可能还没建（只在真出过错时才写日志）：先建再开，否则「打开」是无声失败
+      openLogs: () => {
+        void fs.mkdir(logDirectory(), { recursive: true }).then(() => shell.openPath(logDirectory()))
+      }
+    })
     // 上一次运行崩溃时可能留下画布副本的临时文件：超过一天的一律清掉
     void pruneStaleCopies()
     // 第一个窗口认领「启动时带的那个文件」（双击 .xmind / 拖到 exe 上 / 右键打开方式）
@@ -1385,4 +1432,18 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   quitRequested = true
   for (const state of pending) state.win.webContents.send(IPC.closeRequest)
+})
+
+/**
+ * 进程级兜底：未捕获异常与未处理的 Promise 拒绝都落盘（日志目录可直接打开查看）。
+ *
+ * **刻意不退出**：主进程在大多数异常之后仍能继续服务；一旦在这里 quit()，
+ * 用户正在编辑的内容会跟着窗口一起消失——那才是最大的损失。
+ */
+process.on('uncaughtException', (error) => {
+  logMain('uncaughtException', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  logMain('unhandledRejection', reason)
 })
