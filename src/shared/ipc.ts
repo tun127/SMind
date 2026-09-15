@@ -1,5 +1,6 @@
 import type { Workbook } from './model/types'
 import type { AiConfigView, AiMessage, AiStreamEvent, ChatHistoryEntry } from './ai'
+import type { LicenseView } from './license'
 import type { ImageExportFormat } from './export/types'
 import type { HistoryEntry } from './history'
 import type { SnapshotItem, SnapshotReason } from './snapshot'
@@ -156,6 +157,10 @@ export const IPC = {
   chatHistoryLoad: 'chat:history-load',
   chatHistorySave: 'chat:history-save',
   chatHistoryClear: 'chat:history-clear',
+  /* ---- 许可与试用（商业化闸门） ---- */
+  licenseGet: 'license:get',
+  licenseActivate: 'license:activate',
+  licenseDeactivate: 'license:deactivate',
   /* ---- 大纲文件导入（P9+） ---- */
   importText: 'file:import-text',
   /* ---- 历史记录与常用（P9+） ---- */
@@ -346,6 +351,15 @@ export interface MindApi {
   chatHistorySave(key: string, messages: ChatHistoryEntry[]): Promise<void>
   /** 清掉某份文档的聊天记录（面板上的「清空对话」） */
   chatHistoryClear(key: string): Promise<void>
+  /**
+   * 当前许可状态：是否 Pro、试用还剩几个写回合。
+   * **闸门判定在主进程**（由它决定下发哪些工具），这里只用于界面显示。
+   */
+  licenseGet(): Promise<LicenseView>
+  /** 激活许可码（离线验签，不联网） */
+  licenseActivate(key: string): Promise<{ ok: boolean; message: string; view: LicenseView }>
+  /** 取消激活（换机器、退货都用它） */
+  licenseDeactivate(): Promise<LicenseView>
 
   /* ---- 大纲文件导入 ---- */
   /**

@@ -2374,6 +2374,83 @@ textarea {
   white-space: nowrap;
 }
 
+/* 许可徽标：Pro / 试用剩余。低调但一直在，用户随时知道自己在什么状态 */
+.chat-panel__badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-panel__badge--pro {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 试用用尽时的说明与激活入口 */
+.chat-panel__limits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.chat-panel__limits-text {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.chat-panel__limits-text svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.chat-panel__activate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-panel__activate textarea {
+  resize: none;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--panel);
+  color: var(--text);
+  /* 许可码是 base64 长串：允许任意位置断行，别把面板撑宽 */
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.chat-panel__activate textarea:focus {
+  border-color: var(--accent);
+}
+
+.chat-panel__activate-msg {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.chat-panel__activate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .side-panel__row {
   display: flex;
   gap: 6px;

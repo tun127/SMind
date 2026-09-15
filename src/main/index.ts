@@ -44,7 +44,9 @@ import {
   type ChatHistoryEntry,
   type ToolCall
 } from '@shared/ai'
-import { AGENT_ALL_TOOLS, toWireTools } from '@shared/agent'
+import { AGENT_WRITE_TOOLS, planAvailableTools, toWireTools, type AgentToolDef } from '@shared/agent'
+import { hasWriteToolCall, type LicenseView } from '@shared/license'
+import { activateLicense, consumeTrialTurn, deactivateLicense, getLicenseView } from './license'
 import type { Workbook } from '@shared/model/types'
 import { createId } from '@shared/model/factory'
 import {
@@ -367,6 +369,9 @@ async function writeAiConfig(config: AiConfig): Promise<void> {
   await fs.writeFile(aiConfigFile(), JSON.stringify(config, null, 2), 'utf8')
 }
 
+/** 写工具的名字：主进程据此判断「这次对话真的动了画布吗」（试用计数只认它） */
+const WRITE_TOOL_NAMES = AGENT_WRITE_TOOLS.map((tool) => tool.name)
+
 /** 进行中的流式请求（requestId → 控制器）：「停止生成」与窗口关闭时中止用 */
 const streamAborters = new Map<string, AbortController>()
 
@@ -382,9 +387,14 @@ async function callAiStream(
   messages: AiMessage[],
   requestId: string,
   sender: { isDestroyed(): boolean; send(channel: string, payload: unknown): void },
-  /** 是否带上只读工具定义；模型不支持工具调用时由渲染层关掉 */
-  useTools: boolean
-): Promise<void> {
+  /**
+   * 这次允许下发给模型的工具定义（可能只有只读的，也可能一个都没有——
+   * 模型不支持函数调用时）。**许可闸门就在这一层**。
+   */
+  tools: AgentToolDef[]
+): Promise<string[]> {
+  /** 本次流里模型调用过的工具名（主进程据此判定这是不是一个「写回合」） */
+  let toolNames: string[] = []
   const push = (event: AiStreamEvent): void => {
     if (!sender.isDestroyed()) sender.send(IPC.aiStreamEvent, event)
   }
@@ -392,7 +402,7 @@ async function callAiStream(
   const url = chatCompletionsUrl(config.baseUrl)
   if (url.length === 0) {
     push({ requestId, kind: 'error', message: 'BaseURL 没有配置' })
-    return
+    return []
   }
 
   const controller = new AbortController()
@@ -414,8 +424,8 @@ async function callAiStream(
         messages: toWireMessages(messages),
         temperature: config.temperature,
         stream: true,
-        // 读 + 写工具：模型据此决定先看哪一眼、以及要不要动手
-        ...(useTools ? { tools: toWireTools(AGENT_ALL_TOOLS) } : {})
+        // 只下发这次允许的工具：模型看不到写工具，就物理上调不动它
+        ...(tools.length > 0 ? { tools: toWireTools(tools) } : {})
       }),
       signal: controller.signal
     })
@@ -460,13 +470,16 @@ async function callAiStream(
     // 过滤器里可能留着「像标签前缀其实是正文」的尾巴
     emit(think.flush())
 
+    const finalCalls = finalizeToolCalls(toolCalls)
+    toolNames = finalCalls.map((call) => call.name)
+
     push({
       requestId,
       kind: 'done',
       content: full,
       model: model ?? config.model,
       aborted: controller.signal.aborted,
-      toolCalls: finalizeToolCalls(toolCalls)
+      toolCalls: finalCalls
     })
   } catch (error) {
     if (controller.signal.aborted) {
@@ -493,6 +506,7 @@ async function callAiStream(
   } finally {
     streamAborters.delete(requestId)
   }
+  return toolNames
 }
 
 /**
@@ -1418,16 +1432,39 @@ function registerIpc(): void {
       // 工具默认开着；模型不支持函数调用时由渲染层显式关掉
       const useTools = !(isRecord(options) && options.useTools === false)
 
+      // **许可闸门**：Pro 或试用没用完，才把写工具下发下去。
+      // 放在主进程、放在「下发哪些工具」这一层——模型看不到写工具就物理上调不动它，
+      // 比在渲染层判断可靠（渲染层的提示只是礼貌，不是边界）。
+      const license = await getLicenseView()
+      const tools = useTools ? planAvailableTools(license.canWrite) : []
+
       const sender = e.sender
       // 窗口销毁时中止：别留悬着的连接，也别再往已销毁的窗口发事件
       sender.once('destroyed', () => streamAborters.get(requestId)?.abort())
-      await callAiStream(config, messages as AiMessage[], requestId, sender, useTools)
+      const usedTools = await callAiStream(config, messages as AiMessage[], requestId, sender, tools)
+
+      // 真的动了画布才算一个试用回合：只读聊天永久免费、不计数
+      if (hasWriteToolCall(usedTools, WRITE_TOOL_NAMES)) await consumeTrialTurn()
     }
   )
 
   ipcMain.on(IPC.aiChatStreamCancel, (_e, requestId: unknown) => {
     if (typeof requestId === 'string') streamAborters.get(requestId)?.abort()
   })
+
+  /* ---- 许可与试用（商业化闸门：Pro 解锁写工具，免费送 20 个写回合） ---- */
+
+  ipcMain.handle(IPC.licenseGet, (): Promise<LicenseView> => getLicenseView())
+
+  ipcMain.handle(IPC.licenseActivate, async (_e, key: unknown) => {
+    // 许可码是外部输入（用户粘贴的），长度与类型都验一遍再进验签
+    if (typeof key !== 'string' || key.length === 0 || key.length > 4000) {
+      return { ok: false, message: '许可码无效：请把购买时拿到的那一整串原样粘进来', view: await getLicenseView() }
+    }
+    return activateLicense(key)
+  })
+
+  ipcMain.handle(IPC.licenseDeactivate, (): Promise<LicenseView> => deactivateLicense())
 
   /* ---- AI 聊天记录（按文档持久化） ---- */
 

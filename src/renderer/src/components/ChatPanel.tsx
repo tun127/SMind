@@ -27,6 +27,7 @@ import {
   type ToolContext,
   type WriteIntent
 } from '@shared/agent'
+import type { LicenseView } from '@shared/license'
 import { createId } from '@shared/model/factory'
 import { activeRoot, ancestorsOf, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
@@ -103,6 +104,16 @@ export default function ChatPanel({
   const [draft, setDraft] = useState('')
   /** null = 还没查完；false = 没配 Key（显示引导）；true = 可用 */
   const [hasKey, setHasKey] = useState<boolean | null>(null)
+  /**
+   * 许可状态（Pro / 试用剩余）。
+   *
+   * **闸门不在这一层**——由主进程决定下发哪些工具；这里只负责让用户看得见
+   * （还差几次、以及去哪输入许可码），以及让提示词如实说明现在能不能改。
+   */
+  const [license, setLicense] = useState<LicenseView | null>(null)
+  const [activateOpen, setActivateOpen] = useState(false)
+  const [licenseKey, setLicenseKey] = useState('')
+  const [licenseMessage, setLicenseMessage] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   /** 需要用户点头的破坏性操作（删分支等） */
   const [pendingWrite, setPendingWrite] = useState<{ summary: string } | null>(null)
@@ -155,6 +166,16 @@ export default function ChatPanel({
       .then((view) => setHasKey(view.hasKey))
       .catch(() => setHasKey(false))
   }, [])
+
+  /** 读许可状态；读不到就当"未知"（面板少显示一个徽标，绝不拦住用户用软件） */
+  const refreshLicense = useCallback((): void => {
+    void window.api
+      .licenseGet()
+      .then(setLicense)
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => refreshLicense(), [refreshLicense])
 
   /**
    * 按文档恢复聊天记录。
@@ -312,6 +333,9 @@ export default function ChatPanel({
       const label = log.length > 0 ? `AI · ${log.slice(0, 2).join('、')}` : 'AI · 修改导图'
       useEditor.getState().commitAiTurn(label)
     }
+
+    // 试用次数在主进程里涨的：回合结束后重新读一次，面板上的数字才不会落后
+    refreshLicense()
 
     // 改完**看得见**：闪一下动过的节点，并把视口带到第一处改动。
     // 直接操作省掉了「预览确认」，信任全靠这一眼——没这一下，画布静悄悄地变了。
@@ -649,7 +673,10 @@ export default function ChatPanel({
         skeleton: buildSkeletonDigest(root),
         selectedTitles,
         totalNodes: countTopicTree(root),
-        sheetCount: state.workbook.sheets.length
+        sheetCount: state.workbook.sheets.length,
+        // 能不能改，以主进程的许可判定为准：写工具没下发时，提示词也必须如实说
+        canWrite: license?.canWrite ?? true,
+        writeHint: license?.writeHint ?? null
       })
 
       const history: AiMessage[] = [
@@ -681,7 +708,7 @@ export default function ChatPanel({
       setDraft('')
       runRound()
     },
-    [runRound, update]
+    [runRound, update, license]
   )
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
@@ -732,6 +759,18 @@ export default function ChatPanel({
           <Bot size={15} />
           AI 助手
         </span>
+        {license && (
+          <span
+            className={license.pro ? 'chat-panel__badge chat-panel__badge--pro' : 'chat-panel__badge'}
+            title={
+              license.pro
+                ? `Pro${license.holder ? `（${license.holder}）` : ''}：AI 可以直接改画布`
+                : `免费试用：还能让 AI 改 ${license.remaining} 次（只读聊天不限次）`
+            }
+          >
+            {license.pro ? 'Pro' : `试用 ${license.remaining}/${license.trialLimit}`}
+          </span>
+        )}
         <div className="chat-panel__actions">
           <button
             type="button"
@@ -856,6 +895,59 @@ export default function ChatPanel({
                   执行
                 </button>
               </div>
+            </div>
+          )}
+
+          {license && !license.canWrite && (
+            <div className="chat-panel__limits">
+              <div className="chat-panel__limits-text">
+                <TriangleAlert size={14} />
+                <span>{license.writeHint}</span>
+              </div>
+              {activateOpen ? (
+                <div className="chat-panel__activate">
+                  <textarea
+                    value={licenseKey}
+                    rows={3}
+                    placeholder="把购买时拿到的许可码整串粘进来（可以带换行）"
+                    onChange={(event) => setLicenseKey(event.target.value)}
+                  />
+                  {licenseMessage && <div className="chat-panel__activate-msg">{licenseMessage}</div>}
+                  <div className="chat-panel__activate-actions">
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        setActivateOpen(false)
+                        setLicenseMessage(null)
+                      }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      disabled={licenseKey.trim().length === 0}
+                      onClick={() => {
+                        void window.api.licenseActivate(licenseKey).then((result) => {
+                          setLicense(result.view)
+                          setLicenseMessage(result.message)
+                          if (result.ok) {
+                            setActivateOpen(false)
+                            setLicenseKey('')
+                          }
+                        })
+                      }}
+                    >
+                      激活
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" className="btn" onClick={() => setActivateOpen(true)}>
+                  输入许可码
+                </button>
+              )}
             </div>
           )}
 

@@ -20,6 +20,9 @@
     "icon": "node scripts/make-icon.mjs",
     "verify": "tsc -p tsconfig.check.json && node scripts/verify-roundtrip.cjs",
     "selfcheck": "node scripts/run-selfcheck.mjs",
+    "license:keygen": "node scripts/run-license-tool.mjs keygen",
+    "license:issue": "node scripts/run-license-tool.mjs issue",
+    "license:selftest": "node scripts/run-license-tool.mjs selftest",
     "dist": "electron-vite build && electron-builder --win --config electron-builder.yml"
   },
   "dependencies": {

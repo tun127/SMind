@@ -51,16 +51,32 @@ import {
   AGENT_ALL_TOOLS,
   AGENT_MAX_ROUNDS,
   AGENT_MAX_TOOL_CALLS,
+  AGENT_TOOLS,
   AGENT_WRITE_TOOLS,
   buildTitleIndex,
   canContinueAgentLoop,
   isMutatingIntent,
+  planAvailableTools,
   planWriteTool,
   resolveTopicAddress,
   runReadTool,
   segmentTitleMentions,
   type ToolContext
 } from '../src/shared/agent'
+import {
+  bytesToBase64Url,
+  bumpTrialUsed,
+  decodeLicenseKey,
+  encodeLicenseKey,
+  hasWriteToolCall,
+  licensePayloadSegment,
+  licenseViewOf,
+  normalizeLicenseKey,
+  remainingTrialTurns,
+  TRIAL_TURN_LIMIT,
+  unknownLicenseView
+} from '../src/shared/license'
+import { generateKeyPairSync, sign as signData, verify as verifyData } from 'node:crypto'
 import { evictOldest } from '../src/shared/cache'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove } from '../src/shared/model/dragmove'
 import {
@@ -1470,7 +1486,8 @@ function testAiChatHelpers(): void {
     skeleton: digest,
     selectedTitles: ['中心', '分支甲', '甲一'],
     totalNodes: 5,
-    sheetCount: 1
+    sheetCount: 1,
+    canWrite: true
   })
   check('带上骨架', prompt.includes('- 分支甲（3 个节点）'))
   check('带上选中路径', prompt.includes('中心 → 分支甲 → 甲一'))
@@ -1486,9 +1503,31 @@ function testAiChatHelpers(): void {
       skeleton: digest,
       selectedTitles: [],
       totalNodes: 5,
-      sheetCount: 2
+      sheetCount: 2,
+      canWrite: true
     }).includes('（未选中任何节点）')
   )
+
+  // 试用用尽 / 未解锁：提示词必须换一套，否则模型会满口答应却调不动工具
+  const limited = buildChatSystemPrompt({
+    skeleton: digest,
+    selectedTitles: [],
+    totalNodes: 5,
+    sheetCount: 1,
+    canWrite: false,
+    writeHint: 'AI 改图的试用已经用完（20/20）。'
+  })
+  check('不能改时明说写工具没下发', limited.includes('只能看、不能改画布'))
+  check('不能改时把原因写进提示词', limited.includes('试用已经用完'))
+  check('不能改时禁止假装已经改了', limited.includes('绝不要假装已经改了'))
+  check('不能改时不再声称可以直接改', !limited.includes('直接修改画布'))
+  check('未给原因时也有兜底说法', buildChatSystemPrompt({
+    skeleton: digest,
+    selectedTitles: [],
+    totalNodes: 5,
+    sheetCount: 1,
+    canWrite: false
+  }).includes('改图能力当前不可用'))
 
   group('AI 聊天：流式解析')
 
@@ -1622,6 +1661,178 @@ function testAgentHelpers(): void {
 
   const long = normalizeChatHistory({ messages: [{ role: 'user', content: 'x'.repeat(30000) }] })
   eq('超长内容被截断', long[0]?.content.length, 20000)
+}
+
+/* ------------------------------------------------------------------ */
+/* 7.10 许可与试用：格式 / 签名 / 闸门（商业化基建）                    */
+/* ------------------------------------------------------------------ */
+
+function testLicenseHelpers(): void {
+  /** 对象比较统一转 JSON 串，避免依赖断言器的深比较行为 */
+  const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined'
+
+  group('许可：许可码格式')
+
+  const payload = {
+    v: 1 as const,
+    edition: 'pro' as const,
+    holder: '张三',
+    issuedAt: '2026-09-15',
+    order: 'A-001'
+  }
+  const segment = licensePayloadSegment(payload)
+  const key = encodeLicenseKey(payload, 'SIGSEG')
+
+  eq('许可码是三段式', key.split('.').length, 3)
+  check('带产品前缀', key.startsWith('SMIND1.'))
+
+  const decoded = decodeLicenseKey(key)
+  eq('能解回来', decoded.ok, true)
+  check('中文持有人也没问题', decoded.ok && decoded.payload.holder === '张三')
+  check('payload 段原样返回（验签覆盖的就是它）', decoded.ok && decoded.payloadSegment === segment)
+  eq('订单号也带回来', decoded.ok ? decoded.payload.order : null, 'A-001')
+
+  // 从聊天窗口/邮件复制，极易带上换行空格；中文输入法还会带全角符号
+  eq('粘贴带的换行空格被清掉', normalizeLicenseKey(` ${key.slice(0, 12)}\n\t${key.slice(12)} `), key)
+  eq(
+    '全角句点与横线也能纠正',
+    normalizeLicenseKey('SMIND1\uFF0Eabc\uFF0Ddef'), // SMIND1．abc－def
+    'SMIND1.abc-def'
+  )
+
+  eq('空串直接拒', decodeLicenseKey('   ').ok, false)
+  eq('段数不对直接拒', decodeLicenseKey('SMIND1.abc').ok, false)
+  eq('前缀不对直接拒', decodeLicenseKey('OTHER.abc.def').ok, false)
+  eq('内容读不出来直接拒', decodeLicenseKey('SMIND1.@@@@.sig').ok, false)
+  eq(
+    '内容不是 JSON 直接拒',
+    decodeLicenseKey(`SMIND1.${bytesToBase64Url(new TextEncoder().encode('not json'))}.sig`).ok,
+    false
+  )
+  eq(
+    '字段不全直接拒（缺 holder）',
+    decodeLicenseKey(
+      encodeLicenseKey({ v: 1, edition: 'pro', holder: ' ', issuedAt: '2026-09-15' }, 'sig')
+    ).ok,
+    false
+  )
+  eq(
+    '版本/版本类型不对直接拒',
+    decodeLicenseKey(
+      encodeLicenseKey(
+        { v: 2, edition: 'pro', holder: '甲', issuedAt: '2026-09-15' } as unknown as typeof payload,
+        'sig'
+      )
+    ).ok,
+    false
+  )
+
+  group('许可：签名（真签真验）')
+
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const signature = signData(null, Buffer.from(segment, 'utf8'), privateKey)
+  const signedKey = encodeLicenseKey(payload, bytesToBase64Url(signature))
+  const signedDecoded = decodeLicenseKey(signedKey)
+  const signedSegment = signedDecoded.ok ? signedDecoded.payloadSegment : ''
+  const signedBytes = signedDecoded.ok ? base64UrlBytesOf(signedDecoded.signature) : null
+
+  eq('签发后验签通过', verifyData(null, Buffer.from(signedSegment, 'utf8'), publicKey, signature), true)
+  eq(
+    '签名能从许可码里取回来（主进程就是这么验的）',
+    signedBytes !== null &&
+      verifyData(null, Buffer.from(signedSegment, 'utf8'), publicKey, signedBytes),
+    true
+  )
+  eq(
+    '改了内容签名就对不上',
+    verifyData(
+      null,
+      Buffer.from(licensePayloadSegment({ ...payload, holder: '李四' }), 'utf8'),
+      publicKey,
+      signature
+    ),
+    false
+  )
+  eq(
+    '换一把公钥也验不过',
+    verifyData(
+      null,
+      Buffer.from(signedSegment, 'utf8'),
+      generateKeyPairSync('ed25519').publicKey,
+      signature
+    ),
+    false
+  )
+
+  group('许可：试用算术')
+
+  eq('上限是 20', TRIAL_TURN_LIMIT, 20)
+  eq('没用过就是满额', remainingTrialTurns(0), 20)
+  eq('用了 19 次还剩 1 次', remainingTrialTurns(19), 1)
+  eq('用满就是 0（不出现负数）', remainingTrialTurns(20), 0)
+  eq('超过上限也是 0', remainingTrialTurns(999), 0)
+  eq('脏数据当没用过', remainingTrialTurns(-5), 20)
+  eq('计数只加一', bumpTrialUsed(3), 4)
+  eq('计数停在上限，不会越滚越大', bumpTrialUsed(20), 20)
+  eq('脏数据从零起算', bumpTrialUsed(-1), 1)
+
+  group('许可：写回合判定')
+
+  eq(
+    '调了写工具就算一个写回合',
+    hasWriteToolCall(['getSubtree', 'renameTopic'], ['renameTopic', 'deleteTopic']),
+    true
+  )
+  eq('全是只读工具不算', hasWriteToolCall(['getSubtree', 'searchNodes'], ['renameTopic']), false)
+  eq('一个工具都没调不算', hasWriteToolCall([], ['renameTopic']), false)
+
+  group('许可：状态视图')
+
+  const pro = licenseViewOf({ pro: true, holder: '张三', trialUsed: 20 })
+  eq('Pro 能写', pro.canWrite, true)
+  eq('Pro 不显示试用提示', pro.writeHint, null)
+  eq('Pro 显示持有人', pro.holder, '张三')
+
+  const trial = licenseViewOf({ pro: false, holder: '张三', trialUsed: 5 })
+  eq('试用中还能写', trial.canWrite, true)
+  eq('试用中显示剩余', trial.remaining, 15)
+  eq('不是 Pro 就不显示持有人（没人会给他看）', trial.holder, null)
+
+  const used = licenseViewOf({ pro: false, holder: null, trialUsed: 20 })
+  eq('试用用尽就不能写', used.canWrite, false)
+  check('用尽时的提示写清了边界', used.writeHint?.includes('只读聊天永久免费') === true)
+  eq('未知状态按"没用过"算（许可文件坏了不该把用户锁死）', unknownLicenseView().canWrite, true)
+
+  group('许可：工具闸门')
+
+  eq('能写时读 + 写全下发', planAvailableTools(true).length, AGENT_ALL_TOOLS.length)
+  eq('不能写时仍下发全部只读工具（看，是免费的）', planAvailableTools(false).length, AGENT_TOOLS.length)
+  check(
+    '不能写时**一个写工具都不下发**（模型物理上调不动）',
+    planAvailableTools(false).every(
+      (tool) => !AGENT_WRITE_TOOLS.some((writeTool) => writeTool.name === tool.name)
+    )
+  )
+  check(
+    '写工具的每个名字都在读工具集之外（两集不重叠）',
+    AGENT_WRITE_TOOLS.every((writeTool) => !AGENT_TOOLS.some((tool) => tool.name === writeTool.name))
+  )
+  eq('工具名不重复', new Set(AGENT_ALL_TOOLS.map((tool) => tool.name)).size, AGENT_ALL_TOOLS.length)
+  check('许可码不是工具名，别混进工具集', json(AGENT_ALL_TOOLS.map((t) => t.name)).includes('license') === false)
+}
+
+/** 取许可码里的签名字节（自检里模拟主进程那一步） */
+function base64UrlBytesOf(text: string): Uint8Array | null {
+  try {
+    const normalized = text.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+    const binary = atob(padded)
+    const out = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) out[index] = binary.charCodeAt(index)
+    return out
+  } catch {
+    return null
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -6429,6 +6640,7 @@ async function main(): Promise<void> {
   testAgentHelpers()
   testAgentTools()
   testWriteToolsAndTurn()
+  testLicenseHelpers()
   await testSafetyHelpers()
   testMisc()
   testTypedChar()

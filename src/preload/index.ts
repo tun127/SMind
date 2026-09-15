@@ -15,6 +15,7 @@ import {
   type SaveResult
 } from '@shared/ipc'
 import type { AiConfigView, AiMessage, AiStreamEvent, ChatHistoryEntry } from '@shared/ai'
+import type { LicenseView } from '@shared/license'
 import type { HistoryEntry } from '@shared/history'
 import type { SnapshotItem, SnapshotReason } from '@shared/snapshot'
 import type { SnapshotRestoreResult } from '@shared/ipc'
@@ -152,6 +153,17 @@ const api: MindApi = {
     ipcRenderer.invoke(IPC.chatHistorySave, key, messages) as Promise<void>,
 
   chatHistoryClear: (key: string) => ipcRenderer.invoke(IPC.chatHistoryClear, key) as Promise<void>,
+
+  licenseGet: () => ipcRenderer.invoke(IPC.licenseGet) as Promise<LicenseView>,
+
+  licenseActivate: (key: string) =>
+    ipcRenderer.invoke(IPC.licenseActivate, key) as Promise<{
+      ok: boolean
+      message: string
+      view: LicenseView
+    }>,
+
+  licenseDeactivate: () => ipcRenderer.invoke(IPC.licenseDeactivate) as Promise<LicenseView>,
 
   importText: (kind: 'markdown' | 'opml') =>
     ipcRenderer.invoke(IPC.importText, kind) as Promise<ImportedTextFile | null>,

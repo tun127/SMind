@@ -693,6 +693,17 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
 /** 一次对话可用的全部工具（读 + 写） */
 export const AGENT_ALL_TOOLS: AgentToolDef[] = [...AGENT_TOOLS, ...AGENT_WRITE_TOOLS]
 
+/**
+ * 这次对话**允许模型看到的工具**。
+ *
+ * 闸门放在「下发哪些工具定义」这一层，而不是"调用时再拦"——模型看不到写工具，
+ * 就物理上调不动它，与「工具即权限边界」是同一条原则（也是提示词注入的最终防线）。
+ * `canWrite` 由主进程按许可状态算出（Pro，或试用还没用完）。
+ */
+export function planAvailableTools(canWrite: boolean): AgentToolDef[] {
+  return canWrite ? AGENT_ALL_TOOLS : AGENT_TOOLS
+}
+
 /** 目标节点自己或它的某个子孙是不是 `id` */
 function subtreeContains(node: Topic, id: string): boolean {
   if (node.id === id) return true
