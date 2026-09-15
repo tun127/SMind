@@ -759,8 +759,21 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
           <b>双击画布上的标题</b>可直接改文字；关系线拖动<b>两端圆点</b>改接、拖动<b>线身</b>移动。
         </div>
 
-        {overlayRow('关系线', sheet.relationships.map((item) => ({ id: item.id, title: item.title })), setRelationshipTitle, removeRelationship)}
-        {overlayRow('边界', sheet.boundaries.map((item) => ({ id: item.id, title: item.title })), setBoundaryTitle, removeBoundary)}
+        {overlayRow(
+          '关系线',
+          sheet.relationships.map((item) => ({ id: item.id, title: item.title })),
+          setRelationshipTitle,
+          removeRelationship,
+          // 关系线标题也要能手动换行（与概要一致），否则画布上排不了两行
+          true
+        )}
+        {overlayRow(
+          '边界',
+          sheet.boundaries.map((item) => ({ id: item.id, title: item.title })),
+          setBoundaryTitle,
+          removeBoundary,
+          true
+        )}
         {overlayRow('概要', sheet.summaries.map((item) => ({ id: item.id, title: item.title })), setSummaryTitle, removeSummary, true)}
       </div>
     </div>

@@ -1197,6 +1197,33 @@ function testNodeDrag(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 7.5b 折叠与选择：藏在折叠子树里的选中项要提到折叠节点上              */
+/* ------------------------------------------------------------------ */
+
+function testCollapseSelection(): void {
+  group('折叠：把藏起来的选中项提到折叠节点上')
+
+  reset()
+  const rootTopic = root()
+  const parent = addChildOf(rootTopic.id, '父')
+  const child = addChildOf(parent, '子')
+  addChildOf(child, '孙')
+
+  // 折叠会让整棵子树从布局里消失：选中项若留在里面，视角锁定就再也盯不到它，
+  // 用户看到的是「锁定突然失效、画面不跟了」
+  store().select(child)
+  store().setCollapsed(parent, true)
+  eq('折叠后选择落到折叠节点自己身上', store().selection[0], parent)
+
+  store().setCollapsed(parent, false)
+  eq('展开不改变选择', store().selection[0], parent)
+
+  store().select(rootTopic.id)
+  store().setCollapsed(parent, true)
+  eq('选中不在这一支里就保持不动', store().selection[0], rootTopic.id)
+}
+
+/* ------------------------------------------------------------------ */
 /* 7.6 撤销粒度统一 + 编辑态同源                                        */
 /* ------------------------------------------------------------------ */
 
@@ -2171,18 +2198,18 @@ function testWriteToolsAndTurn(): void {
   eq('删除是破坏性操作（要确认）', destructiveOf(del), true)
   check('删除摘要带上影响范围', del.summary.includes('3 个节点'))
 
-  const move = plan('moveTopic', { address: '人力', toAddress: '中心主题/成本' })
+  const move = plan('moveTopic', { address: '成本/物料', toAddress: '中心主题' })
   eq('移动规划成功', move.ok, true)
   eq('移动不算破坏性', destructiveOf(move), false)
   // 空操作要如实说：否则「已改好」的报告背后什么都没变，用户会以为 AI 在糊弄
   eq(
-    '本来就在父级末尾＝空操作（如实说没有改动）',
+    '同父级 + 没给位置＝空操作（与 store 的 moveNode 语义一致）',
     plan('moveTopic', { address: '成本/物料', toAddress: '成本' }).ok,
     false
   )
   eq(
-    '同一父级下重排**不是**空操作（照常放行）',
-    plan('moveTopic', { address: '成本/人力', toAddress: '成本' }).ok,
+    '同父级 + 显式 index＝重排，照常放行',
+    plan('moveTopic', { address: '成本/物料', toAddress: '成本', index: 0 }).ok,
     true
   )
   eq('改同名＝空操作', plan('renameTopic', { address: '成本', title: '成本' }).ok, false)
@@ -6896,6 +6923,7 @@ async function main(): Promise<void> {
   testMove()
   testNodeDrag()
   testUndoGranularity()
+  testCollapseSelection()
   testAiChatHelpers()
   testAgentHelpers()
   testAgentTools()

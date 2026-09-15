@@ -951,14 +951,12 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
           '如果这一步确实必要（例如用户明确要求重新排列），请再调用一次并带上 allowMoved: true。'
       )
     }
-    // 空操作：本来就在这个父级的**末尾**、又没指定位置——如实说，不要报成「已移动」。
-    // （同一父级下的**重排**是合法操作，不能拦：移到后面/指定 index 都可能真的改变顺序）
-    const siblings = destination.topic.children
-    const lastSibling = siblings[siblings.length - 1]
-    if (lastSibling !== undefined && lastSibling.id === source.topic.id && args.index === undefined) {
-      return fail(
-        `「${source.topic.title}」本来就在「${destination.topic.title}」的最后，这次没有改动。`
-      )
+    // 空操作：本来就在这个父级下、又没指定位置——如实说，不要报成「已移动」。
+    // 判定与 store 的 moveNode **完全一致**（同父级 + 无 index 就是原地不动），
+    // 否则会出现「计划说执行了、实际被忽略」的错位。要重排就显式给 index。
+    const chain = ancestorsOf(root, source.topic.id)
+    if (chain[chain.length - 1] === destination.topic.id && args.index === undefined) {
+      return fail(`「${source.topic.title}」本来就在「${destination.topic.title}」下面，这次没有改动。`)
     }
     const rawIndex = args.index
     const index = typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.max(0, Math.round(rawIndex)) : null

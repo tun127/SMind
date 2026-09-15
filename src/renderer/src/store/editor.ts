@@ -1090,6 +1090,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   setCollapsed: (id, collapsed) => {
+    const before = get()
     get().mutate(
       (draft) => {
         const topic = findTopic(activeRoot(draft), id)
@@ -1104,6 +1105,16 @@ export const useEditor = create<EditorState>()((set, get) => ({
       // 方向一变就是新的一步——否则「折叠又展开」会被并成一次空操作，撤销看起来没反应
       `collapse:${id}:${collapsed ? 'fold' : 'unfold'}`
     )
+
+    // 折叠会把整棵子树**藏起来**：选中的主题若正在里面，它就从布局里消失了——
+    // 视角锁定再也盯不到它，用户看到的是「锁定突然失效、画面不跟了」。
+    // 把选择挪到折叠节点自己身上：既看得见，锁定也能继续跟。
+    if (collapsed) {
+      const root = activeRoot(before.workbook)
+      if (before.selection.some((sel) => sel !== id && isSelfOrDescendant(root, id, sel))) {
+        get().select(id)
+      }
+    }
   },
 
   setTopicSide: (id, side) => {

@@ -1904,7 +1904,20 @@ export default function Canvas(): ReactElement {
               if (store.editingId) store.commitEdit()
               store.navigateSelection(key)
             }}
-            onToggleCollapse={(id) => useEditor.getState().toggleCollapse(id)}
+            onToggleCollapse={(id) => {
+              // 折叠 / 展开会重排整张图：把被点的那个主题**按在原处**，
+              // 否则用户眼前的画面会整体跳走（看着看着，那一支忽然不见了）。
+              const before = layout.nodeMap.get(id)
+              const screen = before ? { x: before.x * zoom + pan.x, y: before.y * zoom + pan.y } : null
+              useEditor.getState().toggleCollapse(id)
+              if (!screen || !containerRef.current) return
+              window.requestAnimationFrame(() => {
+                const after = layoutRef.current?.nodeMap.get(id)
+                if (!after) return
+                // 反解平移量：让 after 的世界坐标仍落在同一个屏幕位置
+                useEditor.getState().setPan({ x: screen.x - after.x * zoom, y: screen.y - after.y * zoom })
+              })
+            }}
           />
         ))}
 
@@ -1984,7 +1997,20 @@ export default function Canvas(): ReactElement {
                     strokeLinejoin="round"
                     pointerEvents="none"
                   >
-                    {relationship.title}
+                    {/* 关系线标题同样支持手动换行（与边界 / 概要一致）：按 \n 拆行、整体垂直居中 */}
+                    {overlayTitleLines(relationship.title).map((line, index, all) => (
+                      <tspan
+                        key={index}
+                        x={relationship.label.x}
+                        dy={
+                          index === 0
+                            ? -((all.length - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2
+                            : OVERLAY_TITLE_LINE_HEIGHT
+                        }
+                      >
+                        {line.length > 0 ? line : '\u00A0'}
+                      </tspan>
+                    ))}
                   </text>
                 ) : null}
 
@@ -2176,47 +2202,19 @@ export default function Canvas(): ReactElement {
         </svg>
 
         {/* 双击标题后的就地编辑框。放在世界容器内，所以会随画布一起缩放。
-            概要支持换行，用 textarea（Enter 换行、Esc 取消、失焦提交）；其余仍是单行 input */}
-        {titleEdit && titleEdit.kind === 'summary' ? (
+            关系线 / 边界 / 概要**都支持手动换行**（Enter 换行、Esc 取消、Ctrl+Enter 提交、失焦也提交）——
+            以前只有概要能换行，另外两种用单行 input，用户根本没法换行 */}
+        {titleEdit ? (
           <textarea
             className="overlay-title-editor overlay-title-editor--multi"
             rows={Math.max(1, overlayTitleLines(titleEdit.value).length)}
             style={{
               left: titleEdit.x,
-              top: titleEdit.y - 13,
-              transform:
-                titleEdit.anchor === 'middle'
-                  ? 'translateX(-50%)'
-                  : titleEdit.anchor === 'end'
-                    ? 'translateX(-100%)'
-                    : 'none'
-            }}
-            value={titleEdit.value}
-            autoFocus
-            onFocus={(e) => e.currentTarget.select()}
-            onChange={(e) => {
-              const next = e.currentTarget.value
-              setTitleEdit((current) => (current ? { ...current, value: next } : current))
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return
-              // Enter 交给 textarea 换行；Esc 取消并提交（走失焦那条统一路径）
-              if (e.key === 'Escape') {
-                e.preventDefault()
-                cancelTitleRef.current = true
-                e.currentTarget.blur()
-              }
-            }}
-            onBlur={commitTitleEdit}
-          />
-        ) : titleEdit ? (
-          <input
-            className="overlay-title-editor"
-            style={{
-              left: titleEdit.x,
-              top: titleEdit.y - 13,
+              // 多行时整块按中线对齐（与画布上的排布方式一致）
+              top:
+                titleEdit.y -
+                13 -
+                ((Math.max(1, overlayTitleLines(titleEdit.value).length) - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2,
               transform:
                 titleEdit.anchor === 'middle'
                   ? 'translateX(-50%)'
@@ -2236,10 +2234,16 @@ export default function Canvas(): ReactElement {
               e.stopPropagation()
               // 输入法组词期间交给输入法处理（React 合成事件没有 isComposing）
               if (e.nativeEvent.isComposing || e.keyCode === 229) return
-              if (e.key === 'Enter' || e.key === 'Escape') {
+              // Enter = 换行（这就是「手动换行」，关系线 / 边界 / 概要一视同仁）；
+              // Esc = 取消；Ctrl/Cmd+Enter = 直接提交并退出（单行标签改完想快点收工）
+              if (e.key === 'Escape') {
                 e.preventDefault()
-                // 统一交给失焦处理，避免「回车提交」和「失焦提交」各写一次
-                if (e.key === 'Escape') cancelTitleRef.current = true
+                cancelTitleRef.current = true
+                e.currentTarget.blur()
+                return
+              }
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault()
                 e.currentTarget.blur()
               }
             }}
