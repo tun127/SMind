@@ -714,6 +714,86 @@ export function finalizeToolCalls(calls: ToolCall[]): ToolCall[] {
   return calls.filter((call) => call.name.length > 0)
 }
 
+/* ------------------------------------------------------------------ */
+/* 思维链过滤                                                          */
+/* ------------------------------------------------------------------ */
+
+const THINK_OPEN = ['<', 'think', '>'].join('')
+const THINK_CLOSE = ['<', '/', 'think', '>'].join('')
+
+export interface ThinkingFilter {
+  /** 送进一段原始增量，返回**可以显示给用户**的部分 */
+  push(chunk: string): string
+  /** 流结束：把「看着像标签前缀、其实是普通文字」的尾巴还回来 */
+  flush(): string
+}
+
+/** 结尾这一段有多长可能是（被切开的）标签前缀 */
+function tagTailLength(text: string): number {
+  const max = Math.max(THINK_OPEN.length, THINK_CLOSE.length) - 1
+  for (let length = Math.min(text.length, max); length > 0; length -= 1) {
+    const tail = text.slice(text.length - length)
+    if (THINK_OPEN.startsWith(tail) || THINK_CLOSE.startsWith(tail)) return length
+  }
+  return 0
+}
+
+/**
+ * 滤掉思维链。
+ *
+ * 两种真实情况都要处理：① 推理模型把 ` thinking…` 一起塞进 content；
+ * ② 服务商把开头那段放进了 `reasoning_content`，content 里**只剩一个** `</think>`
+ * ——气泡里孤零零挂个标签，就是它（真事）。
+ * 增量是分片到达的，标签可能被切成两半，所以尾巴要留住等下一片。
+ */
+export function createThinkingFilter(): ThinkingFilter {
+  let inThink = false
+  let pending = ''
+  return {
+    push(chunk: string): string {
+      pending += chunk
+      let out = ''
+      for (;;) {
+        if (inThink) {
+          const close = pending.indexOf(THINK_CLOSE)
+          if (close < 0) {
+            // 整段都在思维链里：只留可能是标签前缀的尾巴，其余丢弃
+            pending = pending.slice(pending.length - tagTailLength(pending))
+            return out
+          }
+          pending = pending.slice(close + THINK_CLOSE.length)
+          inThink = false
+          continue
+        }
+        const open = pending.indexOf(THINK_OPEN)
+        const close = pending.indexOf(THINK_CLOSE)
+        if (close >= 0 && (open < 0 || close < open)) {
+          // 只有闭合标签：丢掉标签本身，它前面的是正常内容
+          out += pending.slice(0, close)
+          pending = pending.slice(close + THINK_CLOSE.length)
+          continue
+        }
+        if (open >= 0) {
+          out += pending.slice(0, open)
+          pending = pending.slice(open + THINK_OPEN.length)
+          inThink = true
+          continue
+        }
+        const keep = tagTailLength(pending)
+        out += pending.slice(0, pending.length - keep)
+        pending = pending.slice(pending.length - keep)
+        return out
+      }
+    },
+    flush(): string {
+      const rest = inThink ? '' : pending
+      pending = ''
+      inThink = false
+      return rest
+    }
+  }
+}
+
 /**
  * 转成 OpenAI 兼容的请求体形态。
  *

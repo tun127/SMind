@@ -223,6 +223,15 @@ export function topicPathOf(root: Topic, id: string): string[] | null {
   return [...titles, self.title]
 }
 
+/** 某节点下的子主题清单（最多 8 个）：把候选回给模型，它下一步就能自己纠正 */
+function describeChildren(topic: Topic, limit = 8): string {
+  const titles = topic.children.map((child) => child.title).filter((title) => title.length > 0)
+  if (titles.length === 0) return `（「${topic.title}」下面没有子主题）`
+  const shown = titles.slice(0, limit)
+  const more = titles.length > shown.length ? ` 等 ${titles.length} 个` : ''
+  return `（在「${topic.title}」下有：${shown.join('、')}${more}）`
+}
+
 /** 找不到精确标题时，给模型几条「你可能想找的是」 */
 function suggestTitles(root: Topic, query: string, limit = 5): string[] {
   const out: string[] = []
@@ -253,29 +262,42 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
     if (path) return { ok: true, resolved: { topic: byId, path } }
   }
 
-  // 2) 标题路径：中心主题/成本/人力；允许省略开头的中心主题
+  // 2) 标题路径：中心主题/成本/人力。
+  //    模型很爱把**文档名**或中心主题也写进开头（「体检报告/分支/子」），
+  //    所以允许从开头跳掉一到两段再试；只要能走到底就算命中。
   const parts = raw
     .split('/')
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
   if (parts.length > 1) {
-    const steps = parts[0] === root.title ? parts.slice(1) : parts
-    let cursor: Topic = root
-    let failed = false
-    for (const step of steps) {
-      const next = cursor.children.find((child) => child.title === step)
-      if (!next) {
-        failed = true
-        return {
-          ok: false,
-          error: `路径「${raw}」中找不到「${step}」（在「${cursor.title}」下没有这个子主题）。可先用 searchNodes 搜一下。`
+    let bestDepth = -1
+    let bestError = ''
+    for (let skip = 0; skip <= Math.min(2, parts.length - 1); skip += 1) {
+      const steps = parts.slice(skip)
+      let cursor: Topic = root
+      let depth = 0
+      let failed = false
+      for (const step of steps) {
+        const next = cursor.children.find((child) => child.title === step)
+        if (!next) {
+          // 记下「走得最深」的那次失败：它离答案最近，对模型最有指导性
+          if (depth >= bestDepth) {
+            bestDepth = depth
+            bestError = `路径「${raw}」中找不到「${step}」${describeChildren(cursor)}`
+          }
+          failed = true
+          break
         }
+        cursor = next
+        depth += 1
       }
-      cursor = next
+      if (!failed) {
+        const path = topicPathOf(root, cursor.id)
+        if (path) return { ok: true, resolved: { topic: cursor, path } }
+      }
     }
-    if (!failed && steps.length > 0) {
-      const path = topicPathOf(root, cursor.id)
-      if (path) return { ok: true, resolved: { topic: cursor, path } }
+    if (bestError.length > 0) {
+      return { ok: false, error: `${bestError}。也可以直接用 searchNodes 按标题搜索。` }
     }
   }
 

@@ -514,11 +514,31 @@ export default function ChatPanel({
       const gate = canContinueAgentLoop(roundRef.current, toolCallsUsedRef.current + calls.length)
       if (!gate.ok) {
         toolCallsUsedRef.current += calls.length
-        // 把「为什么停了」以小标签留在气泡里（用户看得见，而不是回答突然断掉）
+
+        // 已经是「不带工具的决胜轮」了，模型居然还在要工具：必须**硬停**。
+        // 以前这里会再问一次、模型再要一次……于是「已达上限」的小标签叠了三层，
+        // 用户最后什么都没等到。
+        if (forceNoToolsRef.current) {
+          update((prev) => {
+            const last = prev[prev.length - 1]
+            if (!last || last.role !== 'assistant') return prev
+            const content =
+              last.content.trim().length > 0
+                ? last.content
+                : `（${gate.reason}，模型仍在尝试调用工具，本次已停止。可以换个说法再问一次。）`
+            return [...prev.slice(0, -1), { ...last, content }]
+          })
+          requestIdRef.current = null
+          setStreaming(false)
+          queueRef.current = null
+          commitTurnRef.current()
+          return
+        }
+
+        // 撞上限 ≠ 不回答：去掉工具再问**一次**，让它把已经看到的东西讲清楚
         patchLast({
           toolNotes: [...(messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []), gate.reason]
         })
-        // 撞上限 ≠ 不回答：去掉工具再问最后一轮，让它把已经看到的东西讲清楚
         forceNoToolsRef.current = true
         wireRef.current = [
           ...wireRef.current,

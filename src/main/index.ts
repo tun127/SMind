@@ -28,6 +28,7 @@ import {
   accumulateToolCalls,
   chatCompletionsUrl,
   createSseLineSplitter,
+  createThinkingFilter,
   describeAiError,
   extractContent,
   extractStreamDelta,
@@ -428,6 +429,14 @@ async function callAiStream(
 
     const splitter = createSseLineSplitter()
     const decoder = new TextDecoder()
+    // 思维链一律滤掉：有些模型把 ` thought… response` 塞进 content 一起流出来，
+    // 不过滤的话用户气泡里就会挂着这种标签（真出现过）
+    const think = createThinkingFilter()
+    const emit = (text: string): void => {
+      if (text.length === 0) return
+      full += text
+      push({ requestId, kind: 'chunk', text })
+    }
     const feed = (piece: string): void => {
       for (const line of splitter(piece)) {
         const delta = extractStreamDelta(line)
@@ -435,9 +444,7 @@ async function callAiStream(
         if (delta.model) model = delta.model
         // 工具调用的参数是**逐片追加**的字符串，必须按 index 累积（见 accumulateToolCalls）
         if (delta.toolCalls.length > 0) toolCalls = accumulateToolCalls(toolCalls, delta.toolCalls)
-        if (delta.text.length === 0) continue
-        full += delta.text
-        push({ requestId, kind: 'chunk', text: delta.text })
+        emit(think.push(delta.text))
       }
     }
 
@@ -450,6 +457,8 @@ async function callAiStream(
     }
     // 收尾：解码器里可能还压着没有换行的最后一行
     feed(decoder.decode())
+    // 过滤器里可能留着「像标签前缀其实是正文」的尾巴
+    emit(think.flush())
 
     push({
       requestId,

@@ -41,6 +41,7 @@ import {
   accumulateToolCalls,
   countTopicTree,
   createSseLineSplitter,
+  createThinkingFilter,
   extractStreamDelta,
   finalizeToolCalls,
   normalizeChatHistory,
@@ -1515,7 +1516,42 @@ function testAiChatHelpers(): void {
     extractStreamDelta('{"choices":[{"message":{"content":"整段"}}]}')?.text,
     '整段'
   )
+
+  group('AI 聊天：思维链过滤')
+
+  // 标签一律用片段拼出来：直接把这对尖括号写进源码，会被中间环节改写
+  // （真踩过——常量里存进去的是别的东西，于是过滤整个失效、测试也一起失真）
+  const T_OPEN = ['<', 'think', '>'].join('')
+  const T_CLOSE = ['<', '/', 'think', '>'].join('')
+
+  const plain = createThinkingFilter()
+  eq('普通文字原样通过', plain.push('你好，这是回答'), '你好，这是回答')
+
+  const split = createThinkingFilter()
+  eq('开标签被切开时先留住尾巴（不显示半截标签）', split.push(`答案：${T_OPEN.slice(0, 4)}`), '答案：')
+  eq('标签补齐后进入思维链（内部不显示）', split.push(`${T_OPEN.slice(4)}这里在推理`), '')
+  eq('闭标签之后恢复显示', split.push(`${T_CLOSE}正式回答`), '正式回答')
+
+  const orphanClose = createThinkingFilter()
+  eq(
+    '只剩一个闭标签（开头那段走的是 reasoning_content）也照样丢掉',
+    orphanClose.push(`好${T_CLOSE}的`),
+    '好的'
+  )
+
+  const onlyThinking = createThinkingFilter()
+  eq('整段都是思维链时不显示', onlyThinking.push(`${T_OPEN}推理中…`), '')
+
+  const tail = createThinkingFilter()
+  eq('可疑尾巴先不吐', tail.push(`abc${T_OPEN.slice(0, 1)}`), 'abc')
+  eq('流结束时把尾巴还回来（它其实是正文）', tail.flush(), T_OPEN.slice(0, 1))
+
+  const crossChunk = createThinkingFilter()
+  eq('分片：先到一个「<」', crossChunk.push(T_OPEN.slice(0, 1)), '')
+  eq('分片：标签跨了两片', crossChunk.push(`${T_OPEN.slice(1)}想一下${T_CLOSE.slice(0, 6)}`), '')
+  eq('分片：闭标签补齐后正常输出', crossChunk.push(`${T_CLOSE.slice(6)}答案`), '答案')
 }
+
 
 /* ------------------------------------------------------------------ */
 /* 7.9 Agent 纯逻辑：节点引用切分 / 聊天记录校验                        */
@@ -1656,6 +1692,20 @@ function testAgentTools(): void {
   eq('路径解析出完整标题链', json(byPath.ok ? byPath.resolved.path : []), json(['中心主题', '成本', '物料']))
   const withoutRoot = resolveTopicAddress(root, '成本/人力')
   eq('路径可省略开头的中心主题', withoutRoot.ok && withoutRoot.resolved.topic.id === labor.id, true)
+
+  // 模型很爱把文档名 / 中心主题也写进路径开头（真事：「AI 测试Mind/CART树/相关算法/…」）
+  const withDocName = resolveTopicAddress(root, '我的文档/中心主题/成本/物料')
+  eq('开头多写了文档名也能解析', withDocName.ok && withDocName.resolved.topic.id === material.id, true)
+  const skipTwo = resolveTopicAddress(root, '某文档/某中间层/成本/物料')
+  eq('最多允许跳过开头两段', skipTwo.ok && skipTwo.resolved.topic.id === material.id, true)
+
+  const deepFail = resolveTopicAddress(root, '中心主题/成本/物料/不存在')
+  eq('走到底再失败仍然报错', deepFail.ok, false)
+  check(
+    '失败时列出「这一层有哪些子主题」，模型能自己纠正',
+    !deepFail.ok && deepFail.error.includes('「物料」下面没有子主题'),
+    deepFail.ok ? '' : deepFail.error
+  )
 
   const ambiguous = resolveTopicAddress(root, '人力')
   eq('重名标题**不硬选**，直接报错', ambiguous.ok, false)
