@@ -98,6 +98,25 @@ const devIconFile = join(__dirname, '../../build/icon.png')
 
 const isDev = !app.isPackaged
 
+/**
+ * 开发版打开远程调试端口（只绑本机）。
+ *
+ * 唯一用途：**卡死时抓 CPU 火焰图**。`unresponsive` 只能告诉我们「卡了」，
+ * 抓不到「卡在哪个函数」——这次为了定位这个循环花了很多来回，有火焰图就是一眼的事。
+ */
+if (isDev) app.commandLine.appendSwitch('remote-debugging-port', '9222')
+
+/**
+ * 可选：给渲染进程开 V8 采样（`SMIND_PROFILE=1` 启动）。
+ *
+ * 卡死时主线程不回话、调试命令进不去，只能靠 V8 自己在进程里记采样——
+ * 之后用 `node --prof-process isolate-*.log` 就能看到**卡在哪个函数**。
+ * 默认关闭（有性能开销），只在专门排查时打开。
+ */
+if (isDev && process.env.SMIND_PROFILE === '1') {
+  app.commandLine.appendSwitch('js-flags', '--prof')
+}
+
 /** 本次退出源于「退出应用」而不是关闭某个窗口 */
 let quitRequested = false
 /** 所有窗口都确认过未保存内容，可以真正退出 */
@@ -673,8 +692,8 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
    * 渲染进程崩溃 / 无响应 / 页面加载失败。
    * 不处理的话用户只会看到一个**空窗口或卡住的窗口**，不知道发生了什么、也不知道能不能救。
    */
-  /** 「无响应」连续命中次数：连续两次才弹原生出路，避免误报打扰 */
-  let unresponsiveStrikes = 0
+  /** 卡死自救定时器（见下面的 unresponsive 处理） */
+  let unresponsiveTimer: NodeJS.Timeout | null = null
 
   win.webContents.on('render-process-gone', (_event, details) => {
     logMain('render-process-gone', details.reason, { exitCode: details.exitCode })
@@ -695,26 +714,41 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
   win.webContents.on('unresponsive', () => {
     logMain('unresponsive', '渲染进程无响应')
     /**
-     * 卡死时窗口连「关闭」都点不动——主线程被循环占住，这是必然的。
-     * 所以出路必须由**主进程**给：原生对话框不依赖渲染进程，照样能点。
-     * 等第二次无响应再弹（第一次常常只是某一帧重排久了，会自己缓过来）。
+     * **卡死自救**：界面卡住超过 10 秒就自动重新加载。
+     *
+     * 为什么必须这么硬：主线程被同步死循环占住时，窗口连「关闭」都点不动、
+     * 连调试命令都不返回——用户除了强杀进程没有别的办法（真被投诉过多次）。
+     * 而主进程是好的，所以这条自救路线一定走得通。
+     * 文档每 30 秒有一份自动存档兜底，重载是当下唯一能让用户继续干活的选择。
      */
-    unresponsiveStrikes += 1
-    if (unresponsiveStrikes < 2) return
-    unresponsiveStrikes = 0
-    if (win.isDestroyed()) return
-    const choice = dialog.showMessageBoxSync(win, {
-      type: 'warning',
-      title: '界面卡住了',
-      message: '界面进程没有响应（多半是某个界面循环卡住了）。',
-      detail:
-        '文档有自动存档（每 30 秒一份）。重新加载界面能立刻恢复操作；' +
-        '如果最近几十秒的改动还没进存档，可能会丢一点点。',
-      buttons: ['重新加载界面', '继续等待'],
-      defaultId: 0,
-      cancelId: 1
-    })
-    if (choice === 0) win.reload()
+    if (unresponsiveTimer === null) {
+      unresponsiveTimer = setTimeout(() => {
+        unresponsiveTimer = null
+        if (win.isDestroyed()) return
+        logMain('unresponsive-reload', '界面无响应超过 10 秒，自动重新加载')
+        win.webContents.reload()
+        void dialog
+          .showMessageBox(win, {
+            type: 'info',
+            title: '界面刚才卡住了',
+            message: '界面进程卡住超过 10 秒，已自动重新加载。',
+            detail:
+              '文档每 30 秒会存一份自动存档；如果最近几十秒的改动还没进存档，可能会少一点点。' +
+              '这条记录已经写进日志，方便定位。',
+            buttons: ['好']
+          })
+          .catch(() => undefined)
+      }, 10_000)
+    }
+  })
+
+  win.webContents.on('responsive', () => {
+    // 自己缓过来了：撤掉自救，别把用户的活儿 reload 掉
+    if (unresponsiveTimer !== null) {
+      clearTimeout(unresponsiveTimer)
+      unresponsiveTimer = null
+      logMain('responsive', '渲染进程已恢复响应（未触发重载）')
+    }
   })
 
   /**

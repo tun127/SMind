@@ -332,7 +332,19 @@ export default function Canvas(): ReactElement {
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const update = (): void => setSize({ width: el.clientWidth, height: el.clientHeight })
+    /**
+     * 尺寸**真的变了**才写进状态。
+     *
+     * 以前无条件 `setSize({ width, height })`：每次都是新对象 → React 必然重渲染 →
+     * 重渲染又可能让被观察的容器尺寸抖动一个像素 → 观察器再触发……一旦勾上就是**自激循环**，
+     * 主线程被烧满、窗口连关闭都点不动（日志里的连续 `unresponsive` 就是这么来的）。
+     * 尺寸没变时返回原对象，React 会直接跳过这次更新，环就断了。
+     */
+    const update = (): void => {
+      const width = el.clientWidth
+      const height = el.clientHeight
+      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }))
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)

@@ -24,3 +24,5 @@ license-private.pem
 .commit-msg.txt
 # 开发版的输出日志（排查「窗口是不是旧的 / 崩没崩」时用）
 .dev.log
+# V8 采样产物（SMIND_PROFILE=1 排查卡死时会在项目根目录留下）
+isolate-*.log
