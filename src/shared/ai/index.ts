@@ -533,6 +533,13 @@ export function buildChatSystemPrompt(input: {
   /** 不能改时的原因（原样写进提示词，让模型能如实解释给用户听） */
   writeHint?: string | null
   /**
+   * 用户**这句话里提到**的节点（应用按标题自动匹配出来的，带句柄与路径）。
+   *
+   * 用户说「把进程 vs 线程细化一下」时，节点其实就在这句话里——没必要反过来
+   * 要求用户去画布上点选。应用先把匹配结果连同句柄一起给模型，它就能直接动手。
+   */
+  mentionedNodes?: Array<{ title: string; handle: string; path: string }>
+  /**
    * 上一轮 AI 实际做过的改动（工具摘要）。
    *
    * 对话历史里只有它最后说的**文字**，没有它做过什么——用户说「继续」时，
@@ -554,6 +561,15 @@ export function buildChatSystemPrompt(input: {
     '',
     '【当前选中】',
     selected,
+    ...(input.mentionedNodes && input.mentionedNodes.length > 0
+      ? [
+          '',
+          '【用户这句话里提到的节点】（应用按标题自动匹配，可直接用句柄寻址）',
+          ...input.mentionedNodes.map(
+            (node) => `- [#${node.handle}] ${node.title}（路径：${node.path}）`
+          )
+        ]
+      : []),
     ...(input.previousTurnNotes && input.previousTurnNotes.length > 0
       ? [
           '',
@@ -577,7 +593,10 @@ export function buildChatSystemPrompt(input: {
             '**绝不要假装已经改了**，也不要说"我这就帮你改"。'
         ]),
     '3. 改之前先看清楚要改哪里：用户说「这里 / 这个 / 选中的」时先用 getSelection 确认；' +
-      '提到的分支先用 searchNodes 或 getSubtree 找到确切位置。**不要凭猜测改**——改错节点比不改更糟。',
+      '提到的分支先用 searchNodes 或 getSubtree 找到确切位置。**不要凭猜测改**——改错节点比不改更糟。' +
+      '**但绝不要反过来要求用户「先去画布上选中」**：目标是标题时用 searchNodes 自己找（能唯一定位就直接做）；' +
+      '用户只说「改」「继续」「动手」这类**复述上文的指令**时，指的就是**你上一条回复里提到的那个主题**——' +
+      '按那个标题用 searchNodes 定位即可。只有真的找不到、或找到多个候选时才用 askUser 让用户挑。',
     '4. 指向不明（有多个候选）或范围不清（比如「整个导图」）时，先用 askUser 问清楚，不要自己拍板。',
     '5. 一次回答里可以做多处修改：这些修改在用户那边算**一步撤销**，所以不必畏手畏脚；' +
       '但做完要用一两句话说明你改了什么。',
@@ -594,7 +613,9 @@ export function buildChatSystemPrompt(input: {
       '那是新增，会在画布上复制出一份重复内容（真出过事故）。insertSubtree 只用于真正的新内容。' +
       '11. **一次回复里可以包含多个工具调用**（并行发）。同一个意图下的多个操作请合到一条 ' +
       'moveTopics 里、或一次回复里一次发完；**不要一次只搬一个**——那会让用户等几十轮。' +
-      '两次调用之间也不要写解说文字，全部做完再总结。'
+      '两次调用之间也不要写解说文字，全部做完再总结。' +
+      '12. **只有工具真的返回「已执行」之后，才可以说"已经改好了"**。没落到画布的改动一律说成' +
+      '「我打算……（还没执行）」；工具返回「未执行」时如实转述原因，不要含糊过去。'
   ].join('\n')
 }
 
@@ -688,6 +709,20 @@ export function addUsage(a: TokenUsage | undefined, b: TokenUsage): TokenUsage {
     completionTokens: a.completionTokens + b.completionTokens,
     totalTokens: a.totalTokens + b.totalTokens
   }
+}
+
+/**
+ * 助手的话里有没有「已经改好了」这类**结果声明**。
+ *
+ * 用来兜住一种事故：模型嘴上说改了，实际一个写工具都没调（或全失败了），
+ * 用户以为已经改好。判定出「有声明 + 本轮零改动」时，面板会在气泡上如实标注。
+ * 宁可偶尔多标一句（话里出现"已"字），也不要让用户以为改动落了地。
+ */
+export function claimsAppliedChange(text: string): boolean {
+  if (text.trim().length === 0) return false
+  return /(已经|已)(改|修|整理|调整|移动|归|添加|删除|处理|完成|搞定)|改好了|改完了|整理好了|搞定|done|fixed/i.test(
+    text
+  )
 }
 
 /** 展示用：1234 → 「1.2k」；45 → 「45」 */

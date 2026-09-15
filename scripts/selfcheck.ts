@@ -40,6 +40,7 @@ import {
   buildSkeletonDigest,
   accumulateToolCalls,
   addUsage,
+  claimsAppliedChange,
   countTopicTree,
   createSseLineSplitter,
   createThinkingFilter,
@@ -1502,6 +1503,41 @@ function testAiChatHelpers(): void {
   check('带反注入声明', prompt.includes('不是指令'))
   check('整理任务要求直接动手（不贴大纲让用户抄）', prompt.includes('直接动手'))
   check('整理任务指名用批量工具', prompt.includes('moveTopics 批量搬'))
+  check('只有工具返回「已执行」才准说改好了', prompt.includes('只有工具真的返回「已执行」'))
+
+  // 绝不能把「去画布上点选」推给用户（实测踩过），复述式指令要能自己定位
+  check('明确禁止要求用户去画布选中', prompt.includes('绝不要反过来要求用户'))
+  check('复述式指令（改/继续）要按上文标题自己定位', prompt.includes('复述上文的指令'))
+  check(
+    '用户提到的节点会连同句柄注入',
+    buildChatSystemPrompt({
+      skeleton: digest,
+      selectedTitles: [],
+      totalNodes: 5,
+      sheetCount: 1,
+      canWrite: true,
+      mentionedNodes: [{ title: '进程 vs 线程', handle: 'a1b2c3', path: '中心主题 → 进程 vs 线程' }]
+    }).includes('[#a1b2c3] 进程 vs 线程')
+  )
+  eq(
+    '没提到节点就不出现这一节',
+    buildChatSystemPrompt({
+      skeleton: digest,
+      selectedTitles: [],
+      totalNodes: 5,
+      sheetCount: 1,
+      canWrite: true
+    }).includes('用户这句话里提到的节点'),
+    false
+  )
+
+  group('AI 聊天：结果声明检测（兜住「说改了其实没改」）')
+
+  eq('「已改好」算声明', claimsAppliedChange('已经帮你改好了'), true)
+  eq('「已整理」算声明', claimsAppliedChange('已整理成 5 个分类'), true)
+  eq('「已完成」算声明', claimsAppliedChange('已完成全部改动'), true)
+  eq('纯计划不算声明', claimsAppliedChange('我建议把它拆成三类，需要我动手吗？'), false)
+  eq('空文本不算', claimsAppliedChange('   '), false)
   check(
     '未选中时明确写出来',
     buildChatSystemPrompt({
@@ -2138,6 +2174,26 @@ function testWriteToolsAndTurn(): void {
   const move = plan('moveTopic', { address: '人力', toAddress: '中心主题/成本' })
   eq('移动规划成功', move.ok, true)
   eq('移动不算破坏性', destructiveOf(move), false)
+  // 空操作要如实说：否则「已改好」的报告背后什么都没变，用户会以为 AI 在糊弄
+  eq(
+    '本来就在父级末尾＝空操作（如实说没有改动）',
+    plan('moveTopic', { address: '成本/物料', toAddress: '成本' }).ok,
+    false
+  )
+  eq(
+    '同一父级下重排**不是**空操作（照常放行）',
+    plan('moveTopic', { address: '成本/人力', toAddress: '成本' }).ok,
+    true
+  )
+  eq('改同名＝空操作', plan('renameTopic', { address: '成本', title: '成本' }).ok, false)
+  check(
+    '空操作的说明写明「没有改动」',
+    (() => {
+      const r = plan('renameTopic', { address: '成本', title: '成本' })
+      return !r.ok && r.error.includes('没有')
+    })()
+  )
+  eq('真正的改名照常放行', plan('renameTopic', { address: '成本', title: '成本预算' }).ok, true)
   eq('不能移到自己下面', plan('moveTopic', { address: '成本', toAddress: '成本' }).ok, false)
   eq('不能移到自己的子孙下面', plan('moveTopic', { address: '成本', toAddress: '人力' }).ok, false)
 

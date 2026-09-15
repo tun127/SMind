@@ -851,6 +851,10 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     if ('problem' in target) return target.problem
     if (typeof args.title !== 'string') return fail('title 必须是字符串。')
     const title = args.title.trim()
+    // 空操作要如实说：否则一次「改了名」的报告背后什么都没变，用户以为 AI 在糊弄他
+    if (target.topic.title === title) {
+      return fail(`「${title}」的标题本来就是它，这次没有任何改动。`)
+    }
     return {
       ok: true,
       intent: { kind: 'rename', id: target.topic.id, title },
@@ -945,6 +949,15 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       return fail(
         `「${source.topic.title}」是用户手动摆过位置的主题，移动它会打乱他自己排的版面。` +
           '如果这一步确实必要（例如用户明确要求重新排列），请再调用一次并带上 allowMoved: true。'
+      )
+    }
+    // 空操作：本来就在这个父级的**末尾**、又没指定位置——如实说，不要报成「已移动」。
+    // （同一父级下的**重排**是合法操作，不能拦：移到后面/指定 index 都可能真的改变顺序）
+    const siblings = destination.topic.children
+    const lastSibling = siblings[siblings.length - 1]
+    if (lastSibling !== undefined && lastSibling.id === source.topic.id && args.index === undefined) {
+      return fail(
+        `「${source.topic.title}」本来就在「${destination.topic.title}」的最后，这次没有改动。`
       )
     }
     const rawIndex = args.index

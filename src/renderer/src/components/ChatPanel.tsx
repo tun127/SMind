@@ -12,6 +12,7 @@ import {
   addUsage,
   buildChatSystemPrompt,
   buildSkeletonDigest,
+  claimsAppliedChange,
   countTopicTree,
   formatTokenCount,
   type AiMessage,
@@ -27,6 +28,8 @@ import {
   planWriteTool,
   runReadTool,
   segmentTitleMentions,
+  shortHandleOf,
+  topicPathOf,
   type ToolContext,
   type WriteIntent
 } from '@shared/agent'
@@ -66,6 +69,8 @@ interface ChatMsg {
   toolNotes?: string[]
   /** 这条回答花了多少 token（多轮工具调用会累计；服务商没回报就没有） */
   usage?: TokenUsage
+  /** 诚实标注：模型说改了、实际零改动（或写操作没落实）时显示 */
+  warning?: string
 }
 
 /**
@@ -157,6 +162,9 @@ export default function ChatPanel({
   const writeLogRef = useRef<string[]>([])
   /** 本轮 AI 改到/新增了哪些节点：回合结束时闪一下它们 */
   const changedIdsRef = useRef<string[]>([])
+  /** 本轮**成功落到画布**的写操作数 / 失败数：用来兜住「说改了、其实没落地」 */
+  const writesAppliedRef = useRef(0)
+  const writesFailedRef = useRef(0)
   /** 本轮是否已经开过事务（只在真有写操作时开） */
   const turnStartedRef = useRef(false)
 
@@ -363,6 +371,31 @@ export default function ChatPanel({
     // 试用次数在主进程里涨的：回合结束后重新读一次，面板上的数字才不会落后
     refreshLicense()
 
+    // 兜住「说改了、其实没落地」：本轮**零写操作**、但话里带着结果声明 → 如实标注。
+    // 这类事故用户最难判断（画布没变，话却说得很确定），必须在气泡上戳破。
+    const lastMsg = messagesRef.current[messagesRef.current.length - 1]
+    if (
+      writesAppliedRef.current === 0 &&
+      lastMsg !== undefined &&
+      lastMsg.role === 'assistant' &&
+      claimsAppliedChange(lastMsg.content)
+    ) {
+      update((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant') return prev
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            warning:
+              writesFailedRef.current > 0
+                ? `本轮没有任何改动落到画布上：${writesFailedRef.current} 个写操作都没成功（见上方「未执行」条目）。`
+                : '本轮没有任何改动落到画布上——上面说的只是计划或说明，不是已经执行的改动。'
+          }
+        ]
+      })
+    }
+
     // 改完**看得见**：闪一下动过的节点，并把视口带到第一处改动。
     // 直接操作省掉了「预览确认」，信任全靠这一眼——没这一下，画布静悄悄地变了。
     const changed = [...new Set(changedIdsRef.current)]
@@ -478,7 +511,12 @@ export default function ChatPanel({
       }
 
       const applied = applyWriteIntent(plan.intent)
+      if (applied.ok) writesAppliedRef.current += 1
+      else writesFailedRef.current += 1
       const written = applied.ok ? `已执行：${plan.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note
+      // 失败也要在面板上留一行痕迹：否则用户只在气泡里看到它"说要改"，
+      // 却没有任何地方告诉他这一步**没执行**
+      if (!applied.ok) noteAction(`未执行：${plan.summary}`, false)
       // 有些模型（qwen-plus 这类）一次回复只发**一个**工具调用：搬几十个节点要几十轮，
       // 用户感受就是「走一步推一步」。在工具结果里**就地**提醒它改用批量——
       // 比在系统提示词里讲一遍更贴近它当下的决策点
@@ -504,8 +542,11 @@ export default function ChatPanel({
 
     if (approve) {
       const applied = applyWriteIntent(pending.intent)
+      if (applied.ok) writesAppliedRef.current += 1
+      else writesFailedRef.current += 1
       pushToolResult(pending.call, applied.ok ? `已执行：${pending.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note)
       if (applied.ok) noteAction(pending.summary, true)
+      else noteAction(`未执行：${pending.summary}`, false)
     } else {
       // 拒绝也要如实回喂：否则模型以为删掉了，后面的判断全错
       pushToolResult(
@@ -719,6 +760,19 @@ export default function ChatPanel({
             .filter((title) => title.length > 0)
         : []
 
+      // 用户这句话里提到的节点：应用先按标题匹配好（带句柄）——
+      // 这样模型可以直接动手，不用反过来要求用户「先去画布上选中」
+      const mentioned = new Map<string, { title: string; handle: string; path: string }>()
+      for (const segment of segmentTitleMentions(text, titleIndex)) {
+        const id = segment.topicId
+        if (id === null) continue
+        const topic = findTopic(root, id)
+        const path = topicPathOf(root, id)
+        if (topic && path) {
+          mentioned.set(id, { title: topic.title, handle: shortHandleOf(id), path: path.join(' → ') })
+        }
+      }
+
       const system = buildChatSystemPrompt({
         skeleton: buildSkeletonDigest(root),
         selectedTitles,
@@ -729,7 +783,8 @@ export default function ChatPanel({
         writeHint: license?.writeHint ?? null,
         // 上一轮实际做过的改动：不注入的话，用户说「继续」时模型会从零开始
         // 重新读取、重新规划——大导图上就是把同一种折腾重复一遍
-        previousTurnNotes: messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []
+        previousTurnNotes: messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? [],
+        mentionedNodes: [...mentioned.values()].slice(0, 5)
       })
 
       const history: AiMessage[] = [
@@ -746,6 +801,8 @@ export default function ChatPanel({
       toolCallsUsedRef.current = 0
       writeLogRef.current = []
       changedIdsRef.current = []
+      writesAppliedRef.current = 0
+      writesFailedRef.current = 0
       turnStartedRef.current = false
       queueRef.current = null
       forceNoToolsRef.current = false
@@ -761,7 +818,7 @@ export default function ChatPanel({
       setDraft('')
       runRound()
     },
-    [runRound, update, license]
+    [runRound, update, license, titleIndex]
   )
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
@@ -939,6 +996,7 @@ export default function ChatPanel({
                         </div>
                       )}
                       {renderAssistantText(msg.content)}
+                      {msg.warning && <div className="chat-msg__warning">{msg.warning}</div>}
                       {msg.usage && (
                         <div className="chat-msg__usage" title="按服务商回报统计（问 + 答），多轮工具调用已累计">
                           tokens {formatTokenCount(msg.usage.totalTokens)}（问{' '}

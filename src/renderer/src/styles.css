@@ -2222,6 +2222,18 @@ textarea {
   opacity: 0.75;
 }
 
+/* 诚实警示：模型说改了、实际没落到画布——必须显眼，别让用户以为已经改好 */
+.chat-msg__warning {
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px solid #e7b98a;
+  border-radius: 6px;
+  background: #fdf6ec;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* 回答底部的 token 消耗：小、淡、精确到个位（按服务商回报，不做估算） */
 .chat-msg__usage {
   margin-top: 4px;
