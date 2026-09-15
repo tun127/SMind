@@ -169,8 +169,8 @@ export const AGENT_TOOLS: AgentToolDef[] = [
   {
     name: 'searchNodes',
     description:
-      '在全部主题标题里按关键词搜索（不区分大小写），返回命中节点的标题与所在路径。' +
-      '用户提到一个记不清位置的节点时用它定位。',
+      '在全部主题标题里按关键词搜索（不区分大小写），返回命中节点的标题、所在路径与**句柄**。' +
+      '用户提到一个记不清位置的节点时用它定位；同名节点多时用返回的句柄继续寻址。',
     parameters: schema(
       {
         query: { type: 'string', description: '关键词（用较短的核心词，命中率更高）' },
@@ -182,9 +182,11 @@ export const AGENT_TOOLS: AgentToolDef[] = [
   {
     name: 'getSubtree',
     description:
-      '读取某个主题下面的结构（缩进大纲，含每个节点的子节点数）。' +
-      'address 可以是主题 id、从中心主题起的标题路径（用 / 分隔，如 中心主题/成本/人力），或唯一的标题原文。' +
-      '不确定用户指哪一支时先搜，不要用近似标题硬猜。',
+      '读取某个主题下面的结构（缩进大纲，含每个节点的子节点数与**句柄**）。' +
+      'address 可以是主题 id、**句柄**（`#xxxxxx`）、从中心主题起的标题路径（用 / 分隔），或唯一的标题原文。' +
+      '返回的每行形如 `- [#a1b2c3] 标题（3 个子节点）`，方括号里的就是句柄：' +
+      '**同名节点、超长标题、标题里带斜杠的情况一律用句柄寻址**（这些东西用标题都定位不了）。' +
+      '整理 / 归类大导图时先用它一次读到位。',
     parameters: schema(
       {
         address: { type: 'string', description: '主题 id、标题路径或唯一标题' },
@@ -220,6 +222,19 @@ export interface ResolvedTopic {
 }
 
 export type AddressResult = { ok: true; resolved: ResolvedTopic } | { ok: false; error: string }
+
+/**
+ * 给模型用的**短句柄**：取节点 id 的最后一段（创建时生成的 6 个随机字符）。
+ *
+ * 为什么必须有它：大导图里同名节点能出现几十次（「创建 socket.socket()」这类），
+ * 按标题寻址必然歧义；标题还可能带斜杠、超长、含奇怪符号。句柄是**唯一**的，
+ * 模型从读工具里拿到它，就能一次把上百个节点搬完——这是「一回合整理完」的关键。
+ */
+export function shortHandleOf(id: string): string {
+  const parts = id.split('-')
+  const last = parts[parts.length - 1] ?? ''
+  return last.length > 0 ? last : id.slice(-6)
+}
 
 /** 从中心主题到某节点的标题链；节点不存在返回 null */
 export function topicPathOf(root: Topic, id: string): string[] | null {
@@ -266,6 +281,28 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
   if (byId) {
     const path = topicPathOf(root, raw)
     if (path) return { ok: true, resolved: { topic: byId, path } }
+  }
+
+  // 1b) 短句柄（读工具每行都会打出的 `#xxxxxx`）：重名 / 超长 / 带斜杠的标题全靠它寻址
+  const bare = raw.startsWith('#') ? raw.slice(1) : raw
+  if (/^[0-9a-z]{4,10}$/.test(bare)) {
+    const matched: Topic[] = []
+    const scan = (topic: Topic): void => {
+      if (shortHandleOf(topic.id) === bare) matched.push(topic)
+      for (const child of topic.children) scan(child)
+    }
+    scan(root)
+    const only = matched[0]
+    if (matched.length === 1 && only) {
+      const path = topicPathOf(root, only.id)
+      if (path) return { ok: true, resolved: { topic: only, path } }
+    }
+    if (matched.length > 1) {
+      return {
+        ok: false,
+        error: `句柄「${raw}」在文档里出现了 ${matched.length} 次（极罕见）。请改用完整的主题 id 或标题路径。`
+      }
+    }
   }
 
   // 2) 标题路径：中心主题/成本/人力。
@@ -384,7 +421,8 @@ function outlineOf(topic: Topic, depth: number, maxLines = 120): { text: string;
     }
     const title = node.title.length > 0 ? node.title : '（未命名）'
     const suffix = node.children.length > 0 ? `（${node.children.length} 个子节点）` : ''
-    lines.push(`${'  '.repeat(level)}- ${title}${suffix}`)
+    // 每行带上短句柄：模型可以直接用它当 address（重名、超长、带斜杠的标题都因此变得可寻址）
+    lines.push(`${'  '.repeat(level)}- [#${shortHandleOf(node.id)}] ${title}${suffix}`)
     if (level >= depth) {
       if (node.children.length > 0) {
         lines.push(`${'  '.repeat(level + 1)}…（${node.children.length} 个子节点未展开）`)
@@ -483,13 +521,17 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     }
     const limit = intArg(args, 'limit', 20, 1, 50)
     const needle = query.toLowerCase()
-    const hits: Array<{ title: string; path: string }> = []
+    const hits: Array<{ title: string; path: string; handle: string }> = []
     let scanned = 0
     const visit = (topic: Topic): void => {
       scanned += 1
       if (topic.title.toLowerCase().includes(needle)) {
         const path = topicPathOf(context.root, topic.id)
-        hits.push({ title: topic.title, path: path ? path.join(' → ') : topic.title })
+        hits.push({
+          title: topic.title,
+          path: path ? path.join(' → ') : topic.title,
+          handle: shortHandleOf(topic.id)
+        })
       }
       for (const child of topic.children) visit(child)
     }
@@ -503,7 +545,7 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
       }
     }
     const shown = hits.slice(0, limit)
-    const lines = shown.map((hit) => `- ${hit.title}（路径：${hit.path}）`)
+    const lines = shown.map((hit) => `- [#${hit.handle}] ${hit.title}（路径：${hit.path}）`)
     if (hits.length > shown.length) lines.push(`…另有 ${hits.length - shown.length} 个结果未列出`)
     return {
       ok: true,
@@ -654,7 +696,8 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
     description:
       '**批量**移动多个主题——整理 / 归类大导图时务必用它：一次调用可以移动很多节点，' +
       '比逐个 moveTopic 省得多（调用次数上限按「调用」算，不按节点算）。' +
-      'moves 里每一项的语义与 moveTopic 完全相同（address / toAddress / index?）。' +
+      'moves 里每一项的语义与 moveTopic 完全相同（address / toAddress / index?）；' +
+      '**address 优先填句柄**（读工具给的 `#xxxxxx`）——同名节点、超长标题、带斜杠标题都靠它。' +
       '个别条目解析失败会被**跳过**（摘要里说明是哪几条），其余照常执行；全都不行才整体报错。' +
       '列表里有用户手动摆过位置的主题时，同样需要 allowMoved: true。',
     parameters: schema(

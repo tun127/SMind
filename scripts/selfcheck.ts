@@ -63,6 +63,7 @@ import {
   resolveTopicAddress,
   runReadTool,
   segmentTitleMentions,
+  shortHandleOf,
   type ToolContext
 } from '../src/shared/agent'
 import {
@@ -2014,8 +2015,9 @@ function testAgentTools(): void {
   )
 
   const subtree = runReadTool('getSubtree', '{"address":"成本","depth":1}', context)
-  check('读子树给出缩进大纲', subtree.content.includes('- 人力'))
-  check('子节点一并列出', subtree.content.includes('- 物料'))
+  check('读子树给出缩进大纲', subtree.content.includes('- [#') && subtree.content.includes('] 人力'))
+  check('子节点一并列出', subtree.content.includes('] 物料'))
+  check('每行都带句柄（模型据此寻址）', /- \[#[0-9a-z]+\] /.test(subtree.content))
 
   eq('未知工具被拒但可读', runReadTool('dropDatabase', '{}', context).ok, false)
   eq(
@@ -2185,6 +2187,44 @@ function testWriteToolsAndTurn(): void {
     true
   )
   material.position = undefined
+
+  // 句柄寻址：大导图里同名标题能出现几十次（「创建 socket.socket()」这类），
+  // 按标题永远不可能唯一——模型靠读工具打出的句柄定位（一回合整理完的关键）
+  const dupA = createTopic('创建 socket.socket()')
+  const dupB = createTopic('创建 socket.socket()')
+  tree.children.push(dupA, dupB)
+  eq('同名标题按标题寻址确实歧义（真实场景）', resolveTopicAddress(tree, '创建 socket.socket()').ok, false)
+  const byHandleA = resolveTopicAddress(tree, `#${shortHandleOf(dupA.id)}`)
+  eq('按句柄能精确命中其中一个', byHandleA.ok && byHandleA.resolved.topic.id === dupA.id, true)
+  const byHandleB = resolveTopicAddress(tree, shortHandleOf(dupB.id))
+  eq('句柄不带 # 也认', byHandleB.ok && byHandleB.resolved.topic.id === dupB.id, true)
+  check(
+    '批量移动可以全用句柄（重名不再是障碍）',
+    (() => {
+      const r = plan('moveTopics', {
+        moves: [
+          { address: `#${shortHandleOf(dupA.id)}`, toAddress: '成本' },
+          { address: `#${shortHandleOf(dupB.id)}`, toAddress: '成本' }
+        ]
+      })
+      return r.ok && r.intent.kind === 'moveMany' && r.intent.moves.length === 2
+    })()
+  )
+  const readContext: ToolContext = { root: tree, selectedId: null, sheetCount: 1 }
+  check(
+    '子树读取把句柄打在每行前面',
+    runReadTool('getSubtree', JSON.stringify({ address: '中心主题', depth: 1 }), readContext).content.includes(
+      `[#${shortHandleOf(dupA.id)}]`
+    )
+  )
+  check(
+    '搜索结果也带句柄',
+    runReadTool('searchNodes', JSON.stringify({ query: 'socket' }), readContext).content.includes(
+      `[#${shortHandleOf(dupA.id)}]`
+    )
+  )
+  // 清掉，别影响后面的断言
+  tree.children = tree.children.filter((child) => child.id !== dupA.id && child.id !== dupB.id)
 
   // 标题里**本身带斜杠**的节点：编程笔记一抓一把（「class A: /A ()」），
   // 路径解析必然走不通——以前直接报错返回，这类节点对 AI 完全不可见
