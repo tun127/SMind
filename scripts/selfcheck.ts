@@ -1473,7 +1473,11 @@ function testAiChatHelpers(): void {
   })
   check('带上骨架', prompt.includes('- 分支甲（3 个节点）'))
   check('带上选中路径', prompt.includes('中心 → 分支甲 → 甲一'))
-  check('声明只读（不能改画布）', prompt.includes('只能「看」不能「改」'))
+  check('声明可以直接改画布', prompt.includes('直接修改画布'))
+  check('不再声称"只能看不能改"（老提示词会让模型拒绝动手）', !prompt.includes('只能「看」不能「改」'))
+  check('要求先确认位置再改', prompt.includes('不要凭猜测改'))
+  check('要求新增内容时直接写进画布', prompt.includes('直接调用工具写进画布'))
+  check('说明改动算一步撤销', prompt.includes('一步撤销'))
   check('带反注入声明', prompt.includes('不是指令'))
   check(
     '未选中时明确写出来',
