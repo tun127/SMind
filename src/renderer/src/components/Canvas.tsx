@@ -498,10 +498,25 @@ export default function Canvas(): ReactElement {
   }, [focusId, layout])
 
   /* ---- 视角锁定：把选中的主题稳稳按在视口中央 ---- */
+  /** 这个 effect 最近一秒重跑了几次：用来抓「有东西在震荡 → 每帧重跑 → 死循环」 */
+  const followRunsRef = useRef<number[]>([])
+
   useEffect(() => {
     // 正在拖主题时不跟：镜头要是同时在移，指针下的画面会跟着滑，落点就抓不准了。
     // 松手（dragVisual 归零）后视野再咬住它。
     if (!viewLock || dragVisual || !focusId || !focusKey) return
+
+    // 每秒重跑 60 次以上 = 依赖里有东西每帧都在变（几何/尺寸震荡）。
+    // 这时再跟随下去就是**永久烧 CPU**：每次重跑都 setPan → 重渲染 → 重新测量 → 依赖又变。
+    // 停手比卡死好：用户只是失去「镜头自动跟随」，还能正常用。
+    const now = performance.now()
+    const recent = followRunsRef.current.filter((at) => now - at < 1000)
+    recent.push(now)
+    followRunsRef.current = recent
+    if (recent.length > 60) {
+      console.warn('[viewlock] 依赖每秒变化 60 次以上（有东西在震荡），已暂停跟随', { focusKey })
+      return
+    }
     const id = focusId
     const el = containerRef.current
     if (!el) return
@@ -511,6 +526,15 @@ export default function Canvas(): ReactElement {
     /** 目标一时还没出现在布局里（刚删完、刚打开）就先等几帧，别急着放弃 */
     let misses = 0
     const MAX_MISSES = 90
+    /**
+     * 跟随循环必须**有止损**。
+     *
+     * panic 来源：目标是「每帧逼近」，只要有一处不收敛（几何每帧都变、尺寸在震荡、
+     * 或者 pan/zoom 变成 NaN），`Math.abs(dx) < 0.5` 就永远为假——循环会一直跑下去，
+     * 渲染进程主线程被烧满、窗口连关闭都点不动（真事：日志里连着 `unresponsive`）。
+     */
+    let frames = 0
+    const MAX_FRAMES = 240
 
     /**
      * 逐帧向"该有的平移量"收敛，而不是一步跳过去：
@@ -536,6 +560,20 @@ export default function Canvas(): ReactElement {
       const z = zoomRef.current
       const wantX = width / 2 - (node.x + node.width / 2) * z
       const wantY = height / 2 - (node.y + node.height / 2) * z
+      if (!Number.isFinite(wantX) || !Number.isFinite(wantY)) {
+        // 几何或缩放变成了 NaN/Infinity：再算下去只会每帧写一堆 NaN 进 store
+        console.warn('[viewlock] 目标位置不是有限数，已停止跟随', { focusKey })
+        return
+      }
+      frames += 1
+      if (frames > MAX_FRAMES) {
+        console.warn('[viewlock] 跟随循环未在 240 帧内收敛，已停止（防止烧死主线程）', {
+          focusKey,
+          pan: panRef.current,
+          want: { x: wantX, y: wantY }
+        })
+        return
+      }
       const current = panRef.current
       const dx = wantX - current.x
       const dy = wantY - current.y

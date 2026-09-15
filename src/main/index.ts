@@ -673,6 +673,9 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
    * 渲染进程崩溃 / 无响应 / 页面加载失败。
    * 不处理的话用户只会看到一个**空窗口或卡住的窗口**，不知道发生了什么、也不知道能不能救。
    */
+  /** 「无响应」连续命中次数：连续两次才弹原生出路，避免误报打扰 */
+  let unresponsiveStrikes = 0
+
   win.webContents.on('render-process-gone', (_event, details) => {
     logMain('render-process-gone', details.reason, { exitCode: details.exitCode })
     if (win.isDestroyed()) return
@@ -691,6 +694,38 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
 
   win.webContents.on('unresponsive', () => {
     logMain('unresponsive', '渲染进程无响应')
+    /**
+     * 卡死时窗口连「关闭」都点不动——主线程被循环占住，这是必然的。
+     * 所以出路必须由**主进程**给：原生对话框不依赖渲染进程，照样能点。
+     * 等第二次无响应再弹（第一次常常只是某一帧重排久了，会自己缓过来）。
+     */
+    unresponsiveStrikes += 1
+    if (unresponsiveStrikes < 2) return
+    unresponsiveStrikes = 0
+    if (win.isDestroyed()) return
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      title: '界面卡住了',
+      message: '界面进程没有响应（多半是某个界面循环卡住了）。',
+      detail:
+        '文档有自动存档（每 30 秒一份）。重新加载界面能立刻恢复操作；' +
+        '如果最近几十秒的改动还没进存档，可能会丢一点点。',
+      buttons: ['重新加载界面', '继续等待'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    if (choice === 0) win.reload()
+  })
+
+  /**
+   * 渲染层的 console 落进应用日志。
+   *
+   * 卡死这种问题，主进程只能看到「无响应」，看不到**是谁**在刷警告/报错；
+   * 把渲染层的 warning/error 收上来，下次翻日志就能直接定位。
+   */
+  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level < 2) return
+    logMain('renderer-console', `${level === 3 ? 'error' : 'warn'} ${message}`, `${sourceId}:${line}`)
   })
 
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
