@@ -30,7 +30,8 @@
 - **修复**：改「默认对齐 / 代码块基准字号」后布局不重算的问题。
 
 ### 工程
-- 接入 **ESLint（flat config）+ Prettier + EditorConfig**，`npm run lint` 零 error。
+- 接入 **ESLint（flat config）+ Prettier + EditorConfig**，`npm run lint` 零 error / 零 warning
+  （脚本带 `--max-warnings 0` 锁住基线）；顺带修掉 hook 依赖导致的闭包读到旧值问题。
 - 接入 **CI**（`.github/workflows/ci.yml`）：类型 + 规范 + 自检 + 样本往返。
 - tsconfig 增加 `noUnusedLocals` / `noUnusedParameters`。
 - 新增 `CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`docs/known-issues.md`。
