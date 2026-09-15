@@ -1515,7 +1515,7 @@ function testAiChatHelpers(): void {
     totalNodes: 5,
     sheetCount: 1,
     canWrite: false,
-    writeHint: 'AI 改图的试用已经用完（20/20）。'
+    writeHint: 'AI 改图的试用已经用完（30/30）。'
   })
   check('不能改时明说写工具没下发', limited.includes('只能看、不能改画布'))
   check('不能改时把原因写进提示词', limited.includes('试用已经用完'))
@@ -1766,14 +1766,14 @@ function testLicenseHelpers(): void {
 
   group('许可：试用算术')
 
-  eq('上限是 20', TRIAL_TURN_LIMIT, 20)
-  eq('没用过就是满额', remainingTrialTurns(0), 20)
-  eq('用了 19 次还剩 1 次', remainingTrialTurns(19), 1)
-  eq('用满就是 0（不出现负数）', remainingTrialTurns(20), 0)
+  eq('上限是 30（2026-09-15 拍板）', TRIAL_TURN_LIMIT, 30)
+  eq('没用过就是满额', remainingTrialTurns(0), 30)
+  eq('用了 29 次还剩 1 次', remainingTrialTurns(29), 1)
+  eq('用满就是 0（不出现负数）', remainingTrialTurns(30), 0)
   eq('超过上限也是 0', remainingTrialTurns(999), 0)
-  eq('脏数据当没用过', remainingTrialTurns(-5), 20)
+  eq('脏数据当没用过', remainingTrialTurns(-5), 30)
   eq('计数只加一', bumpTrialUsed(3), 4)
-  eq('计数停在上限，不会越滚越大', bumpTrialUsed(20), 20)
+  eq('计数停在上限，不会越滚越大', bumpTrialUsed(30), 30)
   eq('脏数据从零起算', bumpTrialUsed(-1), 1)
 
   group('许可：写回合判定')
@@ -1795,10 +1795,10 @@ function testLicenseHelpers(): void {
 
   const trial = licenseViewOf({ pro: false, holder: '张三', trialUsed: 5 })
   eq('试用中还能写', trial.canWrite, true)
-  eq('试用中显示剩余', trial.remaining, 15)
+  eq('试用中显示剩余', trial.remaining, 25)
   eq('不是 Pro 就不显示持有人（没人会给他看）', trial.holder, null)
 
-  const used = licenseViewOf({ pro: false, holder: null, trialUsed: 20 })
+  const used = licenseViewOf({ pro: false, holder: null, trialUsed: 30 })
   eq('试用用尽就不能写', used.canWrite, false)
   check('用尽时的提示写清了边界', used.writeHint?.includes('只读聊天永久免费') === true)
   eq('未知状态按"没用过"算（许可文件坏了不该把用户锁死）', unknownLicenseView().canWrite, true)

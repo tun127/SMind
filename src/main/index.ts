@@ -1452,7 +1452,7 @@ function registerIpc(): void {
     if (typeof requestId === 'string') streamAborters.get(requestId)?.abort()
   })
 
-  /* ---- 许可与试用（商业化闸门：Pro 解锁写工具，免费送 20 个写回合） ---- */
+  /* ---- 许可与试用（商业化闸门：Pro 解锁写工具，免费送 30 个写回合） ---- */
 
   ipcMain.handle(IPC.licenseGet, (): Promise<LicenseView> => getLicenseView())
 
