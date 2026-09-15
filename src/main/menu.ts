@@ -6,6 +6,8 @@ interface MenuActions {
   newWindow: () => void
   /** 打开日志目录（排查崩溃与异常用） */
   openLogs: () => void
+  /** 主动检查更新（有结果一定说清楚，与启动时的安静检查不同） */
+  checkUpdates: () => void
 }
 
 function send(command: MenuCommand): void {
@@ -95,6 +97,7 @@ export function buildAppMenu(actions: MenuActions): void {
       submenu: [
         { label: '快捷键说明', click: () => send('help:shortcuts') },
         { label: '打开日志目录', click: () => actions.openLogs() },
+        { label: '检查更新…', click: () => actions.checkUpdates() },
         { type: 'separator' },
         {
           label: `版本 ${app.getVersion()}`,

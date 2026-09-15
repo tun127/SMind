@@ -84,6 +84,7 @@ import { parseRecoveryMeta, shouldOfferRecovery, type RecoveryMeta } from '@shar
 import { autosaveSlotName, sameDocPath } from '@shared/window'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import { buildAppMenu } from './menu'
+import { checkForUpdateInteractive, startAutoUpdate } from './update'
 
 /** 应用名：与 electron-builder 的 productName、窗口标题保持一致 */
 const APP_NAME = 'SMind'
@@ -1799,8 +1800,13 @@ if (!acquireSingleInstance()) {
       // 目录可能还没建（只在真出过错时才写日志）：先建再开，否则「打开」是无声失败
       openLogs: () => {
         void fs.mkdir(logDirectory(), { recursive: true }).then(() => shell.openPath(logDirectory()))
+      },
+      checkUpdates: () => {
+        void checkForUpdateInteractive(BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null)
       }
     })
+    // 打包版才生效：后台检查更新，下载完在退出时静默安装（不打断正在画图的人）
+    startAutoUpdate()
     // 上一次运行崩溃时可能留下画布副本的临时文件：超过一天的一律清掉
     void pruneStaleCopies()
     // 第一个窗口认领「启动时带的那个文件」（双击 .xmind / 拖到 exe 上 / 右键打开方式）
