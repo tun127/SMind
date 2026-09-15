@@ -22,6 +22,7 @@ import ThemePanel from './components/ThemePanel'
 import Toolbar from './components/Toolbar'
 import { RecoveryDialog, ShortcutsDialog, UnsavedDialog } from './components/Dialogs'
 import AiDialog, { type AiTask } from './components/AiDialog'
+import ChatPanel from './components/ChatPanel'
 import AiSettingsDialog from './components/AiSettingsDialog'
 import ExportDialog from './components/ExportDialog'
 import HistoryDialog from './components/HistoryDialog'
@@ -113,7 +114,7 @@ export default function App(): ReactElement {
   } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   /** 右侧抽屉：同一时刻只开一个 */
-  const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node' | 'search'>('none')
+  const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node' | 'search' | 'chat'>('none')
   /** 左侧大纲面板：与画布并排显示，改哪边另一边都跟着变 */
   const [showOutline, setShowOutline] = useState(false)
   /** 导出设置框 */
@@ -1080,6 +1081,7 @@ export default function App(): ReactElement {
           onAiExpand: () => setAiTask('expand'),
           onAiPolish: () => setAiTask('polish'),
           onAiSettings: () => setShowAiSettings(true),
+          onAiChat: () => setSidePanel((current) => (current === 'chat' ? 'none' : 'chat')),
           onHistory: () => setShowHistory(true),
           onNewWindow: openNewWindow,
           onOpenSheetWindow: openCopyWindow
@@ -1098,6 +1100,12 @@ export default function App(): ReactElement {
         )}
         {sidePanel === 'node' && <NodePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
         {sidePanel === 'search' && <SearchPanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
+        {sidePanel === 'chat' && (
+          <ChatPanel
+            onClose={() => setSidePanel('none')}
+            onOpenSettings={() => setShowAiSettings(true)}
+          />
+        )}
       </div>
 
       {/* 仅在进入编辑态时出现；「默认样式」面板改渲染兜底值后要让测量缓存失效 */}

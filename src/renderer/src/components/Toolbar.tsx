@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   AlignStartVertical,
   AppWindow,
+  Bot,
   Braces,
   ChevronDown,
   CircleHelp,
@@ -69,6 +70,8 @@ export interface ToolbarActions {
   onAiExpand(): void
   onAiPolish(): void
   onAiSettings(): void
+  /** 打开 / 关闭 AI 聊天面板（三期 1a） */
+  onAiChat(): void
   /** 历史记录 / 常用 / 默认保存位置 */
   onHistory(): void
   /** 全部恢复自动布局（清空手动位置偏移） */
@@ -863,6 +866,13 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
           label="AI"
           title="AI 助手（OpenAI 兼容接口）"
           items={[
+            {
+              key: 'ai-chat',
+              label: '打开 AI 聊天…',
+              hint: '用自然语言问这页导图',
+              icon: <Bot size={15} />,
+              onSelect: actions.onAiChat
+            },
             {
               key: 'ai-generate',
               label: '一键生成导图…',

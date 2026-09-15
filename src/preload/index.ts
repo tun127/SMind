@@ -14,7 +14,7 @@ import {
   type RecoveryInfo,
   type SaveResult
 } from '@shared/ipc'
-import type { AiConfigView, AiMessage } from '@shared/ai'
+import type { AiConfigView, AiMessage, AiStreamEvent, ChatHistoryEntry } from '@shared/ai'
 import type { HistoryEntry } from '@shared/history'
 import type { SnapshotItem, SnapshotReason } from '@shared/snapshot'
 import type { SnapshotRestoreResult } from '@shared/ipc'
@@ -129,6 +129,24 @@ const api: MindApi = {
     ipcRenderer.invoke(IPC.aiChat, messages, options) as Promise<AiChatResult>,
 
   aiTest: () => ipcRenderer.invoke(IPC.aiTest) as Promise<AiTestResult>,
+
+  aiChatStream: (requestId: string, messages: AiMessage[], options?: { useTools?: boolean }) =>
+    ipcRenderer.invoke(IPC.aiChatStream, requestId, messages, options) as Promise<void>,
+
+  aiChatStreamCancel: (requestId: string) => ipcRenderer.send(IPC.aiChatStreamCancel, requestId),
+
+  onAiStreamEvent: (handler: (event: AiStreamEvent) => void) => {
+    const listener = (_e: unknown, event: AiStreamEvent): void => handler(event)
+    ipcRenderer.on(IPC.aiStreamEvent, listener)
+    return () => ipcRenderer.removeListener(IPC.aiStreamEvent, listener)
+  },
+
+  chatHistoryLoad: (key: string) => ipcRenderer.invoke(IPC.chatHistoryLoad, key) as Promise<ChatHistoryEntry[]>,
+
+  chatHistorySave: (key: string, messages: ChatHistoryEntry[]) =>
+    ipcRenderer.invoke(IPC.chatHistorySave, key, messages) as Promise<void>,
+
+  chatHistoryClear: (key: string) => ipcRenderer.invoke(IPC.chatHistoryClear, key) as Promise<void>,
 
   importText: (kind: 'markdown' | 'opml') =>
     ipcRenderer.invoke(IPC.importText, kind) as Promise<ImportedTextFile | null>,

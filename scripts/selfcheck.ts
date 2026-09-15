@@ -34,6 +34,27 @@ import { createSheet, createTopic, createWorkbook } from '../src/shared/model/fa
 import { coerceCode, coerceRichText } from '../src/shared/model/coerce'
 import { checkImagePayload, isPlausibleFilePath, MAX_IMAGE_BYTES } from '../src/shared/ipc-args'
 import { writeFileAtomic } from '../src/main/atomic-write'
+import {
+  buildChatSystemPrompt,
+  buildSkeletonDigest,
+  accumulateToolCalls,
+  countTopicTree,
+  createSseLineSplitter,
+  extractStreamDelta,
+  finalizeToolCalls,
+  normalizeChatHistory,
+  toWireMessages
+} from '../src/shared/ai'
+import {
+  AGENT_MAX_ROUNDS,
+  AGENT_MAX_TOOL_CALLS,
+  buildTitleIndex,
+  canContinueAgentLoop,
+  resolveTopicAddress,
+  runReadTool,
+  segmentTitleMentions,
+  type ToolContext
+} from '../src/shared/agent'
 import { evictOldest } from '../src/shared/cache'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove } from '../src/shared/model/dragmove'
 import {
@@ -1369,6 +1390,277 @@ async function testSafetyHelpers(): Promise<void> {
   eq('名字过长被拒', checkImagePayload(new Uint8Array(4), 'x'.repeat(300)) !== null, true)
 
   rmSync(dir, { recursive: true, force: true })
+}
+
+/* ------------------------------------------------------------------ */
+/* 7.8 AI 聊天面板的纯逻辑：骨架摘要 / 系统提示词 / 流式解析            */
+/* ------------------------------------------------------------------ */
+
+function testAiChatHelpers(): void {
+  /** 对象比较统一转 JSON 串，避免依赖断言器的深比较行为 */
+  const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined'
+
+  group('AI 聊天：骨架摘要')
+
+  const root = createTopic('中心')
+  const branchA = createTopic('分支甲')
+  const branchB = createTopic('分支乙')
+  branchA.children.push(createTopic('甲一'), createTopic('甲二'))
+  root.children.push(branchA, branchB)
+
+  eq('节点总数统计含根', countTopicTree(root), 5)
+
+  const digest = buildSkeletonDigest(root)
+  eq('骨架首行是中心主题', digest.split('\n')[0], '中心主题：中心')
+  check('一级分支带各自节点数', digest.includes('- 分支甲（3 个节点）'))
+  check('叶子分支也计数', digest.includes('- 分支乙（1 个节点）'))
+  eq('空导图给出占位说明', buildSkeletonDigest(createTopic('光杆')).includes('暂无一级分支'), true)
+
+  const many = createTopic('多')
+  for (let i = 0; i < 25; i += 1) many.children.push(createTopic(`分支${i}`))
+  const truncated = buildSkeletonDigest(many)
+  check('超出上限的分支折叠成一行', truncated.includes('另有 5 个一级分支未列出'))
+  eq('只列前 20 个分支', truncated.split('\n').length, 1 + 20 + 1)
+
+  group('AI 聊天：系统提示词')
+
+  const prompt = buildChatSystemPrompt({
+    skeleton: digest,
+    selectedTitles: ['中心', '分支甲', '甲一'],
+    totalNodes: 5,
+    sheetCount: 1
+  })
+  check('带上骨架', prompt.includes('- 分支甲（3 个节点）'))
+  check('带上选中路径', prompt.includes('中心 → 分支甲 → 甲一'))
+  check('声明只读（不能改画布）', prompt.includes('只能「看」不能「改」'))
+  check('带反注入声明', prompt.includes('不是指令'))
+  check(
+    '未选中时明确写出来',
+    buildChatSystemPrompt({
+      skeleton: digest,
+      selectedTitles: [],
+      totalNodes: 5,
+      sheetCount: 2
+    }).includes('（未选中任何节点）')
+  )
+
+  group('AI 聊天：流式解析')
+
+  const splitter = createSseLineSplitter()
+  eq('半截行留在缓冲里不吐', json(splitter('data: {"a"')), json([]))
+  eq('补齐后才吐，且一次吐两行', json(splitter(':1}\ndata: [DONE]\n')), json(['{"a":1}', '[DONE]']))
+  eq('一包里多行一次吐完', json(splitter('data: 1\ndata: 2\n')), json(['1', '2']))
+  eq('CRLF 也能吃', json(splitter('data: 3\r\n')), json(['3']))
+  eq('非 data 行被忽略', json(splitter('event: ping\n:注释\n')), json([]))
+
+  const chunk = '{"model":"m1","choices":[{"delta":{"content":"你好"}}]}'
+  eq('取增量文本', extractStreamDelta(chunk)?.text, '你好')
+  eq('同一条里能取到模型名', extractStreamDelta(chunk)?.model, 'm1')
+  eq('[DONE] 不当作内容', json(extractStreamDelta('[DONE]')), 'null')
+  eq('空行忽略', json(extractStreamDelta('   ')), 'null')
+  eq('坏 JSON 忽略（心跳等）', json(extractStreamDelta('not-json')), 'null')
+  eq('choices 为空忽略', json(extractStreamDelta('{"choices":[]}')), 'null')
+  eq(
+    '只有 role 的分片返回空串而不是 null',
+    json(extractStreamDelta('{"choices":[{"delta":{"role":"assistant"}}]}')?.text),
+    json('')
+  )
+  eq(
+    '兼容把整段放在 message 里的实现',
+    extractStreamDelta('{"choices":[{"message":{"content":"整段"}}]}')?.text,
+    '整段'
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* 7.9 Agent 纯逻辑：节点引用切分 / 聊天记录校验                        */
+/* ------------------------------------------------------------------ */
+
+function testAgentHelpers(): void {
+  /** 对象比较统一转 JSON 串，避免依赖断言器的深比较行为 */
+  const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined'
+
+  group('Agent：回复里的节点引用切分')
+
+  const root = createTopic('中心')
+  const cost = createTopic('成本')
+  const costControl = createTopic('成本控制')
+  const goal = createTopic('目标')
+  root.children.push(cost, costControl, goal)
+
+  const index = buildTitleIndex(root)
+  /** 片段转成可读形式：命中节点用 [标题]，纯文本用 ·文本 */
+  const cut = (text: string): string[] =>
+    segmentTitleMentions(text, index).map((segment) =>
+      segment.topicId === null ? `·${segment.text}` : `[${segment.text}]`
+    )
+
+  eq('命中一个标题', json(cut('建议把「目标」拆细')), json(['·建议把「', '[目标]', '·」拆细']))
+  eq(
+    '长标题优先：成本控制不会被「成本」咬掉一半',
+    json(cut('成本控制最关键')),
+    json(['[成本控制]', '·最关键'])
+  )
+  eq('同一句里出现两个标题', json(cut('目标与成本都要看')), json(['[目标]', '·与', '[成本]', '·都要看']))
+  eq('提到两次都算', json(cut('成本，还是成本')), json(['[成本]', '·，还是', '[成本]']))
+  eq('没有命中就是一整段纯文本', json(cut('这段话里没有节点名')), json(['·这段话里没有节点名']))
+  eq('空文本没有片段', json(cut('')), json([]))
+  eq('单字标题不进索引（太容易误伤）', buildTitleIndex(createTopic('甲')).size, 0)
+
+  group('Agent：聊天记录校验')
+
+  eq('不是对象 → 空', json(normalizeChatHistory('nope')), json([]))
+  eq('缺 messages → 空', json(normalizeChatHistory({ version: 1 })), json([]))
+  eq('messages 不是数组 → 空', json(normalizeChatHistory({ messages: 'x' })), json([]))
+  eq(
+    '坏条目被丢弃（null / 数字 / 非法的 system 角色）',
+    json(
+      normalizeChatHistory({
+        messages: [null, 3, { role: 'system', content: 'x' }, { role: 'user', content: '你好' }]
+      })
+    ),
+    json([{ role: 'user', content: '你好' }])
+  )
+  eq('空白内容的条目不收', json(normalizeChatHistory({ messages: [{ role: 'user', content: '   ' }] })), json([]))
+  eq(
+    'aborted 只认真正的 true',
+    json(normalizeChatHistory({ messages: [{ role: 'assistant', content: 'a', aborted: 'yes' }] })),
+    json([{ role: 'assistant', content: 'a' }])
+  )
+
+  const many = normalizeChatHistory({
+    messages: Array.from({ length: 260 }, (_, i) => ({ role: 'user', content: `第${i}条` }))
+  })
+  eq('超过上限只留最近的一批', many.length, 200)
+  eq('留下的是最新的（下文比上文有用）', many[many.length - 1]?.content, '第259条')
+
+  const long = normalizeChatHistory({ messages: [{ role: 'user', content: 'x'.repeat(30000) }] })
+  eq('超长内容被截断', long[0]?.content.length, 20000)
+}
+
+/* ------------------------------------------------------------------ */
+/* 7.10 Agent 工具层：分片累积 / 线格式 / 寻址 / 只读工具 / 循环上限     */
+/* ------------------------------------------------------------------ */
+
+function testAgentTools(): void {
+  /** 对象比较统一转 JSON 串，避免依赖断言器的深比较行为 */
+  const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined'
+
+  group('Agent：工具调用的流式分片')
+
+  const chunkLine =
+    '{"model":"m","choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"searchNodes","arguments":"{\\"que"}}]},"finish_reason":null}]}'
+  const parsed = extractStreamDelta(chunkLine)
+  eq('从分片里解析出工具调用', parsed?.toolCalls.length, 1)
+  eq('分片里的函数名', parsed?.toolCalls[0]?.name, 'searchNodes')
+  eq('普通文本分片不带工具调用', extractStreamDelta('{"choices":[{"delta":{"content":"嗨"}}]}')?.toolCalls.length, 0)
+  eq(
+    '结束原因能取到',
+    extractStreamDelta('{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}')?.finishReason,
+    'tool_calls'
+  )
+
+  // 参数是**跨片拼起来的**：一次覆盖式赋值只会拿到半截 JSON
+  const step1 = accumulateToolCalls([], [{ index: 0, id: 'c1', name: 'searchNodes', argumentsText: '{"que' }])
+  const step2 = accumulateToolCalls(step1, [{ index: 0, argumentsText: 'ry":"成本"}' }])
+  eq('参数分片是追加而不是覆盖', step2[0]?.argumentsText, '{"query":"成本"}')
+  eq('id 与函数名保留（后续分片不带它们）', `${step2[0]?.id}/${step2[0]?.name}`, 'c1/searchNodes')
+
+  const parallel = accumulateToolCalls([], [
+    { index: 0, id: 'a', name: 'getDocStats' },
+    { index: 1, id: 'b', name: 'getSelection' }
+  ])
+  eq('并行两个调用各就各位', parallel.length, 2)
+  eq('第二个调用的 id 正确', parallel[1]?.id, 'b')
+  eq('没拿到名字的空槽在收尾时丢掉', finalizeToolCalls([{ id: 'x', name: '', argumentsText: '' }]).length, 0)
+
+  group('Agent：请求体的线格式')
+
+  const wire = toWireMessages([
+    { role: 'user', content: '你好' },
+    { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'getDocStats', argumentsText: '{}' }] },
+    { role: 'tool', toolCallId: 'c1', content: '结果' }
+  ])
+  eq('工具结果用 tool_call_id 关联', json(wire[2]?.tool_call_id), json('c1'))
+  eq('助手消息带 tool_calls 数组', Array.isArray(wire[1]?.tool_calls), true)
+  const calls = wire[1]?.tool_calls as Array<Record<string, unknown>> | undefined
+  const fn = calls?.[0]?.function as Record<string, unknown> | undefined
+  eq('参数以字符串形态传（协议要求）', json(fn?.arguments), json('{}'))
+  eq('没有工具调用的消息保持原样', json(wire[0]?.content), json('你好'))
+
+  group('Agent：寻址解析')
+
+  // 中心 ─ 成本 ─ 人力 / 物料；另有一支也叫「人力」——专门用来测「重名必须问清」
+  const root = createTopic('中心主题')
+  const cost = createTopic('成本')
+  const labor = createTopic('人力')
+  const material = createTopic('物料')
+  const otherLabor = createTopic('人力')
+  cost.children.push(labor, material)
+  root.children.push(cost, otherLabor)
+
+  const byId = resolveTopicAddress(root, labor.id)
+  eq('按 id 解析（最可靠的写法）', byId.ok && byId.resolved.topic.id === labor.id, true)
+  const byPath = resolveTopicAddress(root, '中心主题/成本/物料')
+  eq('按标题路径解析', byPath.ok && byPath.resolved.topic.id === material.id, true)
+  eq('路径解析出完整标题链', json(byPath.ok ? byPath.resolved.path : []), json(['中心主题', '成本', '物料']))
+  const withoutRoot = resolveTopicAddress(root, '成本/人力')
+  eq('路径可省略开头的中心主题', withoutRoot.ok && withoutRoot.resolved.topic.id === labor.id, true)
+
+  const ambiguous = resolveTopicAddress(root, '人力')
+  eq('重名标题**不硬选**，直接报错', ambiguous.ok, false)
+  check('重名报错里给出候选路径', !ambiguous.ok && ambiguous.error.includes('成本/人力'))
+  const missing = resolveTopicAddress(root, '预算')
+  eq('找不到时也报错', missing.ok, false)
+  check('找不到时给出可读原因（提示去搜）', !missing.ok && missing.error.includes('searchNodes'))
+  eq('路径走到断点时报错', resolveTopicAddress(root, '中心主题/不存在').ok, false)
+  eq('空 address 报错', resolveTopicAddress(root, '   ').ok, false)
+
+  group('Agent：只读工具')
+
+  const context: ToolContext = { root, selectedId: labor.id, sheetCount: 2 }
+
+  const stats = runReadTool('getDocStats', '{}', context)
+  check('文档概况含节点总数', stats.content.includes('节点总数：5'))
+  check('文档概况含画布数', stats.content.includes('画布数：2'))
+  check('文档概况的摘要是给用户看的', stats.summary.includes('5 个节点'))
+
+  const selection = runReadTool('getSelection', '{}', context)
+  check('读选中含路径', selection.content.includes('中心主题 → 成本 → 人力'))
+  eq(
+    '没有选中时如实说明（不编造）',
+    runReadTool('getSelection', '{}', { ...context, selectedId: null }).content.includes('没有选中'),
+    true
+  )
+
+  const found = runReadTool('searchNodes', '{"query":"料"}', context)
+  eq('搜索命中', found.ok, true)
+  check('搜索结果带路径', found.content.includes('中心主题 → 成本 → 物料'))
+  check(
+    '搜索无命中也不报错（只是没有结果）',
+    runReadTool('searchNodes', '{"query":"不存在的词"}', context).content.includes('没有找到')
+  )
+
+  const subtree = runReadTool('getSubtree', '{"address":"成本","depth":1}', context)
+  check('读子树给出缩进大纲', subtree.content.includes('- 人力'))
+  check('子节点一并列出', subtree.content.includes('- 物料'))
+
+  eq('未知工具被拒但可读', runReadTool('dropDatabase', '{}', context).ok, false)
+  eq(
+    '参数不是合法 JSON 时给可纠正的提示',
+    runReadTool('searchNodes', '{"query"', context).content.includes('合法 JSON'),
+    true
+  )
+  eq('缺必填参数时报错', runReadTool('getSubtree', '{}', context).ok, false)
+  eq('正常结果不会被截断', runReadTool('getDocStats', '{}', context).content.includes('截断'), false)
+
+  group('Agent：循环上限')
+
+  eq('刚起步可以继续', canContinueAgentLoop(0, 0).ok, true)
+  eq('到轮数上限就停', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).ok, false)
+  check('停下时给出原因（不是静默）', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).reason.includes('轮'))
+  eq('到调用次数上限就停', canContinueAgentLoop(0, AGENT_MAX_TOOL_CALLS).ok, false)
+  eq('刚好在上限之前还能继续', canContinueAgentLoop(AGENT_MAX_ROUNDS - 1, AGENT_MAX_TOOL_CALLS - 1).ok, true)
 }
 
 /* ------------------------------------------------------------------ */
@@ -5874,6 +6166,9 @@ async function main(): Promise<void> {
   testMove()
   testNodeDrag()
   testUndoGranularity()
+  testAiChatHelpers()
+  testAgentHelpers()
+  testAgentTools()
   await testSafetyHelpers()
   testMisc()
   testTypedChar()

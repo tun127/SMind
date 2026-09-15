@@ -1,5 +1,5 @@
 import type { Workbook } from './model/types'
-import type { AiConfigView, AiMessage } from './ai'
+import type { AiConfigView, AiMessage, AiStreamEvent, ChatHistoryEntry } from './ai'
 import type { ImageExportFormat } from './export/types'
 import type { HistoryEntry } from './history'
 import type { SnapshotItem, SnapshotReason } from './snapshot'
@@ -141,6 +141,14 @@ export const IPC = {
   aiConfigSave: 'ai:config-save',
   aiChat: 'ai:chat',
   aiTest: 'ai:test',
+  /* ---- AI 聊天面板（三期 1a） ---- */
+  aiChatStream: 'ai:chat-stream',
+  aiChatStreamCancel: 'ai:chat-stream-cancel',
+  aiStreamEvent: 'ai:stream-event',
+  /* ---- AI 聊天记录（按文档持久化，不进 .xmind） ---- */
+  chatHistoryLoad: 'chat:history-load',
+  chatHistorySave: 'chat:history-save',
+  chatHistoryClear: 'chat:history-clear',
   /* ---- 大纲文件导入（P9+） ---- */
   importText: 'file:import-text',
   /* ---- 历史记录与常用（P9+） ---- */
@@ -298,6 +306,29 @@ export interface MindApi {
   aiChat(messages: AiMessage[], options?: { timeoutMs?: number }): Promise<AiChatResult>
   /** 用一条极短的消息测试连通性 */
   aiTest(): Promise<AiTestResult>
+  /**
+   * 发起一次**流式**对话（三期 AI 聊天面板）。
+   * 正文不通过返回值给——增量经 `onAiStreamEvent` 逐块推送；
+   * 返回的 Promise 只表示「主进程已受理」，结束 / 出错 / 被停止也走事件。
+   */
+  aiChatStream(
+    requestId: string,
+    messages: AiMessage[],
+    options?: { useTools?: boolean }
+  ): Promise<void>
+  /** 中止一次进行中的流式请求（面板上的「停止生成」） */
+  aiChatStreamCancel(requestId: string): void
+  /** 订阅流式事件，返回取消订阅函数 */
+  onAiStreamEvent(handler: (event: AiStreamEvent) => void): () => void
+  /**
+   * 读某份文档的聊天记录（`key` = 文档路径；未保存的文档不落盘，调用方不要传）。
+   * 文件不存在或损坏时返回空数组。
+   */
+  chatHistoryLoad(key: string): Promise<ChatHistoryEntry[]>
+  /** 写某份文档的聊天记录（整体覆盖） */
+  chatHistorySave(key: string, messages: ChatHistoryEntry[]): Promise<void>
+  /** 清掉某份文档的聊天记录（面板上的「清空对话」） */
+  chatHistoryClear(key: string): Promise<void>
 
   /* ---- 大纲文件导入 ---- */
   /**

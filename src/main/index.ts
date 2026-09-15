@@ -25,15 +25,25 @@ import {
 import { pickDocumentArg } from '@shared/openfile'
 import {
   DEFAULT_AI_CONFIG,
+  accumulateToolCalls,
   chatCompletionsUrl,
+  createSseLineSplitter,
   describeAiError,
   extractContent,
+  extractStreamDelta,
+  finalizeToolCalls,
   normalizeAiConfig,
+  normalizeChatHistory,
   toConfigView,
+  toWireMessages,
   type AiConfig,
   type AiConfigView,
-  type AiMessage
+  type AiMessage,
+  type AiStreamEvent,
+  type ChatHistoryEntry,
+  type ToolCall
 } from '@shared/ai'
+import { toWireTools } from '@shared/agent'
 import type { Workbook } from '@shared/model/types'
 import { createId } from '@shared/model/factory'
 import {
@@ -349,6 +359,126 @@ async function readAiConfig(): Promise<AiConfig> {
 
 async function writeAiConfig(config: AiConfig): Promise<void> {
   await fs.writeFile(aiConfigFile(), JSON.stringify(config, null, 2), 'utf8')
+}
+
+/** 进行中的流式请求（requestId → 控制器）：「停止生成」与窗口关闭时中止用 */
+const streamAborters = new Map<string, AbortController>()
+
+/**
+ * 流式对话（三期 AI 聊天面板 1a）。
+ *
+ * 与 callAi 的区别：`stream: true`，服务端按 SSE 逐块回，这里边收边通过
+ * `aiStreamEvent` 推给渲染进程——聊天框要的是打字机效果，等全文到齐就死了。
+ * 结果**不走返回值**：本函数只把事件发完，内容与错误都在事件里。
+ */
+async function callAiStream(
+  config: AiConfig,
+  messages: AiMessage[],
+  requestId: string,
+  sender: { isDestroyed(): boolean; send(channel: string, payload: unknown): void },
+  /** 是否带上只读工具定义；模型不支持工具调用时由渲染层关掉 */
+  useTools: boolean
+): Promise<void> {
+  const push = (event: AiStreamEvent): void => {
+    if (!sender.isDestroyed()) sender.send(IPC.aiStreamEvent, event)
+  }
+
+  const url = chatCompletionsUrl(config.baseUrl)
+  if (url.length === 0) {
+    push({ requestId, kind: 'error', message: 'BaseURL 没有配置' })
+    return
+  }
+
+  const controller = new AbortController()
+  streamAborters.set(requestId, controller)
+
+  let full = ''
+  let model: string | null = null
+  /** 本轮模型请求的工具调用（分片累积；空数组 = 说完了） */
+  let toolCalls: ToolCall[] = []
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.apiKey}`
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: toWireMessages(messages),
+        temperature: config.temperature,
+        stream: true,
+        // 只读工具：模型据此决定要不要先看一眼导图再回答
+        ...(useTools ? { tools: toWireTools() } : {})
+      }),
+      signal: controller.signal
+    })
+
+    if (!response.ok) {
+      // 错误响应不是流：整段读出来交给统一的错误翻译
+      const body = await response.text()
+      throw new Error(describeAiError(response.status, body))
+    }
+    if (!response.body) throw new Error('AI 服务没有返回流式内容')
+
+    const splitter = createSseLineSplitter()
+    const decoder = new TextDecoder()
+    const feed = (piece: string): void => {
+      for (const line of splitter(piece)) {
+        const delta = extractStreamDelta(line)
+        if (!delta) continue
+        if (delta.model) model = delta.model
+        // 工具调用的参数是**逐片追加**的字符串，必须按 index 累积（见 accumulateToolCalls）
+        if (delta.toolCalls.length > 0) toolCalls = accumulateToolCalls(toolCalls, delta.toolCalls)
+        if (delta.text.length === 0) continue
+        full += delta.text
+        push({ requestId, kind: 'chunk', text: delta.text })
+      }
+    }
+
+    const reader = response.body.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (controller.signal.aborted) break
+      feed(decoder.decode(value, { stream: true }))
+    }
+    // 收尾：解码器里可能还压着没有换行的最后一行
+    feed(decoder.decode())
+
+    push({
+      requestId,
+      kind: 'done',
+      content: full,
+      model: model ?? config.model,
+      aborted: controller.signal.aborted,
+      toolCalls: finalizeToolCalls(toolCalls)
+    })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      // 用户主动停止：不算错误，把已经收到的部分完完整整交回去
+      push({
+        requestId,
+        kind: 'done',
+        content: full,
+        model: model ?? config.model,
+        aborted: true,
+        // 被停止时工具调用多半是残缺的：带回去但渲染层不会执行（见 ChatPanel）
+        toolCalls: finalizeToolCalls(toolCalls)
+      })
+    } else if (error instanceof TypeError) {
+      // fetch 的网络层错误（DNS / 连接被拒 / 证书）
+      push({
+        requestId,
+        kind: 'error',
+        message: `连不上 AI 服务：请检查 BaseURL 是否正确、网络是否可用（${error.message}）`
+      })
+    } else {
+      push({ requestId, kind: 'error', message: (error as Error).message })
+    }
+  } finally {
+    streamAborters.delete(requestId)
+  }
 }
 
 /**
@@ -1209,6 +1339,101 @@ function registerIpc(): void {
     } catch (error) {
       return { ok: false, message: (error as Error).message }
     }
+  })
+
+  ipcMain.handle(
+    IPC.aiChatStream,
+    async (e, requestId: unknown, messages: unknown, options: unknown): Promise<void> => {
+      // 这条通道直连网络且带着 Key，渲染层给的一切都不默认可信，逐项校验
+      if (typeof requestId !== 'string' || requestId.length === 0 || requestId.length > 128) {
+        throw new Error('流式请求标识无效')
+      }
+      // 工具往返会多出 assistant(带 tool_calls) 与 tool 两类消息，上限放宽到 120
+      if (!Array.isArray(messages) || messages.length === 0 || messages.length > 120) {
+        throw new Error('对话内容无效')
+      }
+      for (const item of messages) {
+        if (!isRecord(item)) throw new Error('对话内容无效')
+        const role = item.role
+        const knownRole = role === 'system' || role === 'user' || role === 'assistant' || role === 'tool'
+        if (!knownRole || typeof item.content !== 'string' || item.content.length > 60000) {
+          throw new Error('对话内容无效')
+        }
+        if (item.toolCallId !== undefined && typeof item.toolCallId !== 'string') {
+          throw new Error('对话内容无效')
+        }
+        if (item.toolCalls !== undefined) {
+          if (!Array.isArray(item.toolCalls) || item.toolCalls.length > 20) throw new Error('对话内容无效')
+          for (const call of item.toolCalls) {
+            if (
+              !isRecord(call) ||
+              typeof call.id !== 'string' ||
+              typeof call.name !== 'string' ||
+              typeof call.argumentsText !== 'string' ||
+              call.argumentsText.length > 60000
+            ) {
+              throw new Error('对话内容无效')
+            }
+          }
+        }
+      }
+
+      const config = await readAiConfig()
+      if (config.apiKey.length === 0) {
+        throw new Error('还没有配置 API Key：请打开「AI 设置」填入后再试')
+      }
+
+      // 工具默认开着；模型不支持函数调用时由渲染层显式关掉
+      const useTools = !(isRecord(options) && options.useTools === false)
+
+      const sender = e.sender
+      // 窗口销毁时中止：别留悬着的连接，也别再往已销毁的窗口发事件
+      sender.once('destroyed', () => streamAborters.get(requestId)?.abort())
+      await callAiStream(config, messages as AiMessage[], requestId, sender, useTools)
+    }
+  )
+
+  ipcMain.on(IPC.aiChatStreamCancel, (_e, requestId: unknown) => {
+    if (typeof requestId === 'string') streamAborters.get(requestId)?.abort()
+  })
+
+  /* ---- AI 聊天记录（按文档持久化） ---- */
+
+  const chatDir = (): string => join(app.getPath('userData'), 'chat')
+
+  /**
+   * 聊天记录的落盘文件。
+   *
+   * 用**文档路径的哈希**当文件名：路径可能含中文、空格、超长，直接做文件名不可靠；
+   * 只存哈希不存原路径，也就不会把用户的目录结构写进这个文件。
+   */
+  const chatFileOf = (key: string): string =>
+    join(chatDir(), `${createHash('sha256').update(key).digest('hex').slice(0, 32)}.json`)
+
+  ipcMain.handle(IPC.chatHistoryLoad, async (_e, key: unknown): Promise<ChatHistoryEntry[]> => {
+    if (typeof key !== 'string' || !isPlausibleFilePath(key)) return []
+    try {
+      const raw: unknown = JSON.parse(await fs.readFile(chatFileOf(key), 'utf8'))
+      return normalizeChatHistory(raw)
+    } catch {
+      // 文件不存在或坏了都当「没有记录」：聊天记录丢了不该影响开文档
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.chatHistorySave, async (_e, key: unknown, messages: unknown): Promise<void> => {
+    if (typeof key !== 'string' || !isPlausibleFilePath(key)) throw new Error('聊天记录的文档标识无效')
+    if (!Array.isArray(messages)) throw new Error('聊天记录无效')
+    // 复用与读取同一套校验：写进去的和读出来的一定同构
+    const items = normalizeChatHistory({ messages })
+    await fs.mkdir(chatDir(), { recursive: true })
+    // 原子写：半截的聊天记录文件解析不了，等于整段对话白存
+    await writeFileAtomic(chatFileOf(key), Buffer.from(JSON.stringify({ version: 1, messages: items }, null, 2)))
+  })
+
+  ipcMain.handle(IPC.chatHistoryClear, async (_e, key: unknown): Promise<void> => {
+    if (typeof key !== 'string' || !isPlausibleFilePath(key)) return
+    await fs.rm(chatFileOf(key), { force: true })
   })
 
   /* ---- 大纲文件导入（Markdown / OPML） ---- */
