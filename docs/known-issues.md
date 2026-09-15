@@ -1,12 +1,51 @@
 # 待修问题清单（Known Issues）
 
 > 生成时间：2026-09-14
-> 对应版本：0.6.0（提交 `7a5cf53`）
-> 状态：**待办，尚未修复** —— 本文件是明天动手的作业单
+> 最后处理：**2026-09-15**（见下方「处理结果」）
+> 对应版本：0.6.0 起
 > 排查方式：全仓只读审查（安全 / 健壮性 / 性能 / 资源泄漏 / 类型卫生 / 功能缺口），关键结论均已人工复核
 
 每条含四项：**现象** → **证据（文件:行号）** → **建议改法** → **怎么验收**。
 优先级：P0 会丢用户数据；P1 安全纵深；P2 性能；P3 工程规范；P4 分发；P5 功能缺口。
+
+---
+
+## 处理结果（2026-09-15）
+
+| 项 | 结果 | 落地位置 |
+|---|---|---|
+| **P0-1 保存非原子写** | **已修**：临时文件 → `fsync` → `rename`；失败清理临时文件且不碰原文件 | `src/main/atomic-write.ts`（含自检断言） |
+| **P0-2 无错误边界 / 无进程兜底** | **已修**：渲染层错误边界（可复制错误信息、重新加载）；主进程 `uncaughtException` / `unhandledRejection` / `render-process-gone` / `unresponsive` / `did-fail-load` 全部落日志；菜单「帮助 → 打开日志目录」 | `src/renderer/src/components/ErrorBoundary.tsx`、`src/main/log.ts`、`src/main/index.ts` |
+| **P0-3 自动保存失败被吞** | **已修**：失败会提示「自动保存失败，请尽快手动保存一次」 | `src/renderer/src/App.tsx` |
+| **P0-4 损坏文件抛英文异常** | **已修**：改为中文说明并给出下一步建议 | `src/shared/xmind/parse.ts` 的 `loadZip` |
+| **P1-1 无 CSP** | **已修**：生产构建注入 CSP（`script-src 'self'`、禁 object/base/form）；开发模式不注入（否则会打死 Vite 的内联刷新脚本） | `electron.vite.config.ts` 的 `smind-csp` |
+| **P1-2 `sandbox: false`** | **已修**：改为 `sandbox: true`，实测生产产物正常启动 | `src/main/index.ts` |
+| **P1-3 IPC 入参校验不均** | **已修**：路径合法性（`openPath` / `saveToPath` / `showInFolder` / `historyReveal`）+ 图片 20MB 上限与名称长度 | `src/shared/ipc-args.ts`（含自检断言） |
+| **P1-4 公式错误消息未转义** | **已修**：经 `escapeHtml` 后再拼进 `title` | `src/renderer/src/render/formula.ts` |
+| **P1-5 导入字段无结构校验** | **已修**：`titleRich` / `code` 逐字段收敛（颜色、字体、字号都限定字符范围），不再 `as` 强转 | `src/shared/model/coerce.ts`（含自检断言） |
+| **P2-1 布局每击键全量重算** | **部分修**：测量新增「按对象身份」的快速路径（未改动节点直接命中，不再重建缓存键）；并修掉「改默认对齐/代码字号后布局不重算」。**真正的增量布局仍未做**（见下方遗留） | `src/renderer/src/render/measure.ts`、`store/editor.ts` 的 `renderEpoch` |
+| **P2-2 大纲零虚拟化** | **已修**：视口外的行不再参与布局与绘制（`content-visibility`，并让滚动条高度稳定） | `src/renderer/src/styles.css` |
+| **P2-3 搜索无防抖** | **已修**：180ms 防抖，画布高亮与搜索面板共用（清空立即生效） | `src/renderer/src/hooks/useDebouncedValue.ts` |
+| **P2-4 筛选递归拷贝路径数组** | **已修**：改为父指针回溯，一次遍历 | `src/shared/search/index.ts` |
+| **P2-5 缓存满即整体清空** | **已修**：改为淘汰最旧一批（25%），消除周期性卡顿尖峰 | `src/shared/cache.ts`（含自检断言） |
+| **P3-1 无 ESLint / Prettier** | **已修**：ESLint flat config + Prettier + EditorConfig，`npm run lint` **0 error**；顺手清掉一批未使用的导入/变量，并修好工具栏三个按钮**丢失禁用原因提示**的缺陷 | `eslint.config.mjs`、`.prettierrc`、`.editorconfig` |
+| **P3-2 无 CI** | **已修**：push / PR 自动跑 类型 → 规范 → 自检 → 样本往返 | `.github/workflows/ci.yml` |
+| **P3-3 类型严格度不足** | **已修**：开启 `noUnusedLocals` / `noUnusedParameters`（只暴露 3 处，已修） | `tsconfig.json` |
+| **P3-4 缺 CHANGELOG 等** | **已修**：新增 `CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md` | 仓库根目录 |
+| **P3-5 仍有重复实现** | **已修**：备注 HTML 派生统一为 `notesHtmlFrom`；XML 转义统一到 `shared/xml-escape.ts`；删掉 `isPlainRecord` 历史别名 | 见左 |
+| **附一 图标字母 M** | **已修**：字母改为 **S**（用圆弧拼，16px 也不糊），已重新生成 7 个尺寸的 ico 与 PNG | `scripts/make-icon.mjs`、`build/icon.*` |
+
+### 本轮仍未做（明确记录，不是遗漏）
+
+| 项 | 为什么没做 |
+|---|---|
+| **真正的增量布局**（P2-1 的完整版） | 调查结论：连线、坐标归一化、以及"按层/行/列的全局聚合"（平衡图左右交替、矩阵列宽、组织图行宽等）**本质上都是全局的**，只缓存子树尺寸并不能把击键成本降到「局部」。要做就得同时实现增量的归一化与连线阶段，并补一套「增量结果 == 全量结果」的断言——这是一次独立重构，风险不该混在本次里 |
+| **`noUncheckedIndexedAccess`** | 开了预计会有几十处报错（数组下标访问），需要单独一次提交专门修，且大量机械加 `!` 反而更糟 |
+| **react-hooks v6 的四类新建议**（`refs` / `immutability` / `purity` / `set-state-in-effect`） | 属于 React Compiler 的写法建议，会指着画布里**有意为之**的 `xxxRef.current = yyy` 报警。照改等于给画布做一次重构，另立一项。目前：前三条关闭、最后一条保留为 warning（存量 9 处） |
+| **P4-1 / P4-2 / P4-3 签名 / 自动更新 / 跨平台** | 分别需要购买代码签名证书、准备发布渠道、以及在对应平台实测，都不是本机改代码能完成的。未签名的影响已在 `README.md` 写清（首次运行提示 + 操作指引） |
+| **P5 功能缺口** | 属于产品取舍（演示模式、打印、加密、docx/mm 导入、i18n……），本次刻意不做 |
+
+---
 
 ---
 

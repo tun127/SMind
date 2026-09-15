@@ -2499,6 +2499,65 @@ v1 支持作为分支结构：**逻辑图（左/右）、树形图（左/右）�
 
 ## 六、缺陷修复记录
 
+### 2026-09-15 · 按「待修问题清单」全面收口（P0–P3 + 图标）
+
+来源：`docs/known-issues.md`（前一日的全仓体检）。本轮把 P0 / P1 / P3 全部做完、P2 完成五项，并补上图标字母。
+
+#### P0 数据与健壮性（4/4）
+
+| 问题 | 修法 |
+|---|---|
+| 保存非原子写，写一半被打断会把**用户原稿**截断 | 抽成 `src/main/atomic-write.ts`：临时文件 → `fsync` → `rename` 覆盖；失败清理临时文件、原文件不动；自动存档同样处理 |
+| 无错误边界、无进程兜底（出错即白屏或静默退出） | 渲染层加 `ErrorBoundary`（错误详情 + 复制 + 重新加载）；主进程兜底 `uncaughtException` / `unhandledRejection` / `render-process-gone` / `unresponsive` / `did-fail-load`，日志落在 `%APPDATA%\SMind\logs\`，菜单「帮助 → 打开日志目录」可直接打开 |
+| 自动保存失败被静默吞掉 | 补 `.catch` 并明确提示「自动保存失败，请尽快手动保存一次」 |
+| 打开损坏 zip 抛英文原文 | 改为中文说明并给出下一步建议 |
+
+#### P1 安全纵深（5/5）
+
+| 问题 | 修法 | 验证 |
+|---|---|---|
+| 全仓无 CSP | 生产构建注入 CSP（`script-src 'self'`，禁 object/base/form）；开发模式不注入，否则会打死 Vite 的内联刷新脚本 | 产物里确认 meta 存在，并**实测生产产物正常启动** |
+| `sandbox: false` | 改为 `true`（preload 只用 contextBridge + ipcRenderer，沙箱内可用） | 实测生产产物窗口标题正常、无报错 |
+| IPC 入参不校验 | 新增 `src/shared/ipc-args.ts`：路径合法性 + 图片 20MB 上限；接到 openPath / saveToPath / showInFolder / historyReveal | 自检断言（Windows / POSIX / UNC、相对路径、NUL、超长、超限图片） |
+| 公式错误消息未转义就拼进 HTML 属性 | 经 `escapeHtml` 再拼 | 自检断言（含引号的色值被挡掉） |
+| 导入字段 `as` 强转 | 新增 `src/shared/model/coerce.ts` 逐字段收敛（颜色/字体限定字符范围，防逃逸到导出物） | 自检断言 |
+
+#### P2 性能（5/5，其中一项为部分完成）
+
+| 问题 | 修法 |
+|---|---|
+| 编辑时每敲一键全量重算布局 | 测量新增按**对象身份**的快速路径（未改动节点直接命中，不再重建缓存键）；并修掉「改默认对齐 / 代码基准字号后布局不重算」（新增 store 的 `renderEpoch`） |
+| 大纲零虚拟化 | 视口外的行不参与布局与绘制（`content-visibility` + `contain-intrinsic-size: auto`，滚动条高度稳定） |
+| 搜索无防抖 | `useDebouncedValue` 180ms，画布与面板共用；**清空立即生效** |
+| 筛选递归拷贝路径数组 | 改为父指针回溯，一次遍历 |
+| 缓存满即整体清空 | 改为淘汰最旧 25%，消除周期性卡顿尖峰 |
+
+**未做**：真正的「仅子树局部重算」。调查结论已写入 `known-issues.md`——连线、坐标归一化与按层/行/列的全局聚合本质上都是全局的，只缓存子树尺寸降不到局部，需要一次独立重构。
+
+#### P3 工程规范（5/5）
+
+- 接入 **ESLint（flat config）+ Prettier + EditorConfig**，`npm run lint` 零 error
+- 接入 **CI**：push / PR 自动跑 类型 → 规范 → 自检 → 样本往返
+- tsconfig 开启 `noUnusedLocals` / `noUnusedParameters`（只暴露 3 处，已修）
+- 新增 `CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`
+- 消除重复实现：备注 HTML 统一为 `notesHtmlFrom`、XML 转义统一到 `shared/xml-escape.ts`、删掉 `isPlainRecord` 别名
+
+**顺带修掉一个真缺陷**：工具栏「关系线 / 概要 / 边界」三个按钮的**禁用原因提示丢了**——变量算好了却没接到 DOM 上（工具栏收纳改造留下的）。现已接回外层 span：禁用状态的 button 不弹 title，提示只能挂在外层。
+
+#### 图标
+
+字母由 **M** 改为 **S**（产品名 SMind）。用两段圆弧拼 S：一开始两段开口都在右侧，画出来是个「Ɛ」；改成开口在相反两侧后才是正确的 S。已重新生成 7 个尺寸的 ico 与各档 PNG。
+
+#### 本轮验证
+
+| 检查 | 结果 |
+|---|---|
+| `npm run typecheck` | 零错误 |
+| `npm run lint` | **0 error**（9 warning：react-hooks 的"在 effect 里同步 setState"建议，已记录为后续项） |
+| `npm run selfcheck` | **1515 项断言全绿**（本轮新增 41 项） |
+| `npm run verify` | 全部样本往返一致 |
+| 生产构建 + 实测启动 | 通过（CSP 与 sandbox 均生效） |
+
 ### 2026-09-14 · 撤销粒度统一 + 编辑态双份真相收敛 + 旧名残留清理
 
 #### 一、撤销粒度：什么能合并、什么绝不能

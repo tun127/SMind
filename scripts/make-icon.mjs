@@ -2,7 +2,7 @@
  * 生成应用图标（零依赖）。
  *
  * 造型仿 Typora：几张叠在一起的纸，纸上一枚大字母，左下角一个蓝色小徽标。
- * 这里字母用「M」（应用名 mind）。
+ * 这里字母用「S」（应用名 SMind 的首字母）。
  *
  * 全过程自己画、自己编码，不引任何图形库：
  *   1. 在放大 SS 倍的画布上用「点是否在形状内」逐像素作画，再降采样得到抗锯齿；
@@ -88,6 +88,21 @@ function pointInPolygon(px, py, points) {
   return inside
 }
 
+/**
+ * 扇环判定：两条同心圆之间、角度区间内的一段。
+ * 角度按屏幕坐标（y 向下）：0° 向右、90° 向下、270° 向上。
+ */
+function pointInRing(px, py, ring) {
+  const dx = px - ring.cx
+  const dy = py - ring.cy
+  const distance = Math.hypot(dx, dy)
+  if (distance > ring.rOuter || distance < ring.rInner) return false
+  const angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360
+  const start = ((ring.start % 360) + 360) % 360
+  const span = (((ring.end - ring.start) % 360) + 360) % 360
+  return (angle - start + 360) % 360 <= span
+}
+
 /** 圆角矩形判定；cx/cy 为中心，w/h 为边长，r 为圆角，angle 为旋转弧度 */
 function insideRoundedRect(px, py, cx, cy, w, h, r, angle) {
   let dx = px - cx
@@ -152,20 +167,22 @@ function paperEdge(canvas, shape, color, width, alpha = 1) {
 /* 造型                                                                */
 /* ------------------------------------------------------------------ */
 
-/** 字母 M 的轮廓（归一化到 0..1 的方框里） */
-const LETTER_M = [
-  [0.0, 1.0],
-  [0.0, 0.0],
-  [0.19, 0.0],
-  [0.5, 0.54],
-  [0.81, 0.0],
-  [1.0, 0.0],
-  [1.0, 1.0],
-  [0.79, 1.0],
-  [0.79, 0.33],
-  [0.5, 0.86],
-  [0.21, 0.33],
-  [0.21, 1.0]
+/**
+ * 字母「S」：由上下两段**扇环**拼成。
+ *
+ * 用圆弧而不是手写多边形：曲线更顺，缩到 16px 也不会糊成一团。
+ * 坐标以**方框高度**为基准归一化（x 也除以高度），这样两轴等比，
+ * 画出来才是正圆的笔画、而不是被横向拉扁的椭圆。
+ *
+ * 两段在方框正中重叠一点（上环的"底"与下环的"顶"都是方框中心），
+ * 于是 S 中间那道过渡是连起来的。关键是两段的**开口要在相反两侧**——
+ * 一开始我把两段开口都放在右侧，画出来是个「Ɛ」。
+ *   上环：从中点出发，顺时针经左侧、顶部、右侧，停在**右下**（开口朝右下）；
+ *   下环：从中点出发，顺时针经右侧、底部、左侧，停在**左上**（开口朝左上）。
+ */
+const LETTER_S = [
+  { cx: 0.44, cy: 0.28, rInner: 0.12, rOuter: 0.28, start: 90, end: 20 },
+  { cx: 0.44, cy: 0.72, rInner: 0.12, rOuter: 0.28, start: 270, end: 200 }
 ]
 
 /** 徽标里的箭头（↗）：一根斜杠 + 一个三角头 */
@@ -225,7 +242,8 @@ function drawIcon(size) {
   const bh = box.h * S
   canvas.fill(
     [bx - 2, by - 2, bx + bw + 2, by + bh + 2],
-    (x, y) => pointInPolygon((x - bx) / bw, (y - by) / bh, LETTER_M),
+    // 以高度为基准归一化（x 也除以 bh）：两轴等比，笔画才是正圆
+    (x, y) => LETTER_S.some((ring) => pointInRing((x - bx) / bh, (y - by) / bh, ring)),
     INK
   )
 
