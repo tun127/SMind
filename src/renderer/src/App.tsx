@@ -56,6 +56,12 @@ function fileNameOf(path: string | null): string | null {
   return parts[parts.length - 1] || path
 }
 
+/** 用户是否在页面里真的选中了文字（画布节点不可选中，所以有选区就是面板/输入框里的文字） */
+function hasDomTextSelection(): boolean {
+  const selection = window.getSelection()
+  return selection !== null && selection.toString().trim().length > 0
+}
+
 interface PastedImage {
   path: string
   width: number
@@ -859,6 +865,14 @@ export default function App(): ReactElement {
           e.preventDefault()
           store.redo()
         } else if (key === 'c') {
+          /**
+           * 面板里真的选中了文字（聊天回答、节点详情…）→ 把 Ctrl+C **交还给浏览器**。
+           *
+           * 画布上的节点是 `user-select: none`，所以「有 DOM 选区」就等于「用户选的是面板里的文字」。
+           * 以前这里无条件 preventDefault，结果从聊天里复制不出任何东西——
+           * 用户报的「无法从会话粘贴东西」根因就在这里（复制不出，当然粘不了）。
+           */
+          if (hasDomTextSelection()) return
           e.preventDefault()
           store.copySelection()
         } else if (key === 'v') {

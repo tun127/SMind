@@ -129,6 +129,13 @@ export default function ChatPanel({
   const [sessionTokens, setSessionTokens] = useState(0)
   /** 输入区上方的一句临时提示（粘贴失败之类），几秒后自己消失 */
   const [hint, setHint] = useState<string | null>(null)
+  /**
+   * 正在干什么（「正在思考…」「正在翻看导图…」）。
+   *
+   * 没有它的时候，用户盯着一屏工具条目分不清「它还在想」和「已经答完了」——
+   * 真被投诉过（「我都不知道它干完没有」）。转圈 + 一行字是最便宜、最有效的补偿。
+   */
+  const [activity, setActivity] = useState('')
   const [streaming, setStreaming] = useState(false)
   /** 需要用户点头的破坏性操作（删分支等） */
   const [pendingWrite, setPendingWrite] = useState<{ summary: string } | null>(null)
@@ -478,6 +485,7 @@ export default function ChatPanel({
           selectedId: state.selection[0] ?? null,
           sheetCount: state.workbook.sheets.length
         }
+        setActivity('正在翻看导图…')
         const result = runReadTool(call.name, call.argumentsText, context)
         pushToolResult(call, result.content)
         noteAction(result.summary, false)
@@ -520,6 +528,7 @@ export default function ChatPanel({
         return
       }
 
+      setActivity('正在改画布…')
       const applied = applyWriteIntent(plan.intent)
       if (applied.ok) writesAppliedRef.current += 1
       else writesFailedRef.current += 1
@@ -731,6 +740,9 @@ export default function ChatPanel({
     const requestId = createId()
     requestIdRef.current = requestId
     setStreaming(true)
+    setActivity(
+      roundRef.current === 0 ? '正在思考…' : `正在思考…（第 ${roundRef.current + 1} 轮，还在翻资料）`
+    )
     void window.api
       .aiChatStream(requestId, wireRef.current, {
         useTools: useToolsRef.current && !forceNoToolsRef.current
@@ -750,11 +762,12 @@ export default function ChatPanel({
 
   useEffect(() => window.api.onAiStreamEvent(handleEvent), [handleEvent])
 
-  // 新内容到达就滚到底：聊天面板的默认预期
+  // 新内容到达就滚到底：聊天面板的默认预期。
+  // activity 也在依赖里：「正在思考…」那行出现/换字时同样要保证它在视野内
   useEffect(() => {
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messages])
+  }, [messages, activity])
 
   const send = useCallback(
     (raw: string): void => {
@@ -1021,10 +1034,23 @@ export default function ChatPanel({
                       )}
                     </>
                   )}
+                  {/* 还在写：末尾一个闪烁光标，一眼看出「这条还没完」 */}
+                  {streaming && msg.role === 'assistant' && msg.id === messages[messages.length - 1]?.id && (
+                    <span className="chat-msg__caret" aria-hidden="true" />
+                  )}
                   {msg.aborted && <span className="chat-msg__stop">（已停止）</span>}
                 </div>
               </div>
             ))}
+
+            {/* 正在工作：转圈 + 一行说明。
+                没有它的时候，用户盯着一屏工具条目分不清「它还在想」和「已经答完了」 */}
+            {streaming && (
+              <div className="chat-thinking" role="status" aria-live="polite">
+                <span className="chat-thinking__spinner" aria-hidden="true" />
+                <span>{activity || '正在思考…'}</span>
+              </div>
+            )}
           </div>
 
           <div className="chat-panel__quick">
@@ -1137,6 +1163,16 @@ export default function ChatPanel({
               placeholder={streaming ? 'AI 正在回答…' : '问点什么，Enter 发送（Shift+Enter 换行）'}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={onKeyDown}
+              onPaste={(event) => {
+                // 粘进来的是图片（截图）：textarea 会静默什么都不发生，用户只会觉得「粘贴坏了」。
+                // 明确说一句，并告诉他图片该粘到哪儿。
+                const data = event.clipboardData
+                const hasImage = Array.from(data.items).some((item) => item.type.startsWith('image/'))
+                if (hasImage && data.getData('text/plain').trim().length === 0) {
+                  event.preventDefault()
+                  setHint('剪贴板里是图片：聊天目前只能发文字。图片可以直接粘到画布的主题上，文字请用截图里的文字或直接描述。')
+                }
+              }}
             />
             <button
               type="button"

@@ -2474,6 +2474,54 @@ textarea {
   border-top: 1px solid var(--border);
 }
 
+/**
+ * 「正在工作」指示：转圈 + 一行说明。
+ *
+ * 一屏工具条目跑完之前，用户没法判断它是还在想、还是已经答完了（真被投诉过）。
+ * 转圈是最便宜的「还在动」信号；那行字顺便说明在干什么。
+ */
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 14px 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.chat-thinking__spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: chat-spin 0.7s linear infinite;
+}
+
+@keyframes chat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 流式回答末尾的闪烁光标：这条还没写完 */
+.chat-msg__caret {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: var(--accent);
+  animation: chat-caret 1s steps(2, start) infinite;
+}
+
+@keyframes chat-caret {
+  to {
+    visibility: hidden;
+  }
+}
+
 .chat-panel__activate-actions {
   display: flex;
   justify-content: flex-end;
