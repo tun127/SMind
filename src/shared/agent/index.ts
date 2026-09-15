@@ -275,6 +275,8 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
     .split('/')
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
+  /** 路径解析的失败原因：先留着，等「整串标题精确匹配」也失败才报——见第 3 步的注释 */
+  let pathError = ''
   if (parts.length > 1) {
     let bestDepth = -1
     let bestError = ''
@@ -303,7 +305,10 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
       }
     }
     if (bestError.length > 0) {
-      return { ok: false, error: `${bestError}。也可以直接用 searchNodes 按标题搜索。` }
+      // 不在这里直接报错：标题里**本身带斜杠**的节点（「class A: /A ()」这类，
+      // 编程笔记里一抓一把）路径一定走不通，但整串标题精确匹配能救回来——
+      // 先让第 3 步试，第 3 步也失败才把路径错误报出去
+      pathError = `${bestError}。也可以直接用 searchNodes 按标题搜索。`
     }
   }
 
@@ -332,6 +337,11 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
       ok: false,
       error: `标题「${raw}」在文档里出现了 ${matches.length} 次，无法确定是哪一个。请改用路径指定，例如：${paths.join('、')}`
     }
+  }
+
+  // 标题精确匹配也没救回来，路径错误才是真正要报的
+  if (matches.length === 0 && pathError.length > 0) {
+    return { ok: false, error: pathError }
   }
 
   const hints = suggestTitles(root, raw)

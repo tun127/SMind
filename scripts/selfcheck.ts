@@ -2186,6 +2186,21 @@ function testWriteToolsAndTurn(): void {
   )
   material.position = undefined
 
+  // 标题里**本身带斜杠**的节点：编程笔记一抓一把（「class A: /A ()」），
+  // 路径解析必然走不通——以前直接报错返回，这类节点对 AI 完全不可见
+  // （真踩过：python 笔记整理卡在 3 个带斜杠的标题上，模型绕了好几轮都没绕过去）
+  material.title = 'class类名: /class类名 ()'
+  const slashed = resolveTopicAddress(tree, 'class类名: /class类名 ()')
+  eq('标题带斜杠也能按整串标题解析', slashed.ok && slashed.resolved.topic.id === material.id, true)
+  check(
+    '批量移动同样吃这条解析',
+    (() => {
+      const r = plan('moveTopics', { moves: [{ address: 'class类名: /class类名 ()', toAddress: '成本' }] })
+      return r.ok && r.intent.kind === 'moveMany' && r.intent.moves.length === 1
+    })()
+  )
+  material.title = '物料'
+
   eq('折叠必须给布尔值', plan('setCollapsed', { address: '成本', collapsed: 'yes' }).ok, false)
   check('折叠摘要可读', plan('setCollapsed', { address: '成本', collapsed: true }).summary.includes('折叠'))
   check('备注为空即清空', plan('setNotes', { address: '成本', text: '  ' }).summary.includes('清空'))
