@@ -979,7 +979,22 @@ function scanCodeLine(line: string, def: LanguageDef, state: ScanState): CodeTok
   const has = (list: string[] | undefined, word: string): boolean => Boolean(list?.includes(word))
 
   let i = 0
+  /**
+   * 推进保证（保险丝）：记录上一轮循环的起点。
+   *
+   * 下面每个分支都必须让 `i` 前进；一旦有分支没前进（`i <= lastI`），
+   * 这里就强制吃掉一个字符——**绝不允许原地打转**。
+   * 这条不是洁癖：真实事故就是某个分支匹配了却不前进，导致渲染进程
+   * 100% CPU 死循环、界面永久冻死（`@` 触发的那个，见 IDENT_START/IDENT_PART 的注释）。
+   */
+  let lastI = -1
   while (i < line.length) {
+    if (i <= lastI) {
+      push(line[i] ?? '', 'operator')
+      i += 1
+      continue
+    }
+    lastI = i
     // 1) 跨行块注释 / 多行字符串的延续
     if (state.blockEnd) {
       const end = indexOfFrom(line, state.blockEnd, i)
@@ -1107,6 +1122,18 @@ function scanCodeLine(line: string, def: LanguageDef, state: ScanState): CodeTok
     if (IDENT_START.test(ch)) {
       let j = i
       while (j < line.length && IDENT_PART.test(line[j] ?? '')) j += 1
+      /**
+       * `IDENT_START` 认的字符 `IDENT_PART` 未必认——`@`（Python 装饰器、Java 注解、
+       * JSDoc 的 `@param`）与 `\` 就是这种：**以前这里会让 `i` 原地不动**，
+       * 于是整个分词器进入无限循环：渲染进程 100% CPU、界面永久冻死，而且
+       * 只在「那块代码第一次进入视口（首次分词）」时才炸——所以表现得非常诡异。
+       * 现在退化成「把这一个字符当作运算符吃掉」：既能推进，拼回去也仍是原文。
+       */
+      if (j === i) {
+        push(ch, 'operator')
+        i += 1
+        continue
+      }
       const word = line.slice(i, j)
       const probe = def.ignoreCase ? word.toLowerCase() : word
       let kind: CodeTokenKind = 'plain'
@@ -1143,10 +1170,18 @@ function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
     if (text.length > 0) tokens.push({ text, kind })
   }
   let i = 0
+  let lastI = -1
   // YAML 的 `key:` 顶格写法：只在行首没缩进的键上算（缩进层也可能有键，所以按「: 之前是纯标识符」判断）
   const yamlKeyMatch = def.yamlKeys ? /^(\s*)([A-Za-z0-9_.$-]+)(\s*):/.exec(line) : null
 
   while (i < line.length) {
+    // 推进保证（保险丝）：与 code 模式同款——任何分支都不许让 i 原地打转
+    if (i <= lastI) {
+      push(line[i] ?? '', 'operator')
+      i += 1
+      continue
+    }
+    lastI = i
     // 取不到按空串处理：下面所有判断（空白/数字/标识符）对空串都为 false，
     // 也就是"这个位置没有字符可识别"，与原来的行为一致
     const ch = line[i] ?? ''
@@ -1206,6 +1241,12 @@ function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
     if (IDENT_START.test(ch)) {
       let j = i
       while (j < line.length && (IDENT_PART.test(line[j] ?? '') || line[j] === '~')) j += 1
+      // 同 code 模式：IDENT_START 认的 `@` / `\` 不在 IDENT_PART 里，必须保证推进
+      if (j === i) {
+        push(ch, 'operator')
+        i += 1
+        continue
+      }
       const word = line.slice(i, j)
       push(word, def.literals?.includes(word.toLowerCase()) ? 'literal' : 'plain')
       i = j

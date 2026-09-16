@@ -48,7 +48,7 @@ import type { LicenseView } from '@shared/license'
 import { createId } from '@shared/model/factory'
 import { activeRoot, activeSheet, ancestorsOf, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
-import { armDiag, beginCost, disarmDiag, reportCosts, setStage } from '../dev/stage'
+import { armDiag, beginCost, keepDiagArmed, reportCosts, setStage } from '../dev/stage'
 import { useEditor } from '../store/editor'
 import type { AiTask } from './AiDialog'
 
@@ -333,7 +333,9 @@ export default function ChatPanel({
         workbook: useEditor.getState().workbook
       })
       dumpCostRef.current = performance.now() - startedAt
-      void window.api.diagDump(payload)
+      // 必须 catch：invoke 的失败是**异步**的，外层 try/catch 抓不到，
+      // 否则会在控制台刷「Uncaught (in promise)」并污染错误边界
+      void window.api.diagDump(payload).catch(() => undefined)
     } catch {
       /* 取证绝不能把正常流程弄崩 */
     }
@@ -507,7 +509,9 @@ export default function ChatPanel({
      * · 代码块渲染×288 · 代码块 span 共 45 万`。
      */
     reportCosts('AI 回合结束')
-    disarmDiag()
+    // 不关：实测冻结发生在**回合结束后用户开始滚动画布**那一段（写入侧只用了几毫秒），
+    // 关掉就等于把唯一能取证的两分钟丢掉了
+    keepDiagArmed(120_000)
     const log = writeLogRef.current
     if (turnStartedRef.current) {
       const label = log.length > 0 ? `AI · ${log.slice(0, 2).join('、')}` : 'AI · 修改导图'

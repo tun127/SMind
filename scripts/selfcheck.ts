@@ -5405,7 +5405,20 @@ async function testMediaElements(): Promise<void> {
     ['cpp', '#include <iostream>\nint main() { return 0; }'],
     ['c', 'int main(void) { return 0; }'],
     ['text', '任何内容\n都不高亮'],
-    ['', '未知语言也不高亮']
+    ['', '未知语言也不高亮'],
+    /**
+     * 回归：`@` 与 `\` 曾让分词器**原地打转**（`IDENT_START` 认它们、`IDENT_PART` 不认），
+     * 表现是渲染进程 100% CPU、界面永久冻死，而且只在「那块代码第一次进入视口」时才炸
+     * ——AI 批量补全 Python 代码块（装饰器 `@functools.wraps`）时固定触发。
+     * 这几条用例既防卡死，也钉住「拼回去逐字节一致」（不许吞字符）。
+     */
+    ['python', '@functools.wraps(func)\ndef f(): pass'],
+    ['python', '装饰器：@语法糖修改函数行为'],
+    ['python', 'x = a @ b  # 矩阵乘'],
+    ['python', 'C:\\Users\\somebody\\file.txt'],
+    ['typescript', 'class A { @decorator prop = 1 }'],
+    ['yaml', '@bad: 1'],
+    ['json', '{ "a": "b@c" }']
   ]
   for (const [lang, text] of samples) {
     const lines = highlightCode(text, lang)

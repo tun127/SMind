@@ -33,6 +33,7 @@ import { setCodeFontSizeBase } from '@shared/layout/accessory'
 import { stageTypedChar } from './editor/typedChar'
 import { setStage } from './dev/stage'
 import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
+import { beginCost } from './dev/stage'
 import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
 import TabBar from './components/TabBar'
 import { type AppSettings } from '@shared/ipc'
@@ -705,6 +706,8 @@ export default function App(): ReactElement {
       if (!store.dirty) return
       // 用快照而不是直接落库：把正在输入但还没提交的文本也写进去，
       // 同时不打断用户的输入（不会退出编辑态）
+      // 取证：这一跳每 30 秒一次，正好落在「冻结发生在回合之后」的时间窗里，必须计时
+      const endSave = beginCost('自动存档快照')
       void window.api
         .autosave(
           activeDocId(),
@@ -718,6 +721,7 @@ export default function App(): ReactElement {
           const detail = error instanceof Error ? error.message : String(error)
           showToast(`自动保存失败：${detail}（请尽快手动保存一次）`)
         })
+      endSave()
     }, 30000)
     return () => window.clearInterval(timer)
   }, [showToast])

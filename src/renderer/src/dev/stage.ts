@@ -24,6 +24,7 @@
 let stage = '启动'
 let armed = false
 let armedReason = ''
+let disarmTimer: number | null = null
 
 const counters = new Map<string, number>()
 const amounts = new Map<string, number>()
@@ -32,9 +33,19 @@ const costs = new Map<string, { calls: number; total: number; max: number }>()
 /** 超过这个耗时就单独记一行（毫秒）。低于它的阶段不值得刷屏 */
 const SLOW_MS = 120
 
-/** 标记当前阶段（心跳会报出来） */
+/**
+ * 标记当前阶段。
+ *
+ * 除了进心跳，**阶段一变就立刻写一行**（相邻重复会去重）。为什么这条最关键：
+ * 同步死循环会**永远不让出主线程**——心跳停了、看门狗也没机会说话（它要等恢复才能报）。
+ * 唯一拿得到的线索就是「进入致命阶段的那一行」，配合主进程 unresponsive 的时间戳，
+ * 就能算出「这个阶段跑了多久才把界面卡死」。
+ * 去重之后开销可忽略：平移时阶段一直是「滚轮平移」，只会写第一条。
+ */
 export function setStage(next: string): void {
+  if (next === stage) return
   stage = next
+  if (armed) console.log(`[stage] 阶段 → ${next}`)
 }
 
 /** 记一次循环 / 一次调用。心跳会报出「每秒 N 次」，用来抓停不下来的循环 */
@@ -121,15 +132,39 @@ export function clearStats(): void {
  * 打开诊断输出（打包版默认关着，避免日常使用刷日志）。
  * 由「AI 回合开始」触发——卡死正好都发生在这条路径上。
  */
-export function armDiag(reason: string): void {
-  if (armed) return
-  armed = true
-  armedReason = reason
-  console.log(`[stage] 诊断已开启（${reason}）`)
+export function armDiag(reason: string, holdMs = 300_000): void {
+  if (!armed) {
+    armed = true
+    armedReason = reason
+    console.log(`[stage] 诊断已开启（${reason}）`)
+  }
+  scheduleDisarm(holdMs)
 }
 
-/** 关掉诊断输出（回合结束后调，别让日志一直涨） */
+/**
+ * 延长取证窗口（不改变已开启状态）。
+ *
+ * 实测教训：AI 回合**写入侧只用了几毫秒**，冻结发生在**回合结束后用户开始滚动画布**那一段——
+ * 那时探针已经关了，日志一片空白，白丢一次现场。所以回合结束时不是关掉，而是再保持一段时间。
+ */
+export function keepDiagArmed(holdMs: number): void {
+  if (!armed) return
+  scheduleDisarm(holdMs)
+}
+
+function scheduleDisarm(holdMs: number): void {
+  if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return
+  if (disarmTimer !== null) window.clearTimeout(disarmTimer)
+  disarmTimer = window.setTimeout(() => {
+    disarmTimer = null
+    disarmDiag()
+  }, holdMs)
+}
+
+/** 关掉诊断输出（不再刷新窗口时；定时自动调用） */
 export function disarmDiag(): void {
+  if (disarmTimer !== null && typeof window !== 'undefined') window.clearTimeout(disarmTimer)
+  disarmTimer = null
   if (!armed) return
   armed = false
   console.log(`[stage] 诊断已关闭（${armedReason}）`)
@@ -158,6 +193,30 @@ function takeAmounts(): string {
 
 // 这个模块只服务渲染进程；自检里若有人不小心 import 它，不要因此炸掉测试
 const inRenderer = typeof window !== 'undefined' && typeof window.setInterval === 'function'
+
+/**
+ * 主线程停顿看门狗（**常驻，不依赖诊断开关**）。
+ *
+ * 这是整套取证里唯一「停顿结束后自己会说话」的探针：500ms 一跳，
+ * 如果某一跳晚了 ≥700ms，说明主线程刚被**同步卡住**过——立刻把「卡了多久 + 卡之前最后
+ * 停在哪个阶段」写出去。正因为它在恢复后立刻执行，所以**打包版、诊断没开**都能拿到，
+ * 而且给出的是**时长**（历次取证最缺的就是这个数）。
+ */
+const WATCHDOG_TICK_MS = 500
+const STALL_MS = 700
+if (inRenderer) {
+  let lastTickAt = performance.now()
+  window.setInterval(() => {
+    const now = performance.now()
+    const delta = now - lastTickAt
+    lastTickAt = now
+    if (delta >= STALL_MS) {
+      console.log(
+        `[stage] 主线程停顿 ${Math.round(delta)}ms（停顿前最后阶段：${stage}${armed ? '' : ' · 诊断未开启'}）`
+      )
+    }
+  }, WATCHDOG_TICK_MS)
+}
 
 // 开发版一开始就开着；打包版要等 armDiag（AI 回合）——用户日常编辑不产生日志
 if (inRenderer && !window.location.protocol.startsWith('file')) armed = true
