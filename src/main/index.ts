@@ -1708,6 +1708,20 @@ function registerIpc(): void {
     }
   )
 
+  /**
+   * 卡死取证：渲染层节流落盘的现场（wire / workbook / 阶段）。
+   *
+   * 历次冻结都发生在「写意图落盘后的渲染」，而未命名文档没有自动存档、聊天也不落盘——
+   * 强杀进程会把毒内容一起带走，下一轮只能从零猜。这份转储让任何一次冻结之后，
+   * `%APPDATA%/smind/diag/last-state.json` 里都留着完整现场。
+   */
+  ipcMain.handle(IPC.diagDump, async (_e, text: unknown): Promise<void> => {
+    if (typeof text !== 'string' || text.length === 0 || text.length > 64 * 1024 * 1024) return
+    const dir = join(app.getPath('userData'), 'diag')
+    await fs.mkdir(dir, { recursive: true })
+    await writeFileAtomic(join(dir, 'last-state.json'), Buffer.from(text))
+  })
+
   ipcMain.handle(IPC.chatHistoryClear, async (_e, key: unknown): Promise<void> => {
     if (typeof key !== 'string' || !isPlausibleFilePath(key)) return
     await fs.rm(chatFileOf(key), { force: true })

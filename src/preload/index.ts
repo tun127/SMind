@@ -164,6 +164,8 @@ const api: MindApi = {
 
   chatHistoryClear: (key: string) => ipcRenderer.invoke(IPC.chatHistoryClear, key) as Promise<void>,
 
+  diagDump: (content: string) => ipcRenderer.invoke(IPC.diagDump, content) as Promise<void>,
+
   licenseGet: () => ipcRenderer.invoke(IPC.licenseGet) as Promise<LicenseView>,
 
   licenseActivate: (key: string) =>

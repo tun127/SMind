@@ -304,6 +304,34 @@ export default function ChatPanel({
     })
   }
 
+  /* ---- 卡死取证转储：AI 回合期间把现场节流落盘 ----
+   * 曾经的 freeze 全部发生在「写意图落盘后」的渲染阶段，而未命名文档没有自动存档、
+   * 聊天历史也不落盘——强杀进程会把毒内容一起带走，下一轮只能从零猜。
+   * 有了这份转储，任何一次冻结之后 `%APPDATA%/smind/diag/last-state.json` 里
+   * 都有完整的 wire（含全部工具参数）与 workbook，可用 scripts/run-diag-freeze.mjs
+   * 对真实内容逐块复现定位。 */
+  const lastDumpAtRef = useRef(0)
+  const dumpDiag = useCallback((reason: string, force = false): void => {
+    const now = performance.now()
+    // 节流 2 秒：转储本身要序列化整个 workbook，绝不能变成新的性能负担
+    if (!force && now - lastDumpAtRef.current < 2000) return
+    lastDumpAtRef.current = now
+    try {
+      void window.api.diagDump(
+        JSON.stringify({
+          at: new Date().toISOString(),
+          reason,
+          round: roundRef.current,
+          wire: wireRef.current,
+          messages: messagesRef.current,
+          workbook: useEditor.getState().workbook
+        })
+      )
+    } catch {
+      /* 取证绝不能把正常流程弄崩 */
+    }
+  }, [])
+
   /** 把「AI 干了什么」记到界面与日志上 */
   const noteAction = (summary: string, counts: boolean): void => {
     if (counts) writeLogRef.current = [...writeLogRef.current, summary]
@@ -605,6 +633,8 @@ export default function ChatPanel({
 
       setActivity(`正在改画布…（${queue.index + 1}/${queue.calls.length}）`)
       const applied = applyWriteIntent(plan.intent)
+      // 强制转储：冻结就发生在某次应用之后的渲染里，这份就是「案发前的最后现场」
+      dumpDiag(`已应用 ${plan.intent.kind}（${queue.index + 1}/${queue.calls.length}）`, true)
       if (applied.ok) writesAppliedRef.current += 1
       else writesFailedRef.current += 1
       const written = applied.ok
@@ -825,17 +855,19 @@ export default function ChatPanel({
         ...wireRef.current,
         { role: 'assistant', content: event.content, toolCalls: calls }
       ]
+      dumpDiag(`收到 ${calls.length} 个工具调用`)
       toolCallsUsedRef.current += calls.length
       queueRef.current = { calls, index: 0 }
       processQueueRef.current()
     },
-    [update]
+    [update, dumpDiag]
   )
 
   const runRound = useCallback((): void => {
     const requestId = createId()
     requestIdRef.current = requestId
     setStreaming(true)
+    dumpDiag(`发起第 ${roundRef.current + 1} 轮模型请求`, true)
     setActivity(
       roundRef.current === 0
         ? '正在思考…'
@@ -855,7 +887,7 @@ export default function ChatPanel({
           message: readableIpcError((error as Error).message)
         })
       })
-  }, [handleEvent])
+  }, [handleEvent, dumpDiag])
 
   useEffect(() => {
     runRoundRef.current = runRound

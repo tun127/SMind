@@ -157,6 +157,8 @@ export const IPC = {
   chatHistoryLoad: 'chat:history-load',
   chatHistorySave: 'chat:history-save',
   chatHistoryClear: 'chat:history-clear',
+  /* ---- 卡死取证：渲染层节流落盘现场（wire / workbook），冻结后可从磁盘完整恢复 ---- */
+  diagDump: 'diag:dump',
   /* ---- 许可与试用（商业化闸门） ---- */
   licenseGet: 'license:get',
   licenseActivate: 'license:activate',
@@ -360,6 +362,8 @@ export interface MindApi {
   chatHistorySave(key: string, messages: ChatHistoryEntry[]): Promise<void>
   /** 清掉某份文档的聊天记录（面板上的「清空对话」） */
   chatHistoryClear(key: string): Promise<void>
+  /** 卡死取证：把渲染层现场（wire / workbook / 阶段）写到 userData/diag/last-state.json */
+  diagDump(content: string): Promise<void>
   /**
    * 当前许可状态：是否 Pro、试用还剩几个写回合。
    * **闸门判定在主进程**（由它决定下发哪些工具），这里只用于界面显示。

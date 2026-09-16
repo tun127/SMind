@@ -20,6 +20,7 @@
     "icon": "node scripts/make-icon.mjs",
     "verify": "tsc -p tsconfig.check.json && node scripts/verify-roundtrip.cjs",
     "selfcheck": "node scripts/run-selfcheck.mjs",
+    "diag:freeze": "node scripts/run-diag-freeze.mjs",
     "license:keygen": "node scripts/run-license-tool.mjs keygen",
     "license:issue": "node scripts/run-license-tool.mjs issue",
     "license:selftest": "node scripts/run-license-tool.mjs selftest",
