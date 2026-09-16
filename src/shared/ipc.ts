@@ -224,7 +224,12 @@ export interface MindApi {
   onFileOpenRequest(handler: (path: string) => void): () => void
   saveToPath(docId: string, path: string, workbook: Workbook): Promise<SaveResult>
   saveAs(docId: string, workbook: Workbook, suggestedName: string): Promise<SaveResult | null>
-  autosave(docId: string, workbook: Workbook, originalPath: string | null, title: string): Promise<void>
+  autosave(
+    docId: string,
+    workbook: Workbook,
+    originalPath: string | null,
+    title: string
+  ): Promise<void>
   clearAutosave(): Promise<void>
   /**
    * 释放一个文档的残留资源（标签关闭时调用）：
@@ -317,7 +322,11 @@ export interface MindApi {
    * 把已经生成好的导出内容写到用户选择的位置。
    * 渲染进程负责排版与栅格化，主进程只负责弹保存框与落盘。
    */
-  saveExport(data: Uint8Array | string, fileName: string, ext: ImageExportFormat): Promise<string | null>
+  saveExport(
+    data: Uint8Array | string,
+    fileName: string,
+    ext: ImageExportFormat
+  ): Promise<string | null>
 
   /* ---- AI（P8） ---- */
   /** 读取 AI 配置（Key 只回掩码，完整 Key 不进渲染进程） */

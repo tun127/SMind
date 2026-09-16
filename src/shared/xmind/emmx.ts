@@ -94,7 +94,9 @@ function asText(bytes: Uint8Array): string | null {
 /** 字节是否属于「文字区」：可打印 ASCII、UTF-8 首字节、UTF-8 连续字节 */
 function isTextByte(byte: number): boolean {
   return (
-    (byte >= 0x20 && byte <= 0x7e) || (byte >= 0xc2 && byte <= 0xf4) || (byte >= 0x80 && byte <= 0xbf)
+    (byte >= 0x20 && byte <= 0x7e) ||
+    (byte >= 0xc2 && byte <= 0xf4) ||
+    (byte >= 0x80 && byte <= 0xbf)
   )
 }
 

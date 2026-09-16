@@ -25,7 +25,8 @@ import type { OutlineFormat } from '@shared/outline'
 import type { ThemeDefinition } from '@shared/theme'
 
 const api: MindApi = {
-  openDialog: (docId: string) => ipcRenderer.invoke(IPC.openDialog, docId) as Promise<OpenResult | null>,
+  openDialog: (docId: string) =>
+    ipcRenderer.invoke(IPC.openDialog, docId) as Promise<OpenResult | null>,
 
   openPath: (docId: string, path: string) =>
     ipcRenderer.invoke(IPC.openPath, docId, path) as Promise<OpenResult>,
@@ -53,7 +54,8 @@ const api: MindApi = {
 
   recoveryCheck: () => ipcRenderer.invoke(IPC.recoveryCheck) as Promise<RecoveryInfo | null>,
 
-  recoveryLoad: (docId: string) => ipcRenderer.invoke(IPC.recoveryLoad, docId) as Promise<OpenResult | null>,
+  recoveryLoad: (docId: string) =>
+    ipcRenderer.invoke(IPC.recoveryLoad, docId) as Promise<OpenResult | null>,
 
   recoveryDiscard: () => ipcRenderer.invoke(IPC.recoveryDiscard) as Promise<void>,
 
@@ -68,7 +70,8 @@ const api: MindApi = {
 
   readClipboardText: () => ipcRenderer.invoke(IPC.clipboardText) as Promise<string>,
 
-  reportDocument: (docId: string, path: string | null) => ipcRenderer.send(IPC.documentPath, docId, path),
+  reportDocument: (docId: string, path: string | null) =>
+    ipcRenderer.send(IPC.documentPath, docId, path),
 
   showInFolder: (path: string) => ipcRenderer.send(IPC.showInFolder, path),
 
@@ -93,21 +96,26 @@ const api: MindApi = {
 
   themesList: () => ipcRenderer.invoke(IPC.themesList) as Promise<ThemeDefinition[]>,
 
-  themesSave: (theme: ThemeDefinition) => ipcRenderer.invoke(IPC.themesSave, theme) as Promise<void>,
+  themesSave: (theme: ThemeDefinition) =>
+    ipcRenderer.invoke(IPC.themesSave, theme) as Promise<void>,
 
   themesDelete: (id: string) => ipcRenderer.invoke(IPC.themesDelete, id) as Promise<void>,
 
   themesImport: () => ipcRenderer.invoke(IPC.themesImport) as Promise<ThemeDefinition | null>,
 
-  themesExport: (theme: ThemeDefinition) => ipcRenderer.invoke(IPC.themesExport, theme) as Promise<boolean>,
+  themesExport: (theme: ThemeDefinition) =>
+    ipcRenderer.invoke(IPC.themesExport, theme) as Promise<boolean>,
 
   settingsLoad: () => ipcRenderer.invoke(IPC.settingsLoad) as Promise<AppSettings>,
 
-  settingsSave: (settings: AppSettings) => ipcRenderer.invoke(IPC.settingsSave, settings) as Promise<void>,
+  settingsSave: (settings: AppSettings) =>
+    ipcRenderer.invoke(IPC.settingsSave, settings) as Promise<void>,
 
-  pickImage: (docId: string) => ipcRenderer.invoke(IPC.pickImage, docId) as Promise<PickedImage | null>,
+  pickImage: (docId: string) =>
+    ipcRenderer.invoke(IPC.pickImage, docId) as Promise<PickedImage | null>,
 
-  pasteImage: (docId: string) => ipcRenderer.invoke(IPC.pasteImage, docId) as Promise<PickedImage | null>,
+  pasteImage: (docId: string) =>
+    ipcRenderer.invoke(IPC.pasteImage, docId) as Promise<PickedImage | null>,
 
   addImage: (docId: string, name: string, bytes: Uint8Array) =>
     ipcRenderer.invoke(IPC.addImage, docId, name, bytes) as Promise<PickedImage | null>,
@@ -129,7 +137,8 @@ const api: MindApi = {
 
   aiConfigGet: () => ipcRenderer.invoke(IPC.aiConfigGet) as Promise<AiConfigView>,
 
-  aiConfigSave: (patch: AiConfigPatch) => ipcRenderer.invoke(IPC.aiConfigSave, patch) as Promise<AiConfigView>,
+  aiConfigSave: (patch: AiConfigPatch) =>
+    ipcRenderer.invoke(IPC.aiConfigSave, patch) as Promise<AiConfigView>,
 
   aiChat: (messages: AiMessage[], options?: { timeoutMs?: number }) =>
     ipcRenderer.invoke(IPC.aiChat, messages, options) as Promise<AiChatResult>,
@@ -147,7 +156,8 @@ const api: MindApi = {
     return () => ipcRenderer.removeListener(IPC.aiStreamEvent, listener)
   },
 
-  chatHistoryLoad: (key: string) => ipcRenderer.invoke(IPC.chatHistoryLoad, key) as Promise<ChatHistoryEntry[]>,
+  chatHistoryLoad: (key: string) =>
+    ipcRenderer.invoke(IPC.chatHistoryLoad, key) as Promise<ChatHistoryEntry[]>,
 
   chatHistorySave: (key: string, messages: ChatHistoryEntry[]) =>
     ipcRenderer.invoke(IPC.chatHistorySave, key, messages) as Promise<void>,
@@ -170,15 +180,18 @@ const api: MindApi = {
 
   historyList: () => ipcRenderer.invoke(IPC.historyList) as Promise<HistoryEntry[]>,
 
-  historyTogglePin: (path: string) => ipcRenderer.invoke(IPC.historyTogglePin, path) as Promise<HistoryEntry[]>,
+  historyTogglePin: (path: string) =>
+    ipcRenderer.invoke(IPC.historyTogglePin, path) as Promise<HistoryEntry[]>,
 
-  historyRemove: (path: string) => ipcRenderer.invoke(IPC.historyRemove, path) as Promise<HistoryEntry[]>,
+  historyRemove: (path: string) =>
+    ipcRenderer.invoke(IPC.historyRemove, path) as Promise<HistoryEntry[]>,
 
   historyClear: () => ipcRenderer.invoke(IPC.historyClear) as Promise<HistoryEntry[]>,
 
   historySaveDir: () => ipcRenderer.invoke(IPC.historySaveDir) as Promise<string>,
 
-  historyChooseSaveDir: () => ipcRenderer.invoke(IPC.historyChooseSaveDir) as Promise<string | null>,
+  historyChooseSaveDir: () =>
+    ipcRenderer.invoke(IPC.historyChooseSaveDir) as Promise<string | null>,
 
   revealInFolder: (path: string) => ipcRenderer.invoke(IPC.historyReveal, path) as Promise<void>,
 

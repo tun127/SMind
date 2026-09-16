@@ -1,4 +1,13 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, protocol, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeImage,
+  protocol,
+  shell
+} from 'electron'
 import { isInstanceAlive, isRecord, isSelfNavigation } from '../shared/guards'
 import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
 import { writeFileAtomic } from './atomic-write'
@@ -45,7 +54,12 @@ import {
   type TokenUsage,
   type ToolCall
 } from '@shared/ai'
-import { AGENT_WRITE_TOOLS, planAvailableTools, toWireTools, type AgentToolDef } from '@shared/agent'
+import {
+  AGENT_WRITE_TOOLS,
+  planAvailableTools,
+  toWireTools,
+  type AgentToolDef
+} from '@shared/agent'
 import { hasWriteToolCall, type LicenseView } from '@shared/license'
 import { activateLicense, consumeTrialTurn, deactivateLicense, getLicenseView } from './license'
 import type { Workbook } from '@shared/model/types'
@@ -595,7 +609,8 @@ async function callAi(
     const content = extractContent(payload)
     const usage = isRecord(payload) && isRecord(payload.usage) ? payload.usage : null
     const totalTokens = usage && typeof usage.total_tokens === 'number' ? usage.total_tokens : null
-    const model = isRecord(payload) && typeof payload.model === 'string' ? payload.model : config.model
+    const model =
+      isRecord(payload) && typeof payload.model === 'string' ? payload.model : config.model
     return { content, model, totalTokens }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
@@ -626,7 +641,9 @@ async function callAi(
  * `options.path` 只在「启动时带文件 / 双击文件 / 二实例传参」时给：
  * 那一刻 React 可能还没挂载，所以路径先存在窗口状态里，渲染进程就绪后自己来取一次。
  */
-function createWindow(options: { path?: string | null; copySource?: string | null } = {}): DocWindow {
+function createWindow(
+  options: { path?: string | null; copySource?: string | null } = {}
+): DocWindow {
   windowSeq += 1
   const slot = autosaveSlotName(windowSeq)
 
@@ -678,7 +695,9 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
     win.webContents.on('console-message', (details) => {
       const level = details.level ?? 'info'
       if (level === 'error' || level === 'warning') {
-        console.log(`[renderer:${level}] ${details.message} (${details.sourceId ?? ''}:${details.lineNumber ?? 0})`)
+        console.log(
+          `[renderer:${level}] ${details.message} (${details.sourceId ?? ''}:${details.lineNumber ?? 0})`
+        )
       }
     })
   }
@@ -764,7 +783,11 @@ function createWindow(options: { path?: string | null; copySource?: string | nul
       return
     }
     if (level < 2) return
-    logMain('renderer-console', `${level === 3 ? 'error' : 'warn'} ${message}`, `${sourceId}:${line}`)
+    logMain(
+      'renderer-console',
+      `${level === 3 ? 'error' : 'warn'} ${message}`,
+      `${sourceId}:${line}`
+    )
   })
 
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
@@ -1016,7 +1039,12 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC.saveAs,
-    async (e, docId: string, workbook: Workbook, suggestedName: string): Promise<SaveResult | null> => {
+    async (
+      e,
+      docId: string,
+      workbook: Workbook,
+      suggestedName: string
+    ): Promise<SaveResult | null> => {
       // 默认落在记住的保存目录（首次是「文档/思维导图」）
       const dir = await currentSaveDir()
       const result = await showSaveIn(winOf(e.sender), {
@@ -1031,7 +1059,13 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC.autosave,
-    async (e, docId: string, workbook: Workbook, originalPath: string | null, title: string): Promise<void> => {
+    async (
+      e,
+      docId: string,
+      workbook: Workbook,
+      originalPath: string | null,
+      title: string
+    ): Promise<void> => {
       const state = stateOf(e.sender)
       const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
       if (!state) return
@@ -1241,7 +1275,10 @@ function registerIpc(): void {
     const target = result.filePath.toLowerCase().endsWith('.json')
       ? result.filePath
       : `${result.filePath}.json`
-    await fs.writeFile(target, JSON.stringify({ type: 'mindmap-theme', version: 1, theme }, null, 2))
+    await fs.writeFile(
+      target,
+      JSON.stringify({ type: 'mindmap-theme', version: 1, theme }, null, 2)
+    )
     return true
   })
 
@@ -1371,41 +1408,47 @@ function registerIpc(): void {
     return message.length === 0
   })
 
-  ipcMain.handle(IPC.saveAttachmentAs, async (e, path: string, suggestedName: string): Promise<boolean> => {
-    const bytes = resourceBytesOf(path)
-    if (!bytes) return false
-    const result = await showSaveIn(winOf(e.sender), {
-      title: '导出附件',
-      defaultPath: suggestedName || safeResourceName(path)
-    })
-    if (result.canceled || !result.filePath) return false
-    await fs.writeFile(result.filePath, Buffer.from(bytes))
-    return true
-  })
+  ipcMain.handle(
+    IPC.saveAttachmentAs,
+    async (e, path: string, suggestedName: string): Promise<boolean> => {
+      const bytes = resourceBytesOf(path)
+      if (!bytes) return false
+      const result = await showSaveIn(winOf(e.sender), {
+        title: '导出附件',
+        defaultPath: suggestedName || safeResourceName(path)
+      })
+      if (result.canceled || !result.filePath) return false
+      await fs.writeFile(result.filePath, Buffer.from(bytes))
+      return true
+    }
+  )
 
   /* ---- 大纲导出（P5） ---- */
 
-  ipcMain.handle(IPC.exportOutline, async (e, workbook: Workbook, format: OutlineFormat): Promise<string | null> => {
-    const def = outlineFormatDef(format)
-    const content = buildOutline(workbook, format)
+  ipcMain.handle(
+    IPC.exportOutline,
+    async (e, workbook: Workbook, format: OutlineFormat): Promise<string | null> => {
+      const def = outlineFormatDef(format)
+      const content = buildOutline(workbook, format)
 
-    const result = await showSaveIn(winOf(e.sender), {
-      title: def.dialogTitle,
-      // 默认文件名用中心主题的名字
-      defaultPath: defaultFileName(workbook, def.ext),
-      filters: [
-        { name: def.label, extensions: [def.ext] },
-        { name: '所有文件', extensions: ['*'] }
-      ]
-    })
-    if (result.canceled || !result.filePath) return null
+      const result = await showSaveIn(winOf(e.sender), {
+        title: def.dialogTitle,
+        // 默认文件名用中心主题的名字
+        defaultPath: defaultFileName(workbook, def.ext),
+        filters: [
+          { name: def.label, extensions: [def.ext] },
+          { name: '所有文件', extensions: ['*'] }
+        ]
+      })
+      if (result.canceled || !result.filePath) return null
 
-    const target = result.filePath.toLowerCase().endsWith(`.${def.ext}`)
-      ? result.filePath
-      : `${result.filePath}.${def.ext}`
-    await fs.writeFile(target, content, 'utf8')
-    return target
-  })
+      const target = result.filePath.toLowerCase().endsWith(`.${def.ext}`)
+        ? result.filePath
+        : `${result.filePath}.${def.ext}`
+      await fs.writeFile(target, content, 'utf8')
+      return target
+    }
+  )
 
   /* ---- 图片导出（P6） ---- */
 
@@ -1415,7 +1458,12 @@ function registerIpc(): void {
    */
   ipcMain.handle(
     IPC.saveExport,
-    async (e, data: Uint8Array | string, fileName: string, ext: ImageExportFormat): Promise<string | null> => {
+    async (
+      e,
+      data: Uint8Array | string,
+      fileName: string,
+      ext: ImageExportFormat
+    ): Promise<string | null> => {
       const def = imageExportFormatDef(ext)
       const result = await showSaveIn(winOf(e.sender), {
         title: `导出为 ${def.label}`,
@@ -1439,16 +1487,27 @@ function registerIpc(): void {
 
   /* ---- AI（P8） ---- */
 
-  ipcMain.handle(IPC.aiConfigGet, async (): Promise<AiConfigView> => toConfigView(await readAiConfig()))
+  ipcMain.handle(IPC.aiConfigGet, async (): Promise<AiConfigView> =>
+    toConfigView(await readAiConfig())
+  )
 
   ipcMain.handle(IPC.aiConfigSave, async (_e, patch: AiConfigPatch): Promise<AiConfigView> => {
     const current = await readAiConfig()
     const merged: AiConfig = {
-      baseUrl: typeof patch.baseUrl === 'string' && patch.baseUrl.trim().length > 0 ? patch.baseUrl.trim() : current.baseUrl,
-      model: typeof patch.model === 'string' && patch.model.trim().length > 0 ? patch.model.trim() : current.model,
+      baseUrl:
+        typeof patch.baseUrl === 'string' && patch.baseUrl.trim().length > 0
+          ? patch.baseUrl.trim()
+          : current.baseUrl,
+      model:
+        typeof patch.model === 'string' && patch.model.trim().length > 0
+          ? patch.model.trim()
+          : current.model,
       temperature: typeof patch.temperature === 'number' ? patch.temperature : current.temperature,
       // 空字符串表示「不改动已保存的 Key」，避免用户看不到明文时误清空
-      apiKey: typeof patch.apiKey === 'string' && patch.apiKey.trim().length > 0 ? patch.apiKey.trim() : current.apiKey
+      apiKey:
+        typeof patch.apiKey === 'string' && patch.apiKey.trim().length > 0
+          ? patch.apiKey.trim()
+          : current.apiKey
     }
     const { config } = normalizeAiConfig(merged)
     await writeAiConfig(config)
@@ -1471,7 +1530,10 @@ function registerIpc(): void {
         [{ role: 'user', content: '请只回复两个字：正常' }],
         25000
       )
-      return { ok: true, message: `连接正常（模型 ${result.model}）：${result.content.trim().slice(0, 20)}` }
+      return {
+        ok: true,
+        message: `连接正常（模型 ${result.model}）：${result.content.trim().slice(0, 20)}`
+      }
     } catch (error) {
       return { ok: false, message: (error as Error).message }
     }
@@ -1521,7 +1583,8 @@ function registerIpc(): void {
         const item = messages[index]
         if (!isRecord(item)) throw blame(index, '不是对象')
         const role = item.role
-        const knownRole = role === 'system' || role === 'user' || role === 'assistant' || role === 'tool'
+        const knownRole =
+          role === 'system' || role === 'user' || role === 'assistant' || role === 'tool'
         if (!knownRole) throw blame(index, 'role 不是 system/user/assistant/tool')
         if (typeof item.content !== 'string') throw blame(index, 'content 不是字符串')
         if (item.content.length > MAX_CONTENT) {
@@ -1569,7 +1632,13 @@ function registerIpc(): void {
       const sender = e.sender
       // 窗口销毁时中止：别留悬着的连接，也别再往已销毁的窗口发事件
       sender.once('destroyed', () => streamAborters.get(requestId)?.abort())
-      const usedTools = await callAiStream(config, messages as AiMessage[], requestId, sender, tools)
+      const usedTools = await callAiStream(
+        config,
+        messages as AiMessage[],
+        requestId,
+        sender,
+        tools
+      )
 
       // 真的动了画布才算一个试用回合：只读聊天永久免费、不计数
       if (hasWriteToolCall(usedTools, WRITE_TOOL_NAMES)) await consumeTrialTurn()
@@ -1587,7 +1656,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.licenseActivate, async (_e, key: unknown) => {
     // 许可码是外部输入（用户粘贴的），长度与类型都验一遍再进验签
     if (typeof key !== 'string' || key.length === 0 || key.length > 4000) {
-      return { ok: false, message: '许可码无效：请把购买时拿到的那一整串原样粘进来', view: await getLicenseView() }
+      return {
+        ok: false,
+        message: '许可码无效：请把购买时拿到的那一整串原样粘进来',
+        view: await getLicenseView()
+      }
     }
     return activateLicense(key)
   })
@@ -1618,15 +1691,22 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.chatHistorySave, async (_e, key: unknown, messages: unknown): Promise<void> => {
-    if (typeof key !== 'string' || !isPlausibleFilePath(key)) throw new Error('聊天记录的文档标识无效')
-    if (!Array.isArray(messages)) throw new Error('聊天记录无效')
-    // 复用与读取同一套校验：写进去的和读出来的一定同构
-    const items = normalizeChatHistory({ messages })
-    await fs.mkdir(chatDir(), { recursive: true })
-    // 原子写：半截的聊天记录文件解析不了，等于整段对话白存
-    await writeFileAtomic(chatFileOf(key), Buffer.from(JSON.stringify({ version: 1, messages: items }, null, 2)))
-  })
+  ipcMain.handle(
+    IPC.chatHistorySave,
+    async (_e, key: unknown, messages: unknown): Promise<void> => {
+      if (typeof key !== 'string' || !isPlausibleFilePath(key))
+        throw new Error('聊天记录的文档标识无效')
+      if (!Array.isArray(messages)) throw new Error('聊天记录无效')
+      // 复用与读取同一套校验：写进去的和读出来的一定同构
+      const items = normalizeChatHistory({ messages })
+      await fs.mkdir(chatDir(), { recursive: true })
+      // 原子写：半截的聊天记录文件解析不了，等于整段对话白存
+      await writeFileAtomic(
+        chatFileOf(key),
+        Buffer.from(JSON.stringify({ version: 1, messages: items }, null, 2))
+      )
+    }
+  )
 
   ipcMain.handle(IPC.chatHistoryClear, async (_e, key: unknown): Promise<void> => {
     if (typeof key !== 'string' || !isPlausibleFilePath(key)) return
@@ -1635,44 +1715,51 @@ function registerIpc(): void {
 
   /* ---- 大纲文件导入（Markdown / OPML） ---- */
 
-  ipcMain.handle(IPC.importText, async (e, kind: 'markdown' | 'opml'): Promise<ImportedTextFile | null> => {
-    const isMarkdown = kind !== 'opml'
-    const result = await showOpenIn(winOf(e.sender), {
-      title: isMarkdown ? '导入 Markdown 生成导图' : '导入 OPML 生成导图',
-      filters: isMarkdown
-        ? [
-            { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
-            { name: '所有文件', extensions: ['*'] }
-          ]
-        : [
-            { name: 'OPML', extensions: ['opml', 'xml'] },
-            { name: '所有文件', extensions: ['*'] }
-          ],
-      properties: ['openFile']
-    })
-    const path = firstPathOf(result)
-    if (!path) return null
+  ipcMain.handle(
+    IPC.importText,
+    async (e, kind: 'markdown' | 'opml'): Promise<ImportedTextFile | null> => {
+      const isMarkdown = kind !== 'opml'
+      const result = await showOpenIn(winOf(e.sender), {
+        title: isMarkdown ? '导入 Markdown 生成导图' : '导入 OPML 生成导图',
+        filters: isMarkdown
+          ? [
+              { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
+              { name: '所有文件', extensions: ['*'] }
+            ]
+          : [
+              { name: 'OPML', extensions: ['opml', 'xml'] },
+              { name: '所有文件', extensions: ['*'] }
+            ],
+        properties: ['openFile']
+      })
+      const path = firstPathOf(result)
+      if (!path) return null
 
-    let text: string
-    try {
-      text = await fs.readFile(path, 'utf8')
-    } catch (error) {
-      throw new Error(`读取文件失败：${(error as Error).message}`, { cause: error })
+      let text: string
+      try {
+        text = await fs.readFile(path, 'utf8')
+      } catch (error) {
+        throw new Error(`读取文件失败：${(error as Error).message}`, { cause: error })
+      }
+      // 去掉 UTF-8 BOM，否则第一行会被当成乱码
+      if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
+      if (text.trim().length === 0) throw new Error('这个文件是空的')
+
+      return { path, name: basename(path), text }
     }
-    // 去掉 UTF-8 BOM，否则第一行会被当成乱码
-    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
-    if (text.trim().length === 0) throw new Error('这个文件是空的')
-
-    return { path, name: basename(path), text }
-  })
+  )
 
   /* ---- 历史记录与常用（P9+） ---- */
 
   ipcMain.handle(IPC.historyList, async (): Promise<HistoryEntry[]> => listHistory())
 
-  ipcMain.handle(IPC.historyTogglePin, async (_e, path: string): Promise<HistoryEntry[]> => togglePin(path))
+  ipcMain.handle(IPC.historyTogglePin, async (_e, path: string): Promise<HistoryEntry[]> =>
+    togglePin(path)
+  )
 
-  ipcMain.handle(IPC.historyRemove, async (_e, path: string): Promise<HistoryEntry[]> => removeEntry(path))
+  ipcMain.handle(IPC.historyRemove, async (_e, path: string): Promise<HistoryEntry[]> =>
+    removeEntry(path)
+  )
 
   ipcMain.handle(IPC.historyClear, async (): Promise<HistoryEntry[]> => clearAllHistory())
 
@@ -1694,9 +1781,8 @@ function registerIpc(): void {
 
   /* ---- 文档版本快照（P9+） ---- */
 
-  ipcMain.handle(
-    IPC.snapshotList,
-    async (_e, path: string | null): Promise<SnapshotItem[]> => listSnapshots(path)
+  ipcMain.handle(IPC.snapshotList, async (_e, path: string | null): Promise<SnapshotItem[]> =>
+    listSnapshots(path)
   )
 
   ipcMain.handle(
@@ -1726,32 +1812,35 @@ function registerIpc(): void {
     }
   )
 
-  ipcMain.handle(IPC.snapshotRestore, async (e, docId: string, id: string): Promise<SnapshotRestoreResult> => {
-    const bytes = await readSnapshotBytes(id)
-    if (!bytes) throw new Error('这个版本的文件已经不在了，可能被清理过')
-    const parsed = await parseXmind(bytes)
-    // 与打开文件一致：资源必须留在主进程，否则「恢复后再保存」会把图片丢掉
-    const state = stateOf(e.sender)
-    if (state && typeof docId === 'string') {
-      const doc = docOf(state, docId)
-      doc.resources = parsed.resources
-      doc.inserted.clear()
-    }
-    return {
-      workbook: parsed.workbook,
-      warnings: parsed.warnings,
-      resourceCount: Object.keys(parsed.resources).length
-    }
-  })
-
   ipcMain.handle(
-    IPC.snapshotRemove,
-    async (_e, id: string, path: string | null): Promise<SnapshotItem[]> => removeSnapshotById(id, path)
+    IPC.snapshotRestore,
+    async (e, docId: string, id: string): Promise<SnapshotRestoreResult> => {
+      const bytes = await readSnapshotBytes(id)
+      if (!bytes) throw new Error('这个版本的文件已经不在了，可能被清理过')
+      const parsed = await parseXmind(bytes)
+      // 与打开文件一致：资源必须留在主进程，否则「恢复后再保存」会把图片丢掉
+      const state = stateOf(e.sender)
+      if (state && typeof docId === 'string') {
+        const doc = docOf(state, docId)
+        doc.resources = parsed.resources
+        doc.inserted.clear()
+      }
+      return {
+        workbook: parsed.workbook,
+        warnings: parsed.warnings,
+        resourceCount: Object.keys(parsed.resources).length
+      }
+    }
   )
 
   ipcMain.handle(
-    IPC.snapshotClear,
-    async (_e, path: string | null): Promise<SnapshotItem[]> => clearSnapshotsFor(path)
+    IPC.snapshotRemove,
+    async (_e, id: string, path: string | null): Promise<SnapshotItem[]> =>
+      removeSnapshotById(id, path)
+  )
+
+  ipcMain.handle(IPC.snapshotClear, async (_e, path: string | null): Promise<SnapshotItem[]> =>
+    clearSnapshotsFor(path)
   )
 
   /**
@@ -1868,7 +1957,11 @@ function acquireSingleInstance(): boolean {
 
   let live = false
   try {
-    live = isInstanceAlive(JSON.parse(readFileSync(instanceFile(), 'utf8')), Date.now(), HEARTBEAT_STALE_MS)
+    live = isInstanceAlive(
+      JSON.parse(readFileSync(instanceFile(), 'utf8')),
+      Date.now(),
+      HEARTBEAT_STALE_MS
+    )
   } catch {
     live = false
   }
@@ -1926,10 +2019,14 @@ if (!acquireSingleInstance()) {
       newWindow: () => createWindow(),
       // 目录可能还没建（只在真出过错时才写日志）：先建再开，否则「打开」是无声失败
       openLogs: () => {
-        void fs.mkdir(logDirectory(), { recursive: true }).then(() => shell.openPath(logDirectory()))
+        void fs
+          .mkdir(logDirectory(), { recursive: true })
+          .then(() => shell.openPath(logDirectory()))
       },
       checkUpdates: () => {
-        void checkForUpdateInteractive(BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null)
+        void checkForUpdateInteractive(
+          BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+        )
       }
     })
     // 打包版才生效：后台检查更新，下载完在退出时静默安装（不打断正在画图的人）

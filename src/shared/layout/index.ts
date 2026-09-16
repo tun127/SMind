@@ -53,7 +53,11 @@ export function layoutSheet(
       result = layoutTree(rootTopic, builder, cls === 'org.xmind.ui.tree.left' ? -1 : 1)
       break
     case 'orgchart':
-      result = layoutOrgChart(rootTopic, builder, cls === 'org.xmind.ui.org-chart.up' ? 'up' : 'down')
+      result = layoutOrgChart(
+        rootTopic,
+        builder,
+        cls === 'org.xmind.ui.org-chart.up' ? 'up' : 'down'
+      )
       break
     case 'timeline':
       result =
@@ -75,7 +79,9 @@ export function layoutSheet(
       break
     case 'mindmap':
       result =
-        cls === 'org.xmind.ui.map.clockwise' ? layoutRadial(rootTopic, builder) : layoutMindmap(rootTopic, builder)
+        cls === 'org.xmind.ui.map.clockwise'
+          ? layoutRadial(rootTopic, builder)
+          : layoutMindmap(rootTopic, builder)
       break
     default:
       result = layoutMindmap(rootTopic, builder)

@@ -57,7 +57,12 @@ export function logMain(scope: string, detail: unknown, extra?: unknown): void {
   try {
     const file = logFile()
     rotateIfNeeded(file)
-    const line = [new Date().toISOString(), scope, describe(detail), extra === undefined ? '' : describe(extra)]
+    const line = [
+      new Date().toISOString(),
+      scope,
+      describe(detail),
+      extra === undefined ? '' : describe(extra)
+    ]
       .filter((part) => part.length > 0)
       .join(' | ')
     appendFileSync(file, `${line}\n`, 'utf8')

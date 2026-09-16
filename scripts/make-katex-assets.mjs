@@ -69,4 +69,6 @@ export const KATEX_INLINED_FONTS: string[] = ${JSON.stringify(fontNames, null, 2
 
 writeFileSync(outFile, banner, 'utf8')
 console.log(`已生成 ${outFile}`)
-console.log(`内联字体 ${fontNames.length} 个、替换 url() ${inlined} 处，CSS 体积 ${Math.round(css.length / 1024)} KB`)
+console.log(
+  `内联字体 ${fontNames.length} 个、替换 url() ${inlined} 处，CSS 体积 ${Math.round(css.length / 1024)} KB`
+)

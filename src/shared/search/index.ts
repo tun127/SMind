@@ -104,7 +104,13 @@ export function snippetOf(text: string, query: string, caseSensitive = false, ra
 }
 
 /** 在单个节点的各字段里找命中（一个字段最多产出一条命中） */
-function hitsInTopic(topic: Topic, sheetId: string, depth: number, query: string, options: Required<SearchOptions>): SearchHit[] {
+function hitsInTopic(
+  topic: Topic,
+  sheetId: string,
+  depth: number,
+  query: string,
+  options: Required<SearchOptions>
+): SearchHit[] {
   const out: SearchHit[] = []
   const base = { topicId: topic.id, sheetId, title: topic.title, depth }
 
@@ -165,7 +171,11 @@ export function searchSheet(sheet: Sheet, query: string, options: SearchOptions 
 }
 
 /** 在整个工作簿里搜索（多画布时按画布顺序） */
-export function searchWorkbook(workbook: Workbook, query: string, options: SearchOptions = {}): SearchHit[] {
+export function searchWorkbook(
+  workbook: Workbook,
+  query: string,
+  options: SearchOptions = {}
+): SearchHit[] {
   const out: SearchHit[] = []
   for (const sheet of workbook.sheets) out.push(...searchSheet(sheet, query, options))
   return out
@@ -177,7 +187,11 @@ export function hitTopicIds(hits: SearchHit[]): Set<string> {
 }
 
 /** 只按标题统计某个工作簿里有多少处会被替换（替换前用来报数） */
-export function countTitleMatches(workbook: Workbook, query: string, options: SearchOptions = {}): number {
+export function countTitleMatches(
+  workbook: Workbook,
+  query: string,
+  options: SearchOptions = {}
+): number {
   const opts = normalizeOptions(options)
   if (query.length === 0) return 0
   let total = 0

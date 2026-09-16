@@ -63,7 +63,10 @@ export function readOverlayTextStyle(
     // 没显式写过就用元素自己的默认粗细（概要默认加粗、边界默认加粗）
     bold: weight === undefined ? fallback.bold : weight === 'bold' || Number(weight) >= 600,
     italic: fontStyle === 'italic',
-    color: typeof properties[OVERLAY_FONT_COLOR_KEY] === 'string' ? properties[OVERLAY_FONT_COLOR_KEY] : undefined
+    color:
+      typeof properties[OVERLAY_FONT_COLOR_KEY] === 'string'
+        ? properties[OVERLAY_FONT_COLOR_KEY]
+        : undefined
   }
 }
 
@@ -84,10 +87,14 @@ export function withOverlayTextStyle(
     else properties[key] = value
   }
 
-  if ('fontSize' in patch) write(OVERLAY_FONT_SIZE_KEY, patch.fontSize ? `${patch.fontSize}px` : undefined)
+  if ('fontSize' in patch)
+    write(OVERLAY_FONT_SIZE_KEY, patch.fontSize ? `${patch.fontSize}px` : undefined)
   // 加粗要写 'normal' 而不是删键：删键会落回「概要默认加粗」
   if ('bold' in patch) {
-    write(OVERLAY_FONT_WEIGHT_KEY, patch.bold === undefined ? undefined : patch.bold ? 'bold' : 'normal')
+    write(
+      OVERLAY_FONT_WEIGHT_KEY,
+      patch.bold === undefined ? undefined : patch.bold ? 'bold' : 'normal'
+    )
   }
   if ('italic' in patch) write(OVERLAY_FONT_STYLE_KEY, patch.italic ? 'italic' : undefined)
   if ('color' in patch) write(OVERLAY_FONT_COLOR_KEY, patch.color)

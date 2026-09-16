@@ -274,7 +274,8 @@ const charWidthCache = new Map<string, number>()
 const CHAR_CACHE_LIMIT = 60000
 
 function widthOf(char: StyledChar): number {
-  if (char.formula) return char.formulaWidth ?? inlineFormulaSize(char.formula, char.style.fontSize).width
+  if (char.formula)
+    return char.formulaWidth ?? inlineFormulaSize(char.formula, char.style.fontSize).width
   const ch = char.ch
   const style = char.style
   const font = fontOf(style)
@@ -472,7 +473,8 @@ function compute(topic: Topic, depth: number): MeasureResult {
         width += widthOf(char)
         if (char.style.fontSize > maxFontSize) maxFontSize = char.style.fontSize
         if (char.formula) {
-          const size = char.formulaHeight ?? inlineFormulaSize(char.formula, char.style.fontSize).height
+          const size =
+            char.formulaHeight ?? inlineFormulaSize(char.formula, char.style.fontSize).height
           if (size > maxFormulaHeight) maxFormulaHeight = size
         }
       }
@@ -510,11 +512,15 @@ function compute(topic: Topic, depth: number): MeasureResult {
       }
     : undefined
   const imageBox: Size = imageBoxSize(topic.image, imageBounds)
-  const formulaBox: Size = topic.formula ? formulaSize(topic.formula, base.fontSize) : { width: 0, height: 0 }
+  const formulaBox: Size = topic.formula
+    ? formulaSize(topic.formula, base.fontSize)
+    : { width: 0, height: 0 }
   // 代码块同样吃「手动拉伸」的可用空间：按空间等比缩放字号/行高/内边距，
   // 于是它永远待在节点框里（不给 bounds 时保持自然尺寸、完整展示整段代码）
   const codeMetrics = codeBlockMetrics(topic.code, imageBounds)
-  const codeBox: Size = codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : { width: 0, height: 0 }
+  const codeBox: Size = codeMetrics
+    ? { width: codeMetrics.width, height: codeMetrics.height }
+    : { width: 0, height: 0 }
   const imageBlock = imageBox.height > 0 ? imageBox.height + BLOCK_GAP : 0
   const formulaBlock = formulaBox.height > 0 ? formulaBox.height + BLOCK_GAP : 0
   const codeBlock = codeBox.height > 0 ? codeBox.height + BLOCK_GAP : 0
@@ -533,7 +539,8 @@ function compute(topic: Topic, depth: number): MeasureResult {
   )
   let width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2, base.minWidth)
 
-  let height = base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + codeBlock + labelRow.height
+  let height =
+    base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + codeBlock + labelRow.height
   for (const line of lines) height += line.height
   // 标记条可能比内容还高（标记多时），节点要能装下它
   height = Math.max(height, markerStrip.height + base.paddingY * 2)
@@ -631,7 +638,8 @@ export function measureTextWidth(
 
   if (typeof document === 'undefined') {
     let estimate = 0
-    for (const ch of text) estimate += ch.charCodeAt(0) > 0xff ? resolved.fontSize : resolved.fontSize * 0.55
+    for (const ch of text)
+      estimate += ch.charCodeAt(0) > 0xff ? resolved.fontSize : resolved.fontSize * 0.55
     return estimate
   }
 

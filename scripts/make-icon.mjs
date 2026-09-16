@@ -399,7 +399,9 @@ const images = SIZES.map((size) => {
 
 const icoPath = join(outDir, 'icon.ico')
 writeFileSync(icoPath, buildIco(images))
-console.log(`\n已生成 ${icoPath}（${SIZES.length} 个尺寸，${(buildIco(images).length / 1024).toFixed(1)} KB）`)
+console.log(
+  `\n已生成 ${icoPath}（${SIZES.length} 个尺寸，${(buildIco(images).length / 1024).toFixed(1)} KB）`
+)
 
 // 各尺寸再单独存一份 PNG：便于检查小尺寸是否清晰，也能直接拿去别处用
 for (const image of images) {

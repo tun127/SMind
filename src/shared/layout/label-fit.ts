@@ -27,7 +27,11 @@ export interface FittedLabel {
  * 省略号本身也占位，所以判断的是「前缀宽 + 省略号宽 <= 上限」；
  * 极端情况（一个字都放不下）只留省略号，避免出现宽度为 0 的空标签。
  */
-export function fitLabelText(text: string, charWidth: (ch: string) => number, maxTextWidth: number): FittedLabel {
+export function fitLabelText(
+  text: string,
+  charWidth: (ch: string) => number,
+  maxTextWidth: number
+): FittedLabel {
   const chars = [...text]
 
   let fullWidth = 0

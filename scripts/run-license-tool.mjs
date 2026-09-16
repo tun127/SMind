@@ -32,5 +32,7 @@ await esbuild.build({
 })
 
 // 透传参数：keygen / issue --to 名字 …
-const result = spawnSync(process.execPath, [outFile, ...process.argv.slice(2)], { stdio: 'inherit' })
+const result = spawnSync(process.execPath, [outFile, ...process.argv.slice(2)], {
+  stdio: 'inherit'
+})
 process.exit(result.status ?? 1)

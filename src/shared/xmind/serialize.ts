@@ -37,7 +37,8 @@ function compact<T extends Raw>(obj: T): T {
   for (const [k, v] of Object.entries(obj)) {
     if (v === undefined || v === null) continue
     if (Array.isArray(v) && v.length === 0) continue
-    if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0) continue
+    if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0)
+      continue
     out[k] = v
   }
   return out as T
@@ -63,7 +64,8 @@ function topicToRaw(topic: Topic): Raw {
   // 原样透传外部扩展
   if (topic.extensions) {
     for (const ext of topic.extensions) {
-      if (typeof ext === 'object' && ext !== null && (ext as Raw).provider === OUR_PROVIDER) continue
+      if (typeof ext === 'object' && ext !== null && (ext as Raw).provider === OUR_PROVIDER)
+        continue
       extensions.push(ext)
     }
   }

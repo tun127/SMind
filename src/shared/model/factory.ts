@@ -76,6 +76,4 @@ export function createWorkbook(options: CreateWorkbookOptions = {}): Workbook {
   }
 }
 
-
-
 export { MODEL_VERSION, CREATOR }

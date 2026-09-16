@@ -57,7 +57,9 @@ function opToSvg(op: DrawOp): string {
       ])}/>`
 
     case 'text': {
-      const paint = op.stroke ? ` stroke="${escapeXmlAttr(op.stroke)}" stroke-width="${num(op.strokeWidth ?? 4)}" paint-order="stroke" stroke-linejoin="round"` : ''
+      const paint = op.stroke
+        ? ` stroke="${escapeXmlAttr(op.stroke)}" stroke-width="${num(op.strokeWidth ?? 4)}" paint-order="stroke" stroke-linejoin="round"`
+        : ''
       return `<text${attrs([
         ['x', op.x],
         ['y', op.y],
@@ -153,7 +155,12 @@ function opToSvg(op: DrawOp): string {
       const cx = op.x + radius
       const cy = op.y + radius
       return (
-        `<circle${attrs([['cx', cx], ['cy', cy], ['r', radius], ['fill', op.color]])}/>` +
+        `<circle${attrs([
+          ['cx', cx],
+          ['cy', cy],
+          ['r', radius],
+          ['fill', op.color]
+        ])}/>` +
         `<text${attrs([
           ['x', cx],
           ['y', cy],
@@ -220,7 +227,12 @@ function opToSvg(op: DrawOp): string {
         ])}/>`
       }
       // 其它图形（笑脸/箭头/灯泡等）在导出里统一画成圆点，避免引入整套图标
-      return `<circle${attrs([['cx', cx], ['cy', cy], ['r', r * 0.62], ['fill', op.color]])}/>`
+      return `<circle${attrs([
+        ['cx', cx],
+        ['cy', cy],
+        ['r', r * 0.62],
+        ['fill', op.color]
+      ])}/>`
     }
 
     default:
@@ -230,7 +242,10 @@ function opToSvg(op: DrawOp): string {
 
 /** 生成完整的 SVG 文档 */
 export function drawingToSvg(drawing: Drawing): string {
-  const body = drawing.ops.map(opToSvg).filter((item) => item.length > 0).join('\n  ')
+  const body = drawing.ops
+    .map(opToSvg)
+    .filter((item) => item.length > 0)
+    .join('\n  ')
   const background =
     drawing.background === null
       ? ''

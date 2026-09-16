@@ -31,7 +31,15 @@ export function placeFishboneSubtree(
     const side: number = index % 2 === 0 ? -1 : 1
     const childY = side < 0 ? spineY0 - boneOffset - childSize.height : spineY0 + boneOffset
     builder.add(child, centerX - childSize.width / 2, childY, depth + 1, side < 0 ? 'up' : 'down')
-    placeVerticalColumn(builder, child, centerX - childSize.width / 2, childY, side < 0 ? -1 : 1, depth + 1, indent)
+    placeVerticalColumn(
+      builder,
+      child,
+      centerX - childSize.width / 2,
+      childY,
+      side < 0 ? -1 : 1,
+      depth + 1,
+      indent
+    )
     anchors.push({ id: child.id, x: Math.round(anchorX), side })
     cursor += extent + builder.gapX + boneSlant + indent * (builder.maxDepth(child) - 1)
   })

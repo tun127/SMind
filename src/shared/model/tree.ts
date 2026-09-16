@@ -2,7 +2,10 @@ import type { Sheet, Topic, Workbook } from './types'
 import { createId } from './factory'
 
 /** 深度优先遍历（含根） */
-export function walk(root: Topic, visit: (topic: Topic, parent: Topic | null, depth: number) => void): void {
+export function walk(
+  root: Topic,
+  visit: (topic: Topic, parent: Topic | null, depth: number) => void
+): void {
   const inner = (topic: Topic, parent: Topic | null, depth: number): void => {
     visit(topic, parent, depth)
     for (const child of topic.children) inner(child, topic, depth + 1)
@@ -153,7 +156,9 @@ export function cloneTopicDeep(source: Topic): Topic {
     attachments: source.attachments.map((a) => ({ ...a })),
     children: [],
     detachedChildren: [],
-    style: source.style ? { ...source.style, properties: { ...source.style.properties } } : undefined,
+    style: source.style
+      ? { ...source.style, properties: { ...source.style.properties } }
+      : undefined,
     position: source.position ? { ...source.position } : undefined,
     titleRich: source.titleRich ? structuredClone(source.titleRich) : undefined
   }

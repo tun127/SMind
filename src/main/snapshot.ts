@@ -35,7 +35,8 @@ const indexFile = (): string => join(rootDir(), 'index.json')
 const filesDir = (): string => join(rootDir(), 'files')
 
 /** id 只允许安全字符，避免索引被手改后出现越出目录的路径 */
-const safeId = (id: string): string => (typeof id === 'string' ? id.replace(/[^a-zA-Z0-9_-]/g, '') : '')
+const safeId = (id: string): string =>
+  typeof id === 'string' ? id.replace(/[^a-zA-Z0-9_-]/g, '') : ''
 const fileOf = (id: string): string => join(filesDir(), `${safeId(id)}.xmind`)
 
 const newId = (): string => `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`

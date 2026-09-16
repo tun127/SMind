@@ -77,7 +77,8 @@ export function formulaSize(source: string, fontSize: number): Size {
       const child = el.firstElementChild
       // 用 getBoundingClientRect 拿**亚像素**尺寸，再向上取整 + 2px 余量：
       // offsetWidth 是取整值，渲染又是亚像素的，差值会恰好把右/下边缘切掉一点点
-      const rect = child instanceof HTMLElement ? child.getBoundingClientRect() : el.getBoundingClientRect()
+      const rect =
+        child instanceof HTMLElement ? child.getBoundingClientRect() : el.getBoundingClientRect()
       const width = rect.width
       const height = rect.height
       if (width > 0 && height > 0) {

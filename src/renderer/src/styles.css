@@ -6,7 +6,8 @@
   --text-dim: #6b7280;
   --accent: #2f6bff;
   --danger: #e5484d;
-  font-family: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'Segoe UI', system-ui, sans-serif;
+  font-family:
+    'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'Segoe UI', system-ui, sans-serif;
   color-scheme: light;
 }
 
@@ -532,7 +533,9 @@ textarea {
 
 /* 搜索命中的节点：加一圈醒目的描边 */
 .topic--hit {
-  box-shadow: 0 0 0 3px rgba(255, 138, 0, 0.85), 0 6px 16px rgba(16, 24, 40, 0.18) !important;
+  box-shadow:
+    0 0 0 3px rgba(255, 138, 0, 0.85),
+    0 6px 16px rgba(16, 24, 40, 0.18) !important;
 }
 
 /* 被筛选排除的节点：淡出但仍可点选 */
@@ -871,7 +874,7 @@ textarea {
   overflow: auto;
   border-radius: 6px;
   background: rgba(140, 148, 160, 0.12);
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: 11px;
   white-space: pre-wrap;
 }
@@ -2939,7 +2942,7 @@ button.chat-panel__badge {
 /* ---- 图片 / 附件 / 公式（节点属性面板） ---- */
 
 .input--mono {
-  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
   font-size: 12px;
 }
 
@@ -3034,7 +3037,6 @@ button.chat-panel__badge {
   font-size: 12px;
 }
 
-
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -3103,7 +3105,7 @@ button.chat-panel__badge {
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: 11px;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -3172,7 +3174,7 @@ button.chat-panel__badge {
 
 .history-row__path {
   color: #9aa4b2;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: 10px;
 }
 

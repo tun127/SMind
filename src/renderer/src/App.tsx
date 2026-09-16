@@ -265,7 +265,8 @@ export default function App(): ReactElement {
         const result = await window.api.snapshotRestore(activeDocId(), snapshotId)
         useEditor.getState().restoreDocument(result.workbook)
         const messages = ['已恢复到所选版本（恢复前的状态也留了一份，可再切回）']
-        if (result.resourceCount > 0) messages.push(`带回了 ${result.resourceCount} 个图片/附件资源`)
+        if (result.resourceCount > 0)
+          messages.push(`带回了 ${result.resourceCount} 个图片/附件资源`)
         if (result.warnings.length > 0) messages.push(...result.warnings)
         showToast(messages.join('；'))
       } catch (error) {
@@ -387,7 +388,9 @@ export default function App(): ReactElement {
     (run: () => void): void => {
       commitPending()
       if (useEditor.getState().dirty) {
-        const active = useTabs.getState().tabs.find((item) => item.id === useTabs.getState().activeId)
+        const active = useTabs
+          .getState()
+          .tabs.find((item) => item.id === useTabs.getState().activeId)
         setPending({ fileName: active ? tabTitleOf(active) : '当前文档', run })
       } else run()
     },
@@ -893,9 +896,11 @@ export default function App(): ReactElement {
             if (!store.editingId && selectedId) {
               const image = await readClipboardImage()
               if (image) {
-                useEditor
-                  .getState()
-                  .setImage(selectedId, { path: image.path, width: image.width, height: image.height })
+                useEditor.getState().setImage(selectedId, {
+                  path: image.path,
+                  width: image.width,
+                  height: image.height
+                })
                 showToast(
                   image.width > 0
                     ? `已把剪贴板图片贴到选中的主题（${image.width}×${image.height}）`
@@ -1017,7 +1022,10 @@ export default function App(): ReactElement {
       if (!files) return null
       for (const file of Array.from(files)) {
         if (DOCUMENT_RE.test(file.name)) return null // 混着文档时整体交给文档流程
-        if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i.test(file.name)) {
+        if (
+          file.type.startsWith('image/') ||
+          /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i.test(file.name)
+        ) {
           return file
         }
       }
@@ -1123,8 +1131,12 @@ export default function App(): ReactElement {
             onSetDefaultTheme={handleSetDefaultTheme}
           />
         )}
-        {sidePanel === 'node' && <NodePanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
-        {sidePanel === 'search' && <SearchPanel onClose={() => setSidePanel('none')} onNotify={showToast} />}
+        {sidePanel === 'node' && (
+          <NodePanel onClose={() => setSidePanel('none')} onNotify={showToast} />
+        )}
+        {sidePanel === 'search' && (
+          <SearchPanel onClose={() => setSidePanel('none')} onNotify={showToast} />
+        )}
         {sidePanel === 'chat' && (
           <ChatPanel
             onClose={() => setSidePanel('none')}

@@ -51,7 +51,12 @@ const REASON_CLASS: Record<SnapshotReason, string> = {
  * 版本列表由本组件自己读写（只需要路径与会话序号），
  * 只有「恢复」交给 App —— 那一步要走未保存确认，还要先自动存一份恢复前的版本。
  */
-export default function HistoryDialog({ onClose, onNotify, onOpenFile, onRestore }: Props): ReactElement {
+export default function HistoryDialog({
+  onClose,
+  onNotify,
+  onOpenFile,
+  onRestore
+}: Props): ReactElement {
   const filePath = useEditor((s) => s.filePath)
 
   const [tab, setTab] = useState<Tab>('files')
@@ -178,7 +183,10 @@ export default function HistoryDialog({ onClose, onNotify, onOpenFile, onRestore
   /* ---- 渲染 ---- */
 
   const fileRow = (entry: HistoryEntry): ReactElement => (
-    <div key={entry.path} className={entry.missing ? 'history-row history-row--missing' : 'history-row'}>
+    <div
+      key={entry.path}
+      className={entry.missing ? 'history-row history-row--missing' : 'history-row'}
+    >
       <button
         type="button"
         className="history-row__main"
@@ -426,7 +434,8 @@ export default function HistoryDialog({ onClose, onNotify, onOpenFile, onRestore
 
             <div className="history-hint">
               每 <b>10 分钟</b>会自动留一个版本（内容没变就跳过，不占地方）；
-              手动存的版本不会被自动版本挤掉。恢复前也会自动存一份当前状态，<b>点错了还能切回来</b>。
+              手动存的版本不会被自动版本挤掉。恢复前也会自动存一份当前状态，<b>点错了还能切回来</b>
+              。
             </div>
 
             {snapshotLoading ? (

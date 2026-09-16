@@ -117,7 +117,9 @@ function DefaultStylePanel({
         <select
           className="select"
           value={settings.defaultFontSize ?? ''}
-          onChange={(e) => patch({ defaultFontSize: e.target.value ? Number(e.target.value) : null })}
+          onChange={(e) =>
+            patch({ defaultFontSize: e.target.value ? Number(e.target.value) : null })
+          }
         >
           <option value="">默认</option>
           {FONT_SIZES.map((size) => (
@@ -141,7 +143,9 @@ function DefaultStylePanel({
           <button
             key={color}
             type="button"
-            className={settings.defaultColor === color ? 'color-dot color-dot--active' : 'color-dot'}
+            className={
+              settings.defaultColor === color ? 'color-dot color-dot--active' : 'color-dot'
+            }
             style={{ background: color }}
             title={color}
             onClick={() => patch({ defaultColor: color })}
@@ -155,7 +159,9 @@ function DefaultStylePanel({
           className="select"
           value={settings.defaultCodeFontSize ?? ''}
           title="所有代码块的基准字号（影响画布与导出）"
-          onChange={(e) => patch({ defaultCodeFontSize: e.target.value ? Number(e.target.value) : null })}
+          onChange={(e) =>
+            patch({ defaultCodeFontSize: e.target.value ? Number(e.target.value) : null })
+          }
         >
           <option value="">内置 (12)</option>
           {[11, 12, 13, 14, 16, 18].map((size) => (
@@ -212,10 +218,20 @@ function DefaultStylePanel({
       </div>
 
       <div className="default-style__row default-style__row--actions">
-        <button type="button" className="btn" title="把此刻选区上的字号/颜色/对齐存为默认" onClick={useCurrentAsDefault}>
+        <button
+          type="button"
+          className="btn"
+          title="把此刻选区上的字号/颜色/对齐存为默认"
+          onClick={useCurrentAsDefault}
+        >
           用当前格式设为默认
         </button>
-        <button type="button" className="btn" title="把默认字体/字号/颜色刷到这张图的所有节点（一步撤销）" onClick={applyToAll}>
+        <button
+          type="button"
+          className="btn"
+          title="把默认字体/字号/颜色刷到这张图的所有节点（一步撤销）"
+          onClick={applyToAll}
+        >
           应用到全部现有节点
         </button>
         <button
@@ -241,7 +257,16 @@ function DefaultStylePanel({
   )
 }
 
-const COLORS = ['#1f2328', '#EB5757', '#F2994A', '#E2B93B', '#27AE60', '#2D9CDB', '#2F6BFF', '#9B51E0']
+const COLORS = [
+  '#1f2328',
+  '#EB5757',
+  '#F2994A',
+  '#E2B93B',
+  '#27AE60',
+  '#2D9CDB',
+  '#2F6BFF',
+  '#9B51E0'
+]
 const SIZES = [12, 14, 16, 18, 22, 28]
 
 type Chain = ReturnType<RichEditor['chain']>
@@ -284,7 +309,11 @@ export default function RichFormatBar({ onRenderDefaultsChanged }: Props): React
     if (!styleAnchor) return
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target as Node | null
-      if (target && (gearRef.current?.contains(target) || (event.target as HTMLElement)?.closest?.('.default-style')))
+      if (
+        target &&
+        (gearRef.current?.contains(target) ||
+          (event.target as HTMLElement)?.closest?.('.default-style'))
+      )
         return
       setStyleAnchor(null)
     }
@@ -327,7 +356,6 @@ export default function RichFormatBar({ onRenderDefaultsChanged }: Props): React
     state.fontSize !== null && !SIZES.includes(state.fontSize)
       ? [...SIZES, state.fontSize].sort((a, b) => a - b)
       : SIZES
-
 
   return (
     <div className="formatbar" onMouseDown={keepFocus}>

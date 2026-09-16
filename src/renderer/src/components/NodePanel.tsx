@@ -130,7 +130,13 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const header = (
     <div className="side-panel__header">
       <span>节点属性</span>
-      <button type="button" className="tool-btn" title="关闭" onMouseDown={(e) => e.preventDefault()} onClick={onClose}>
+      <button
+        type="button"
+        className="tool-btn"
+        title="关闭"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onClose}
+      >
         <X size={16} />
       </button>
     </div>
@@ -150,8 +156,13 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
       kind === 'summary' ? { fontSize: 13, bold: true } : { fontSize: 12, bold: true }
     )
     const setTitle =
-      kind === 'summary' ? setSummaryTitle : kind === 'boundary' ? setBoundaryTitle : setRelationshipTitle
-    const remove = kind === 'summary' ? removeSummary : kind === 'boundary' ? removeBoundary : removeRelationship
+      kind === 'summary'
+        ? setSummaryTitle
+        : kind === 'boundary'
+          ? setBoundaryTitle
+          : setRelationshipTitle
+    const remove =
+      kind === 'summary' ? removeSummary : kind === 'boundary' ? removeBoundary : removeRelationship
 
     return (
       <div className="side-panel">
@@ -492,7 +503,12 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
               if (event.key === 'Enter') handleAddLabel()
             }}
           />
-          <button type="button" className="btn btn--primary" onMouseDown={(e) => e.preventDefault()} onClick={handleAddLabel}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleAddLabel}
+          >
             <Plus size={14} />
             添加
           </button>
@@ -731,7 +747,9 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
           onChange={(event) => setCodeDraft(event.target.value)}
           onBlur={commitCode}
         />
-        <div className="side-panel__hint">离开输入框即保存；节点里会按等宽字体排版，超出部分可滚动</div>
+        <div className="side-panel__hint">
+          离开输入框即保存；节点里会按等宽字体排版，超出部分可滚动
+        </div>
         {(topic.code || codeDraft.length > 0) && (
           <div className="side-panel__row">
             <button
@@ -774,7 +792,13 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
           removeBoundary,
           true
         )}
-        {overlayRow('概要', sheet.summaries.map((item) => ({ id: item.id, title: item.title })), setSummaryTitle, removeSummary, true)}
+        {overlayRow(
+          '概要',
+          sheet.summaries.map((item) => ({ id: item.id, title: item.title })),
+          setSummaryTitle,
+          removeSummary,
+          true
+        )}
       </div>
     </div>
   )

@@ -1,4 +1,10 @@
-import { memo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
+import {
+  memo,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type ReactElement
+} from 'react'
 import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
 import {
   BLOCK_GAP,
@@ -127,7 +133,7 @@ function TopicNodeInner({
   /** 图片读不出来（资源缺失）时改显示占位，避免只留一个空白框 */
   const [failedImagePath, setFailedImagePath] = useState<string | null>(null)
   const image = node.topic.image
-  const imageBox = image ? node.imageBox ?? imageBoxSize(image) : null
+  const imageBox = image ? (node.imageBox ?? imageBoxSize(image)) : null
   const imageFailed = Boolean(image && failedImagePath === image.path)
 
   const formula = node.topic.formula
@@ -136,8 +142,9 @@ function TopicNodeInner({
 
   // 代码块的尺寸与排版指标都来自测量：节点被手动拉伸时，字号/行高/内边距一起等比缩放，
   // 所以代码块永远待在节点框里（与图片的缩放行为一致）
-  const codeMetrics = code ? node.codeMetrics ?? codeBlockMetrics(code) : null
-  const codeBox = code && codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : null
+  const codeMetrics = code ? (node.codeMetrics ?? codeBlockMetrics(code)) : null
+  const codeBox =
+    code && codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : null
   /** 拉伸时的最小尺寸：代码块缩到下限时的大小 + 内边距（框不能比内容还小） */
   const padding = nodePaddingOf(node.depth)
   const minSize = codeMinNodeSize(code, padding)
@@ -151,10 +158,11 @@ function TopicNodeInner({
     // 分列规则与 markerStripSize 一致：≤4 个一列，否则两列，行数 = ceil(总数 / 列数)
     const columns = markerIds.length <= MARKER_PER_COLUMN ? 1 : MARKER_MAX_COLUMNS
     const rows = Math.ceil(markerIds.length / columns)
-    for (let i = 0; i < markerIds.length; i += rows) markerColumns.push(markerIds.slice(i, i + rows))
+    for (let i = 0; i < markerIds.length; i += rows)
+      markerColumns.push(markerIds.slice(i, i + rows))
   }
   // 正常情况下尺寸来自布局测量结果；个别测量实现没给时退回同一套公式尺寸函数
-  const formulaBox = formula ? node.formulaBox ?? formulaSize(formula, node.fontSize) : null
+  const formulaBox = formula ? (node.formulaBox ?? formulaSize(formula, node.fontSize)) : null
 
   // 框不能比内容还小：代码块（可缩放下限）与公式块（整块原子）取更大的一份。
   // 公式节点被手动缩小到极限时，外框最小也要包住公式——否则左右各裁掉半边
@@ -237,168 +245,173 @@ function TopicNodeInner({
       )}
 
       <div className="topic__body">
-      {/* 顶部图标行：备注 / 链接 / 附件指示（标记已移到左侧） */}
-      {node.accessory.items.length > 0 && (
-        <div className="topic__accessory" style={{ height: node.accessory.height }}>
-          {node.accessory.items.map((item, index) => (
-            <IndicatorIcon key={`i-${index}-${item.kind}`} kind={item.kind} />
-          ))}
-        </div>
-      )}
-
-      {editing ? (
-        <RichTextEditor
-          node={node}
-          rich={editingRich ?? node.topic.titleRich ?? richFromPlain(node.topic.title)}
-          onChange={(rich) => onRichChange(node.id, rich)}
-          onCancel={onCancelEdit}
-          onCommit={onCommitEdit}
-          onAddChild={onCommitAndAddChild}
-          onAddSibling={onCommitAndAddSibling}
-          onNavigate={onNavigateEdit}
-        />
-      ) : (
-        <div className="topic__text">
-          {node.lines.map((line, lineIndex) => (
-            <div
-              key={lineIndex}
-              className="topic__line"
-              style={{ height: line.height, lineHeight: `${line.height}px`, textAlign: line.align }}
-            >
-              {line.segments.length === 0
-                ? '\u00A0'
-                : line.segments.map((segment, segmentIndex) =>
-                    segment.formula ? (
-                      // 行内公式（标题里的 $…$）：交给 KaTeX，垂直居中对齐文字
-                      <span
-                        key={segmentIndex}
-                        className="topic__inline-formula"
-                        // KaTeX 的输出由渲染器生成，不是用户 HTML
-                        dangerouslySetInnerHTML={{ __html: formulaHtml(segment.formula) }}
-                      />
-                    ) : (
-                      <span key={segmentIndex} style={segmentStyle(segment)}>
-                        {segment.text}
-                      </span>
-                    )
-                  )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 节点内图片：显示框尺寸来自布局测量结果，保证「测量=显示」 */}
-      {image && imageBox && (
-        <div className="topic__image" style={{ marginTop: BLOCK_GAP }}>
-          {imageFailed ? (
-            <div
-              className="topic__image-missing"
-              style={{ width: imageBox.width, height: imageBox.height }}
-              title={`图片资源缺失：${image.path}`}
-            >
-              图片缺失
-            </div>
-          ) : (
-            <img
-              src={resourceUrl(image.path)}
-              alt=""
-              draggable={false}
-              width={imageBox.width}
-              height={imageBox.height}
-              style={{ width: imageBox.width, height: imageBox.height }}
-              onError={() => setFailedImagePath(image.path)}
-            />
-          )}
-        </div>
-      )}
-
-      {/* LaTeX 公式：KaTeX 渲染成 HTML，直接内嵌在节点里 */}
-      {formula && formulaBox && (
-        <div
-          className="topic__formula"
-          style={{
-            width: formulaBox.width,
-            height: formulaBox.height,
-            marginTop: BLOCK_GAP,
-            fontSize: node.fontSize
-          }}
-          // KaTeX 的输出是我们自己生成的 HTML，不来自用户输入的原样注入
-          dangerouslySetInnerHTML={{ __html: formulaHtml(formula) }}
-        />
-      )}
-
-      {/* 代码块：等宽排版，尺寸与字号都来自测量（节点被拉伸时一起等比缩放）；语言小标可直接切换 */}
-      {code && codeMetrics && codeBox && (
-        <div
-          className="topic__code"
-          style={{ width: codeBox.width, height: codeBox.height, marginTop: BLOCK_GAP }}
-        >
-          <select
-            className="topic__code-lang"
-            value={code.language || 'text'}
-            title="切换代码语言"
-            style={{
-              fontSize: Math.max(8, Math.round(9 * codeMetrics.scale)),
-              lineHeight: `${codeMetrics.header}px`
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-            onChange={(event) =>
-              useEditor.getState().setCode(node.id, { language: event.target.value, text: code.text })
-            }
-          >
-            {CODE_LANGUAGES.map((lang) => (
-              <option key={lang} value={lang}>
-                {lang === 'text' ? 'text' : lang}
-              </option>
+        {/* 顶部图标行：备注 / 链接 / 附件指示（标记已移到左侧） */}
+        {node.accessory.items.length > 0 && (
+          <div className="topic__accessory" style={{ height: node.accessory.height }}>
+            {node.accessory.items.map((item, index) => (
+              <IndicatorIcon key={`i-${index}-${item.kind}`} kind={item.kind} />
             ))}
-          </select>
-          <pre
-            className="topic__code-pre"
+          </div>
+        )}
+
+        {editing ? (
+          <RichTextEditor
+            node={node}
+            rich={editingRich ?? node.topic.titleRich ?? richFromPlain(node.topic.title)}
+            onChange={(rich) => onRichChange(node.id, rich)}
+            onCancel={onCancelEdit}
+            onCommit={onCommitEdit}
+            onAddChild={onCommitAndAddChild}
+            onAddSibling={onCommitAndAddSibling}
+            onNavigate={onNavigateEdit}
+          />
+        ) : (
+          <div className="topic__text">
+            {node.lines.map((line, lineIndex) => (
+              <div
+                key={lineIndex}
+                className="topic__line"
+                style={{
+                  height: line.height,
+                  lineHeight: `${line.height}px`,
+                  textAlign: line.align
+                }}
+              >
+                {line.segments.length === 0
+                  ? '\u00A0'
+                  : line.segments.map((segment, segmentIndex) =>
+                      segment.formula ? (
+                        // 行内公式（标题里的 $…$）：交给 KaTeX，垂直居中对齐文字
+                        <span
+                          key={segmentIndex}
+                          className="topic__inline-formula"
+                          // KaTeX 的输出由渲染器生成，不是用户 HTML
+                          dangerouslySetInnerHTML={{ __html: formulaHtml(segment.formula) }}
+                        />
+                      ) : (
+                        <span key={segmentIndex} style={segmentStyle(segment)}>
+                          {segment.text}
+                        </span>
+                      )
+                    )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 节点内图片：显示框尺寸来自布局测量结果，保证「测量=显示」 */}
+        {image && imageBox && (
+          <div className="topic__image" style={{ marginTop: BLOCK_GAP }}>
+            {imageFailed ? (
+              <div
+                className="topic__image-missing"
+                style={{ width: imageBox.width, height: imageBox.height }}
+                title={`图片资源缺失：${image.path}`}
+              >
+                图片缺失
+              </div>
+            ) : (
+              <img
+                src={resourceUrl(image.path)}
+                alt=""
+                draggable={false}
+                width={imageBox.width}
+                height={imageBox.height}
+                style={{ width: imageBox.width, height: imageBox.height }}
+                onError={() => setFailedImagePath(image.path)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* LaTeX 公式：KaTeX 渲染成 HTML，直接内嵌在节点里 */}
+        {formula && formulaBox && (
+          <div
+            className="topic__formula"
             style={{
-              fontSize: codeMetrics.fontSize,
-              lineHeight: `${codeMetrics.lineHeight}px`,
-              padding: `${codeMetrics.header}px ${codeMetrics.paddingX}px ${codeMetrics.paddingY}px`
+              width: formulaBox.width,
+              height: formulaBox.height,
+              marginTop: BLOCK_GAP,
+              fontSize: node.fontSize
             }}
+            // KaTeX 的输出是我们自己生成的 HTML，不来自用户输入的原样注入
+            dangerouslySetInnerHTML={{ __html: formulaHtml(formula) }}
+          />
+        )}
+
+        {/* 代码块：等宽排版，尺寸与字号都来自测量（节点被拉伸时一起等比缩放）；语言小标可直接切换 */}
+        {code && codeMetrics && codeBox && (
+          <div
+            className="topic__code"
+            style={{ width: codeBox.width, height: codeBox.height, marginTop: BLOCK_GAP }}
           >
-            {highlightCode(code.text, code.language).map((line, lineIndex, all) => (
-              <span key={lineIndex} className="topic__code-line">
-                {line.tokens.map((token, tokenIndex) => (
-                  <span
-                    key={tokenIndex}
-                    style={{
-                      color: CODE_TOKEN_COLORS[token.kind],
-                      // 注释用斜体，和常见编辑器观感一致
-                      fontStyle: token.kind === 'comment' ? 'italic' : undefined
-                    }}
-                  >
-                    {token.text}
-                  </span>
-                ))}
-                {lineIndex < all.length - 1 ? '\n' : null}
+            <select
+              className="topic__code-lang"
+              value={code.language || 'text'}
+              title="切换代码语言"
+              style={{
+                fontSize: Math.max(8, Math.round(9 * codeMetrics.scale)),
+                lineHeight: `${codeMetrics.header}px`
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              onChange={(event) =>
+                useEditor
+                  .getState()
+                  .setCode(node.id, { language: event.target.value, text: code.text })
+              }
+            >
+              {CODE_LANGUAGES.map((lang) => (
+                <option key={lang} value={lang}>
+                  {lang === 'text' ? 'text' : lang}
+                </option>
+              ))}
+            </select>
+            <pre
+              className="topic__code-pre"
+              style={{
+                fontSize: codeMetrics.fontSize,
+                lineHeight: `${codeMetrics.lineHeight}px`,
+                padding: `${codeMetrics.header}px ${codeMetrics.paddingX}px ${codeMetrics.paddingY}px`
+              }}
+            >
+              {highlightCode(code.text, code.language).map((line, lineIndex, all) => (
+                <span key={lineIndex} className="topic__code-line">
+                  {line.tokens.map((token, tokenIndex) => (
+                    <span
+                      key={tokenIndex}
+                      style={{
+                        color: CODE_TOKEN_COLORS[token.kind],
+                        // 注释用斜体，和常见编辑器观感一致
+                        fontStyle: token.kind === 'comment' ? 'italic' : undefined
+                      }}
+                    >
+                      {token.text}
+                    </span>
+                  ))}
+                  {lineIndex < all.length - 1 ? '\n' : null}
+                </span>
+              ))}
+            </pre>
+          </div>
+        )}
+
+        {/* 底部标签行 */}
+        {node.labelRow.items.length > 0 && (
+          <div className="topic__labels" style={{ height: node.labelRow.height }}>
+            {node.labelRow.items.map((label, index) => (
+              <span
+                key={`l-${index}-${label.text}`}
+                className="topic__label"
+                style={{ width: label.width }}
+                // 过长时标签画的是截断后的文字，hover 用完整原文提示
+                title={label.full ?? label.text}
+              >
+                {label.text}
               </span>
             ))}
-          </pre>
-        </div>
-      )}
-
-      {/* 底部标签行 */}
-      {node.labelRow.items.length > 0 && (
-        <div className="topic__labels" style={{ height: node.labelRow.height }}>
-          {node.labelRow.items.map((label, index) => (
-            <span
-              key={`l-${index}-${label.text}`}
-              className="topic__label"
-              style={{ width: label.width }}
-              // 过长时标签画的是截断后的文字，hover 用完整原文提示
-              title={label.full ?? label.text}
-            >
-              {label.text}
-            </span>
-          ))}
-        </div>
-      )}
-
+          </div>
+        )}
       </div>
 
       {/* 手动拉伸手柄：选中且不在编辑态时出现，拖右下角改尺寸，双击恢复自动尺寸 */}

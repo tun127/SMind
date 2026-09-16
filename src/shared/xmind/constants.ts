@@ -12,21 +12,65 @@ export interface StructureDef {
   /** 布局是否已实现 */
   supported: boolean
   /** 布局方向分组，供布局引擎选择算法 */
-  family: 'mindmap' | 'logic' | 'tree' | 'orgchart' | 'fishbone' | 'timeline' | 'brace' | 'spreadsheet' | 'matrix'
+  family:
+    | 'mindmap'
+    | 'logic'
+    | 'tree'
+    | 'orgchart'
+    | 'fishbone'
+    | 'timeline'
+    | 'brace'
+    | 'spreadsheet'
+    | 'matrix'
 }
 
 export const STRUCTURES: StructureDef[] = [
-  { class: 'org.xmind.ui.map.unbalanced', label: '思维导图（平衡）', supported: true, family: 'mindmap' },
-  { class: 'org.xmind.ui.map.clockwise', label: '思维导图（顺时针）', supported: true, family: 'mindmap' },
+  {
+    class: 'org.xmind.ui.map.unbalanced',
+    label: '思维导图（平衡）',
+    supported: true,
+    family: 'mindmap'
+  },
+  {
+    class: 'org.xmind.ui.map.clockwise',
+    label: '思维导图（顺时针）',
+    supported: true,
+    family: 'mindmap'
+  },
   { class: 'org.xmind.ui.logic.right', label: '逻辑图（向右）', supported: true, family: 'logic' },
   { class: 'org.xmind.ui.logic.left', label: '逻辑图（向左）', supported: true, family: 'logic' },
   { class: 'org.xmind.ui.tree.right', label: '树形图（向右）', supported: true, family: 'tree' },
   { class: 'org.xmind.ui.tree.left', label: '树形图（向左）', supported: true, family: 'tree' },
-  { class: 'org.xmind.ui.org-chart.down', label: '组织架构图（向下）', supported: true, family: 'orgchart' },
-  { class: 'org.xmind.ui.org-chart.up', label: '组织架构图（向上）', supported: true, family: 'orgchart' },
-  { class: 'org.xmind.ui.fishbone.leftHeaded', label: '鱼骨图', supported: true, family: 'fishbone' },
-  { class: 'org.xmind.ui.timeline.horizontal', label: '时间轴（水平）', supported: true, family: 'timeline' },
-  { class: 'org.xmind.ui.timeline.vertical', label: '时间轴（垂直）', supported: true, family: 'timeline' },
+  {
+    class: 'org.xmind.ui.org-chart.down',
+    label: '组织架构图（向下）',
+    supported: true,
+    family: 'orgchart'
+  },
+  {
+    class: 'org.xmind.ui.org-chart.up',
+    label: '组织架构图（向上）',
+    supported: true,
+    family: 'orgchart'
+  },
+  {
+    class: 'org.xmind.ui.fishbone.leftHeaded',
+    label: '鱼骨图',
+    supported: true,
+    family: 'fishbone'
+  },
+  {
+    class: 'org.xmind.ui.timeline.horizontal',
+    label: '时间轴（水平）',
+    supported: true,
+    family: 'timeline'
+  },
+  {
+    class: 'org.xmind.ui.timeline.vertical',
+    label: '时间轴（垂直）',
+    supported: true,
+    family: 'timeline'
+  },
   { class: 'org.xmind.ui.brace.right', label: '括号图', supported: true, family: 'brace' },
   { class: 'org.xmind.ui.spreadsheet', label: '树状表格', supported: true, family: 'spreadsheet' },
   { class: 'org.xmind.ui.matrix', label: '矩阵图', supported: true, family: 'matrix' }
@@ -76,10 +120,10 @@ export const MARKER_LABELS: Record<string, string> = {
   'symbol-exclam': '感叹',
   'arrow-up': '上升',
   'arrow-down': '下降',
-  'people': '人物',
+  people: '人物',
   'light-bulb': '灵感',
-  'crown': '皇冠',
-  'finance': '金钱'
+  crown: '皇冠',
+  finance: '金钱'
 }
 
 /**

@@ -70,7 +70,10 @@ export function imageBoxSize(image: TopicImage | undefined, bounds?: Size): Size
 export function pureFormulaSize(source: string | undefined, fontSize: number): Size {
   const text = (source ?? '').replace(/\\[a-zA-Z]+/g, 'xx').replace(/[{}$&]/g, '')
   const units = Math.max(1, [...text].length)
-  const width = Math.min(FORMULA_MAX_WIDTH, Math.max(FORMULA_MIN_WIDTH, Math.round(units * fontSize * 0.5)))
+  const width = Math.min(
+    FORMULA_MAX_WIDTH,
+    Math.max(FORMULA_MIN_WIDTH, Math.round(units * fontSize * 0.5))
+  )
   const height = Math.round(fontSize * 2.4)
   return { width, height }
 }
@@ -124,7 +127,8 @@ let codeFontSizeBase = CODE_FONT_SIZE
 
 /** 设置代码块基准字号（null = 回到内置默认）；非法值一律忽略 */
 export function setCodeFontSizeBase(size: number | null): void {
-  codeFontSizeBase = size !== null && Number.isFinite(size) && size >= 8 ? Math.round(size) : CODE_FONT_SIZE
+  codeFontSizeBase =
+    size !== null && Number.isFinite(size) && size >= 8 ? Math.round(size) : CODE_FONT_SIZE
 }
 
 /** 当前代码块基准字号（导出绘制 / 测试用） */
@@ -242,7 +246,10 @@ export function codeBoxSize(code: TopicCode | undefined, bounds?: Size): Size {
  * 如果允许把节点框拖得比这更小，代码块就会**溢出到节点框外面**——
  * 用户报的"框比代码块还小"就是这么来的。
  */
-export function codeMinNodeSize(code: TopicCode | undefined, padding: { x: number; y: number }): Size | null {
+export function codeMinNodeSize(
+  code: TopicCode | undefined,
+  padding: { x: number; y: number }
+): Size | null {
   if (!code) return null
   // 用"极小空间"逼出缩放下限下的那套指标
   const floor = codeBlockMetrics(code, { width: 1, height: 1 })

@@ -143,11 +143,21 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
           <button type="button" className="btn" disabled={busy || testing} onClick={onClose}>
             关闭
           </button>
-          <button type="button" className="btn" disabled={busy || testing} onClick={() => void test()}>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || testing}
+            onClick={() => void test()}
+          >
             <Plug size={14} />
             {testing ? '正在测试…' : '测试连接'}
           </button>
-          <button type="button" className="btn btn--primary" disabled={busy || testing} onClick={() => void save()}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={busy || testing}
+            onClick={() => void save()}
+          >
             保存
           </button>
         </>
@@ -195,7 +205,12 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
               激活
             </button>
             {license?.pro && (
-              <button type="button" className="btn" disabled={licenseBusy} onClick={() => void deactivate()}>
+              <button
+                type="button"
+                className="btn"
+                disabled={licenseBusy}
+                onClick={() => void deactivate()}
+              >
                 取消激活
               </button>
             )}
@@ -226,8 +241,8 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
           />
           <span className="ai-field__hint">
             让 AI <strong>直接改画布</strong>时，模型的选择影响很大：优先用支持工具调用的强模型
-            （DeepSeek-V3 系、Qwen3 系、GPT、Claude 等）。上下文太小的模型（8k 级）装不下
-            agent 回合（骨架 + 历史 + 工具往返），会频繁「走一步推一步」。
+            （DeepSeek-V3 系、Qwen3 系、GPT、Claude 等）。上下文太小的模型（8k 级）装不下 agent
+            回合（骨架 + 历史 + 工具往返），会频繁「走一步推一步」。
           </span>
         </div>
 
@@ -257,7 +272,9 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
           />
           <span className="ai-field__value">{temperature.toFixed(1)}</span>
         </div>
-        <span className="ai-field__hint">越低越稳定保守，越高越发散有创意。生成导图建议 0.5–0.8。</span>
+        <span className="ai-field__hint">
+          越低越稳定保守，越高越发散有创意。生成导图建议 0.5–0.8。
+        </span>
 
         {testResult && (
           <div className={testResult.ok ? 'ai-test ai-test--ok' : 'ai-test ai-test--fail'}>

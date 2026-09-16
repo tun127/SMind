@@ -84,7 +84,13 @@ export default function SearchPanel({ onClose, onNotify }: Props): ReactElement 
     <div className="side-panel">
       <div className="side-panel__header">
         <span>搜索 / 筛选 / 统计</span>
-        <button type="button" className="tool-btn" title="关闭" onMouseDown={(e) => e.preventDefault()} onClick={onClose}>
+        <button
+          type="button"
+          className="tool-btn"
+          title="关闭"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onClose}
+        >
           <X size={16} />
         </button>
       </div>
@@ -152,7 +158,9 @@ export default function SearchPanel({ onClose, onNotify }: Props): ReactElement 
             {hits.map((hit) => (
               <div
                 key={`${hit.topicId}-${hit.field}`}
-                className={hit.topicId === selectedId ? 'search-hit search-hit--active' : 'search-hit'}
+                className={
+                  hit.topicId === selectedId ? 'search-hit search-hit--active' : 'search-hit'
+                }
               >
                 <button
                   type="button"
@@ -268,7 +276,12 @@ export default function SearchPanel({ onClose, onNotify }: Props): ReactElement 
 
         {(filter.markers.length > 0 || filter.labels.length > 0) && (
           <div className="side-panel__row">
-            <button type="button" className="btn" onMouseDown={(e) => e.preventDefault()} onClick={clearFilter}>
+            <button
+              type="button"
+              className="btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={clearFilter}
+            >
               <X size={14} />
               清除筛选
             </button>

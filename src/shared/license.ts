@@ -119,8 +119,16 @@ export function normalizeLicensePayload(raw: unknown): LicensePayload | null {
   if (typeof record.holder !== 'string' || record.holder.trim().length === 0) return null
   if (typeof record.issuedAt !== 'string' || record.issuedAt.trim().length === 0) return null
   const order =
-    typeof record.order === 'string' && record.order.trim().length > 0 ? record.order.trim() : undefined
-  return { v: 1, edition: 'pro', holder: record.holder.trim(), issuedAt: record.issuedAt.trim(), order }
+    typeof record.order === 'string' && record.order.trim().length > 0
+      ? record.order.trim()
+      : undefined
+  return {
+    v: 1,
+    edition: 'pro',
+    holder: record.holder.trim(),
+    issuedAt: record.issuedAt.trim(),
+    order
+  }
 }
 
 /**
@@ -140,7 +148,8 @@ export function decodeLicenseKey(raw: string): LicenseDecodeResult {
   if (!payloadSegment || !signature) return { ok: false, error: '许可码不完整（缺少内容或签名）' }
 
   const payloadText = base64UrlToText(payloadSegment)
-  if (payloadText === null) return { ok: false, error: '许可码的内容读不出来（复制时可能缺了字符）' }
+  if (payloadText === null)
+    return { ok: false, error: '许可码的内容读不出来（复制时可能缺了字符）' }
 
   let parsed: unknown
   try {
@@ -177,7 +186,10 @@ export function bumpTrialUsed(used: number): number {
  * 只读工具（看结构）不计数：免费用户随便问、随便看，这是产品的门面，
  * 也是让用户自己产生「让它直接改」这个念头的地方。
  */
-export function hasWriteToolCall(names: readonly string[], writeToolNames: readonly string[]): boolean {
+export function hasWriteToolCall(
+  names: readonly string[],
+  writeToolNames: readonly string[]
+): boolean {
   return names.some((name) => writeToolNames.includes(name))
 }
 

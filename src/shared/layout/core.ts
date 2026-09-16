@@ -325,7 +325,14 @@ export class LayoutBuilder {
 /* 连线与装饰的收集                                                    */
 /* ------------------------------------------------------------------ */
 
-export function addEdge(result: LayoutResult, fromId: string, toId: string, from: Point, to: Point, kind: ConnectorKind): void {
+export function addEdge(
+  result: LayoutResult,
+  fromId: string,
+  toId: string,
+  from: Point,
+  to: Point,
+  kind: ConnectorKind
+): void {
   const edge: EdgeLayout = { fromId, toId, d: pathFor(kind, from, to) }
   result.edges.push(edge)
 }
@@ -356,7 +363,14 @@ export function connectTree(
         continue
       }
       const anchors = anchorOf(parent, childNode)
-      addEdge(result, parent.id, childNode.id, anchorPoint(parent, anchors.from), anchorPoint(childNode, anchors.to), kind)
+      addEdge(
+        result,
+        parent.id,
+        childNode.id,
+        anchorPoint(parent, anchors.from),
+        anchorPoint(childNode, anchors.to),
+        kind
+      )
       walk(child)
     }
   }
@@ -364,12 +378,18 @@ export function connectTree(
 }
 
 /** 水平方向堆叠时的默认锚点：父的右/左边 -> 子的左/右边 */
-export function horizontalAnchors(_parent: NodeLayout, child: NodeLayout): { from: Anchor; to: Anchor } {
+export function horizontalAnchors(
+  _parent: NodeLayout,
+  child: NodeLayout
+): { from: Anchor; to: Anchor } {
   return child.side === 'left' ? { from: 'left', to: 'right' } : { from: 'right', to: 'left' }
 }
 
 /** 垂直方向堆叠时的默认锚点：父的下/上边 -> 子的上/下边 */
-export function verticalAnchors(parent: NodeLayout, child: NodeLayout): { from: Anchor; to: Anchor } {
+export function verticalAnchors(
+  parent: NodeLayout,
+  child: NodeLayout
+): { from: Anchor; to: Anchor } {
   return child.y + child.height / 2 < parent.y + parent.height / 2
     ? { from: 'top', to: 'bottom' }
     : { from: 'bottom', to: 'top' }

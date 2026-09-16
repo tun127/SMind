@@ -40,7 +40,8 @@ function fromCodePoint(code: number): string {
 /** 解码 XML 实体（&amp; / &#65; / &#x41; …） */
 export function decodeEntities(input: string): string {
   return input.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
-    if (body.startsWith('#x') || body.startsWith('#X')) return fromCodePoint(parseInt(body.slice(2), 16)) || whole
+    if (body.startsWith('#x') || body.startsWith('#X'))
+      return fromCodePoint(parseInt(body.slice(2), 16)) || whole
     if (body.startsWith('#')) return fromCodePoint(parseInt(body.slice(1), 10)) || whole
     return NAMED_ENTITIES[body] ?? whole
   })

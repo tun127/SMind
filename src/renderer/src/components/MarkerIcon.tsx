@@ -100,28 +100,56 @@ function ProgressBadge({
   }
 
   return (
-    <svg className="marker-progress" width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img">
+    <svg
+      className="marker-progress"
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      role="img"
+    >
       <title>{label}</title>
-      <circle cx={center} cy={center} r={radius} fill="none" stroke={color} strokeWidth={1.5} opacity={0.45} />
+      <circle
+        cx={center}
+        cy={center}
+        r={radius}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        opacity={0.45}
+      />
       {filled ? <path d={filled} fill={color} /> : null}
     </svg>
   )
 }
 
 /** 标记图标 */
-export default function MarkerIcon({ markerId, size = 16 }: { markerId: string; size?: number }): ReactElement {
+export default function MarkerIcon({
+  markerId,
+  size = 16
+}: {
+  markerId: string
+  size?: number
+}): ReactElement {
   const visual = markerVisualOf(markerId)
 
   if (visual.kind === 'priority') {
-    return <PriorityBadge text={visual.text} color={visual.color} label={visual.label} size={size} />
+    return (
+      <PriorityBadge text={visual.text} color={visual.color} label={visual.label} size={size} />
+    )
   }
   if (visual.kind === 'progress') {
-    return <ProgressBadge ratio={visual.ratio} color={visual.color} label={visual.label} size={size} />
+    return (
+      <ProgressBadge ratio={visual.ratio} color={visual.color} label={visual.label} size={size} />
+    )
   }
 
   const Icon = GLYPH_ICONS[visual.glyph]
   return (
-    <span className="marker-icon" title={visual.label} style={{ color: visual.color, width: size, height: size }}>
+    <span
+      className="marker-icon"
+      title={visual.label}
+      style={{ color: visual.color, width: size, height: size }}
+    >
       <Icon size={size} strokeWidth={2.2} />
     </span>
   )
@@ -155,7 +183,11 @@ export function IndicatorIcon({
   const Icon = INDICATOR_ICONS[kind]
   if (!Icon) return null
   return (
-    <span className="topic__indicator" title={INDICATOR_TITLES[kind]} style={{ width: size, height: size }}>
+    <span
+      className="topic__indicator"
+      title={INDICATOR_TITLES[kind]}
+      style={{ width: size, height: size }}
+    >
       <Icon size={size} strokeWidth={2} />
     </span>
   )

@@ -90,7 +90,10 @@ const ENTITIES: Record<string, string> = {
 
 function decodeEntity(name: string): string {
   if (name.startsWith('#')) {
-    const code = name[1] === 'x' || name[1] === 'X' ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10)
+    const code =
+      name[1] === 'x' || name[1] === 'X'
+        ? Number.parseInt(name.slice(2), 16)
+        : Number.parseInt(name.slice(1), 10)
     return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : `&${name};`
   }
   return ENTITIES[name.toLowerCase()] ?? `&${name};`
@@ -330,7 +333,12 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
     while (runs.length > 0 && (runs[0]?.text.trim().length ?? 0) === 0) runs.shift()
     while (runs.length > 0 && (runs[runs.length - 1]?.text.trim().length ?? 0) === 0) runs.pop()
   }
-  return { runs, text: trimmed, href, usedFootnotes: usedFootnotes.length > 0 ? usedFootnotes : undefined }
+  return {
+    runs,
+    text: trimmed,
+    href,
+    usedFootnotes: usedFootnotes.length > 0 ? usedFootnotes : undefined
+  }
 }
 
 interface EmphasisMatch {
@@ -387,7 +395,14 @@ export function inlineRunsToRich(runs: InlineRun[]): RichText | undefined {
     }))
   if (mapped.length === 0) return undefined
   const hasFormat = mapped.some(
-    (run) => run.bold || run.italic || run.strike || run.underline || run.highlight || run.script || run.fontFamily
+    (run) =>
+      run.bold ||
+      run.italic ||
+      run.strike ||
+      run.underline ||
+      run.highlight ||
+      run.script ||
+      run.fontFamily
   )
   if (!hasFormat) return undefined
   return { paragraphs: [{ runs: mapped }] }
@@ -486,7 +501,10 @@ export function looksLikeMarkdown(text: string): boolean {
  * 收集 `[^脚注]: 说明` 与 `[链接名]: url` 这两类**定义行**。
  * 它们不是内容，主扫描里要跳过；但行内解析需要它们做查表。
  */
-function collectDefinitions(source: string): { footnotes: Map<string, string>; linkRefs: Map<string, string> } {
+function collectDefinitions(source: string): {
+  footnotes: Map<string, string>
+  linkRefs: Map<string, string>
+} {
   const footnotes = new Map<string, string>()
   const linkRefs = new Map<string, string>()
   for (const line of source.split(/\r?\n/)) {

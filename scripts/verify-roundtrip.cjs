@@ -59,10 +59,15 @@ async function main() {
     if (!ok) failed += 1
 
     const summary = parsed.workbook.sheets
-      .map((s) => `${s.title}[结构=${s.rootTopic.structureClass ?? '默认'},关系=${s.relationships.length},边界=${s.boundaries.length},概要=${s.summaries.length}]`)
+      .map(
+        (s) =>
+          `${s.title}[结构=${s.rootTopic.structureClass ?? '默认'},关系=${s.relationships.length},边界=${s.boundaries.length},概要=${s.summaries.length}]`
+      )
       .join(' ')
 
-    console.log(`${ok ? '通过' : '失败'}  ${file}  画布数=${parsed.workbook.sheets.length}  ${summary}`)
+    console.log(
+      `${ok ? '通过' : '失败'}  ${file}  画布数=${parsed.workbook.sheets.length}  ${summary}`
+    )
     if (!ok) {
       console.log('  往返前：\n' + before)
       console.log('  往返后：\n' + after)

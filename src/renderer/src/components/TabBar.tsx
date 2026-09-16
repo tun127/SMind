@@ -28,7 +28,10 @@ export default function TabBar({ onNewTab, onCloseTab }: Props): ReactElement {
   const liveFilePath = useEditor((s) => s.filePath)
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false })
+  const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({
+    left: false,
+    right: false
+  })
   const dragIdRef = useRef<string | null>(null)
 
   const updateScrollState = useCallback((): void => {
@@ -73,7 +76,9 @@ export default function TabBar({ onNewTab, onCloseTab }: Props): ReactElement {
         {tabs.map((tab, index) => {
           const active = tab.id === activeId
           const dirty = active ? liveDirty : tab.dirty
-          const title = active ? tabTitleOf({ filePath: liveFilePath, workbook: liveWorkbook }) : tabTitleOf(tab)
+          const title = active
+            ? tabTitleOf({ filePath: liveFilePath, workbook: liveWorkbook })
+            : tabTitleOf(tab)
           return (
             <div
               key={tab.id}

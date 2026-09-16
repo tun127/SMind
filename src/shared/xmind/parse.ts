@@ -192,7 +192,9 @@ function parseTopic(raw: unknown): Topic | null {
   // 本软件自己的扩展字段已经在上面还原成 titleRich / formula / code，
   // 这里必须把它们剔除，否则「打开→另存」会凭空多出一份重复数据。
   if (Array.isArray(raw.extensions)) {
-    const external = raw.extensions.filter((ext) => !(isRecord(ext) && ext.provider === OUR_PROVIDER))
+    const external = raw.extensions.filter(
+      (ext) => !(isRecord(ext) && ext.provider === OUR_PROVIDER)
+    )
     if (external.length > 0) topic.extensions = external
   }
 
@@ -446,7 +448,10 @@ async function parseEmmxPackage(
 }
 
 /** 读取 Xmind 8 旧版（content.xml） */
-async function parseLegacyPackage(zip: JSZip, contentFile: JSZip.JSZipObject): Promise<ParseResult> {
+async function parseLegacyPackage(
+  zip: JSZip,
+  contentFile: JSZip.JSZipObject
+): Promise<ParseResult> {
   let text: string
   try {
     text = await contentFile.async('string')

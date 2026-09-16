@@ -291,7 +291,15 @@ function placeSpreadsheetChildren(
       placeSubtree(builder, child, childX, childY, depth + 1, 'down', inherited)
     } else {
       builder.add(child, childX, childY, depth + 1, 'down')
-      placeVerticalColumn(builder, child, childX, childY, 1, depth + 1, Math.max(18, builder.gapX * 0.5))
+      placeVerticalColumn(
+        builder,
+        child,
+        childX,
+        childY,
+        1,
+        depth + 1,
+        Math.max(18, builder.gapX * 0.5)
+      )
     }
     cursor += extent + builder.gapX
   }

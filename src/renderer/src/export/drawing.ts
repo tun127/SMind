@@ -163,15 +163,7 @@ export interface GlyphOp {
 }
 
 export type DrawOp =
-  | RectOp
-  | PathOp
-  | TextOp
-  | LineTextOp
-  | ImageOp
-  | FormulaOp
-  | BadgeOp
-  | PieOp
-  | GlyphOp
+  RectOp | PathOp | TextOp | LineTextOp | ImageOp | FormulaOp | BadgeOp | PieOp | GlyphOp
 
 export interface Drawing {
   width: number
@@ -227,7 +219,9 @@ function arrowPath(x: number, y: number, angle: number): string {
     [-10, -4],
     [-10, 4]
   ]
-  const mapped = points.map(([px, py]) => [x + px * cos - py * sin, y + px * sin + py * cos] as const)
+  const mapped = points.map(
+    ([px, py]) => [x + px * cos - py * sin, y + px * sin + py * cos] as const
+  )
   const [a, b, c] = mapped
   if (!a || !b || !c) return ''
   return `M ${a[0].toFixed(2)} ${a[1].toFixed(2)} L ${b[0].toFixed(2)} ${b[1].toFixed(2)} L ${c[0].toFixed(2)} ${c[1].toFixed(2)} Z`
@@ -329,12 +323,12 @@ function nodeOps(
 
       // 行内公式（标题里的 $…$）在导出里以源码文本斜体呈现：
       // 导出后端只画文字/图形，塞不进 KaTeX 的 HTML；画布上仍是渲染后的公式
-      const segments: Array<StyledSegment & { text: string; x?: number; width?: number }> = line.segments.map(
-        (segment) =>
+      const segments: Array<StyledSegment & { text: string; x?: number; width?: number }> =
+        line.segments.map((segment) =>
           segment.formula
             ? { ...segment, text: segment.formula, formula: undefined, italic: true }
             : { ...segment }
-      )
+        )
 
       // 逐段算绝对位置：高亮底色要按段画矩形，位置必须和文字严格对齐
       const widths = segments.map((segment) =>
@@ -346,7 +340,12 @@ function nodeOps(
         })
       )
       const total = widths.reduce((sum, width) => sum + width, 0)
-      let cursorX = line.align === 'center' ? anchorX - total / 2 : line.align === 'right' ? anchorX - total : anchorX
+      let cursorX =
+        line.align === 'center'
+          ? anchorX - total / 2
+          : line.align === 'right'
+            ? anchorX - total
+            : anchorX
       segments.forEach((segment, index) => {
         const width = widths[index] ?? 0
         segment.x = cursorX
@@ -369,7 +368,15 @@ function nodeOps(
         })
       }
 
-      ops.push({ kind: 'lineText', x: anchorX, y: cursorY, align: line.align, baseline, segments, color: visual.color })
+      ops.push({
+        kind: 'lineText',
+        x: anchorX,
+        y: cursorY,
+        align: line.align,
+        baseline,
+        segments,
+        color: visual.color
+      })
     }
     cursorY += line.height
   }
@@ -377,7 +384,7 @@ function nodeOps(
   // 图片/公式的显示框优先用布局测量结果；个别测量实现没给时自己算一份，
   // 免得导出时整块内容凭空消失（与 TopicNode 的兜底逻辑保持一致）
   const imageBox = topic.image
-    ? node.imageBox ?? imageBoxSize(topic.image)
+    ? (node.imageBox ?? imageBoxSize(topic.image))
     : { width: 0, height: 0 }
   if (topic.image && imageBox.height > 0) {
     cursorY += BLOCK_GAP
@@ -401,7 +408,7 @@ function nodeOps(
   }
 
   const formulaBox = topic.formula
-    ? node.formulaBox ?? formulaSize(topic.formula, node.fontSize)
+    ? (node.formulaBox ?? formulaSize(topic.formula, node.fontSize))
     : { width: 0, height: 0 }
   if (topic.formula && formulaBox.height > 0) {
     cursorY += BLOCK_GAP
@@ -422,8 +429,10 @@ function nodeOps(
 
   // 代码块：底色圆角框 + 等宽文本逐行、逐 token 上色画。
   // 指标（字号/行高/内边距/缩放）与画布共用同一份，节点被拉伸时一起等比缩放。
-  const codeMetrics = topic.code ? node.codeMetrics ?? codeBlockMetrics(topic.code) : null
-  const codeBox = codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : { width: 0, height: 0 }
+  const codeMetrics = topic.code ? (node.codeMetrics ?? codeBlockMetrics(topic.code)) : null
+  const codeBox = codeMetrics
+    ? { width: codeMetrics.width, height: codeMetrics.height }
+    : { width: 0, height: 0 }
   if (topic.code && codeMetrics && codeBox.height > 0) {
     cursorY += BLOCK_GAP
     const x = node.x + (node.width - codeBox.width) / 2
@@ -524,7 +533,9 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
       ops.push({
         kind: 'path',
         d: decoration.d,
-        stroke: decoration.branchId ? branchColorOf(colors, layout, decoration.branchId) : colors.deepText,
+        stroke: decoration.branchId
+          ? branchColorOf(colors, layout, decoration.branchId)
+          : colors.deepText,
         strokeWidth: colors.edgeWidth * (decoration.widthScale ?? 1),
         opacity: decoration.dashed ? 0.5 : colors.edgeOpacity,
         dash: decoration.dashed ? '6 5' : undefined
@@ -533,7 +544,9 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
 
     // 3. 边界：填充 + 描边
     for (const boundary of layout.boundaries) {
-      const color = boundary.branchId ? branchColorOf(colors, layout, boundary.branchId) : colors.deepText
+      const color = boundary.branchId
+        ? branchColorOf(colors, layout, boundary.branchId)
+        : colors.deepText
       ops.push({
         kind: 'path',
         d: boundary.d,
@@ -562,7 +575,9 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
 
     // 4. 概要：大括号 + 文字（文字描一圈画布底色，压到别的内容上也读得清）
     for (const summary of layout.summaries) {
-      const color = summary.branchId ? branchColorOf(colors, layout, summary.branchId) : colors.deepText
+      const color = summary.branchId
+        ? branchColorOf(colors, layout, summary.branchId)
+        : colors.deepText
       ops.push({
         kind: 'path',
         d: summary.d,

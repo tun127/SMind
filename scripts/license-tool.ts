@@ -65,7 +65,9 @@ function issue(): void {
     return
   }
   if (!existsSync(PRIVATE_KEY_PATH)) {
-    console.error(`找不到私钥：${PRIVATE_KEY_PATH}\n请先跑 npm run license:keygen，或设置 SMIND_KEY_DIR`)
+    console.error(
+      `找不到私钥：${PRIVATE_KEY_PATH}\n请先跑 npm run license:keygen，或设置 SMIND_KEY_DIR`
+    )
     process.exitCode = 1
     return
   }
@@ -80,7 +82,11 @@ function issue(): void {
 
   // 签名覆盖 payload 段的字节本身：客户端验签用的就是同一串，不存在序列化差异
   const segment = licensePayloadSegment(payload)
-  const signature = sign(null, Buffer.from(segment, 'utf8'), createPrivateKey(readFileSync(PRIVATE_KEY_PATH)))
+  const signature = sign(
+    null,
+    Buffer.from(segment, 'utf8'),
+    createPrivateKey(readFileSync(PRIVATE_KEY_PATH))
+  )
   const key = encodeLicenseKey(payload, bytesToBase64Url(signature))
 
   console.log(`持有人：${payload.holder}`)
@@ -116,7 +122,11 @@ function selftest(): void {
     issuedAt: new Date().toISOString().slice(0, 10)
   }
   const segment = licensePayloadSegment(payload)
-  const signature = sign(null, Buffer.from(segment, 'utf8'), createPrivateKey(readFileSync(PRIVATE_KEY_PATH)))
+  const signature = sign(
+    null,
+    Buffer.from(segment, 'utf8'),
+    createPrivateKey(readFileSync(PRIVATE_KEY_PATH))
+  )
   const key = encodeLicenseKey(payload, bytesToBase64Url(signature))
 
   const decoded = decodeLicenseKey(key)

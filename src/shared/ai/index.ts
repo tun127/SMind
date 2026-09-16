@@ -48,7 +48,11 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
 export const AI_PRESETS: Array<{ label: string; baseUrl: string; model: string }> = [
   { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  { label: '通义千问（兼容模式）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  {
+    label: '通义千问（兼容模式）',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus'
+  },
   { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
   { label: 'Kimi（月之暗面）', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
   { label: '本地 Ollama', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b' }
@@ -67,10 +71,16 @@ export function normalizeAiConfig(raw: unknown): { config: AiConfig; warnings: s
     baseUrl = DEFAULT_AI_CONFIG.baseUrl
   }
 
-  const model = typeof source.model === 'string' && source.model.trim().length > 0 ? source.model.trim() : DEFAULT_AI_CONFIG.model
+  const model =
+    typeof source.model === 'string' && source.model.trim().length > 0
+      ? source.model.trim()
+      : DEFAULT_AI_CONFIG.model
   const apiKey = typeof source.apiKey === 'string' ? source.apiKey.trim() : ''
 
-  let temperature = typeof source.temperature === 'number' && Number.isFinite(source.temperature) ? source.temperature : DEFAULT_AI_CONFIG.temperature
+  let temperature =
+    typeof source.temperature === 'number' && Number.isFinite(source.temperature)
+      ? source.temperature
+      : DEFAULT_AI_CONFIG.temperature
   if (temperature < 0) temperature = 0
   if (temperature > 2) temperature = 2
 
@@ -80,7 +90,8 @@ export function normalizeAiConfig(raw: unknown): { config: AiConfig; warnings: s
 /** 把配置转成界面上要展示的形态（Key 只给掩码） */
 export function toConfigView(config: AiConfig): AiConfigView {
   const key = config.apiKey
-  const preview = key.length === 0 ? null : key.length <= 8 ? '****' : `${key.slice(0, 3)}…${key.slice(-4)}`
+  const preview =
+    key.length === 0 ? null : key.length <= 8 ? '****' : `${key.slice(0, 3)}…${key.slice(-4)}`
   return {
     baseUrl: config.baseUrl,
     model: config.model,
@@ -175,7 +186,9 @@ export function buildExpandMessages(input: {
     lines.push(`已有的子主题（不要重复）：${input.existing.join('、')}`)
   }
   lines.push(`任务：为「${input.title}」补 ${count} 个新的子主题。`)
-  lines.push('要求：每个子主题一行，以「- 」开头且**不要缩进**，简体中文，每个不超过 12 字，只输出这些行。')
+  lines.push(
+    '要求：每个子主题一行，以「- 」开头且**不要缩进**，简体中文，每个不超过 12 字，只输出这些行。'
+  )
 
   return [
     { role: 'system', content: OUTLINE_SYSTEM },
@@ -185,7 +198,8 @@ export function buildExpandMessages(input: {
 
 /** 文案润色（只改这一句标题）的提示词 */
 export function buildPolishMessages(input: { title: string; style?: string }): AiMessage[] {
-  const style = input.style && input.style.trim().length > 0 ? input.style.trim() : '简洁、专业、通顺'
+  const style =
+    input.style && input.style.trim().length > 0 ? input.style.trim() : '简洁、专业、通顺'
   return [
     {
       role: 'system',
@@ -249,7 +263,9 @@ export function stripCodeFence(text: string): string {
 }
 
 /** 一行的解析结果：层级深度 + 文字 + 是否有列表标记；不是大纲行则返回 null */
-export function parseOutlineLine(line: string): { depth: number; text: string; marked: boolean } | null {
+export function parseOutlineLine(
+  line: string
+): { depth: number; text: string; marked: boolean } | null {
   if (line.trim().length === 0) return null
 
   // 制表符按两个空格算，缩进按两格一级
@@ -349,7 +365,9 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
     // 模型给了并列的多个顶层节点：套一个根节点，别让它们散着
     root = { title: fallbackRootTitle, children: roots }
     wrapped = true
-    warnings.push(`模型返回了 ${roots.length} 个并列的顶层节点，已统一挂到「${fallbackRootTitle}」下`)
+    warnings.push(
+      `模型返回了 ${roots.length} 个并列的顶层节点，已统一挂到「${fallbackRootTitle}」下`
+    )
   }
 
   const count = countOutlineNodes(root)
@@ -378,7 +396,6 @@ export function outlineToTopic(node: OutlineNode, structureClass?: string): Topi
   return topic
 }
 
-
 /** 解析「一行一个」的列表（扩写结果那种） */
 export function parseFlatList(text: string): string[] {
   const body = stripCodeFence(text ?? '')
@@ -397,7 +414,11 @@ export function parseFlatList(text: string): string[] {
  * 只保留第一行，去掉包裹的引号与「1. 」这类前缀。
  */
 export function cleanPolishedTitle(raw: string): string {
-  const firstLine = (raw ?? '').split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0) ?? ''
+  const firstLine =
+    (raw ?? '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? ''
   let text = firstLine
   text = text.replace(/^\d+[.)、]\s*/, '')
   text = text.replace(/^[-*+•]\s+/, '')
@@ -410,7 +431,11 @@ export function cleanPolishedTitle(raw: string): string {
       ['《', '》']
     ]
     for (const [open, close] of pairs) {
-      if (text.startsWith(open) && text.endsWith(close) && text.length > open.length + close.length) {
+      if (
+        text.startsWith(open) &&
+        text.endsWith(close) &&
+        text.length > open.length + close.length
+      ) {
         text = text.slice(open.length, text.length - close.length)
         break
       }
@@ -429,7 +454,10 @@ export function extractContent(payload: unknown): string {
   const choices = payload.choices
   if (!Array.isArray(choices) || choices.length === 0) {
     // 有些实现把错误塞在 body 里
-    const message = isRecord(payload.error) && typeof payload.error.message === 'string' ? payload.error.message : null
+    const message =
+      isRecord(payload.error) && typeof payload.error.message === 'string'
+        ? payload.error.message
+        : null
     throw new Error(message ? `AI 返回错误：${message}` : 'AI 没有返回任何结果（choices 为空）')
   }
 
@@ -648,7 +676,9 @@ export function normalizeChatHistory(raw: unknown): ChatHistoryEntry[] {
     if (role !== 'user' && role !== 'assistant') continue
     if (typeof item.content !== 'string' || item.content.trim().length === 0) continue
     const content =
-      item.content.length > CHAT_ENTRY_MAX_LENGTH ? item.content.slice(0, CHAT_ENTRY_MAX_LENGTH) : item.content
+      item.content.length > CHAT_ENTRY_MAX_LENGTH
+        ? item.content.slice(0, CHAT_ENTRY_MAX_LENGTH)
+        : item.content
     out.push({ role, content, aborted: item.aborted === true ? true : undefined })
   }
   // 只留最近的一批：长对话的下文比上文有用
@@ -802,7 +832,8 @@ export function extractStreamDelta(dataLine: string): StreamDelta | null {
     return usage ? { text: '', model, toolCalls: [], finishReason: null, usage } : null
   }
   const first = choices[0]
-  if (!isRecord(first)) return usage ? { text: '', model, toolCalls: [], finishReason: null, usage } : null
+  if (!isRecord(first))
+    return usage ? { text: '', model, toolCalls: [], finishReason: null, usage } : null
   const finishReason = typeof first.finish_reason === 'string' ? first.finish_reason : null
   const delta = first.delta
   const toolCalls = isRecord(delta) ? readToolCallDeltas(delta.tool_calls) : []

@@ -17,11 +17,7 @@ import { useTabs } from '../src/renderer/src/store/tabs'
 import { withAlpha } from '../src/renderer/src/render/theme'
 import { defaultTextAlignOf, setDefaultTextAlign } from '../src/renderer/src/render/defaults'
 import { pickDocumentArg } from '../src/shared/openfile'
-import {
-  clearTypedChar,
-  stageTypedChar,
-  takeTypedChar
-} from '../src/renderer/src/editor/typedChar'
+import { clearTypedChar, stageTypedChar, takeTypedChar } from '../src/renderer/src/editor/typedChar'
 import {
   BUILTIN_THEMES,
   DEFAULT_THEME,
@@ -29,7 +25,16 @@ import {
   normalizeThemeColors,
   normalizeThemeDefinition
 } from '../src/shared/theme'
-import { activeRoot, activeSheet, countCharacters, countDescendants, countTopics, findParent, findTopic, subtreeIds } from '../src/shared/model/tree'
+import {
+  activeRoot,
+  activeSheet,
+  countCharacters,
+  countDescendants,
+  countTopics,
+  findParent,
+  findTopic,
+  subtreeIds
+} from '../src/shared/model/tree'
 import { createSheet, createTopic, createWorkbook } from '../src/shared/model/factory'
 import { coerceCode, coerceRichText } from '../src/shared/model/coerce'
 import { checkImagePayload, isPlausibleFilePath, MAX_IMAGE_BYTES } from '../src/shared/ipc-args'
@@ -171,13 +176,21 @@ import {
   parseOutline,
   toConfigView
 } from '../src/shared/ai'
-import { looksLikeMarkdown, parseInlineMarkdown, parseMarkdownOutline } from '../src/shared/import/markdown'
+import {
+  looksLikeMarkdown,
+  parseInlineMarkdown,
+  parseMarkdownOutline
+} from '../src/shared/import/markdown'
 import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../src/shared/formula'
 import { estimateOverlayLabelSize, overlayTitleLines } from '../src/shared/layout/overlays'
 import { LABEL_ELLIPSIS, fitLabelText } from '../src/shared/layout/label-fit'
 import { CODE_TOKEN_COLORS, highlightCode } from '../src/shared/code/highlight'
 import { autosaveSlotName, findWindowForPath, sameDocPath } from '../src/shared/window'
-import { readOverlayFontSize, readOverlayTextStyle, withOverlayTextStyle } from '../src/shared/model/overlay-style'
+import {
+  readOverlayFontSize,
+  readOverlayTextStyle,
+  withOverlayTextStyle
+} from '../src/shared/model/overlay-style'
 import { parseOpmlOutline } from '../src/shared/import/opml'
 import { defaultDocumentName, defaultFileName, sanitizeFileName } from '../src/shared/model/naming'
 import {
@@ -347,9 +360,17 @@ function testInit(): void {
   check('只有一个画布', state.workbook.sheets.length === 1)
   check('根主题标题正确', root().title === '中心主题', root().title)
   check('根主题默认带 2 个分支', root().children.length === 2, String(root().children.length))
-  check('默认结构为逻辑图（向右）', root().structureClass === 'org.xmind.ui.logic.right', String(root().structureClass))
+  check(
+    '默认结构为逻辑图（向右）',
+    root().structureClass === 'org.xmind.ui.logic.right',
+    String(root().structureClass)
+  )
   // 「新建导图 / 新建画布 / 新增画布」走的是同一套工厂函数，默认结构必须处处一致
-  eq('新建工作簿也用默认结构', createWorkbook().sheets[0].rootTopic.structureClass, DEFAULT_STRUCTURE)
+  eq(
+    '新建工作簿也用默认结构',
+    createWorkbook().sheets[0].rootTopic.structureClass,
+    DEFAULT_STRUCTURE
+  )
   eq('新建画布也用默认结构', createSheet('画布 2').rootTopic.structureClass, DEFAULT_STRUCTURE)
   check('初始不脏', state.dirty === false)
   check('初始无历史', state.undoStack.length === 0 && state.redoStack.length === 0)
@@ -386,7 +407,11 @@ function testAddAndCommit(): void {
   const emptyId = store().addChild(rootId)
   const historyBefore = store().undoStack.length
   store().commitEdit(emptyId)
-  check('空标题提交不产生历史', store().undoStack.length === historyBefore, String(store().undoStack.length - historyBefore))
+  check(
+    '空标题提交不产生历史',
+    store().undoStack.length === historyBefore,
+    String(store().undoStack.length - historyBefore)
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -433,7 +458,11 @@ function testCommitAndAdd(): void {
   // 交互之后必须重新取父节点：immer 会产生新树，旧引用只是历史快照
   const parent = findParent(root(), a)!
   const ai = parent.children.findIndex((c) => c.id === a)
-  check('同级：新节点紧跟其后', parent.children.length === ai + 2, `index=${ai} len=${parent.children.length}`)
+  check(
+    '同级：新节点紧跟其后',
+    parent.children.length === ai + 2,
+    `index=${ai} len=${parent.children.length}`
+  )
   const sibling = parent.children[ai + 1]
   check('同级：新节点是新 id', sibling.id !== a)
   check('同级：新节点进入编辑态', store().editingId === sibling.id)
@@ -452,7 +481,11 @@ function testCommitAndAdd(): void {
   store().updateEditingText('中心主题')
   const before = root().children.length
   store().commitAndAddSibling()
-  check('根主题上 Enter 新建的是子主题', root().children.length === before + 1, String(root().children.length))
+  check(
+    '根主题上 Enter 新建的是子主题',
+    root().children.length === before + 1,
+    String(root().children.length)
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -496,7 +529,11 @@ function testUndoRedo(): void {
     normalize(store().workbook) === baseline,
     normalize(store().workbook).slice(0, 160)
   )
-  check('撤销后重做栈有内容', store().redoStack.length === historyDepth, String(store().redoStack.length))
+  check(
+    '撤销后重做栈有内容',
+    store().redoStack.length === historyDepth,
+    String(store().redoStack.length)
+  )
 
   // 全部重做
   for (let i = 0; i < historyDepth; i += 1) store().redo()
@@ -534,12 +571,21 @@ function testDelete(): void {
   store().deleteSelection()
 
   check('被删节点已移除', find(target) === null)
-  check('整棵子树一起移除', countTopics(root()) === totalBefore - 3, `${countTopics(root())} vs ${totalBefore - 3}`)
+  check(
+    '整棵子树一起移除',
+    countTopics(root()) === totalBefore - 3,
+    `${countTopics(root())} vs ${totalBefore - 3}`
+  )
 
   store().undo()
   check('撤销后被删节点回来', find(target) !== null)
   check('子树完整恢复', countTopics(root()) === totalBefore, String(countTopics(root())))
-  check('子节点顺序保持', find(target)?.children.map((c) => c.title).join(',') === '子 1,子 2')
+  check(
+    '子节点顺序保持',
+    find(target)
+      ?.children.map((c) => c.title)
+      .join(',') === '子 1,子 2'
+  )
 
   // 根主题不可删
   store().select(rootId)
@@ -571,10 +617,13 @@ function testDelete(): void {
     store().selection.length === 1 && find(store().selection[0]) !== null,
     JSON.stringify(store().selection)
   )
-  check('删完之后方向键仍然可用（← 能回到父级）', (() => {
-    store().navigateSelection('ArrowLeft')
-    return store().selection[0] === dRoot.id
-  })())
+  check(
+    '删完之后方向键仍然可用（← 能回到父级）',
+    (() => {
+      store().navigateSelection('ArrowLeft')
+      return store().selection[0] === dRoot.id
+    })()
+  )
 
   group('方向键导航：选择失效时兜底回到根，键盘不会"死掉"')
 
@@ -586,11 +635,14 @@ function testDelete(): void {
   // 根的子节点实际是 [分支主题 1, 分支主题 2, 一, 二]
   const kids = (): string[] => (find(nRoot.id)?.children ?? []).map((c) => c.id)
 
-  check('选择指向不存在的主题时会先收回根', (() => {
-    store().select('不存在的-id')
-    store().navigateSelection('ArrowDown')
-    return store().selection[0] === nRoot.id
-  })())
+  check(
+    '选择指向不存在的主题时会先收回根',
+    (() => {
+      store().select('不存在的-id')
+      store().navigateSelection('ArrowDown')
+      return store().selection[0] === nRoot.id
+    })()
+  )
 
   store().select(nRoot.id)
   store().navigateSelection('ArrowRight')
@@ -661,7 +713,9 @@ function testNodeDrag(): void {
   // 否则断言会被默认内容干扰
   const mine = new Set([n1, n2, n3, n1a])
   const order = (parentId: string): string[] =>
-    (find(parentId)?.children ?? []).filter((topic) => mine.has(topic.id)).map((topic) => topic.title)
+    (find(parentId)?.children ?? [])
+      .filter((topic) => mine.has(topic.id))
+      .map((topic) => topic.title)
   eq('初始顺序', order(dragRoot.id), ['一', '二', '三'])
 
   store().dropNode(n1, n3, 'after')
@@ -796,10 +850,7 @@ function testNodeDrag(): void {
 
   // 多选时「成为某人的子主题」只解释得通一个主题，所以直接判为非法，
   // 免得预览画一个位置、松手却只动其中一个。
-  check(
-    '多选拖拽时不能成为目标子主题',
-    resolveDrop(root(), ga, gb, 'child', [ga, gb1]) === null
-  )
+  check('多选拖拽时不能成为目标子主题', resolveDrop(root(), ga, gb, 'child', [ga, gb1]) === null)
   eq(
     '多选拖拽时同级插入仍然成立',
     JSON.stringify(resolveDrop(root(), ga, gb, 'after', [ga, gb1])),
@@ -831,7 +882,11 @@ function testNodeDrag(): void {
   // 抓在没被选中的主题上 → 只走它自己（不会"顺手"把别人也带走）
   const soloMove = resolveDragMove(root(), gb1, [ga, gb])
   eq('抓未被选中的主题只走它自己', soloMove.ids, [gb1])
-  eq('单选时也不会去动别人', resolveDragMove(root(), ga, [ga]).ids.sort(), subtreeIds(root(), ga).sort())
+  eq(
+    '单选时也不会去动别人',
+    resolveDragMove(root(), ga, [ga]).ids.sort(),
+    subtreeIds(root(), ga).sort()
+  )
 
   group('拖拽落点：单选拖动时「成为子主题」不能被多选规则误禁（真缺陷回归）')
 
@@ -907,7 +962,11 @@ function testNodeDrag(): void {
   eq('朝上：贴下缘是"前面"', zoneOf(tall, { x: 20, y: 95 }, upward), 'before')
 
   eq('拿不到方向时一律按子主题处理', zoneOf(wide, { x: 95, y: 20 }, null), 'child')
-  eq('零尺寸矩形不会除零', zoneOf({ x: 0, y: 0, width: 0, height: 0 }, { x: 0, y: 0 }, rightward), 'child')
+  eq(
+    '零尺寸矩形不会除零',
+    zoneOf({ x: 0, y: 0, width: 0, height: 0 }, { x: 0, y: 0 }, rightward),
+    'child'
+  )
 
   group('拖拽落点裁决：同级排列方向')
 
@@ -956,7 +1015,9 @@ function testNodeDrag(): void {
   const kNamed = new Set([m1, m2, m3, m1a])
   // 同样只看本用例自己造的节点，避免受默认子节点干扰
   const kOrder = (): string[] =>
-    (find(kRoot.id)?.children ?? []).filter((topic) => kNamed.has(topic.id)).map((topic) => topic.title)
+    (find(kRoot.id)?.children ?? [])
+      .filter((topic) => kNamed.has(topic.id))
+      .map((topic) => topic.title)
 
   store().select(m2)
   check('↑ 把第二个上移一位', store().moveSelectionByKey('ArrowUp') === true)
@@ -1005,13 +1066,25 @@ function testNodeDrag(): void {
     ]
   }
   const stacks = [gapStack]
-  eq('落在 c1 与 c2 的空隙里 → 插到 c1 后面', nearestSiblingGap(stacks, { x: 50, y: 65 })?.targetId, 'c1')
-  eq('落在 c2 与 c3 的空隙里 → 插到 c2 后面', nearestSiblingGap(stacks, { x: 50, y: 165 })?.targetId, 'c2')
+  eq(
+    '落在 c1 与 c2 的空隙里 → 插到 c1 后面',
+    nearestSiblingGap(stacks, { x: 50, y: 65 })?.targetId,
+    'c1'
+  )
+  eq(
+    '落在 c2 与 c3 的空隙里 → 插到 c2 后面',
+    nearestSiblingGap(stacks, { x: 50, y: 165 })?.targetId,
+    'c2'
+  )
   eq('带回正确的父级', nearestSiblingGap(stacks, { x: 50, y: 65 })?.parentId, 'p')
   check('空隙边缘附近也能命中', nearestSiblingGap(stacks, { x: 50, y: 76 }) !== null)
   check('离空隙太远就不算（交给自由摆放）', nearestSiblingGap(stacks, { x: 50, y: 500 }) === null)
   check('横向偏离太远也不算', nearestSiblingGap(stacks, { x: 900, y: 65 }) === null)
-  check('只有一个子节点时没有空隙', nearestSiblingGap([{ parentId: 'p', children: [gapStack.children[0]] }], { x: 50, y: 15 }) === null)
+  check(
+    '只有一个子节点时没有空隙',
+    nearestSiblingGap([{ parentId: 'p', children: [gapStack.children[0]] }], { x: 50, y: 15 }) ===
+      null
+  )
   check('空数组不会崩', nearestSiblingGap([], { x: 0, y: 0 }) === null)
 
   group('拖拽落点裁决：空白处的吸附（不能随便掉进自由摆放）')
@@ -1031,10 +1104,20 @@ function testNodeDrag(): void {
     closestNodeWithin(snapNodes, { x: 50, y: 120 }, new Set())?.id,
     'n2'
   )
-  check('离所有节点都很远 → 才允许自由摆放', closestNodeWithin(snapNodes, { x: 900, y: 900 }, new Set()) === null)
-  check('被拖的子树不参与吸附', closestNodeWithin(snapNodes, { x: 50, y: 15 }, new Set(['n1']))?.id === 'n2')
+  check(
+    '离所有节点都很远 → 才允许自由摆放',
+    closestNodeWithin(snapNodes, { x: 900, y: 900 }, new Set()) === null
+  )
+  check(
+    '被拖的子树不参与吸附',
+    closestNodeWithin(snapNodes, { x: 50, y: 15 }, new Set(['n1']))?.id === 'n2'
+  )
   check('空列表不会崩', closestNodeWithin([], { x: 0, y: 0 }, new Set()) === null)
-  eq('贴着矩形内也算 0 距离', distanceToRect({ x: 0, y: 0 }, { x: 0, y: 0, width: 10, height: 10 }), 0)
+  eq(
+    '贴着矩形内也算 0 距离',
+    distanceToRect({ x: 0, y: 0 }, { x: 0, y: 0, width: 10, height: 10 }),
+    0
+  )
 
   const otherStack: SiblingStack = {
     parentId: 'q',
@@ -1043,7 +1126,11 @@ function testNodeDrag(): void {
       { id: 'd2', rect: { x: 400, y: 60, width: 100, height: 30 } }
     ]
   }
-  eq('多个堆时取最近的那个', nearestSiblingGap([gapStack, otherStack], { x: 450, y: 45 })?.targetId, 'd1')
+  eq(
+    '多个堆时取最近的那个',
+    nearestSiblingGap([gapStack, otherStack], { x: 450, y: 45 })?.targetId,
+    'd1'
+  )
 
   group('拖拽落点裁决：分轴「可吸附区域」（生长方向宽、同级方向窄）')
 
@@ -1096,7 +1183,11 @@ function testNodeDrag(): void {
     region: { x: -20, y: 40, width: 140, height: 70 },
     depth: 2
   }
-  eq('指针落在本体上时优先本体', nearestInRegion([bandA, bandB], { x: 50, y: 20 }, new Set())?.id, 'A')
+  eq(
+    '指针落在本体上时优先本体',
+    nearestInRegion([bandA, bandB], { x: 50, y: 20 }, new Set())?.id,
+    'A'
+  )
   eq(
     '两个区域都命中时取离本体更近的那个',
     nearestInRegion([bandA, bandB], { x: 50, y: 48 }, new Set())?.id,
@@ -1148,7 +1239,9 @@ function testNodeDrag(): void {
   const b3 = addChildOf(bRoot.id, '丙')
   const bNamed = new Set([b1, b2, b3])
   const bOrder = (): string[] =>
-    (find(bRoot.id)?.children ?? []).filter((topic) => bNamed.has(topic.id)).map((topic) => topic.title)
+    (find(bRoot.id)?.children ?? [])
+      .filter((topic) => bNamed.has(topic.id))
+      .map((topic) => topic.title)
 
   store().dropNode(b3, b1, 'before')
   eq('丙 插到了 甲 的前面', bOrder().join(','), '丙,甲,乙')
@@ -1366,7 +1459,9 @@ async function testSafetyHelpers(): Promise<void> {
   )
   eq(
     '非法 align / bullet 被丢掉',
-    json(coerceRichText({ paragraphs: [{ align: 'middle', bullet: 'yes', runs: [{ text: 'a' }] }] })),
+    json(
+      coerceRichText({ paragraphs: [{ align: 'middle', bullet: 'yes', runs: [{ text: 'a' }] }] })
+    ),
     json({ paragraphs: [{ runs: [{ text: 'a' }] }] })
   )
   eq(
@@ -1423,17 +1518,26 @@ async function testSafetyHelpers(): Promise<void> {
 
   check(
     '同一个 file 页面 → 放行（刷新）',
-    isSelfNavigation('file:///D:/Mind/out/renderer/index.html', 'file:///D:/Mind/out/renderer/index.html')
+    isSelfNavigation(
+      'file:///D:/Mind/out/renderer/index.html',
+      'file:///D:/Mind/out/renderer/index.html'
+    )
   )
   check(
     '只有 hash 不同也算同一个页面',
-    isSelfNavigation('file:///D:/Mind/out/renderer/index.html#/a', 'file:///D:/Mind/out/renderer/index.html#/b')
+    isSelfNavigation(
+      'file:///D:/Mind/out/renderer/index.html#/a',
+      'file:///D:/Mind/out/renderer/index.html#/b'
+    )
   )
   check(
     '拖进来的图片 → 拦下（否则界面会被替换成图片）',
     !isSelfNavigation('file:///D:/Mind/out/renderer/index.html', 'file:///C:/Users/me/a.png')
   )
-  check('开发服务器同源刷新 → 放行', isSelfNavigation('http://localhost:5173/', 'http://localhost:5173/'))
+  check(
+    '开发服务器同源刷新 → 放行',
+    isSelfNavigation('http://localhost:5173/', 'http://localhost:5173/')
+  )
   check(
     '开发服务器同源资源 → 放行（Vite 整页刷新要用）',
     isSelfNavigation('http://localhost:5173/', 'http://localhost:5173/src/main.tsx')
@@ -1450,10 +1554,18 @@ async function testSafetyHelpers(): Promise<void> {
     isInstanceAlive({ pid: 1, time: heartbeatNow - 60000 }, heartbeatNow),
     false
   )
-  eq('还没超时仍算活着', isInstanceAlive({ pid: 1, time: heartbeatNow - 29000 }, heartbeatNow), true)
+  eq(
+    '还没超时仍算活着',
+    isInstanceAlive({ pid: 1, time: heartbeatNow - 29000 }, heartbeatNow),
+    true
+  )
   eq('读不到心跳就算死了', isInstanceAlive(null, heartbeatNow), false)
   eq('坏数据算死了', isInstanceAlive({ time: 'x' }, heartbeatNow), false)
-  eq('时间戳在未来按活着处理（宁可多等，也不双开）', isInstanceAlive({ time: heartbeatNow + 5000 }, heartbeatNow), true)
+  eq(
+    '时间戳在未来按活着处理（宁可多等，也不双开）',
+    isInstanceAlive({ time: heartbeatNow + 5000 }, heartbeatNow),
+    true
+  )
 
   group('IPC 入参校验：路径')
 
@@ -1524,7 +1636,10 @@ function testAiChatHelpers(): void {
   check('带上骨架', prompt.includes('- 分支甲（3 个节点）'))
   check('带上选中路径', prompt.includes('中心 → 分支甲 → 甲一'))
   check('声明可以直接改画布', prompt.includes('直接修改画布'))
-  check('不再声称"只能看不能改"（老提示词会让模型拒绝动手）', !prompt.includes('只能「看」不能「改」'))
+  check(
+    '不再声称"只能看不能改"（老提示词会让模型拒绝动手）',
+    !prompt.includes('只能「看」不能「改」')
+  )
   check('要求先确认位置再改', prompt.includes('不要凭猜测改'))
   check('要求新增内容时直接写进画布', prompt.includes('直接调用工具写进画布'))
   check('说明改动算一步撤销', prompt.includes('一步撤销'))
@@ -1577,7 +1692,11 @@ function testAiChatHelpers(): void {
     '这条消息太长了（200001 字，上限 200000 字）'
   )
   eq('本来是人话就原样返回', readableIpcError('还没有配置 API Key'), '还没有配置 API Key')
-  eq('没有「: 」时不乱切', readableIpcError('Error invoking remote method'), 'Error invoking remote method')
+  eq(
+    '没有「: 」时不乱切',
+    readableIpcError('Error invoking remote method'),
+    'Error invoking remote method'
+  )
   check(
     '未选中时明确写出来',
     buildChatSystemPrompt({
@@ -1625,13 +1744,16 @@ function testAiChatHelpers(): void {
   check('不能改时把原因写进提示词', limited.includes('试用已经用完'))
   check('不能改时禁止假装已经改了', limited.includes('绝不要假装已经改了'))
   check('不能改时不再声称可以直接改', !limited.includes('直接修改画布'))
-  check('未给原因时也有兜底说法', buildChatSystemPrompt({
-    skeleton: digest,
-    selectedTitles: [],
-    totalNodes: 5,
-    sheetCount: 1,
-    canWrite: false
-  }).includes('改图能力当前不可用'))
+  check(
+    '未给原因时也有兜底说法',
+    buildChatSystemPrompt({
+      skeleton: digest,
+      selectedTitles: [],
+      totalNodes: 5,
+      sheetCount: 1,
+      canWrite: false
+    }).includes('改图能力当前不可用')
+  )
 
   group('AI 聊天：流式解析')
 
@@ -1671,7 +1793,11 @@ function testAiChatHelpers(): void {
   eq('普通文字原样通过', plain.push('你好，这是回答'), '你好，这是回答')
 
   const split = createThinkingFilter()
-  eq('开标签被切开时先留住尾巴（不显示半截标签）', split.push(`答案：${T_OPEN.slice(0, 4)}`), '答案：')
+  eq(
+    '开标签被切开时先留住尾巴（不显示半截标签）',
+    split.push(`答案：${T_OPEN.slice(0, 4)}`),
+    '答案：'
+  )
   eq('标签补齐后进入思维链（内部不显示）', split.push(`${T_OPEN.slice(4)}这里在推理`), '')
   eq('闭标签之后恢复显示', split.push(`${T_CLOSE}正式回答`), '正式回答')
 
@@ -1700,15 +1826,25 @@ function testAiChatHelpers(): void {
     '{"choices":[{"delta":{"content":"你好"}}],"usage":{"prompt_tokens":1234,"completion_tokens":567,"total_tokens":1801}}'
   )
   eq('普通分片也能带 usage', withUsage?.usage?.totalTokens, 1801)
-  eq('问/答分开记', json([withUsage?.usage?.promptTokens, withUsage?.usage?.completionTokens]), json([1234, 567]))
+  eq(
+    '问/答分开记',
+    json([withUsage?.usage?.promptTokens, withUsage?.usage?.completionTokens]),
+    json([1234, 567])
+  )
 
   // **关键回归**：开了 include_usage 后，最后会来一个 choices 为空、只有 usage 的分片——
   // 不能因为 choices 空就把它扔掉（以前会扔，消耗就丢了）
-  const usageOnly = extractStreamDelta('{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}')
+  const usageOnly = extractStreamDelta(
+    '{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}'
+  )
   eq('choices 为空的 usage 分片要收下', usageOnly?.usage?.totalTokens, 15)
   eq('total 缺失就自己加', usageOnly?.usage?.promptTokens, 10)
 
-  eq('没有 usage 就是没有（不编数字）', extractStreamDelta('{"choices":[{"delta":{"content":"x"}}]}')?.usage, null)
+  eq(
+    '没有 usage 就是没有（不编数字）',
+    extractStreamDelta('{"choices":[{"delta":{"content":"x"}}]}')?.usage,
+    null
+  )
   eq(
     '字段不全不收',
     extractStreamDelta('{"choices":[{"delta":{}}],"usage":{"prompt_tokens":10}}')?.usage,
@@ -1717,10 +1853,19 @@ function testAiChatHelpers(): void {
 
   eq(
     '多轮消耗累加（工具循环一轮就是一次请求）',
-    json(addUsage({ promptTokens: 100, completionTokens: 20, totalTokens: 120 }, { promptTokens: 10, completionTokens: 2, totalTokens: 12 })),
+    json(
+      addUsage(
+        { promptTokens: 100, completionTokens: 20, totalTokens: 120 },
+        { promptTokens: 10, completionTokens: 2, totalTokens: 12 }
+      )
+    ),
     json({ promptTokens: 110, completionTokens: 22, totalTokens: 132 })
   )
-  eq('第一轮就直接用', json(addUsage(undefined, { promptTokens: 1, completionTokens: 2, totalTokens: 3 })), json({ promptTokens: 1, completionTokens: 2, totalTokens: 3 }))
+  eq(
+    '第一轮就直接用',
+    json(addUsage(undefined, { promptTokens: 1, completionTokens: 2, totalTokens: 3 })),
+    json({ promptTokens: 1, completionTokens: 2, totalTokens: 3 })
+  )
 
   eq('展示格式：0', formatTokenCount(0), '0')
   eq('展示格式：999 原样', formatTokenCount(999), '999')
@@ -1728,7 +1873,6 @@ function testAiChatHelpers(): void {
   eq('展示格式：12345 → 12.3k', formatTokenCount(12345), '12.3k')
   eq('展示格式：脏数据当 0', formatTokenCount(-5), '0')
 }
-
 
 /* ------------------------------------------------------------------ */
 /* 7.9 Agent 纯逻辑：节点引用切分 / 聊天记录校验                        */
@@ -1759,7 +1903,11 @@ function testAgentHelpers(): void {
     json(cut('成本控制最关键')),
     json(['[成本控制]', '·最关键'])
   )
-  eq('同一句里出现两个标题', json(cut('目标与成本都要看')), json(['[目标]', '·与', '[成本]', '·都要看']))
+  eq(
+    '同一句里出现两个标题',
+    json(cut('目标与成本都要看')),
+    json(['[目标]', '·与', '[成本]', '·都要看'])
+  )
   eq('提到两次都算', json(cut('成本，还是成本')), json(['[成本]', '·，还是', '[成本]']))
   eq('没有命中就是一整段纯文本', json(cut('这段话里没有节点名')), json(['·这段话里没有节点名']))
   eq('空文本没有片段', json(cut('')), json([]))
@@ -1784,7 +1932,11 @@ function testAgentHelpers(): void {
     ),
     json([{ role: 'user', content: '你好' }])
   )
-  eq('空白内容的条目不收', json(normalizeChatHistory({ messages: [{ role: 'user', content: '   ' }] })), json([]))
+  eq(
+    '空白内容的条目不收',
+    json(normalizeChatHistory({ messages: [{ role: 'user', content: '   ' }] })),
+    json([])
+  )
   eq(
     'aborted 只认真正的 true',
     json(normalizeChatHistory({ messages: [{ role: 'assistant', content: 'a', aborted: 'yes' }] })),
@@ -1831,7 +1983,11 @@ function testLicenseHelpers(): void {
   eq('订单号也带回来', decoded.ok ? decoded.payload.order : null, 'A-001')
 
   // 从聊天窗口/邮件复制，极易带上换行空格；中文输入法还会带全角符号
-  eq('粘贴带的换行空格被清掉', normalizeLicenseKey(` ${key.slice(0, 12)}\n\t${key.slice(12)} `), key)
+  eq(
+    '粘贴带的换行空格被清掉',
+    normalizeLicenseKey(` ${key.slice(0, 12)}\n\t${key.slice(12)} `),
+    key
+  )
   eq(
     '全角句点与横线也能纠正',
     normalizeLicenseKey('SMIND1\uFF0Eabc\uFF0Ddef'), // SMIND1．abc－def
@@ -1874,7 +2030,11 @@ function testLicenseHelpers(): void {
   const signedSegment = signedDecoded.ok ? signedDecoded.payloadSegment : ''
   const signedBytes = signedDecoded.ok ? base64UrlBytesOf(signedDecoded.signature) : null
 
-  eq('签发后验签通过', verifyData(null, Buffer.from(signedSegment, 'utf8'), publicKey, signature), true)
+  eq(
+    '签发后验签通过',
+    verifyData(null, Buffer.from(signedSegment, 'utf8'), publicKey, signature),
+    true
+  )
   eq(
     '签名能从许可码里取回来（主进程就是这么验的）',
     signedBytes !== null &&
@@ -1944,7 +2104,11 @@ function testLicenseHelpers(): void {
   group('许可：工具闸门')
 
   eq('能写时读 + 写全下发', planAvailableTools(true).length, AGENT_ALL_TOOLS.length)
-  eq('不能写时仍下发全部只读工具（看，是免费的）', planAvailableTools(false).length, AGENT_TOOLS.length)
+  eq(
+    '不能写时仍下发全部只读工具（看，是免费的）',
+    planAvailableTools(false).length,
+    AGENT_TOOLS.length
+  )
   check(
     '不能写时**一个写工具都不下发**（模型物理上调不动）',
     planAvailableTools(false).every(
@@ -1953,10 +2117,15 @@ function testLicenseHelpers(): void {
   )
   check(
     '写工具的每个名字都在读工具集之外（两集不重叠）',
-    AGENT_WRITE_TOOLS.every((writeTool) => !AGENT_TOOLS.some((tool) => tool.name === writeTool.name))
+    AGENT_WRITE_TOOLS.every(
+      (writeTool) => !AGENT_TOOLS.some((tool) => tool.name === writeTool.name)
+    )
   )
   eq('工具名不重复', new Set(AGENT_ALL_TOOLS.map((tool) => tool.name)).size, AGENT_ALL_TOOLS.length)
-  check('许可码不是工具名，别混进工具集', json(AGENT_ALL_TOOLS.map((t) => t.name)).includes('license') === false)
+  check(
+    '许可码不是工具名，别混进工具集',
+    json(AGENT_ALL_TOOLS.map((t) => t.name)).includes('license') === false
+  )
 }
 
 /** 取许可码里的签名字节（自检里模拟主进程那一步） */
@@ -1988,7 +2157,11 @@ function testAgentTools(): void {
   const parsed = extractStreamDelta(chunkLine)
   eq('从分片里解析出工具调用', parsed?.toolCalls.length, 1)
   eq('分片里的函数名', parsed?.toolCalls[0]?.name, 'searchNodes')
-  eq('普通文本分片不带工具调用', extractStreamDelta('{"choices":[{"delta":{"content":"嗨"}}]}')?.toolCalls.length, 0)
+  eq(
+    '普通文本分片不带工具调用',
+    extractStreamDelta('{"choices":[{"delta":{"content":"嗨"}}]}')?.toolCalls.length,
+    0
+  )
   eq(
     '结束原因能取到',
     extractStreamDelta('{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}')?.finishReason,
@@ -1996,24 +2169,38 @@ function testAgentTools(): void {
   )
 
   // 参数是**跨片拼起来的**：一次覆盖式赋值只会拿到半截 JSON
-  const step1 = accumulateToolCalls([], [{ index: 0, id: 'c1', name: 'searchNodes', argumentsText: '{"que' }])
+  const step1 = accumulateToolCalls(
+    [],
+    [{ index: 0, id: 'c1', name: 'searchNodes', argumentsText: '{"que' }]
+  )
   const step2 = accumulateToolCalls(step1, [{ index: 0, argumentsText: 'ry":"成本"}' }])
   eq('参数分片是追加而不是覆盖', step2[0]?.argumentsText, '{"query":"成本"}')
   eq('id 与函数名保留（后续分片不带它们）', `${step2[0]?.id}/${step2[0]?.name}`, 'c1/searchNodes')
 
-  const parallel = accumulateToolCalls([], [
-    { index: 0, id: 'a', name: 'getDocStats' },
-    { index: 1, id: 'b', name: 'getSelection' }
-  ])
+  const parallel = accumulateToolCalls(
+    [],
+    [
+      { index: 0, id: 'a', name: 'getDocStats' },
+      { index: 1, id: 'b', name: 'getSelection' }
+    ]
+  )
   eq('并行两个调用各就各位', parallel.length, 2)
   eq('第二个调用的 id 正确', parallel[1]?.id, 'b')
-  eq('没拿到名字的空槽在收尾时丢掉', finalizeToolCalls([{ id: 'x', name: '', argumentsText: '' }]).length, 0)
+  eq(
+    '没拿到名字的空槽在收尾时丢掉',
+    finalizeToolCalls([{ id: 'x', name: '', argumentsText: '' }]).length,
+    0
+  )
 
   group('Agent：请求体的线格式')
 
   const wire = toWireMessages([
     { role: 'user', content: '你好' },
-    { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'getDocStats', argumentsText: '{}' }] },
+    {
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ id: 'c1', name: 'getDocStats', argumentsText: '{}' }]
+    },
     { role: 'tool', toolCallId: 'c1', content: '结果' }
   ])
   eq('工具结果用 tool_call_id 关联', json(wire[2]?.tool_call_id), json('c1'))
@@ -2038,13 +2225,21 @@ function testAgentTools(): void {
   eq('按 id 解析（最可靠的写法）', byId.ok && byId.resolved.topic.id === labor.id, true)
   const byPath = resolveTopicAddress(root, '中心主题/成本/物料')
   eq('按标题路径解析', byPath.ok && byPath.resolved.topic.id === material.id, true)
-  eq('路径解析出完整标题链', json(byPath.ok ? byPath.resolved.path : []), json(['中心主题', '成本', '物料']))
+  eq(
+    '路径解析出完整标题链',
+    json(byPath.ok ? byPath.resolved.path : []),
+    json(['中心主题', '成本', '物料'])
+  )
   const withoutRoot = resolveTopicAddress(root, '成本/人力')
   eq('路径可省略开头的中心主题', withoutRoot.ok && withoutRoot.resolved.topic.id === labor.id, true)
 
   // 模型很爱把文档名 / 中心主题也写进路径开头（真事：「AI 测试Mind/CART树/相关算法/…」）
   const withDocName = resolveTopicAddress(root, '我的文档/中心主题/成本/物料')
-  eq('开头多写了文档名也能解析', withDocName.ok && withDocName.resolved.topic.id === material.id, true)
+  eq(
+    '开头多写了文档名也能解析',
+    withDocName.ok && withDocName.resolved.topic.id === material.id,
+    true
+  )
   const skipTwo = resolveTopicAddress(root, '某文档/某中间层/成本/物料')
   eq('最多允许跳过开头两段', skipTwo.ok && skipTwo.resolved.topic.id === material.id, true)
 
@@ -2078,7 +2273,9 @@ function testAgentTools(): void {
   check('读选中含路径', selection.content.includes('中心主题 → 成本 → 人力'))
   eq(
     '没有选中时如实说明（不编造）',
-    runReadTool('getSelection', '{}', { ...context, selectedId: null }).content.includes('没有选中'),
+    runReadTool('getSelection', '{}', { ...context, selectedId: null }).content.includes(
+      '没有选中'
+    ),
     true
   )
 
@@ -2091,7 +2288,10 @@ function testAgentTools(): void {
   )
 
   const subtree = runReadTool('getSubtree', '{"address":"成本","depth":1}', context)
-  check('读子树给出缩进大纲', subtree.content.includes('- [#') && subtree.content.includes('] 人力'))
+  check(
+    '读子树给出缩进大纲',
+    subtree.content.includes('- [#') && subtree.content.includes('] 人力')
+  )
   check('子节点一并列出', subtree.content.includes('] 物料'))
   check('每行都带句柄（模型据此寻址）', /- \[#[0-9a-z]+\] /.test(subtree.content))
 
@@ -2102,7 +2302,11 @@ function testAgentTools(): void {
     true
   )
   eq('缺必填参数时报错', runReadTool('getSubtree', '{}', context).ok, false)
-  eq('正常结果不会被截断', runReadTool('getDocStats', '{}', context).content.includes('截断'), false)
+  eq(
+    '正常结果不会被截断',
+    runReadTool('getDocStats', '{}', context).content.includes('截断'),
+    false
+  )
 
   group('Agent：循环上限')
 
@@ -2110,9 +2314,16 @@ function testAgentTools(): void {
   eq('调用次数上限 60', AGENT_MAX_TOOL_CALLS, 60)
   eq('刚起步可以继续', canContinueAgentLoop(0, 0).ok, true)
   eq('到轮数上限就停', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).ok, false)
-  check('停下时给出原因（不是静默）', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).reason.includes('轮'))
+  check(
+    '停下时给出原因（不是静默）',
+    canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).reason.includes('轮')
+  )
   eq('到调用次数上限就停', canContinueAgentLoop(0, AGENT_MAX_TOOL_CALLS).ok, false)
-  eq('刚好在上限之前还能继续', canContinueAgentLoop(AGENT_MAX_ROUNDS - 1, AGENT_MAX_TOOL_CALLS - 1).ok, true)
+  eq(
+    '刚好在上限之前还能继续',
+    canContinueAgentLoop(AGENT_MAX_ROUNDS - 1, AGENT_MAX_TOOL_CALLS - 1).ok,
+    true
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -2136,11 +2347,15 @@ function testWriteToolsAndTurn(): void {
   const plan = (name: string, args: Record<string, unknown>): ReturnType<typeof planWriteTool> =>
     planWriteTool(name, JSON.stringify(args), tree)
   /** 取「是不是破坏性操作」；规划失败时按 false 处理（失败的断言在别处） */
-  const destructiveOf = (p: ReturnType<typeof planWriteTool>): boolean => (p.ok ? p.destructive : false)
+  const destructiveOf = (p: ReturnType<typeof planWriteTool>): boolean =>
+    p.ok ? p.destructive : false
 
   const rename = plan('renameTopic', { address: '中心主题/成本/人力', title: '人力成本' })
   eq('改名规划成功', rename.ok, true)
-  check('改名指向正确节点', rename.ok && rename.intent.kind === 'rename' && rename.intent.id === labor.id)
+  check(
+    '改名指向正确节点',
+    rename.ok && rename.intent.kind === 'rename' && rename.intent.id === labor.id
+  )
   check('改名摘要给人看', rename.summary.includes('人力') && rename.summary.includes('人力成本'))
   eq('改名不算破坏性', destructiveOf(plan('renameTopic', { address: '成本', title: 'X' })), false)
 
@@ -2152,7 +2367,10 @@ function testWriteToolsAndTurn(): void {
   const insert = plan('insertSubtree', { address: '成本', outline: '- 预算\n  - 人力\n  - 物料' })
   eq('插入子树规划成功', insert.ok, true)
   check('插入带上节点数', insert.ok && insert.intent.kind === 'insert' && insert.intent.count === 3)
-  check('插入摘要有层级说明', insert.summary.includes('预算') && insert.summary.includes('3 个节点'))
+  check(
+    '插入摘要有层级说明',
+    insert.summary.includes('预算') && insert.summary.includes('3 个节点')
+  )
   eq('outline 为空被拦下', plan('insertSubtree', { address: '成本', outline: '   ' }).ok, false)
 
   // 这两条是「新主题」垃圾节点的回归断言：模型给并列的多行时，
@@ -2168,7 +2386,10 @@ function testWriteToolsAndTurn(): void {
       multi.intent.kind === 'insert' &&
       multi.intent.nodes.every((node) => ['甲', '乙', '丙'].includes(node.title))
   )
-  check('并列插入的摘要列出主题', multi.summary.includes('3 个主题') && multi.summary.includes('甲'))
+  check(
+    '并列插入的摘要列出主题',
+    multi.summary.includes('3 个主题') && multi.summary.includes('甲')
+  )
 
   const nested = plan('insertSubtree', { address: '成本', outline: '- 预算\n  - 人力' })
   check(
@@ -2278,18 +2499,21 @@ function testWriteToolsAndTurn(): void {
 
   // 跳过容错：100 条里错 1 条就整批退回 = 烧掉一轮，所以能执行的执行、失败的列出来
   const partial = plan('moveTopics', {
-    moves: [
-      { address: '成本/物料', toAddress: '中心主题' },
-      { toAddress: '中心主题' }
-    ]
+    moves: [{ address: '成本/物料', toAddress: '中心主题' }, { toAddress: '中心主题' }]
   })
   eq('坏条目被跳过而不是整批失败', partial.ok, true)
   check(
     '能执行的那条照常在意图里',
     partial.ok && partial.intent.kind === 'moveMany' && partial.intent.moves.length === 1
   )
-  check('要求的总数如实记录（模型能对上账）', partial.ok && partial.intent.kind === 'moveMany' && partial.intent.requested === 2)
-  check('摘要里说明跳过了哪条', partial.summary.includes('跳过 1 条') && partial.summary.includes('moves[1]'))
+  check(
+    '要求的总数如实记录（模型能对上账）',
+    partial.ok && partial.intent.kind === 'moveMany' && partial.intent.requested === 2
+  )
+  check(
+    '摘要里说明跳过了哪条',
+    partial.summary.includes('跳过 1 条') && partial.summary.includes('moves[1]')
+  )
 
   check(
     '全军覆没时也要给下一步指引',
@@ -2308,7 +2532,10 @@ function testWriteToolsAndTurn(): void {
   )
   eq(
     '整批带上 allowMoved 才放行',
-    plan('moveTopics', { moves: [{ address: '成本/物料', toAddress: '中心主题' }], allowMoved: true }).ok,
+    plan('moveTopics', {
+      moves: [{ address: '成本/物料', toAddress: '中心主题' }],
+      allowMoved: true
+    }).ok,
     true
   )
   material.position = undefined
@@ -2318,7 +2545,11 @@ function testWriteToolsAndTurn(): void {
   const dupA = createTopic('创建 socket.socket()')
   const dupB = createTopic('创建 socket.socket()')
   tree.children.push(dupA, dupB)
-  eq('同名标题按标题寻址确实歧义（真实场景）', resolveTopicAddress(tree, '创建 socket.socket()').ok, false)
+  eq(
+    '同名标题按标题寻址确实歧义（真实场景）',
+    resolveTopicAddress(tree, '创建 socket.socket()').ok,
+    false
+  )
   const byHandleA = resolveTopicAddress(tree, `#${shortHandleOf(dupA.id)}`)
   eq('按句柄能精确命中其中一个', byHandleA.ok && byHandleA.resolved.topic.id === dupA.id, true)
   const byHandleB = resolveTopicAddress(tree, shortHandleOf(dupB.id))
@@ -2338,9 +2569,11 @@ function testWriteToolsAndTurn(): void {
   const readContext: ToolContext = { root: tree, selectedId: null, sheetCount: 1 }
   check(
     '子树读取把句柄打在每行前面',
-    runReadTool('getSubtree', JSON.stringify({ address: '中心主题', depth: 1 }), readContext).content.includes(
-      `[#${shortHandleOf(dupA.id)}]`
-    )
+    runReadTool(
+      'getSubtree',
+      JSON.stringify({ address: '中心主题', depth: 1 }),
+      readContext
+    ).content.includes(`[#${shortHandleOf(dupA.id)}]`)
   )
   check(
     '搜索结果也带句柄',
@@ -2360,15 +2593,23 @@ function testWriteToolsAndTurn(): void {
   check(
     '批量移动同样吃这条解析',
     (() => {
-      const r = plan('moveTopics', { moves: [{ address: 'class类名: /class类名 ()', toAddress: '成本' }] })
+      const r = plan('moveTopics', {
+        moves: [{ address: 'class类名: /class类名 ()', toAddress: '成本' }]
+      })
       return r.ok && r.intent.kind === 'moveMany' && r.intent.moves.length === 1
     })()
   )
   material.title = '物料'
 
   eq('折叠必须给布尔值', plan('setCollapsed', { address: '成本', collapsed: 'yes' }).ok, false)
-  check('折叠摘要可读', plan('setCollapsed', { address: '成本', collapsed: true }).summary.includes('折叠'))
-  check('备注为空即清空', plan('setNotes', { address: '成本', text: '  ' }).summary.includes('清空'))
+  check(
+    '折叠摘要可读',
+    plan('setCollapsed', { address: '成本', collapsed: true }).summary.includes('折叠')
+  )
+  check(
+    '备注为空即清空',
+    plan('setNotes', { address: '成本', text: '  ' }).summary.includes('清空')
+  )
   check('代码块为空即移除', plan('setCode', { address: '成本', text: '' }).summary.includes('移除'))
 
   const formula = plan('setFormula', { address: '成本', formula: '$$E=mc^2$$' })
@@ -2377,7 +2618,10 @@ function testWriteToolsAndTurn(): void {
     formula.ok && formula.intent.kind === 'formula' && formula.intent.formula === 'E=mc^2'
   )
 
-  const ask = plan('askUser', { question: '要改哪一支？', options: ['成本', '收入', 'a', 'b', 'c', 'd'] })
+  const ask = plan('askUser', {
+    question: '要改哪一支？',
+    options: ['成本', '收入', 'a', 'b', 'c', 'd']
+  })
   check('提问被规划', ask.ok && ask.intent.kind === 'ask')
   check('候选最多留 5 个', ask.ok && ask.intent.kind === 'ask' && ask.intent.options.length === 5)
   eq('空问题被拦下', plan('askUser', { question: ' ' }).ok, false)
@@ -2397,7 +2641,9 @@ function testWriteToolsAndTurn(): void {
   const c = addChildOf(turnRoot.id, '丙')
   const ours = [a, b, c]
   const order = (): string[] =>
-    (find(turnRoot.id)?.children ?? []).filter((topic) => ours.includes(topic.id)).map((topic) => topic.title)
+    (find(turnRoot.id)?.children ?? [])
+      .filter((topic) => ours.includes(topic.id))
+      .map((topic) => topic.title)
 
   const base = store().undoStack.length
   store().beginAiTurn()
@@ -2448,7 +2694,10 @@ function testMisc(): void {
   const pasted = root().children[root().children.length - 1]
   check('粘贴出新节点', pasted.id !== b1)
   check('粘贴保留标题', pasted.title === '源节点', pasted.title)
-  check('粘贴保留子树且换了新 id', pasted.children.length === 1 && pasted.children[0].id !== find(b1)?.children[0].id)
+  check(
+    '粘贴保留子树且换了新 id',
+    pasted.children.length === 1 && pasted.children[0].id !== find(b1)?.children[0].id
+  )
   check('源节点未受影响', find(b1)?.children.length === 1)
 
   // 折叠
@@ -2462,7 +2711,11 @@ function testMisc(): void {
 
   // 结构
   store().setStructure('org.xmind.ui.logic.right', rootId)
-  check('根结构已切换', root().structureClass === 'org.xmind.ui.logic.right', String(root().structureClass))
+  check(
+    '根结构已切换',
+    root().structureClass === 'org.xmind.ui.logic.right',
+    String(root().structureClass)
+  )
   store().setStructure('org.xmind.ui.map.unbalanced', b1)
   check('分支可单独设置结构', find(b1)?.structureClass === 'org.xmind.ui.map.unbalanced')
 
@@ -2475,7 +2728,11 @@ function testMisc(): void {
   // 否则它会落在"自动布局位置 + 偏移"的地方，也就是落点预览画在一处、松手却在另一处。
   const dropHost = addChildOf(rootId, '落点宿主')
   store().dropNode(b1, dropHost, 'child')
-  check('落到新父级后清掉自由偏移', find(b1)?.position === undefined, JSON.stringify(find(b1)?.position))
+  check(
+    '落到新父级后清掉自由偏移',
+    find(b1)?.position === undefined,
+    JSON.stringify(find(b1)?.position)
+  )
   check('确实换了父级', findParent(root(), b1)?.id === dropHost)
   store().undo()
   eq('撤销后偏移也回来了', find(b1)?.position, { x: 15, y: -15 })
@@ -2487,10 +2744,16 @@ function testMisc(): void {
   store().offsetPosition(b1, 30, 0)
   store().offsetPosition(dropHost, -20, 10)
   eq('统计出 2 个自由摆放的主题', store().clearAllPositions(), 2)
-  check('全部放回自动布局', find(b1)?.position === undefined && find(dropHost)?.position === undefined)
+  check(
+    '全部放回自动布局',
+    find(b1)?.position === undefined && find(dropHost)?.position === undefined
+  )
   eq('没有自由摆放时返回 0 且不写历史', store().clearAllPositions(), 0)
   store().undo()
-  check('整批恢复可以一次撤销', find(b1)?.position !== undefined || find(dropHost)?.position !== undefined)
+  check(
+    '整批恢复可以一次撤销',
+    find(b1)?.position !== undefined || find(dropHost)?.position !== undefined
+  )
 
   // 统计
   check('字数统计可用', countCharacters(root()) > 0, String(countCharacters(root())))
@@ -2718,7 +2981,11 @@ function testLayoutNoOverlap(): void {
   store().setStructure('org.xmind.ui.matrix', m)
   const mixed = layoutSheet(root(), multilineMeasure)
   const mixedHit = firstOverlap(mixed)
-  check('分支级组合（鱼骨+组织+矩阵）无节点重叠', mixedHit === null, mixedHit ? mixedHit.join(' ⨯ ') : '')
+  check(
+    '分支级组合（鱼骨+组织+矩阵）无节点重叠',
+    mixedHit === null,
+    mixedHit ? mixedHit.join(' ⨯ ') : ''
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -2731,23 +2998,38 @@ function testMarkdownFullFormat(): void {
   // 高亮 / 上下标
   const highlight = parseInlineMarkdown('这是 ==重点== 内容')
   eq('高亮：文字保留（标记不显示）', highlight.text, '这是 重点 内容')
-  check('高亮：标记成 highlight', highlight.runs.some((run) => run.highlight === true && run.text === '重点'))
+  check(
+    '高亮：标记成 highlight',
+    highlight.runs.some((run) => run.highlight === true && run.text === '重点')
+  )
 
   const sup = parseInlineMarkdown('E=mc^2^')
   eq('上标：文字正确', sup.text, 'E=mc2')
-  check('上标：script=super', sup.runs.some((run) => run.script === 'super' && run.text === '2'))
+  check(
+    '上标：script=super',
+    sup.runs.some((run) => run.script === 'super' && run.text === '2')
+  )
 
   const sub = parseInlineMarkdown('H~2~O')
-  check('下标：script=sub', sub.runs.some((run) => run.script === 'sub' && run.text === '2'))
-  check('删除线仍走 ~~', parseInlineMarkdown('~~删掉~~').runs.some((run) => run.strike === true))
-  check('加粗/斜体/行内代码仍生效', (() => {
-    const runs = parseInlineMarkdown('**粗** *斜* `码`').runs
-    return (
-      runs.some((run) => run.bold) &&
-      runs.some((run) => run.italic) &&
-      runs.some((run) => run.mono === true)
-    )
-  })())
+  check(
+    '下标：script=sub',
+    sub.runs.some((run) => run.script === 'sub' && run.text === '2')
+  )
+  check(
+    '删除线仍走 ~~',
+    parseInlineMarkdown('~~删掉~~').runs.some((run) => run.strike === true)
+  )
+  check(
+    '加粗/斜体/行内代码仍生效',
+    (() => {
+      const runs = parseInlineMarkdown('**粗** *斜* `码`').runs
+      return (
+        runs.some((run) => run.bold) &&
+        runs.some((run) => run.italic) &&
+        runs.some((run) => run.mono === true)
+      )
+    })()
+  )
 
   // 孤立的符号不能被当成格式开关（否则 `2 * 3` 之后的文字会整段变斜）
   eq('孤立的 * 保持原样', parseInlineMarkdown('2 * 3 = 6').text, '2 * 3 = 6')
@@ -2761,15 +3043,21 @@ function testMarkdownFullFormat(): void {
   // 行内 HTML
   check(
     '行内 <u> → 下划线',
-    parseInlineMarkdown('<u>下划线</u>').runs.some((run) => run.underline === true && run.text === '下划线')
+    parseInlineMarkdown('<u>下划线</u>').runs.some(
+      (run) => run.underline === true && run.text === '下划线'
+    )
   )
   check(
     '行内 <sup> → 上标',
-    parseInlineMarkdown('x<sup>2</sup>').runs.some((run) => run.script === 'super' && run.text === '2')
+    parseInlineMarkdown('x<sup>2</sup>').runs.some(
+      (run) => run.script === 'super' && run.text === '2'
+    )
   )
   check(
     '行内 <mark> → 高亮',
-    parseInlineMarkdown('a<mark>亮</mark>b').runs.some((run) => run.highlight === true && run.text === '亮')
+    parseInlineMarkdown('a<mark>亮</mark>b').runs.some(
+      (run) => run.highlight === true && run.text === '亮'
+    )
   )
   eq('不认识的标签被剥掉', parseInlineMarkdown('a<span class="x">b</span>').text, 'ab')
 
@@ -2796,7 +3084,11 @@ function testMarkdownFullFormat(): void {
   const parsed = parseMarkdownOutline(doc)
   eq('三个节点（[TOC] 与定义行不生成节点）', parsed.count, 3)
   const footnoteItem = parsed.root?.children.find((child) => child.title.includes('正文引用'))
-  check('脚注定义补进该节点备注', Boolean(footnoteItem?.notes?.includes('脚注的说明文字')), footnoteItem?.notes)
+  check(
+    '脚注定义补进该节点备注',
+    Boolean(footnoteItem?.notes?.includes('脚注的说明文字')),
+    footnoteItem?.notes
+  )
   const refItem = parsed.root?.children.find((child) => child.title.includes('引用式链接'))
   eq('引用式链接挂到节点超链接', refItem?.href, 'https://example.com/ref')
 
@@ -2838,9 +3130,18 @@ function testMarkdownFullFormat(): void {
   check('高亮导出为 ==重点==', md.includes('==重点=='), md)
   const back = parseMarkdownOutline(md)
   const backRuns = back.root?.rich?.paragraphs[0]?.runs ?? []
-  check('往返：下标回到富文本', backRuns.some((run) => run.script === 'sub' && run.text === '2'))
-  check('往返：上标回到富文本', backRuns.some((run) => run.script === 'super' && run.text === '2'))
-  check('往返：高亮回到富文本', backRuns.some((run) => run.highlight === true && run.text === '重点'))
+  check(
+    '往返：下标回到富文本',
+    backRuns.some((run) => run.script === 'sub' && run.text === '2')
+  )
+  check(
+    '往返：上标回到富文本',
+    backRuns.some((run) => run.script === 'super' && run.text === '2')
+  )
+  check(
+    '往返：高亮回到富文本',
+    backRuns.some((run) => run.highlight === true && run.text === '重点')
+  )
 
   // 粘贴 Markdown 片段：run → HTML（编辑器按自己的 schema 解析成带 mark 的文本）
   const html = runsToHtml(parseInlineMarkdown('==高亮== 与 ^上标^ 与 ~~删~~ 与 <b>粗</b>').runs)
@@ -2912,11 +3213,7 @@ function testMarkdownRoundTrip(): void {
   eq('往返：代码块挂回原节点', importedCode?.title, '示例代码')
   eq('往返：代码块语言', importedCode?.code?.language, 'ts')
   eq('往返：代码块内容', importedCode?.code?.text, 'const a = 1\nconst b = 2')
-  eq(
-    '往返：公式回到节点',
-    importedPlan?.children.find((child) => child.formula)?.formula,
-    'E=mc^2'
-  )
+  eq('往返：公式回到节点', importedPlan?.children.find((child) => child.formula)?.formula, 'E=mc^2')
   const importedRich = importedPlan?.children.find((child) => child.rich)
   check('往返：粗体进富文本', importedRich?.rich?.paragraphs[0]?.runs[0]?.bold === true)
   eq('往返：节点数一致', parsed.count, countTopics(root()))
@@ -2952,7 +3249,10 @@ function testBranchFamiliesMore(): void {
     return item
   }
 
-  check('全部进布局', [m, b, t, s, m1, m2, m3, b1, s1, s11, t1, t2].every((id) => layout.nodeMap.has(id)))
+  check(
+    '全部进布局',
+    [m, b, t, s, m1, m2, m3, b1, s1, s11, t1, t2].every((id) => layout.nodeMap.has(id))
+  )
   // 矩阵：两列网格——三个格子里恰有两个同列（x 相同、y 不同），第三个在更右的一列
   {
     const xs = [n(m1).x, n(m2).x, n(m3).x]
@@ -2966,7 +3266,10 @@ function testBranchFamiliesMore(): void {
   }
   // 括号：父子边被括号取代，括号是结构装饰线
   check('括号：不再画父子边', !layout.edges.some((edge) => edge.toId === b1))
-  check('括号：有括号装饰线', layout.decorations.some((d) => d.branchId === b))
+  check(
+    '括号：有括号装饰线',
+    layout.decorations.some((d) => d.branchId === b)
+  )
   // 时间轴：刻目沿主脊上下交替
   check('时间轴：刻目分居主脊上下', n(t1).y < n(t).y && n(t2).y > n(t).y)
   // 树状表格：列头行在分支下方，后代沿缩进列往下
@@ -3135,7 +3438,11 @@ function testMultiWindow(): void {
   eq('两边都 null 不等于同一个', sameDocPath(null, null), false)
   eq('路径末尾斜杠不影响判定', sameDocPath('C:/dir/b.xmind\\', 'C:/dir/b.xmind'), true)
 
-  eq('双击已打开的文件：命中那个窗口', findWindowForPath(['C:/a.xmind', null, 'C:/b.xmind'], 'c:/B.xmind'), 2)
+  eq(
+    '双击已打开的文件：命中那个窗口',
+    findWindowForPath(['C:/a.xmind', null, 'C:/b.xmind'], 'c:/B.xmind'),
+    2
+  )
   eq('没打开过：-1（开新窗口）', findWindowForPath([null, 'C:/a.xmind'], 'C:/z.xmind'), -1)
   eq('空窗口列表：-1', findWindowForPath([], 'C:/a.xmind'), -1)
 
@@ -3152,7 +3459,11 @@ function testPickDocumentArg(): void {
   const exists = (path: string): boolean =>
     path === 'D:\\A\\plan.xmind' || path === 'D:\\B\\灵感.emmx'
 
-  eq('认出 .xmind', pickDocumentArg(['SMind.exe', 'D:\\A\\plan.xmind'], exists), 'D:\\A\\plan.xmind')
+  eq(
+    '认出 .xmind',
+    pickDocumentArg(['SMind.exe', 'D:\\A\\plan.xmind'], exists),
+    'D:\\A\\plan.xmind'
+  )
   eq('也认 .emmx', pickDocumentArg(['SMind.exe', 'D:\\B\\灵感.emmx'], exists), 'D:\\B\\灵感.emmx')
   eq('文件不存在就不认', pickDocumentArg(['SMind.exe', 'D:\\A\\missing.xmind'], exists), null)
   eq('没有文档参数时返回 null', pickDocumentArg(['electron.exe', '.'], exists), null)
@@ -3244,7 +3555,11 @@ function testRichText(): void {
     plainTextOf({ paragraphs: [{ bullet: true, runs: [{ text: '条目' }] }] }),
     '• 条目'
   )
-  eq('格式不影响纯文本', plainTextOf({ paragraphs: [{ runs: [{ text: 'abc', bold: true, color: '#f00' }] }] }), 'abc')
+  eq(
+    '格式不影响纯文本',
+    plainTextOf({ paragraphs: [{ runs: [{ text: 'abc', bold: true, color: '#f00' }] }] }),
+    'abc'
+  )
 
   group('富文本：末尾追加（选中主题后直接打字的入口）')
   eq('追加到单段落末尾', plainTextOf(appendToRich(richFromPlain('abc'), ' ')), 'abc ')
@@ -3262,22 +3577,47 @@ function testRichText(): void {
 
   group('富文本：格式判定')
   check('无格式不判为富文本', hasFormatting(richFromPlain('普通文本')) === false)
-  check('加粗判为富文本', hasFormatting({ paragraphs: [{ runs: [{ text: 'x', bold: true }] }] }) === true)
-  check('颜色判为富文本', hasFormatting({ paragraphs: [{ runs: [{ text: 'x', color: '#f00' }] }] }) === true)
+  check(
+    '加粗判为富文本',
+    hasFormatting({ paragraphs: [{ runs: [{ text: 'x', bold: true }] }] }) === true
+  )
+  check(
+    '颜色判为富文本',
+    hasFormatting({ paragraphs: [{ runs: [{ text: 'x', color: '#f00' }] }] }) === true
+  )
   check('多段落判为富文本', hasFormatting(richFromPlain('a\nb')) === true)
-  check('居中是默认值不算格式', hasFormatting({ paragraphs: [{ align: 'center', runs: [{ text: 'x' }] }] }) === false)
-  check('左对齐算格式', hasFormatting({ paragraphs: [{ align: 'left', runs: [{ text: 'x' }] }] }) === true)
-  check('项目符号算格式', hasFormatting({ paragraphs: [{ bullet: true, runs: [{ text: 'x' }] }] }) === true)
+  check(
+    '居中是默认值不算格式',
+    hasFormatting({ paragraphs: [{ align: 'center', runs: [{ text: 'x' }] }] }) === false
+  )
+  check(
+    '左对齐算格式',
+    hasFormatting({ paragraphs: [{ align: 'left', runs: [{ text: 'x' }] }] }) === true
+  )
+  check(
+    '项目符号算格式',
+    hasFormatting({ paragraphs: [{ bullet: true, runs: [{ text: 'x' }] }] }) === true
+  )
 
   group('富文本：模型 <-> TipTap 往返')
   const rich: RichText = {
     paragraphs: [
       { runs: [{ text: '标题', bold: true, color: '#2F6BFF', fontSize: 18 }] },
-      { align: 'center', runs: [{ text: '普通', italic: true, strike: true }, { text: '混排', underline: true }] }
+      {
+        align: 'center',
+        runs: [
+          { text: '普通', italic: true, strike: true },
+          { text: '混排', underline: true }
+        ]
+      }
     ]
   }
   const doc = richToTiptap(rich)
-  check('生成 doc 且段落数正确', doc.type === 'doc' && doc.content.length === 2, String(doc.content.length))
+  check(
+    '生成 doc 且段落数正确',
+    doc.type === 'doc' && doc.content.length === 2,
+    String(doc.content.length)
+  )
   check(
     '加粗生成 bold mark',
     Boolean(doc.content[0].content?.[0].marks?.some((m) => m.type === 'bold'))
@@ -3286,7 +3626,8 @@ function testRichText(): void {
     '颜色与字号进入 textStyle',
     Boolean(
       doc.content[0].content?.[0].marks?.some(
-        (m) => m.type === 'textStyle' && m.attrs?.color === '#2F6BFF' && m.attrs?.fontSize === '18px'
+        (m) =>
+          m.type === 'textStyle' && m.attrs?.color === '#2F6BFF' && m.attrs?.fontSize === '18px'
       )
     )
   )
@@ -3302,13 +3643,25 @@ function testRichText(): void {
 
   const explicitLeft = tiptapToRich({
     type: 'doc',
-    content: [{ type: 'paragraph', attrs: { textAlign: 'left' }, content: [{ type: 'text', text: '靠左' }] }]
+    content: [
+      { type: 'paragraph', attrs: { textAlign: 'left' }, content: [{ type: 'text', text: '靠左' }] }
+    ]
   })
-  check('显式左对齐被保留', explicitLeft.paragraphs[0].align === 'left', String(explicitLeft.paragraphs[0].align))
+  check(
+    '显式左对齐被保留',
+    explicitLeft.paragraphs[0].align === 'left',
+    String(explicitLeft.paragraphs[0].align)
+  )
 
   const explicitCenter = tiptapToRich({
     type: 'doc',
-    content: [{ type: 'paragraph', attrs: { textAlign: 'center' }, content: [{ type: 'text', text: '居中' }] }]
+    content: [
+      {
+        type: 'paragraph',
+        attrs: { textAlign: 'center' },
+        content: [{ type: 'text', text: '居中' }]
+      }
+    ]
   })
   check('居中被视为默认值丢弃', explicitCenter.paragraphs[0].align === undefined)
 
@@ -3327,7 +3680,10 @@ function testRichText(): void {
     String(bulletDoc.content.length)
   )
   const bulletBack = tiptapToRich(bulletDoc)
-  check('项目符号往返保留', bulletBack.paragraphs.every((p) => p.bullet === true))
+  check(
+    '项目符号往返保留',
+    bulletBack.paragraphs.every((p) => p.bullet === true)
+  )
   eq('项目符号往返文本', plainTextOf(bulletBack), '• 一\n• 二')
 
   const hardBreakDoc: TipTapDoc = {
@@ -3361,7 +3717,11 @@ function testRichText(): void {
   const plainId = store().addChild(rootId)
   store().updateEditingRich(richFromPlain('普通文字'))
   store().commitEdit(plainId)
-  check('无格式不写入 titleRich', find(plainId)?.titleRich === undefined, String(find(plainId)?.titleRich))
+  check(
+    '无格式不写入 titleRich',
+    find(plainId)?.titleRich === undefined,
+    String(find(plainId)?.titleRich)
+  )
   check('无格式仍写入 title', find(plainId)?.title === '普通文字', String(find(plainId)?.title))
 
   store().setRichText(id, { paragraphs: [{ runs: [{ text: '改过的', italic: true }] }] })
@@ -3373,10 +3733,15 @@ function testRichText(): void {
   check('撤销能回退格式修改', find(id)?.titleRich?.paragraphs[0].runs[0].italic === true)
 
   const snapId = store().addChild(rootId)
-  store().updateEditingRich({ paragraphs: [{ runs: [{ text: '未提交的富文本', color: '#EB5757' }] }] })
+  store().updateEditingRich({
+    paragraphs: [{ runs: [{ text: '未提交的富文本', color: '#EB5757' }] }]
+  })
   const snapshot = snapshotForSave(store())
   const snapTopic = findTopic(activeRoot(snapshot), snapId)
-  check('快照包含未提交的富文本格式', snapTopic?.titleRich?.paragraphs[0].runs[0].color === '#EB5757')
+  check(
+    '快照包含未提交的富文本格式',
+    snapTopic?.titleRich?.paragraphs[0].runs[0].color === '#EB5757'
+  )
   check('快照同时写入纯文本', snapTopic?.title === '未提交的富文本')
 }
 
@@ -3388,9 +3753,18 @@ function testTheme(): void {
   group('主题：内置主题库')
   check('内置主题不少于 6 套', BUILTIN_THEMES.length >= 6, String(BUILTIN_THEMES.length))
   check('主题 id 唯一', new Set(BUILTIN_THEMES.map((t) => t.id)).size === BUILTIN_THEMES.length)
-  check('内置主题都标记为 builtin', BUILTIN_THEMES.every((t) => t.builtin))
-  check('内置配色都能通过校验', BUILTIN_THEMES.every((t) => normalizeThemeColors(t.colors) !== null))
-  check('每套主题至少有 4 个分支配色', BUILTIN_THEMES.every((t) => t.colors.branches.length >= 4))
+  check(
+    '内置主题都标记为 builtin',
+    BUILTIN_THEMES.every((t) => t.builtin)
+  )
+  check(
+    '内置配色都能通过校验',
+    BUILTIN_THEMES.every((t) => normalizeThemeColors(t.colors) !== null)
+  )
+  check(
+    '每套主题至少有 4 个分支配色',
+    BUILTIN_THEMES.every((t) => t.colors.branches.length >= 4)
+  )
   check('默认主题就是第一套', DEFAULT_THEME.id === BUILTIN_THEMES[0].id)
 
   group('主题：配色校验')
@@ -3398,20 +3772,50 @@ function testTheme(): void {
   check('空对象视为无效', normalizeThemeColors({}) === null)
   check('非对象视为无效', normalizeThemeColors('abc') === null)
   eq('缺失字段补默认值', normalizeThemeColors({ canvas: '#123456' })?.canvas, '#123456')
-  eq('非法颜色替换为默认值', normalizeThemeColors({ canvas: 'red' })?.canvas, DEFAULT_THEME.colors.canvas)
-  eq('非法分支配色被过滤', normalizeThemeColors({ branches: ['#fff', 'bad', '#112233'] })?.branches, ['#fff', '#112233'])
-  check('分支配色为空时回填默认', (normalizeThemeColors({ branches: [] })?.branches.length ?? 0) > 0)
-  eq('连线过粗被截断到上限', normalizeThemeColors({ canvas: '#ffffff', edgeWidth: 999 })?.edgeWidth, 8)
-  eq('透明度越界被截断到下限', normalizeThemeColors({ canvas: '#ffffff', edgeOpacity: -1 })?.edgeOpacity, 0.1)
+  eq(
+    '非法颜色替换为默认值',
+    normalizeThemeColors({ canvas: 'red' })?.canvas,
+    DEFAULT_THEME.colors.canvas
+  )
+  eq(
+    '非法分支配色被过滤',
+    normalizeThemeColors({ branches: ['#fff', 'bad', '#112233'] })?.branches,
+    ['#fff', '#112233']
+  )
+  check(
+    '分支配色为空时回填默认',
+    (normalizeThemeColors({ branches: [] })?.branches.length ?? 0) > 0
+  )
+  eq(
+    '连线过粗被截断到上限',
+    normalizeThemeColors({ canvas: '#ffffff', edgeWidth: 999 })?.edgeWidth,
+    8
+  )
+  eq(
+    '透明度越界被截断到下限',
+    normalizeThemeColors({ canvas: '#ffffff', edgeOpacity: -1 })?.edgeOpacity,
+    0.1
+  )
 
   group('主题：主题定义校验')
-  const definition = normalizeThemeDefinition({ id: 'my', name: '我的主题', colors: DEFAULT_THEME.colors })
-  check('定义校验通过', definition?.id === 'my' && definition?.name === '我的主题' && definition?.builtin === false)
+  const definition = normalizeThemeDefinition({
+    id: 'my',
+    name: '我的主题',
+    colors: DEFAULT_THEME.colors
+  })
+  check(
+    '定义校验通过',
+    definition?.id === 'my' && definition?.name === '我的主题' && definition?.builtin === false
+  )
   check(
     '缺 id 时自动生成',
     typeof normalizeThemeDefinition({ name: 'a', colors: DEFAULT_THEME.colors })?.id === 'string'
   )
-  eq('缺名称时给默认名', normalizeThemeDefinition({ colors: DEFAULT_THEME.colors })?.name, '未命名主题')
+  eq(
+    '缺名称时给默认名',
+    normalizeThemeDefinition({ colors: DEFAULT_THEME.colors })?.name,
+    '未命名主题'
+  )
   check('配色无效时整体无效', normalizeThemeDefinition({ name: 'a', colors: {} }) === null)
   check('传入裸配色也能识别', normalizeThemeDefinition(DEFAULT_THEME.colors) !== null)
 
@@ -3426,7 +3830,10 @@ function testTheme(): void {
   group('主题：取值优先级')
   eq(
     '自定义配色优先于内置',
-    getThemeColors({ id: 'builtin-minimal', colors: { ...DEFAULT_THEME.colors, canvas: '#000000' } }).canvas,
+    getThemeColors({
+      id: 'builtin-minimal',
+      colors: { ...DEFAULT_THEME.colors, canvas: '#000000' }
+    }).canvas,
     '#000000'
   )
   eq(
@@ -3459,7 +3866,11 @@ function testTheme(): void {
   )
   eq('合并后取最新值', themeColorsOf(store().workbook).canvas, '#303030')
   store().undo()
-  eq('一步撤销回到调色之前', themeColorsOf(store().workbook).canvas, BUILTIN_THEMES[0].colors.canvas)
+  eq(
+    '一步撤销回到调色之前',
+    themeColorsOf(store().workbook).canvas,
+    BUILTIN_THEMES[0].colors.canvas
+  )
   store().redo()
   eq('重做回到调色之后', themeColorsOf(store().workbook).canvas, '#303030')
 
@@ -3527,14 +3938,16 @@ async function testThemeRoundTrip(): Promise<void> {
   }, '构造 Xmind 原生主题')
 
   const native = store().workbook
-  const first = await parseXmind(await serializeXmind({ workbook: native, resources: {} } as MindPackage))
-  check('Xmind 原生主题结构被保留', first.workbook.sheets[0].theme?.raw !== undefined)
-  eq(
-    '原生主题属性逐字段保留',
-    first.workbook.sheets[0].theme?.raw?.properties,
-    { 'svg:fill': '#ffffff' }
+  const first = await parseXmind(
+    await serializeXmind({ workbook: native, resources: {} } as MindPackage)
   )
-  const second = await parseXmind(await serializeXmind({ workbook: first.workbook, resources: {} } as MindPackage))
+  check('Xmind 原生主题结构被保留', first.workbook.sheets[0].theme?.raw !== undefined)
+  eq('原生主题属性逐字段保留', first.workbook.sheets[0].theme?.raw?.properties, {
+    'svg:fill': '#ffffff'
+  })
+  const second = await parseXmind(
+    await serializeXmind({ workbook: first.workbook, resources: {} } as MindPackage)
+  )
   check(
     '原生主题二次往返稳定',
     normalize(second.workbook) === normalize(first.workbook),
@@ -3636,7 +4049,11 @@ function testLayout(): void {
   const total = countTopics(root())
 
   check('每个节点都有布局', result.nodes.length === total, `${result.nodes.length} vs ${total}`)
-  check('连线数 = 节点数 - 1', result.edges.length === total - 1, `${result.edges.length} vs ${total - 1}`)
+  check(
+    '连线数 = 节点数 - 1',
+    result.edges.length === total - 1,
+    `${result.edges.length} vs ${total - 1}`
+  )
   check('根节点 side 为 root', result.nodeMap.get(rootId)?.side === 'root')
   check('根节点 depth 为 0', result.nodeMap.get(rootId)?.depth === 0)
 
@@ -3646,7 +4063,11 @@ function testLayout(): void {
   check('所有坐标与尺寸均为有效正数', allFinite)
 
   const inBounds = result.nodes.every(
-    (n) => n.x >= 0 && n.y >= 0 && n.x + n.width <= result.bounds.width + 1 && n.y + n.height <= result.bounds.height + 1
+    (n) =>
+      n.x >= 0 &&
+      n.y >= 0 &&
+      n.x + n.width <= result.bounds.width + 1 &&
+      n.y + n.height <= result.bounds.height + 1
   )
   check('所有节点都在画布范围内', inBounds)
   check('画布尺寸为正', result.bounds.width > 0 && result.bounds.height > 0)
@@ -3671,7 +4092,10 @@ function testLayout(): void {
   store().toggleCollapse(b1)
   const collapsed = layoutSheet(root(), fakeMeasure)
   const hidden = find(b1)!.children.map((c) => c.id)
-  check('折叠后子节点不再布局', hidden.every((id) => !collapsed.nodeMap.has(id)))
+  check(
+    '折叠后子节点不再布局',
+    hidden.every((id) => !collapsed.nodeMap.has(id))
+  )
   check('折叠后连线数相应减少', collapsed.edges.length === collapsed.nodes.length - 1)
 
   // 自由定位会体现在坐标上
@@ -3697,7 +4121,10 @@ function testLayout(): void {
   store().setTitle(emptyId, '')
   const extreme = layoutSheet(root(), fakeMeasure)
   check('超长标题与空标题都能布局', extreme.nodes.length === 3)
-  check('超长标题不会产生 NaN', extreme.nodes.every((n) => Number.isFinite(n.width) && n.width > 0))
+  check(
+    '超长标题不会产生 NaN',
+    extreme.nodes.every((n) => Number.isFinite(n.width) && n.width > 0)
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -3732,7 +4159,9 @@ function buildFeatureRichWorkbook(): Workbook {
     target.notes = '这是备注\n第二行'
     target.notesHtml = '<p>这是备注</p>'
     target.href = 'https://example.com'
-    target.titleRich = { paragraphs: [{ align: 'center', runs: [{ text: '第一分支', bold: true, color: '#ff0000' }] }] }
+    target.titleRich = {
+      paragraphs: [{ align: 'center', runs: [{ text: '第一分支', bold: true, color: '#ff0000' }] }]
+    }
     // 手动拉伸的尺寸覆盖也要能往返（P7）
     target.sizeOverride = { width: 260, height: 96 }
 
@@ -3741,7 +4170,12 @@ function buildFeatureRichWorkbook(): Workbook {
 
     draft.sheets[0].relationships.push({ id: 'rel-1', end1Id: a, end2Id: b, title: '相关' })
     draft.sheets[0].boundaries.push({ id: 'bd-1', range: `(${a1},${b})`, title: '范围' })
-    draft.sheets[0].summaries.push({ id: 'sm-1', topicId: a1, range: `(${a1},${b})`, title: '概要' })
+    draft.sheets[0].summaries.push({
+      id: 'sm-1',
+      topicId: a1,
+      range: `(${a1},${b})`,
+      title: '概要'
+    })
     draft.sheets[0].topicPositioning = 'fixed'
 
     // 第二个画布
@@ -3751,7 +4185,17 @@ function buildFeatureRichWorkbook(): Workbook {
       rootTopic: {
         id: 'topic-2',
         title: '第二个根',
-        children: [{ id: 'topic-2-1', title: '二-1', children: [], detachedChildren: [], labels: [], markers: [], attachments: [] }],
+        children: [
+          {
+            id: 'topic-2-1',
+            title: '二-1',
+            children: [],
+            detachedChildren: [],
+            labels: [],
+            markers: [],
+            attachments: []
+          }
+        ],
         detachedChildren: [],
         labels: [],
         markers: [],
@@ -3776,7 +4220,11 @@ async function testRoundTrip(): Promise<void> {
   check('序列化产出非空字节', bytes.length > 0, String(bytes.length))
 
   const parsed = await parseXmind(bytes)
-  check('画布数量保持', parsed.workbook.sheets.length === beforeSheets, String(parsed.workbook.sheets.length))
+  check(
+    '画布数量保持',
+    parsed.workbook.sheets.length === beforeSheets,
+    String(parsed.workbook.sheets.length)
+  )
   check('解析无 warning', parsed.warnings.length === 0, parsed.warnings.join(' '))
   check(
     '往返后结构完全一致',
@@ -3804,7 +4252,9 @@ async function testRoundTrip(): Promise<void> {
   check('第二画布保留', parsed.workbook.sheets[1]?.title === '第二画布')
 
   // 二次往返（多次另存不应持续退化）
-  const again = await parseXmind(await serializeXmind({ workbook: parsed.workbook, resources: {} } as MindPackage))
+  const again = await parseXmind(
+    await serializeXmind({ workbook: parsed.workbook, resources: {} } as MindPackage)
+  )
   check(
     '二次往返仍然一致',
     normalize(again.workbook) === before,
@@ -3849,7 +4299,10 @@ async function testUnknownPassthrough(): Promise<void> {
   const JSZip = (await import('jszip')).default
   const zip = new JSZip()
   zip.file('content.json', zipContent)
-  zip.file('metadata.json', JSON.stringify({ creator: { name: 'Xmind', version: '1.0' }, activeSheetId: 'sheet-x' }))
+  zip.file(
+    'metadata.json',
+    JSON.stringify({ creator: { name: 'Xmind', version: '1.0' }, activeSheetId: 'sheet-x' })
+  )
   const bytes = await zip.generateAsync({ type: 'uint8array' })
 
   const parsed = await parseXmind(bytes)
@@ -3859,14 +4312,25 @@ async function testUnknownPassthrough(): Promise<void> {
     parsed.workbook.sheets[0].rootTopic.structureClass === 'org.xmind.ui.something.unknown'
   )
   check('节点级未知扩展被保留', parsed.workbook.sheets[0].rootTopic.extensions?.length === 1)
-  check('子节点未知扩展被保留', parsed.workbook.sheets[0].rootTopic.children[0].extensions?.length === 1)
+  check(
+    '子节点未知扩展被保留',
+    parsed.workbook.sheets[0].rootTopic.children[0].extensions?.length === 1
+  )
   check('未实现的布局不阻塞解析', parsed.workbook.sheets[0].rootTopic.children.length === 1)
 
   // 另存后未知字段仍在
-  const out = await parseXmind(await serializeXmind({ workbook: parsed.workbook, resources: {} } as MindPackage))
+  const out = await parseXmind(
+    await serializeXmind({ workbook: parsed.workbook, resources: {} } as MindPackage)
+  )
   check('另存后未知扩展仍然保留', out.workbook.sheets[0].rootTopic.extensions?.length === 1)
-  check('另存后子节点未知扩展仍然保留', out.workbook.sheets[0].rootTopic.children[0].extensions?.length === 1)
-  check('另存不会丢掉标记', out.workbook.sheets[0].rootTopic.children[0].markers[0]?.markerId === 'star-red')
+  check(
+    '另存后子节点未知扩展仍然保留',
+    out.workbook.sheets[0].rootTopic.children[0].extensions?.length === 1
+  )
+  check(
+    '另存不会丢掉标记',
+    out.workbook.sheets[0].rootTopic.children[0].markers[0]?.markerId === 'star-red'
+  )
 
   // 损坏文件应给出可读错误
   const badZip = new JSZip()
@@ -3937,12 +4401,20 @@ function testRecovery(): void {
   check('缺时间戳视为无效', parseRecoveryMeta({ originalPath: 'a' }) === null)
   check('时间戳非法视为无效', parseRecoveryMeta({ savedAt: Number.NaN }) === null)
   check('时间戳为 0 视为无效', parseRecoveryMeta({ savedAt: 0 }) === null)
-  eq('合法元信息被正确解析', parseRecoveryMeta({ originalPath: 'D:/a.xmind', title: '标题', savedAt: 123 }), {
-    originalPath: 'D:/a.xmind',
-    title: '标题',
-    savedAt: 123
-  })
-  eq('缺标题时给默认标题', parseRecoveryMeta({ savedAt: 123, originalPath: null })?.title, '未命名导图')
+  eq(
+    '合法元信息被正确解析',
+    parseRecoveryMeta({ originalPath: 'D:/a.xmind', title: '标题', savedAt: 123 }),
+    {
+      originalPath: 'D:/a.xmind',
+      title: '标题',
+      savedAt: 123
+    }
+  )
+  eq(
+    '缺标题时给默认标题',
+    parseRecoveryMeta({ savedAt: 123, originalPath: null })?.title,
+    '未命名导图'
+  )
   eq('空路径规整为 null', parseRecoveryMeta({ savedAt: 123, originalPath: '' })?.originalPath, null)
   check('多余字段被忽略且不影响解析', parseRecoveryMeta({ savedAt: 123, junk: 1 }) !== null)
 }
@@ -3955,12 +4427,18 @@ async function testNodeElements(): Promise<void> {
   group('节点元素：标记图标映射')
 
   const priority1 = markerVisualOf('priority-1')
-  check('优先级渲染成数字徽标', priority1.kind === 'priority' && priority1.text === '1', JSON.stringify(priority1))
+  check(
+    '优先级渲染成数字徽标',
+    priority1.kind === 'priority' && priority1.text === '1',
+    JSON.stringify(priority1)
+  )
   eq('优先级 1 用红色', priority1.kind === 'priority' ? priority1.color : '', '#EB5757')
   const priority5 = markerVisualOf('priority-5')
   check(
     '不同优先级颜色不同',
-    priority5.kind === 'priority' && priority1.kind === 'priority' && priority5.color !== priority1.color
+    priority5.kind === 'priority' &&
+      priority1.kind === 'priority' &&
+      priority5.color !== priority1.color
   )
 
   const quarter = markerVisualOf('task-quarter')
@@ -4006,9 +4484,17 @@ async function testNodeElements(): Promise<void> {
 
   store().toggleMarker(id, 'priority-1')
   store().toggleMarker(id, 'star-red')
-  eq('添加了两个标记', find(id)?.markers.map((marker) => marker.markerId), ['priority-1', 'star-red'])
+  eq(
+    '添加了两个标记',
+    find(id)?.markers.map((marker) => marker.markerId),
+    ['priority-1', 'star-red']
+  )
   store().toggleMarker(id, 'priority-1')
-  eq('再次点击移除标记', find(id)?.markers.map((marker) => marker.markerId), ['star-red'])
+  eq(
+    '再次点击移除标记',
+    find(id)?.markers.map((marker) => marker.markerId),
+    ['star-red']
+  )
 
   store().addLabel(id, '重要')
   store().addLabel(id, '重要')
@@ -4021,7 +4507,11 @@ async function testNodeElements(): Promise<void> {
 
   store().setNotes(id, '第一行\n第二行')
   eq('备注已写入', find(id)?.notes, '第一行\n第二行')
-  check('备注同时派生出 HTML', (find(id)?.notesHtml ?? '').includes('<br/>'), String(find(id)?.notesHtml))
+  check(
+    '备注同时派生出 HTML',
+    (find(id)?.notesHtml ?? '').includes('<br/>'),
+    String(find(id)?.notesHtml)
+  )
   check('备注 HTML 转义了特殊字符', !(find(id)?.notesHtml ?? '').includes('<script'))
   store().setNotes(id, '   ')
   check('清空备注', find(id)?.notes === undefined && find(id)?.notesHtml === undefined)
@@ -4041,15 +4531,25 @@ async function testNodeElements(): Promise<void> {
 
   store().toggleMarker(id, 'flag-blue')
   store().undo()
-  eq('撤销能去掉标记', find(id)?.markers.map((marker) => marker.markerId), ['star-red'])
+  eq(
+    '撤销能去掉标记',
+    find(id)?.markers.map((marker) => marker.markerId),
+    ['star-red']
+  )
   store().redo()
-  eq('重做能恢复标记', find(id)?.markers.map((marker) => marker.markerId), ['star-red', 'flag-blue'])
+  eq(
+    '重做能恢复标记',
+    find(id)?.markers.map((marker) => marker.markerId),
+    ['star-red', 'flag-blue']
+  )
 
   store().addLabel(id, '已确认')
   store().setNotes(id, '备注内容')
 
   const before = normalize(store().workbook)
-  const parsed = await parseXmind(await serializeXmind({ workbook: store().workbook, resources: {} } as MindPackage))
+  const parsed = await parseXmind(
+    await serializeXmind({ workbook: store().workbook, resources: {} } as MindPackage)
+  )
   check(
     '带附加元素的文档往返一致',
     normalize(parsed.workbook) === before,
@@ -4057,10 +4557,17 @@ async function testNodeElements(): Promise<void> {
   )
 
   const roundTopic = findTopic(activeRoot(parsed.workbook), id)
-  eq('往返保留标记', roundTopic?.markers.map((marker) => marker.markerId), ['star-red', 'flag-blue'])
+  eq(
+    '往返保留标记',
+    roundTopic?.markers.map((marker) => marker.markerId),
+    ['star-red', 'flag-blue']
+  )
   eq('往返保留标签', roundTopic?.labels, ['待办', '已确认'])
   eq('往返保留备注', roundTopic?.notes, '备注内容')
-  check('往返保留备注 HTML', typeof roundTopic?.notesHtml === 'string' && roundTopic.notesHtml.length > 0)
+  check(
+    '往返保留备注 HTML',
+    typeof roundTopic?.notesHtml === 'string' && roundTopic.notesHtml.length > 0
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -4071,24 +4578,38 @@ async function testMediaElements(): Promise<void> {
   group('图片与公式：尺寸规则')
 
   eq('没有图片时尺寸为 0', imageBoxSize(undefined), { width: 0, height: 0 })
-  eq('超大图片按最大宽度等比缩小', imageBoxSize({ path: 'resources/a.png', width: 400, height: 300 }), {
-    width: 220,
-    height: 165
-  })
+  eq(
+    '超大图片按最大宽度等比缩小',
+    imageBoxSize({ path: 'resources/a.png', width: 400, height: 300 }),
+    {
+      width: 220,
+      height: 165
+    }
+  )
   const tall = imageBoxSize({ path: 'resources/a.png', width: 100, height: 1000 })
   check('超高图片受最大高度限制', tall.height === IMAGE_MAX_HEIGHT, JSON.stringify(tall))
-  check('缩放后仍然小于等于上限', tall.width <= 220 && tall.height <= IMAGE_MAX_HEIGHT, JSON.stringify(tall))
+  check(
+    '缩放后仍然小于等于上限',
+    tall.width <= 220 && tall.height <= IMAGE_MAX_HEIGHT,
+    JSON.stringify(tall)
+  )
 
   const onlyWidth = imageBoxSize({ path: 'resources/a.png', width: 200 })
   eq('只给宽度时按 4:3 补高度', onlyWidth, { width: 200, height: 150 })
   const onlyHeight = imageBoxSize({ path: 'resources/a.png', height: 150 })
   eq('只给高度时按 4:3 补宽度', onlyHeight, { width: 200, height: 150 })
   eq('尺寸完全未知时用兜底框', imageBoxSize({ path: 'resources/a.png' }), { ...IMAGE_FALLBACK })
-  eq('0 尺寸视为未知', imageBoxSize({ path: 'resources/a.png', width: 0, height: 0 }), { ...IMAGE_FALLBACK })
+  eq('0 尺寸视为未知', imageBoxSize({ path: 'resources/a.png', width: 0, height: 0 }), {
+    ...IMAGE_FALLBACK
+  })
 
   const smallFormula = pureFormulaSize('x', 14)
   const longFormula = pureFormulaSize('\\sum_{i=1}^{n} \\frac{a_i}{b_i} \\cdot \\sqrt{x^2+y^2}', 14)
-  check('公式估算宽度为正', smallFormula.width > 0 && smallFormula.height > 0, JSON.stringify(smallFormula))
+  check(
+    '公式估算宽度为正',
+    smallFormula.width > 0 && smallFormula.height > 0,
+    JSON.stringify(smallFormula)
+  )
   check('公式估算高度与字号相关', pureFormulaSize('x', 28).height > pureFormulaSize('x', 14).height)
   check('长公式不超过宽度上限', longFormula.width <= 260, JSON.stringify(longFormula))
   eq('空公式按最小宽度处理', pureFormulaSize('', 14).width, 36)
@@ -4131,12 +4652,19 @@ async function testMediaElements(): Promise<void> {
     `${cjk.width} vs ${ascii.width}`
   )
   const empty = codeBoxSize({ language: 'text', text: '' })
-  check('空文本也保留一行的最小框', empty.height === CODE_HEADER + CODE_PADDING_Y * 2 + lineH, JSON.stringify(empty))
+  check(
+    '空文本也保留一行的最小框',
+    empty.height === CODE_HEADER + CODE_PADDING_Y * 2 + lineH,
+    JSON.stringify(empty)
+  )
 
   // 手动拉伸节点：代码块要像图片一样等比缩放（字号/行高/内边距一起缩），
   // 缩完必须**待在给定空间里**——否则就是用户报的"拉伸后代码块跑到节点外面去了"
   {
-    const block = { language: 'python', text: Array.from({ length: 12 }, () => 'print("hello world")').join('\n') }
+    const block = {
+      language: 'python',
+      text: Array.from({ length: 12 }, () => 'print("hello world")').join('\n')
+    }
     const natural = codeBlockMetrics(block)!
     eq('不给空间时保持自然尺寸', natural.scale, 1)
 
@@ -4147,13 +4675,19 @@ async function testMediaElements(): Promise<void> {
     check('缩完落在给定高度内', tight.height <= 300, `${tight.height} > 300`)
     check(
       '字号/行高/内边距一起缩（不是只改尺寸）',
-      tight.fontSize < natural.fontSize && tight.paddingX < natural.paddingX && tight.header < natural.header,
+      tight.fontSize < natural.fontSize &&
+        tight.paddingX < natural.paddingX &&
+        tight.header < natural.header,
       JSON.stringify(tight)
     )
 
     const roomy = codeBlockMetrics(block, { width: 4000, height: 4000 })!
     check('空间很大时最多放大到上限', roomy.scale <= 2 && roomy.scale > 1, String(roomy.scale))
-    check('放大后字号跟着变大', roomy.fontSize > natural.fontSize, `${roomy.fontSize} vs ${natural.fontSize}`)
+    check(
+      '放大后字号跟着变大',
+      roomy.fontSize > natural.fontSize,
+      `${roomy.fontSize} vs ${natural.fontSize}`
+    )
 
     const tiny = codeBlockMetrics(block, { width: 10, height: 10 })!
     check('再挤也不会缩到看不清（下限 0.5）', tiny.scale >= 0.5, String(tiny.scale))
@@ -4161,7 +4695,10 @@ async function testMediaElements(): Promise<void> {
 
     // 节点框不能比代码块还小（否则代码块会溢出到框外）
     const min = codeMinNodeSize({ language: 'python', text: 'print("hi")' }, { x: 14, y: 9 })!
-    const floor = codeBlockMetrics({ language: 'python', text: 'print("hi")' }, { width: 1, height: 1 })!
+    const floor = codeBlockMetrics(
+      { language: 'python', text: 'print("hi")' },
+      { width: 1, height: 1 }
+    )!
     eq('最小宽度 = 代码块下限宽 + 内边距', min.width, floor.width + 14 * 2)
     eq('最小高度 = 代码块下限高 + 内边距', min.height, floor.height + 9 * 2)
     check('最小尺寸确实小于自然尺寸（只是兜底）', min.width < natural.width)
@@ -4179,7 +4716,11 @@ async function testMediaElements(): Promise<void> {
   check('框宽随字号变大', bigger.width > oneLine.width, `${bigger.width} vs ${oneLine.width}`)
   setCodeFontSizeBase(null)
   eq('null 回到内置', codeFontSize(), CODE_FONT_SIZE)
-  eq('恢复后指标复原', codeBlockMetrics({ language: 'ts', text: 'const a = 1' })!.width, oneLine.width)
+  eq(
+    '恢复后指标复原',
+    codeBlockMetrics({ language: 'ts', text: 'const a = 1' })!.width,
+    oneLine.width
+  )
 
   group('手动拉伸：尺寸覆盖只作下限、可撤销、往返保真')
 
@@ -4219,7 +4760,11 @@ async function testMediaElements(): Promise<void> {
 
   store().setSizeOverride(imgNode, { width: 560, height: 320 })
   const grown = layoutSheet(root(), fakeMeasure).nodeMap.get(imgNode)!.imageBox!
-  check('拉伸后图片变大', grown.width > autoImage.width && grown.height > autoImage.height, JSON.stringify(grown))
+  check(
+    '拉伸后图片变大',
+    grown.width > autoImage.width && grown.height > autoImage.height,
+    JSON.stringify(grown)
+  )
   check(
     '仍然保持 4:3 比例',
     Math.abs(grown.width / grown.height - 4 / 3) < 0.05,
@@ -4247,7 +4792,11 @@ async function testMediaElements(): Promise<void> {
   const fxBox = pureFormulaSize(FX_SOURCE, 15) // depth=1 → 基准字号 15
   store().setSizeOverride(fxNode, { width: 40, height: 30 })
   const override = findTopic(root(), fxNode)?.sizeOverride
-  check('宽度被钳到不小于公式宽 + 内边距', (override?.width ?? 0) >= fxBox.width + 28, String(override?.width))
+  check(
+    '宽度被钳到不小于公式宽 + 内边距',
+    (override?.width ?? 0) >= fxBox.width + 28,
+    String(override?.width)
+  )
   check(
     '高度被钳到不小于「公式高 + 一行标题 + 间隔 + 内边距」',
     (override?.height ?? 0) >= fxBox.height + 24 + 6 + 18,
@@ -4281,17 +4830,29 @@ async function testMediaElements(): Promise<void> {
     eq('显式取消加粗', read.bold, false)
     eq('斜体', read.italic, true)
     eq('颜色', read.color, '#EB5757')
-    eq('Xmind 风格的 14px 也能读', readOverlayFontSize({ properties: { 'fo:font-size': '14px' } }, 13), 14)
+    eq(
+      'Xmind 风格的 14px 也能读',
+      readOverlayFontSize({ properties: { 'fo:font-size': '14px' } }, 13),
+      14
+    )
     eq(
       '恢复默认后样式被清空',
       withOverlayTextStyle(styled, { fontSize: 0, bold: undefined, italic: false, color: '' }),
       undefined
     )
-    eq('没写过样式就用元素默认值', readOverlayTextStyle(undefined, { fontSize: 13, bold: true }).bold, true)
+    eq(
+      '没写过样式就用元素默认值',
+      readOverlayTextStyle(undefined, { fontSize: 13, bold: true }).bold,
+      true
+    )
 
     // 空标题也要有可点区域（否则删空文字就再也点不到概要）
     const emptySize = estimateOverlayLabelSize('', 13)
-    check('空标题也给一块命中区', emptySize.width > 0 && emptySize.height > 0, JSON.stringify(emptySize))
+    check(
+      '空标题也给一块命中区',
+      emptySize.width > 0 && emptySize.height > 0,
+      JSON.stringify(emptySize)
+    )
     check(
       '多行标题的命中区更高',
       estimateOverlayLabelSize('一行\n两行', 13).height > emptySize.height
@@ -4319,7 +4880,9 @@ async function testMediaElements(): Promise<void> {
     eq('选中的是这条概要', store().selectedOverlay?.id, ovSummary)
 
     store().setOverlayStyle('summary', ovSummary, { fontSize: 20 })
-    const styledSummary = activeSheet(store().workbook).summaries.find((item) => item.id === ovSummary)!
+    const styledSummary = activeSheet(store().workbook).summaries.find(
+      (item) => item.id === ovSummary
+    )!
     eq('字号写进了概要样式', readOverlayFontSize(styledSummary.style, 13), 20)
     store().undo()
     const undone = activeSheet(store().workbook).summaries.find((item) => item.id === ovSummary)!
@@ -4379,7 +4942,10 @@ async function testMediaElements(): Promise<void> {
   const plainBox = stripLayout.nodeMap.get(plain)!
   eq('标记条列出全部标记', markedBox.markerStrip?.markerIds.length, 2)
   eq('标记条挂在盒外：节点宽度不被撑宽', markedBox.width, 90 + '带标记的节点'.length * 9)
-  check('标记不再出现在顶部图标行', markedBox.accessory.items.every((item) => item.kind !== 'marker'))
+  check(
+    '标记不再出现在顶部图标行',
+    markedBox.accessory.items.every((item) => item.kind !== 'marker')
+  )
   check('无标记的节点没有标记条', (plainBox.markerStrip?.markerIds.length ?? 0) === 0)
   eq('标记条尺寸与分列规则一致', markedBox.markerStrip?.width, markerStripSize(2).width)
   check(
@@ -4394,7 +4960,10 @@ async function testMediaElements(): Promise<void> {
   // 铁律：分词首尾拼回去必须与原文逐字节相同（否则画出来和源码不一致）
   const samples: Array<[string, string]> = [
     ['python', 'def add(a, b):\n    # 求和\n    return a + b  # 注释\n\nprint("结果:", add(1, 2))'],
-    ['typescript', 'const sum = (a: number, b: number): number => a + b\nexport default class Foo {}\n/* 块注释\n   跨行 */'],
+    [
+      'typescript',
+      'const sum = (a: number, b: number): number => a + b\nexport default class Foo {}\n/* 块注释\n   跨行 */'
+    ],
     ['javascript', '// hi\nconst x = "文本"\nlet n = 1e3 + 0x1f'],
     ['json', '{\n  "name": "小明",\n  "age": 18,\n  "ok": true\n}'],
     ['yaml', '# 配置\nname: 小明\nitems:\n  - a\n  - b\nenabled: true'],
@@ -4423,16 +4992,27 @@ async function testMediaElements(): Promise<void> {
   }
 
   const pyTokens = highlightCode('def add(a, b):  # 求和\n    return a + b', 'python')
-  check('python：def 是关键字', pyTokens[0].tokens.some((t) => t.text === 'def' && t.kind === 'keyword'))
-  check('python：函数名被标出', pyTokens[0].tokens.some((t) => t.text === 'add' && t.kind === 'function'))
+  check(
+    'python：def 是关键字',
+    pyTokens[0].tokens.some((t) => t.text === 'def' && t.kind === 'keyword')
+  )
+  check(
+    'python：函数名被标出',
+    pyTokens[0].tokens.some((t) => t.text === 'add' && t.kind === 'function')
+  )
   check(
     'python：# 起的是注释',
     pyTokens[0].tokens.some((t) => t.kind === 'comment' && t.text.startsWith('#'))
   )
-  check('python：return 是关键字', pyTokens[1].tokens.some((t) => t.text === 'return' && t.kind === 'keyword'))
+  check(
+    'python：return 是关键字',
+    pyTokens[1].tokens.some((t) => t.text === 'return' && t.kind === 'keyword')
+  )
   check(
     'python：字符串上色',
-    highlightCode('print("hi")', 'python')[0].tokens.some((t) => t.kind === 'string' && t.text === '"hi"')
+    highlightCode('print("hi")', 'python')[0].tokens.some(
+      (t) => t.kind === 'string' && t.text === '"hi"'
+    )
   )
   check(
     'python：三引号跨行仍是字符串',
@@ -4440,18 +5020,36 @@ async function testMediaElements(): Promise<void> {
       .flatMap((line) => line.tokens)
       .every((token) => token.kind === 'string')
   )
-  check('py 别名同样生效', highlightCode('def f(): pass', 'py')[0].tokens.some((t) => t.text === 'def' && t.kind === 'keyword'))
+  check(
+    'py 别名同样生效',
+    highlightCode('def f(): pass', 'py')[0].tokens.some(
+      (t) => t.text === 'def' && t.kind === 'keyword'
+    )
+  )
 
-  const tsTokens = highlightCode('const f = (x: string) => new Map<string, number>()', 'typescript')[0].tokens
-  check('ts：const 是关键字', tsTokens.some((t) => t.text === 'const' && t.kind === 'keyword'))
-  check('ts：内建类名上色（Map）', tsTokens.some((t) => t.text === 'Map' && t.kind === 'builtin'))
+  const tsTokens = highlightCode(
+    'const f = (x: string) => new Map<string, number>()',
+    'typescript'
+  )[0].tokens
+  check(
+    'ts：const 是关键字',
+    tsTokens.some((t) => t.text === 'const' && t.kind === 'keyword')
+  )
+  check(
+    'ts：内建类名上色（Map）',
+    tsTokens.some((t) => t.text === 'Map' && t.kind === 'builtin')
+  )
   check(
     'ts：自定义类名按类型上色',
-    highlightCode('const f = (x: Foo) => 1', 'typescript')[0].tokens.some((t) => t.text === 'Foo' && t.kind === 'type')
+    highlightCode('const f = (x: Foo) => 1', 'typescript')[0].tokens.some(
+      (t) => t.text === 'Foo' && t.kind === 'type'
+    )
   )
   check(
     'json：键是 property',
-    highlightCode('{"a": 1}', 'json')[0].tokens.some((t) => t.text === '"a"' && t.kind === 'property')
+    highlightCode('{"a": 1}', 'json')[0].tokens.some(
+      (t) => t.text === '"a"' && t.kind === 'property'
+    )
   )
   check(
     'yaml：键是 property、true 是字面量',
@@ -4481,17 +5079,17 @@ async function testMediaElements(): Promise<void> {
     '不认识的语言＝整行不分词',
     highlightCode('const a = 1', 'klingon')[0].tokens.every((t) => t.kind === 'plain')
   )
-  check('空语言＝不高亮', highlightCode('const a = 1', '')[0].tokens.every((t) => t.kind === 'plain'))
+  check(
+    '空语言＝不高亮',
+    highlightCode('const a = 1', '')[0].tokens.every((t) => t.kind === 'plain')
+  )
   check(
     '每种 token 都有颜色',
     (Object.keys(CODE_TOKEN_COLORS) as Array<keyof typeof CODE_TOKEN_COLORS>).every((kind) =>
       /^#[0-9a-f]{6}$/i.test(CODE_TOKEN_COLORS[kind])
     )
   )
-  check(
-    '空行不产生 token',
-    highlightCode('a\n\nb', 'javascript')[1].tokens.length === 0
-  )
+  check('空行不产生 token', highlightCode('a\n\nb', 'javascript')[1].tokens.length === 0)
 
   group('标签：过长按测量宽度截断（不切半个字）')
 
@@ -4506,10 +5104,18 @@ async function testMediaElements(): Promise<void> {
     check('过长时截断并补省略号', long.text.endsWith(LABEL_ELLIPSIS), long.text)
     check('截断后宽度不超过上限', long.width <= 61, String(long.width))
     check('标记为已截断', long.truncated)
-    eq('宽度与画出来的文字一致', long.width, [...long.text].reduce((sum, ch) => sum + w(ch), 0))
+    eq(
+      '宽度与画出来的文字一致',
+      long.width,
+      [...long.text].reduce((sum, ch) => sum + w(ch), 0)
+    )
 
     const ascii = fitLabelText('abcdefghijklmnop', w, 60)
-    check('ASCII 长标签同样截断', ascii.truncated && ascii.text.endsWith(LABEL_ELLIPSIS), ascii.text)
+    check(
+      'ASCII 长标签同样截断',
+      ascii.truncated && ascii.text.endsWith(LABEL_ELLIPSIS),
+      ascii.text
+    )
 
     const tiny = fitLabelText('一二三', w, 10)
     eq('极窄时至少留下省略号', tiny.text, LABEL_ELLIPSIS)
@@ -4572,10 +5178,18 @@ async function testMediaElements(): Promise<void> {
 
   const rendered = formulaHtml('\\frac{a}{b}')
   check('渲染结果带 KaTeX 标记', rendered.includes('katex'), rendered.slice(0, 120))
-  check('分数渲染出分子分母两层', rendered.includes('frac-line') || rendered.includes('mfrac'), rendered.slice(0, 200))
+  check(
+    '分数渲染出分子分母两层',
+    rendered.includes('frac-line') || rendered.includes('mfrac'),
+    rendered.slice(0, 200)
+  )
   check('常用符号能渲染', formulaHtml('\\sqrt{x^2+y^2}').includes('katex'))
   check('求和公式能渲染', formulaHtml('\\sum_{i=1}^{n} i').includes('katex'))
-  check('中文混排不报错', formulaHtml('\\text{总分} = a + b').includes('katex'), formulaHtml('\\text{总分} = a + b').slice(0, 160))
+  check(
+    '中文混排不报错',
+    formulaHtml('\\text{总分} = a + b').includes('katex'),
+    formulaHtml('\\text{总分} = a + b').slice(0, 160)
+  )
 
   let brokenThrew = false
   let brokenHtml = ''
@@ -4588,7 +5202,11 @@ async function testMediaElements(): Promise<void> {
   check('写坏的公式仍然给出可渲染内容', brokenHtml.length > 0)
 
   const fallbackSize = formulaSize('\\frac{a}{b}', 15)
-  check('无 DOM 时公式尺寸退化为估算值', fallbackSize.width > 0 && fallbackSize.height > 0, JSON.stringify(fallbackSize))
+  check(
+    '无 DOM 时公式尺寸退化为估算值',
+    fallbackSize.width > 0 && fallbackSize.height > 0,
+    JSON.stringify(fallbackSize)
+  )
   eq('同一公式的估算值稳定', formulaSize('\\frac{a}{b}', 15), fallbackSize)
 
   group('图片 / 附件 / 公式：编辑操作')
@@ -4606,21 +5224,43 @@ async function testMediaElements(): Promise<void> {
   store().setImage(mid, null)
   check('移除图片', find(mid)?.image === undefined)
 
-  store().addAttachment(mid, { id: 'att-a', path: 'resources/att-a-d.docx', name: 'd.docx', size: 88 })
-  eq('附件写入', find(mid)?.attachments.map((a) => a.name), ['d.docx'])
-  store().addAttachment(mid, { id: 'att-a2', path: 'resources/att-a-d.docx', name: 'd.docx', size: 88 })
+  store().addAttachment(mid, {
+    id: 'att-a',
+    path: 'resources/att-a-d.docx',
+    name: 'd.docx',
+    size: 88
+  })
+  eq(
+    '附件写入',
+    find(mid)?.attachments.map((a) => a.name),
+    ['d.docx']
+  )
+  store().addAttachment(mid, {
+    id: 'att-a2',
+    path: 'resources/att-a-d.docx',
+    name: 'd.docx',
+    size: 88
+  })
   eq('同一个资源不会被重复添加', find(mid)?.attachments.length, 1)
 
   // 重复添加是空操作：撤销应该回到「添加之前」，而不是把附件删掉
   store().undo()
   eq('撤销回到添加附件之前', find(mid)?.attachments.length, 0)
   store().redo()
-  eq('重做恢复附件', find(mid)?.attachments.map((a) => a.name), ['d.docx'])
+  eq(
+    '重做恢复附件',
+    find(mid)?.attachments.map((a) => a.name),
+    ['d.docx']
+  )
 
   store().removeAttachment(mid, 'att-a')
   eq('删除附件', find(mid)?.attachments.length, 0)
   store().undo()
-  eq('撤销能恢复附件', find(mid)?.attachments.map((a) => a.name), ['d.docx'])
+  eq(
+    '撤销能恢复附件',
+    find(mid)?.attachments.map((a) => a.name),
+    ['d.docx']
+  )
 
   group('图片 / 附件 / 公式：.xmind 往返')
 
@@ -4645,7 +5285,11 @@ async function testMediaElements(): Promise<void> {
   const zipped = await serializeXmind({ workbook: store().workbook, resources: mediaResources })
   const parsedMedia = await parseXmind(zipped)
 
-  check('带媒体资源的文档往返一致', normalize(parsedMedia.workbook) === beforeMedia, firstDiff(beforeMedia, normalize(parsedMedia.workbook)))
+  check(
+    '带媒体资源的文档往返一致',
+    normalize(parsedMedia.workbook) === beforeMedia,
+    firstDiff(beforeMedia, normalize(parsedMedia.workbook))
+  )
   eq('往返保留资源数量', Object.keys(parsedMedia.resources).length, 2)
   eq(
     '图片字节原样保留',
@@ -4660,31 +5304,41 @@ async function testMediaElements(): Promise<void> {
     width: 320,
     height: 240
   })
-  eq('往返保留附件', roundMedia?.attachments.map((a) => [a.path, a.name, a.size, a.mime]), [
-    ['resources/att-z-report.pdf', 'report.pdf', 2048, 'application/pdf']
-  ])
+  eq(
+    '往返保留附件',
+    roundMedia?.attachments.map((a) => [a.path, a.name, a.size, a.mime]),
+    [['resources/att-z-report.pdf', 'report.pdf', 2048, 'application/pdf']]
+  )
 
   const second = await parseXmind(
     await serializeXmind({ workbook: parsedMedia.workbook, resources: parsedMedia.resources })
   )
-  check('二次往返仍然稳定', normalize(second.workbook) === beforeMedia, firstDiff(beforeMedia, normalize(second.workbook)))
+  check(
+    '二次往返仍然稳定',
+    normalize(second.workbook) === beforeMedia,
+    firstDiff(beforeMedia, normalize(second.workbook))
+  )
 
   group('图片 / 附件：字段级写法（对齐真实 Xmind）')
 
   // 直接看生成的 content.json：包内资源引用必须带 xap: 前缀，Xmind 才认得
   const rawZip = await JSZip.loadAsync(zipped)
-  const rawJson = JSON.parse((await rawZip.file('content.json')!.async('string')) as string) as Array<{
+  const rawJson = JSON.parse(
+    (await rawZip.file('content.json')!.async('string')) as string
+  ) as Array<{
     rootTopic: { children: { attached: Array<Record<string, unknown>> } }
   }>
   const rawTopics = rawJson[0].rootTopic.children.attached
   const mediaTopic = rawTopics.find((t) => t.image !== undefined) as
-    | { image: { src: string }; attachments?: Array<{ path: string }> }
-    | undefined
-  check('生成的 content.json 里图片用 xap: 前缀', mediaTopic?.image.src?.startsWith('xap:resources/') ?? false, String(mediaTopic?.image?.src))
+    { image: { src: string }; attachments?: Array<{ path: string }> } | undefined
+  check(
+    '生成的 content.json 里图片用 xap: 前缀',
+    mediaTopic?.image.src?.startsWith('xap:resources/') ?? false,
+    String(mediaTopic?.image?.src)
+  )
 
   const attachTopic = rawTopics.find((t) => t.attachments !== undefined) as
-    | { attachments: Array<{ path: string; name: string }> }
-    | undefined
+    { attachments: Array<{ path: string; name: string }> } | undefined
   check(
     '生成的 content.json 里附件用 xap: 前缀',
     attachTopic?.attachments?.[0]?.path?.startsWith('xap:resources/') ?? false,
@@ -4700,7 +5354,9 @@ async function testMediaElements(): Promise<void> {
   const urlZip = await JSZip.loadAsync(
     await serializeXmind({ workbook: store().workbook, resources: {} })
   )
-  const urlJson = JSON.parse((await urlZip.file('content.json')!.async('string')) as string) as Array<{
+  const urlJson = JSON.parse(
+    (await urlZip.file('content.json')!.async('string')) as string
+  ) as Array<{
     rootTopic: { children: { attached: Array<{ image?: { src: string } }> } }
   }>
   const urlSrc = urlJson[0].rootTopic.children.attached.find((t) => t.image)?.image?.src
@@ -4733,10 +5389,26 @@ async function testOverlays(): Promise<void> {
   const deep = addChildOf(a, 'A-1')
   const index = indexTree(root())
 
-  eq('连续兄弟被完整展开', resolveRange(index, `(${a},${b})`).map((topic) => topic.id), [a, b])
-  eq('反向区间自动纠正顺序', resolveRange(index, `(${c},${a})`).map((topic) => topic.id), [a, b, c])
-  eq('跨父级退化成单个主题', resolveRange(index, `(${a},${deep})`).map((topic) => topic.id), [a])
-  eq('单节点区间', resolveRange(index, `(${c})`).map((topic) => topic.id), [c])
+  eq(
+    '连续兄弟被完整展开',
+    resolveRange(index, `(${a},${b})`).map((topic) => topic.id),
+    [a, b]
+  )
+  eq(
+    '反向区间自动纠正顺序',
+    resolveRange(index, `(${c},${a})`).map((topic) => topic.id),
+    [a, b, c]
+  )
+  eq(
+    '跨父级退化成单个主题',
+    resolveRange(index, `(${a},${deep})`).map((topic) => topic.id),
+    [a]
+  )
+  eq(
+    '单节点区间',
+    resolveRange(index, `(${c})`).map((topic) => topic.id),
+    [c]
+  )
   eq('不存在的 id 返回空', resolveRange(index, '(nope,nope2)'), [])
   eq('非法区间返回空', resolveRange(index, 'garbage'), [])
 
@@ -4797,7 +5469,11 @@ async function testOverlays(): Promise<void> {
   eq('概要带默认标题', summary.title, '概要')
 
   const relationship = layout.relationships[0]
-  check('关系线是二次贝塞尔曲线', relationship.d.startsWith('M ') && relationship.d.includes(' Q '), relationship.d)
+  check(
+    '关系线是二次贝塞尔曲线',
+    relationship.d.startsWith('M ') && relationship.d.includes(' Q '),
+    relationship.d
+  )
   check('关系线箭头角度已计算', Number.isFinite(relationship.arrow.angle))
 
   const onBorder = (point: { x: number; y: number }, node: typeof nodeA): boolean => {
@@ -4848,7 +5524,8 @@ async function testOverlays(): Promise<void> {
   const relId = store().addRelationship()
   check('关系线已创建（用于改接）', typeof relId === 'string', String(relId))
 
-  const storedRel = (): { end1Id: string; end2Id: string } => store().workbook.sheets[0].relationships[0]
+  const storedRel = (): { end1Id: string; end2Id: string } =>
+    store().workbook.sheets[0].relationships[0]
   eq('初始起点', storedRel().end1Id, n1)
   eq('初始终点', storedRel().end2Id, n2)
 
@@ -4869,8 +5546,16 @@ async function testOverlays(): Promise<void> {
   const layout4 = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
   const rel4 = layout4.relationships[0]
   check('改接后关系线仍然成立', Boolean(rel4))
-  check('起点落在起点节点边框上', onBorder(rel4.start, layout4.nodeMap.get(n1)!), JSON.stringify(rel4.start))
-  check('终点落在终点节点边框上', onBorder(rel4.arrow, layout4.nodeMap.get(n3)!), JSON.stringify(rel4.arrow))
+  check(
+    '起点落在起点节点边框上',
+    onBorder(rel4.start, layout4.nodeMap.get(n1)!),
+    JSON.stringify(rel4.start)
+  )
+  check(
+    '终点落在终点节点边框上',
+    onBorder(rel4.arrow, layout4.nodeMap.get(n3)!),
+    JSON.stringify(rel4.arrow)
+  )
 
   group('画布元素：概要括号方向')
 
@@ -4921,7 +5606,9 @@ async function testOverlays(): Promise<void> {
   store().setRelationshipTitle(store().workbook.sheets[0].relationships[0].id, '有关系')
 
   const before = normalize(store().workbook)
-  const parsed = await parseXmind(await serializeXmind({ workbook: store().workbook, resources: {} } as MindPackage))
+  const parsed = await parseXmind(
+    await serializeXmind({ workbook: store().workbook, resources: {} } as MindPackage)
+  )
   check(
     '新建的画布元素往返一致',
     normalize(parsed.workbook) === before,
@@ -5034,7 +5721,10 @@ async function testOverlayToggles(): Promise<void> {
     normalize(parsedCurve.workbook) === workbookBefore,
     firstDiff(normalize(store().workbook, 2), normalize(parsedCurve.workbook, 2))
   )
-  eq('弯度偏移读回相同', readCurveOffset(parsedCurve.workbook.sheets[0].relationships[0].style), { x: 33, y: 22 })
+  eq('弯度偏移读回相同', readCurveOffset(parsedCurve.workbook.sheets[0].relationships[0].style), {
+    x: 33,
+    y: 22
+  })
 
   group('画布元素：边界的可合并路径')
 
@@ -5042,10 +5732,16 @@ async function testOverlayToggles(): Promise<void> {
   const firstBoundary = boundaryLayout.boundaries[0]
   check(
     '边界给出圆角矩形路径',
-    firstBoundary.d.startsWith('M ') && firstBoundary.d.endsWith('Z') && firstBoundary.d.includes('A '),
+    firstBoundary.d.startsWith('M ') &&
+      firstBoundary.d.endsWith('Z') &&
+      firstBoundary.d.includes('A '),
     firstBoundary.d
   )
-  check('边界路径包含四段圆角', firstBoundary.d.split('A ').length - 1 === 4, String(firstBoundary.d.split('A ').length - 1))
+  check(
+    '边界路径包含四段圆角',
+    firstBoundary.d.split('A ').length - 1 === 4,
+    String(firstBoundary.d.split('A ').length - 1)
+  )
 
   group('画布元素：开关状态查询（供工具栏显示「已按下」）')
 
@@ -5063,7 +5759,9 @@ async function testOverlayToggles(): Promise<void> {
   const emptyToggle = overlayToggleOf(store().workbook, [])
   check(
     '未选中任何主题时三个开关都为空',
-    emptyToggle.relationshipId === null && emptyToggle.boundaryId === null && emptyToggle.summaryId === null
+    emptyToggle.relationshipId === null &&
+      emptyToggle.boundaryId === null &&
+      emptyToggle.summaryId === null
   )
   const unrelatedToggle = overlayToggleOf(store().workbook, [t3])
   check(
@@ -5135,7 +5833,10 @@ function overlapReport(nodes: ReturnType<typeof layoutSheet>['nodes']): string[]
       const a = nodes[i]
       const b = nodes[j]
       const separated =
-        a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y
+        a.x + a.width <= b.x ||
+        b.x + b.width <= a.x ||
+        a.y + a.height <= b.y ||
+        b.y + b.height <= a.y
       if (!separated) overlaps.push(`${a.topic.title} × ${b.topic.title}`)
     }
   }
@@ -5146,7 +5847,10 @@ function testStructures(): void {
   group('结构：全部结构的布局不变量')
 
   check('结构清单覆盖 14 种', STRUCTURES.length === 14, String(STRUCTURES.length))
-  check('全部结构都已实现布局', STRUCTURES.every((item) => item.supported))
+  check(
+    '全部结构都已实现布局',
+    STRUCTURES.every((item) => item.supported)
+  )
 
   for (const structure of STRUCTURES) {
     const issues: string[] = []
@@ -5175,7 +5879,8 @@ function testStructures(): void {
     if (outOfBounds.length > 0) issues.push(`${outOfBounds.length} 个节点超出画布`)
 
     const overlaps = overlapReport(layout.nodes)
-    if (overlaps.length > 0) issues.push(`${overlaps.length} 处重叠（${overlaps.slice(0, 3).join('、')}）`)
+    if (overlaps.length > 0)
+      issues.push(`${overlaps.length} 处重叠（${overlaps.slice(0, 3).join('、')}）`)
 
     const missingEdge = layout.nodes.filter(
       (n) => n.id !== root().id && !layout.edges.some((e) => e.toId === n.id)
@@ -5217,7 +5922,9 @@ function testStructures(): void {
   for (const node of table.nodes) {
     byDepth.set(node.depth, [...(byDepth.get(node.depth) ?? []), node.x])
   }
-  const alignedColumns = [...byDepth.values()].every((xs) => new Set(xs.map((x) => Math.round(x))).size === 1)
+  const alignedColumns = [...byDepth.values()].every(
+    (xs) => new Set(xs.map((x) => Math.round(x))).size === 1
+  )
   check('树状表格：同一层左边缘对齐', alignedColumns)
 
   // 水平时间轴：一级分支应在主轴上下交替
@@ -5247,7 +5954,11 @@ function testStructures(): void {
     const node = bone.nodeMap.get(child.id)!
     return node.y + node.height / 2 < boneSpineY ? -1 : 1
   })
-  check('鱼骨图：骨刺上下交替', boneSides.every((side, index) => side === (index % 2 === 0 ? -1 : 1)), boneSides.join(','))
+  check(
+    '鱼骨图：骨刺上下交替',
+    boneSides.every((side, index) => side === (index % 2 === 0 ? -1 : 1)),
+    boneSides.join(',')
+  )
   check('鱼骨图：绘制了主脊', bone.decorations.length > 0)
 
   // 括号图：每组子节点都配了括号装饰
@@ -5256,7 +5967,10 @@ function testStructures(): void {
   const brace = layoutSheet(root(), fakeMeasure)
   check('括号图：绘制了括号', brace.decorations.length >= root().children.length)
   const braceNodes = brace.nodes.slice().sort((a, b) => a.x - b.x)
-  check('括号图：子节点整体在父节点右侧', braceNodes[0].depth < braceNodes[braceNodes.length - 1].depth)
+  check(
+    '括号图：子节点整体在父节点右侧',
+    braceNodes[0].depth < braceNodes[braceNodes.length - 1].depth
+  )
 
   // 矩阵图：一级主题排成一行表头
   buildStructureSample()
@@ -5358,11 +6072,19 @@ async function testLegacy(): Promise<void> {
 
   const notesNode = childOf(childOf(sheetNode, 'topic'), 'notes')!
   eq('plain 文本', childText(notesNode, 'plain'), '纯文本备注')
-  check('CDATA 原样保留', (childText(notesNode, 'html') ?? '').includes('<b>加粗</b>'), childText(notesNode, 'html'))
+  check(
+    'CDATA 原样保留',
+    (childText(notesNode, 'html') ?? '').includes('<b>加粗</b>'),
+    childText(notesNode, 'html')
+  )
 
   const markerRefs = childOf(childOf(sheetNode, 'topic'), 'marker-refs')!
   eq('自闭合标签解析成子元素', childrenOf(markerRefs, 'marker-ref').length, 2)
-  eq('自闭合标签的属性可读', childrenOf(markerRefs, 'marker-ref')[0].attrs['marker-id'], 'priority-1')
+  eq(
+    '自闭合标签的属性可读',
+    childrenOf(markerRefs, 'marker-ref')[0].attrs['marker-id'],
+    'priority-1'
+  )
   eq('注释被忽略', parseXml('<a><!-- 注释 --><b/></a>')!.children.length, 1)
   eq('单引号属性也能解析', parseXml(`<a x='1'/>`)!.attrs['x'], '1')
   eq('数字实体', parseXml('<a>&#65;&#x42;</a>')!.text, 'AB')
@@ -5374,7 +6096,11 @@ async function testLegacy(): Promise<void> {
   const legacy = parseLegacyContent(tree)
   eq('画布数量', legacy.workbook.sheets.length, 1)
   eq('画布标题', legacy.workbook.sheets[0].title, '旧版画布')
-  check('给出了旧版兼容提示', legacy.warnings.some((w) => w.includes('Xmind 8')), legacy.warnings.join(' | '))
+  check(
+    '给出了旧版兼容提示',
+    legacy.warnings.some((w) => w.includes('Xmind 8')),
+    legacy.warnings.join(' | ')
+  )
   check(
     '提示说明了样式不解析',
     legacy.warnings.some((w) => w.includes('styles.xml')),
@@ -5385,39 +6111,75 @@ async function testLegacy(): Promise<void> {
   eq('结构类型', legacyRoot.structureClass, 'org.xmind.ui.logic.right')
   eq('标题', legacyRoot.title, '中心 & 主题')
   eq('备注纯文本', legacyRoot.notes, '纯文本备注')
-  check('备注 HTML 保留', (legacyRoot.notesHtml ?? '').includes('<b>加粗</b>'), String(legacyRoot.notesHtml))
+  check(
+    '备注 HTML 保留',
+    (legacyRoot.notesHtml ?? '').includes('<b>加粗</b>'),
+    String(legacyRoot.notesHtml)
+  )
   eq('标签', legacyRoot.labels, ['标签A', '标签B'])
-  eq('标记', legacyRoot.markers.map((m) => m.markerId), ['priority-1', 'star-red'])
+  eq(
+    '标记',
+    legacyRoot.markers.map((m) => m.markerId),
+    ['priority-1', 'star-red']
+  )
   eq('超链接', legacyRoot.href, 'https://example.com/legacy')
   eq('图片路径剥掉 xap:', legacyRoot.image?.path, 'resources/pic.png')
   eq('图片尺寸', [legacyRoot.image?.width, legacyRoot.image?.height], [120, 80])
-  eq('附件', legacyRoot.attachments.map((a) => [a.path, a.name, a.size, a.mime]), [
-    ['attachments/doc.pdf', 'doc.pdf', 2048, 'application/pdf']
-  ])
-  eq('子主题标题', legacyRoot.children.map((c) => c.title), ['子主题', '带未知元素'])
+  eq(
+    '附件',
+    legacyRoot.attachments.map((a) => [a.path, a.name, a.size, a.mime]),
+    [['attachments/doc.pdf', 'doc.pdf', 2048, 'application/pdf']]
+  )
+  eq(
+    '子主题标题',
+    legacyRoot.children.map((c) => c.title),
+    ['子主题', '带未知元素']
+  )
   check('折叠状态', legacyRoot.children[0].collapsed === true)
-  eq('孙主题', legacyRoot.children[0].children.map((c) => c.title), ['孙主题'])
-  eq('浮动主题', legacyRoot.detachedChildren.map((c) => c.title), ['浮动主题'])
+  eq(
+    '孙主题',
+    legacyRoot.children[0].children.map((c) => c.title),
+    ['孙主题']
+  )
+  eq(
+    '浮动主题',
+    legacyRoot.detachedChildren.map((c) => c.title),
+    ['浮动主题']
+  )
   eq('svg:x / svg:y 被识别', legacyRoot.detachedChildren[0].position, { x: 30, y: -40 })
 
   const unknownExt = legacyRoot.children[1].extensions
-  check('未知元素被原样保留', Array.isArray(unknownExt) && unknownExt.length === 1, JSON.stringify(unknownExt))
+  check(
+    '未知元素被原样保留',
+    Array.isArray(unknownExt) && unknownExt.length === 1,
+    JSON.stringify(unknownExt)
+  )
   check(
     '保留的扩展带上原始 provider 与内容',
     Boolean(
       unknownExt &&
-        (unknownExt[0] as { provider?: string }).provider === 'org.example' &&
-        String((unknownExt[0] as { content?: string }).content).includes('不认识的扩展')
+      (unknownExt[0] as { provider?: string }).provider === 'org.example' &&
+      String((unknownExt[0] as { content?: string }).content).includes('不认识的扩展')
     ),
     JSON.stringify(unknownExt)
   )
 
   const legacySheet = legacy.workbook.sheets[0]
-  eq('关系线', legacySheet.relationships.map((r) => [r.end1Id, r.end2Id, r.title]), [['child-1', 'child-2', '关联']])
-  eq('边界', legacySheet.boundaries.map((b) => [b.range, b.title]), [['(child-1,child-2)', '边界']])
-  eq('概要', legacySheet.summaries.map((s) => [s.topicId, s.range, s.title]), [
-    ['child-1', '(child-1,child-2)', '阶段总结']
-  ])
+  eq(
+    '关系线',
+    legacySheet.relationships.map((r) => [r.end1Id, r.end2Id, r.title]),
+    [['child-1', 'child-2', '关联']]
+  )
+  eq(
+    '边界',
+    legacySheet.boundaries.map((b) => [b.range, b.title]),
+    [['(child-1,child-2)', '边界']]
+  )
+  eq(
+    '概要',
+    legacySheet.summaries.map((s) => [s.topicId, s.range, s.title]),
+    [['child-1', '(child-1,child-2)', '阶段总结']]
+  )
   eq('节点总数', countTopics(legacyRoot), 5)
 
   group('Xmind 8 旧版：损坏文件与升级路径')
@@ -5435,7 +6197,11 @@ async function testLegacy(): Promise<void> {
   const upgradedRoot = activeRoot(upgraded)
   eq('升级到新版格式后节点数不变', countTopics(upgradedRoot), countTopics(legacyRoot))
   eq('升级后 id 保留', upgradedRoot.id, legacyRoot.id)
-  eq('升级后附件路径保留', upgradedRoot.attachments.map((a) => a.path), ['attachments/doc.pdf'])
+  eq(
+    '升级后附件路径保留',
+    upgradedRoot.attachments.map((a) => a.path),
+    ['attachments/doc.pdf']
+  )
   check('升级后未知扩展仍在', Array.isArray(upgradedRoot.children[1].extensions))
 }
 
@@ -5469,9 +6235,11 @@ async function testLegacyPackage(): Promise<void> {
     'attachments/doc.pdf',
     'resources/pic.png'
   ])
-  eq('升级保存后：附件字段完整', activeRoot(upgradedPkg.workbook).attachments.map((a) => [a.path, a.name]), [
-    ['attachments/doc.pdf', 'doc.pdf']
-  ])
+  eq(
+    '升级保存后：附件字段完整',
+    activeRoot(upgradedPkg.workbook).attachments.map((a) => [a.path, a.name]),
+    [['attachments/doc.pdf', 'doc.pdf']]
+  )
   eq('升级保存后：图片字段完整', activeRoot(upgradedPkg.workbook).image?.path, 'resources/pic.png')
   check(
     '升级保存后不再提示旧版',
@@ -5525,13 +6293,24 @@ function testOutline(): void {
 
   eq('第一行是根主题', rows[0].title, '产品规划')
   eq('第一行深度为 0', rows[0].depth, 0)
-  eq('折叠分支的子节点被跳过', rows.some((row) => row.title === '信息架构'), false)
-  check('折叠分支自身仍在', rows.some((row) => row.title === '产品设计' && row.collapsed))
+  eq(
+    '折叠分支的子节点被跳过',
+    rows.some((row) => row.title === '信息架构'),
+    false
+  )
+  check(
+    '折叠分支自身仍在',
+    rows.some((row) => row.title === '产品设计' && row.collapsed)
+  )
   check('有子节点标记正确', rows.find((r) => r.title === '产品设计')?.hasChildren === true)
   check('没有子节点的行不带标记', rows.find((r) => r.title === '竞品对比')?.hasChildren === false)
   check('中间层节点也算有子节点', rows.find((r) => r.title === '目标用户')?.hasChildren === true)
   eq('深度正确', rows.find((r) => r.title === '目标用户')?.depth, 2)
-  eq('浮动主题也出现在大纲里', rows.some((row) => row.title === '浮动想法'), true)
+  eq(
+    '浮动主题也出现在大纲里',
+    rows.some((row) => row.title === '浮动想法'),
+    true
+  )
   eq('顺序与树一致', rows.map((row) => row.title).slice(0, 6), [
     '产品规划',
     '市场分析',
@@ -5542,7 +6321,11 @@ function testOutline(): void {
   ])
 
   const all = outlineRows(root)
-  eq('不跳过折叠时能看到全部节点', all.some((row) => row.title === '信息架构'), true)
+  eq(
+    '不跳过折叠时能看到全部节点',
+    all.some((row) => row.title === '信息架构'),
+    true
+  )
   check('完整行数更多', all.length > rows.length)
 
   const designRow = rows.find((row) => row.title === '产品设计')
@@ -5558,8 +6341,15 @@ function testOutline(): void {
   group('大纲：导出 TXT')
 
   const txt = toPlainText(root)
-  check('TXT 以 BOM 开头（Windows 记事本不乱码）', buildOutline(workbook, 'txt').startsWith('\ufeff'))
-  check('TXT 按层级缩进', txt.includes('\r\n  市场分析\r\n    目标用户'), JSON.stringify(txt.slice(0, 80)))
+  check(
+    'TXT 以 BOM 开头（Windows 记事本不乱码）',
+    buildOutline(workbook, 'txt').startsWith('\ufeff')
+  )
+  check(
+    'TXT 按层级缩进',
+    txt.includes('\r\n  市场分析\r\n    目标用户'),
+    JSON.stringify(txt.slice(0, 80))
+  )
   check('TXT 每行一个主题', txt.trim().split('\r\n').length === all.length)
   check('TXT 包含折叠分支里的节点', txt.includes('信息架构'))
   check('TXT 以换行结尾', txt.endsWith('\r\n'))
@@ -5577,14 +6367,21 @@ function testOutline(): void {
   group('大纲：导出 OPML')
 
   const opml = toOpml(activeSheet(workbook))
-  check('OPML 声明版本', opml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">'))
+  check(
+    'OPML 声明版本',
+    opml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">')
+  )
   check('OPML 头部带画布标题', opml.includes('<title>画布 1</title>'))
   check('OPML 用 outline 元素', opml.includes('<outline text="产品规划">'))
   check('OPML 备注写成 _note', opml.includes('_note="第一行 第二行"'))
   check('OPML 超链接写成 _link', opml.includes('_link="https://example.com"'))
   check('OPML 自闭合标签用于叶子节点', opml.includes('<outline text="竞品对比"/>'))
   check('OPML 叶子节点不会被写成带子元素的标签', !opml.includes('<outline text="竞品对比">'))
-  check('OPML 结构闭合', (opml.match(/<outline/g) ?? []).length === (opml.match(/<\/outline>/g) ?? []).length + countSelfClosing(opml))
+  check(
+    'OPML 结构闭合',
+    (opml.match(/<outline/g) ?? []).length ===
+      (opml.match(/<\/outline>/g) ?? []).length + countSelfClosing(opml)
+  )
 
   const special = createTopic('A & B <C> "D"')
   special.children = [createTopic("it's fine")]
@@ -5596,8 +6393,16 @@ function testOutline(): void {
 
   group('大纲：格式注册与错误处理')
 
-  eq('支持三种格式', OUTLINE_FORMATS.map((item) => item.id), ['txt', 'md', 'opml'])
-  eq('扩展名正确', OUTLINE_FORMATS.map((item) => item.ext), ['txt', 'md', 'opml'])
+  eq(
+    '支持三种格式',
+    OUTLINE_FORMATS.map((item) => item.id),
+    ['txt', 'md', 'opml']
+  )
+  eq(
+    '扩展名正确',
+    OUTLINE_FORMATS.map((item) => item.ext),
+    ['txt', 'md', 'opml']
+  )
   eq('取格式定义', outlineFormatDef('md').label, 'Markdown')
 
   let badFormat = ''
@@ -5636,7 +6441,12 @@ function testSearch(): void {
   eq('区分大小写时大小写不同就不算命中', countOccurrences('AbC', 'abc', true), 0)
   eq('空关键词返回 0', countOccurrences('abc', ''), 0)
   eq('重叠不算两次（不重叠前进）', countOccurrences('aaaa', 'aa'), 2)
-  check('片段带省略号', snippetOf('前面很长的一段文字关键词后面还有很长的一段文字', '关键词', false, 4).includes('关键词'))
+  check(
+    '片段带省略号',
+    snippetOf('前面很长的一段文字关键词后面还有很长的一段文字', '关键词', false, 4).includes(
+      '关键词'
+    )
+  )
 
   group('搜索：替换')
 
@@ -5660,16 +6470,35 @@ function testSearch(): void {
   store().setTitle(c, '设计草稿')
 
   const byTitle = searchWorkbook(store().workbook, '评审')
-  eq('标题命中两个节点', byTitle.filter((hit) => hit.field === 'title').map((hit) => hit.title), ['设计评审', '评审记录'])
-  eq('默认不搜备注', byTitle.some((hit) => hit.field === 'notes'), false)
-  eq('默认不搜标签', byTitle.some((hit) => hit.field === 'label'), false)
+  eq(
+    '标题命中两个节点',
+    byTitle.filter((hit) => hit.field === 'title').map((hit) => hit.title),
+    ['设计评审', '评审记录']
+  )
+  eq(
+    '默认不搜备注',
+    byTitle.some((hit) => hit.field === 'notes'),
+    false
+  )
+  eq(
+    '默认不搜标签',
+    byTitle.some((hit) => hit.field === 'label'),
+    false
+  )
 
   const withNotes = searchWorkbook(store().workbook, '要点', { inNotes: true })
-  eq('打开备注后能命中备注', withNotes.map((hit) => hit.field), ['notes'])
+  eq(
+    '打开备注后能命中备注',
+    withNotes.map((hit) => hit.field),
+    ['notes']
+  )
   eq('备注命中的节点正确', withNotes[0].topicId, a)
 
   const withLabels = searchWorkbook(store().workbook, '评审', { inLabels: true })
-  check('打开标签后能命中标签', withLabels.some((hit) => hit.field === 'label'))
+  check(
+    '打开标签后能命中标签',
+    withLabels.some((hit) => hit.field === 'label')
+  )
   eq('命中集合去重', hitTopicIds(withLabels).size, 2)
 
   eq('空关键词不返回命中', searchWorkbook(store().workbook, '').length, 0)
@@ -5709,9 +6538,16 @@ function testSearch(): void {
   const m4 = addChildOf(fRoot, '既无标记也无标签')
 
   eq('空筛选不算激活', isFilterActive({ markers: [], labels: [] }), false)
-  eq('空筛选时全部算命中', applyTopicFilter(activeRoot(store().workbook), { markers: [], labels: [] }).hits.size, 0)
+  eq(
+    '空筛选时全部算命中',
+    applyTopicFilter(activeRoot(store().workbook), { markers: [], labels: [] }).hits.size,
+    0
+  )
 
-  const byMarker = applyTopicFilter(activeRoot(store().workbook), { markers: ['priority-1'], labels: [] })
+  const byMarker = applyTopicFilter(activeRoot(store().workbook), {
+    markers: ['priority-1'],
+    labels: []
+  })
   eq('按标记筛选命中两个', byMarker.hits.size, 2)
   check('按标记命中包含 m1', byMarker.hits.has(m1))
   check('按标记命中包含 m3', byMarker.hits.has(m3))
@@ -5735,7 +6571,11 @@ function testSearch(): void {
   eq('只按标签筛选', byLabel.hits.size, 1)
 
   const labels = collectLabels(store().workbook)
-  eq('收集到的标签', labels.map((item) => [item.label, item.count]), [['重要', 1]])
+  eq(
+    '收集到的标签',
+    labels.map((item) => [item.label, item.count]),
+    [['重要', 1]]
+  )
 
   group('统计')
 
@@ -5762,7 +6602,11 @@ function testSearch(): void {
     { markerId: 'priority-1', count: 2 },
     { markerId: 'star-red', count: 1 }
   ])
-  eq('统计：标签分布', stats.labels.map((item) => [item.label, item.count]), [['标签甲', 1]])
+  eq(
+    '统计：标签分布',
+    stats.labels.map((item) => [item.label, item.count]),
+    [['标签甲', 1]]
+  )
   eq('统计：无附件时计数为 0', stats.withAttachments, 0)
 
   // 多画布功能已移除：界面只显示第一张画布，多文档由「标签页」承接（见 store/tabs 的测试）
@@ -5773,7 +6617,10 @@ function testSearch(): void {
 /* ------------------------------------------------------------------ */
 
 /** 造一张覆盖各种元素的画布，供导出测试用 */
-function buildExportScene(): { layout: ReturnType<typeof layoutSheet>; colors: ReturnType<typeof themeColorsOf> } {
+function buildExportScene(): {
+  layout: ReturnType<typeof layoutSheet>
+  colors: ReturnType<typeof themeColorsOf>
+} {
   reset()
   const rootId = root().id
   store().setTitle(rootId, '导出测试')
@@ -5809,7 +6656,10 @@ function testExportDrawing(): void {
   const { layout, colors } = buildExportScene()
   const drawing = buildDrawing({ layout, colors, background: colors.canvas })
 
-  check('画布尺寸来自布局边界', drawing.width === layout.bounds.width && drawing.height === layout.bounds.height)
+  check(
+    '画布尺寸来自布局边界',
+    drawing.width === layout.bounds.width && drawing.height === layout.bounds.height
+  )
   eq('背景色透传', drawing.background, colors.canvas)
 
   const rects = drawing.ops.filter((op) => op.kind === 'rect')
@@ -5820,24 +6670,50 @@ function testExportDrawing(): void {
   const pies = drawing.ops.filter((op) => op.kind === 'pie')
   const glyphs = drawing.ops.filter((op) => op.kind === 'glyph')
 
-  check('每个节点都有一条文字行', texts.length >= layout.nodes.length, `${texts.length} vs ${layout.nodes.length}`)
-  check('根节点画成圆角矩形', rects.some((op) => op.kind === 'rect' && op.shadow === true))
-  check('一级主题的矩形带边框', rects.some((op) => op.kind === 'rect' && op.stroke !== undefined))
-  check('深层节点画下划线（不是矩形）', paths.some((op) => op.kind === 'path' && op.strokeWidth === 2))
-  check('连线按分支着色', paths.some((op) => op.kind === 'path' && colors.branches.includes(String(op.stroke))))
+  check(
+    '每个节点都有一条文字行',
+    texts.length >= layout.nodes.length,
+    `${texts.length} vs ${layout.nodes.length}`
+  )
+  check(
+    '根节点画成圆角矩形',
+    rects.some((op) => op.kind === 'rect' && op.shadow === true)
+  )
+  check(
+    '一级主题的矩形带边框',
+    rects.some((op) => op.kind === 'rect' && op.stroke !== undefined)
+  )
+  check(
+    '深层节点画下划线（不是矩形）',
+    paths.some((op) => op.kind === 'path' && op.strokeWidth === 2)
+  )
+  check(
+    '连线按分支着色',
+    paths.some((op) => op.kind === 'path' && colors.branches.includes(String(op.stroke)))
+  )
 
   check('优先级标记画成数字徽标', badges.length >= 1)
   eq('徽标文字是优先级数字', badges[0]?.kind === 'badge' ? badges[0].text : '', '1')
   check('进度标记画成饼形', pies.length >= 1)
   check('星标画成图形', glyphs.length >= 1)
-  check('标签画成底部胶囊', labels.some((op) => op.kind === 'text' && op.text === '标签甲'))
+  check(
+    '标签画成底部胶囊',
+    labels.some((op) => op.kind === 'text' && op.text === '标签甲')
+  )
 
-  const textOf = drawing.ops.find((op) => op.kind === 'lineText' && op.segments.some((s) => s.text.includes('特殊')))
+  const textOf = drawing.ops.find(
+    (op) => op.kind === 'lineText' && op.segments.some((s) => s.text.includes('特殊'))
+  )
   check('特殊字符原样进入指令（转义交给后端）', Boolean(textOf))
 
   const formulaOp = drawing.ops.find((op) => op.kind === 'formula')
   check('公式节点生成公式指令', Boolean(formulaOp))
-  check('没有位图时公式退回源码', formulaOp?.kind === 'formula' && formulaOp.href === undefined && formulaOp.fallbackText === '\\frac{a}{b}')
+  check(
+    '没有位图时公式退回源码',
+    formulaOp?.kind === 'formula' &&
+      formulaOp.href === undefined &&
+      formulaOp.fallbackText === '\\frac{a}{b}'
+  )
 
   // 有图片资源时使用图片指令，没有时画占位框
   const withoutImage = drawing.ops.filter((op) => op.kind === 'image').length
@@ -5848,7 +6724,10 @@ function testExportDrawing(): void {
     background: colors.canvas,
     images: new Map([['resources/pic.png', 'data:image/png;base64,AAAA']])
   })
-  check('有图片资源时生成 image 指令', withImage.ops.some((op) => op.kind === 'image'))
+  check(
+    '有图片资源时生成 image 指令',
+    withImage.ops.some((op) => op.kind === 'image')
+  )
 
   // 透明背景
   const transparent = buildDrawing({ layout, colors, background: null })
@@ -5867,7 +6746,11 @@ function testExportDrawing(): void {
   // 用我们自己的 XML 解析器反向校验：生成的 SVG 必须是结构合法的 XML，
   // 否则浏览器/其它软件打开就是一片报错
   const parsedSvg = parseXml(svg)
-  check('导出的 SVG 是合法 XML', parsedSvg !== null && parsedSvg.local === 'svg', parsedSvg?.name ?? 'null')
+  check(
+    '导出的 SVG 是合法 XML',
+    parsedSvg !== null && parsedSvg.local === 'svg',
+    parsedSvg?.name ?? 'null'
+  )
   eq('SVG 根节点的子元素数量大于 0', (parsedSvg?.children.length ?? 0) > 0, true)
   check(
     'SVG 里带特殊字符的文字没有被截断',
@@ -5897,7 +6780,11 @@ function testExportDrawing(): void {
       }
     ]
   })
-  check('SVG 转义 & < >（文本内容）', escapeSvg.includes('&lt;a &amp; b&gt;'), escapeSvg.slice(escapeSvg.indexOf('<text'), escapeSvg.indexOf('<text') + 160))
+  check(
+    'SVG 转义 & < >（文本内容）',
+    escapeSvg.includes('&lt;a &amp; b&gt;'),
+    escapeSvg.slice(escapeSvg.indexOf('<text'), escapeSvg.indexOf('<text') + 160)
+  )
   check('文本内容里的引号保持原样（XML 文本里不需要转义）', escapeSvg.includes('"引号"'))
 
   // 属性里的 & 必须转义，否则属性被截断
@@ -5914,7 +6801,11 @@ function testExportDrawing(): void {
       }
     ]
   })
-  check('SVG 转义属性里的 &', attrSvg.includes('href="mind-resource://local/a.png?x=1&amp;y=2"'), attrSvg.match(/href="[^"]*"/)?.[0] ?? '')
+  check(
+    'SVG 转义属性里的 &',
+    attrSvg.includes('href="mind-resource://local/a.png?x=1&amp;y=2"'),
+    attrSvg.match(/href="[^"]*"/)?.[0] ?? ''
+  )
 
   const fallbackSvg = drawingToSvg({
     ...escapeScene,
@@ -5932,7 +6823,10 @@ function testExportDrawing(): void {
       }
     ]
   })
-  check('公式没有位图时在 SVG 里输出源码', fallbackSvg.includes('x^2') && !fallbackSvg.includes('<image'))
+  check(
+    '公式没有位图时在 SVG 里输出源码',
+    fallbackSvg.includes('x^2') && !fallbackSvg.includes('<image')
+  )
 
   group('导出：PDF')
 
@@ -5956,7 +6850,11 @@ function testExportDrawing(): void {
   check('PDF 使用 FlateDecode', pdfText.includes('/Filter /FlateDecode'))
   check('PDF 的 Length 与实际压缩数据一致', pdfText.includes(`/Length ${fakeCompressed.length}`))
   // 4 像素 / 2 倍率 × 0.75 = 1.5pt；2 像素 → 0.75pt
-  check('PDF 页面按倍率换算尺寸', pdfText.includes('/MediaBox [0 0 1.5 0.75]'), pdfText.match(/MediaBox[^\]]*\]/)?.[0] ?? '')
+  check(
+    'PDF 页面按倍率换算尺寸',
+    pdfText.includes('/MediaBox [0 0 1.5 0.75]'),
+    pdfText.match(/MediaBox[^\]]*\]/)?.[0] ?? ''
+  )
   check('PDF 内容流把图铺满整页', pdfText.includes('q 1.5 0 0 0.75 0 0 cm /Im0 Do Q'))
   check(
     'PDF 中文标题按 UTF-16BE 十六进制写入（不会被截断成乱码）',
@@ -5964,28 +6862,59 @@ function testExportDrawing(): void {
     pdfText.match(/\/Title [^/]*/)?.[0] ?? ''
   )
   const asciiPdf = new TextDecoder('latin1').decode(
-    buildImagePdf({ pixelWidth: 2, pixelHeight: 2, rgb: new Uint8Array(12), compressed: new Uint8Array(1), title: 'demo' })
+    buildImagePdf({
+      pixelWidth: 2,
+      pixelHeight: 2,
+      rgb: new Uint8Array(12),
+      compressed: new Uint8Array(1),
+      title: 'demo'
+    })
   )
   check('PDF 纯 ASCII 标题用字面量写法', asciiPdf.includes('/Title (demo)'))
-  check('PDF 标题里的括号会被转义', new TextDecoder('latin1').decode(
-    buildImagePdf({ pixelWidth: 2, pixelHeight: 2, rgb: new Uint8Array(12), compressed: new Uint8Array(1), title: 'a(b)c' })
-  ).includes('/Title (a\\(b\\)c)'))
+  check(
+    'PDF 标题里的括号会被转义',
+    new TextDecoder('latin1')
+      .decode(
+        buildImagePdf({
+          pixelWidth: 2,
+          pixelHeight: 2,
+          rgb: new Uint8Array(12),
+          compressed: new Uint8Array(1),
+          title: 'a(b)c'
+        })
+      )
+      .includes('/Title (a\\(b\\)c)')
+  )
 
   // xref 偏移必须能对上对象起始位置，否则 PDF 阅读器会报错
   const xrefAt = pdfText.indexOf('xref')
-  const startxref = Number(pdfText.slice(pdfText.lastIndexOf('startxref') + 9).trim().split(/\s/)[0])
+  const startxref = Number(
+    pdfText
+      .slice(pdfText.lastIndexOf('startxref') + 9)
+      .trim()
+      .split(/\s/)[0]
+  )
   eq('startxref 指向 xref 表', startxref, xrefAt)
   const offsets = [...pdfText.slice(xrefAt).matchAll(/(\d{10}) 00000 n/g)].map((m) => Number(m[1]))
   eq('xref 里对象数量正确', offsets.length, 6)
   check(
     '每个对象的偏移都指向 "N 0 obj"',
-    offsets.every((offset, index) => pdfText.slice(offset, offset + 12).startsWith(`${index + 1} 0 obj`)),
-    offsets.map((offset, index) => `${index + 1}@${offset}:${pdfText.slice(offset, offset + 8)}`).join(' | ')
+    offsets.every((offset, index) =>
+      pdfText.slice(offset, offset + 12).startsWith(`${index + 1} 0 obj`)
+    ),
+    offsets
+      .map((offset, index) => `${index + 1}@${offset}:${pdfText.slice(offset, offset + 8)}`)
+      .join(' | ')
   )
 
   let pdfError = ''
   try {
-    buildImagePdf({ pixelWidth: 4, pixelHeight: 2, rgb: new Uint8Array(5), compressed: fakeCompressed })
+    buildImagePdf({
+      pixelWidth: 4,
+      pixelHeight: 2,
+      rgb: new Uint8Array(5),
+      compressed: fakeCompressed
+    })
   } catch (error) {
     pdfError = (error as Error).message
   }
@@ -5993,7 +6922,12 @@ function testExportDrawing(): void {
 
   let pdfZero = ''
   try {
-    buildImagePdf({ pixelWidth: 0, pixelHeight: 0, rgb: new Uint8Array(0), compressed: fakeCompressed })
+    buildImagePdf({
+      pixelWidth: 0,
+      pixelHeight: 0,
+      rgb: new Uint8Array(0),
+      compressed: fakeCompressed
+    })
   } catch (error) {
     pdfZero = (error as Error).message
   }
@@ -6001,7 +6935,11 @@ function testExportDrawing(): void {
 
   group('导出：KaTeX 资源（公式位图用）')
 
-  check('内联字体齐全（20 个 woff2）', KATEX_INLINED_FONTS.length === 20, String(KATEX_INLINED_FONTS.length))
+  check(
+    '内联字体齐全（20 个 woff2）',
+    KATEX_INLINED_FONTS.length === 20,
+    String(KATEX_INLINED_FONTS.length)
+  )
   check('KaTeX 样式里没有未处理的字体路径', !KATEX_INLINE_CSS.includes('url(fonts/'))
   check('KaTeX 样式里字体已内联', KATEX_INLINE_CSS.includes('url(data:font/woff2;base64,'))
   check('KaTeX 样式含关键类名', KATEX_INLINE_CSS.includes('.katex'))
@@ -6011,9 +6949,22 @@ function testExportDrawing(): void {
 function testExportFormats(): void {
   group('导出：格式与选项')
 
-  eq('三种格式', IMAGE_EXPORT_FORMATS.map((item) => item.id), ['png', 'svg', 'pdf'])
-  eq('扩展名正确', IMAGE_EXPORT_FORMATS.map((item) => item.ext), ['png', 'svg', 'pdf'])
-  check('只有 SVG 不需要倍率', IMAGE_EXPORT_FORMATS.filter((item) => !item.scalable).map((item) => item.id).join(',') === 'svg')
+  eq(
+    '三种格式',
+    IMAGE_EXPORT_FORMATS.map((item) => item.id),
+    ['png', 'svg', 'pdf']
+  )
+  eq(
+    '扩展名正确',
+    IMAGE_EXPORT_FORMATS.map((item) => item.ext),
+    ['png', 'svg', 'pdf']
+  )
+  check(
+    '只有 SVG 不需要倍率',
+    IMAGE_EXPORT_FORMATS.filter((item) => !item.scalable)
+      .map((item) => item.id)
+      .join(',') === 'svg'
+  )
   eq('倍率选项', IMAGE_EXPORT_SCALES, [1, 2, 3, 4])
   eq('取格式定义', imageExportFormatDef('pdf').label, 'PDF 文档')
 
@@ -6045,9 +6996,18 @@ function testAi(): void {
   eq('空模型名回退默认', bad.config.model, DEFAULT_AI_CONFIG.model)
   eq('温度被夹到上限', bad.config.temperature, 2)
   eq('负温度被夹到 0', normalizeAiConfig({ temperature: -3 }).config.temperature, 0)
-  eq('非法温度回退默认', normalizeAiConfig({ temperature: Number.NaN }).config.temperature, DEFAULT_AI_CONFIG.temperature)
+  eq(
+    '非法温度回退默认',
+    normalizeAiConfig({ temperature: Number.NaN }).config.temperature,
+    DEFAULT_AI_CONFIG.temperature
+  )
 
-  const view = toConfigView({ baseUrl: 'https://x/v1', model: 'm', temperature: 0.5, apiKey: 'sk-abcdef123456' })
+  const view = toConfigView({
+    baseUrl: 'https://x/v1',
+    model: 'm',
+    temperature: 0.5,
+    apiKey: 'sk-abcdef123456'
+  })
   eq('掩码保留前缀与后四位', view.keyPreview, 'sk-…3456')
   check('界面上不出现完整 Key', !JSON.stringify(view).includes('sk-abcdef123456'))
   eq('没 Key 时掩码为 null', toConfigView({ ...DEFAULT_AI_CONFIG }).keyPreview, null)
@@ -6055,12 +7015,36 @@ function testAi(): void {
 
   group('AI：接口地址拼装')
 
-  eq('裸域名补 /v1/chat/completions', chatCompletionsUrl('https://api.deepseek.com'), 'https://api.deepseek.com/v1/chat/completions')
-  eq('带 /v1 不重复补', chatCompletionsUrl('https://api.openai.com/v1'), 'https://api.openai.com/v1/chat/completions')
-  eq('末尾斜杠会被去掉', chatCompletionsUrl('https://api.openai.com/v1/'), 'https://api.openai.com/v1/chat/completions')
-  eq('完整地址原样使用', chatCompletionsUrl('https://x.com/v1/chat/completions'), 'https://x.com/v1/chat/completions')
-  eq('本地端口 + /v1', chatCompletionsUrl('http://localhost:11434/v1'), 'http://localhost:11434/v1/chat/completions')
-  eq('智谱 v4 形态', chatCompletionsUrl('https://open.bigmodel.cn/api/paas/v4'), 'https://open.bigmodel.cn/api/paas/v4/chat/completions')
+  eq(
+    '裸域名补 /v1/chat/completions',
+    chatCompletionsUrl('https://api.deepseek.com'),
+    'https://api.deepseek.com/v1/chat/completions'
+  )
+  eq(
+    '带 /v1 不重复补',
+    chatCompletionsUrl('https://api.openai.com/v1'),
+    'https://api.openai.com/v1/chat/completions'
+  )
+  eq(
+    '末尾斜杠会被去掉',
+    chatCompletionsUrl('https://api.openai.com/v1/'),
+    'https://api.openai.com/v1/chat/completions'
+  )
+  eq(
+    '完整地址原样使用',
+    chatCompletionsUrl('https://x.com/v1/chat/completions'),
+    'https://x.com/v1/chat/completions'
+  )
+  eq(
+    '本地端口 + /v1',
+    chatCompletionsUrl('http://localhost:11434/v1'),
+    'http://localhost:11434/v1/chat/completions'
+  )
+  eq(
+    '智谱 v4 形态',
+    chatCompletionsUrl('https://open.bigmodel.cn/api/paas/v4'),
+    'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+  )
   eq('空串返回空', chatCompletionsUrl('   '), '')
 
   group('AI：提示词')
@@ -6072,9 +7056,18 @@ function testAi(): void {
   check('用户消息带主题', generate[1].content.includes('学会做菜'))
   check('用户消息带层级', generate[1].content.includes('最多 4 层'))
   check('用户消息带补充要求', generate[1].content.includes('面向零基础'))
-  check('没写层级时给默认值', buildGenerateMessages({ topic: 'x' })[1].content.includes('最多 3 层'))
+  check(
+    '没写层级时给默认值',
+    buildGenerateMessages({ topic: 'x' })[1].content.includes('最多 3 层')
+  )
 
-  const expand = buildExpandMessages({ title: '市场分析', existing: ['目标用户'], count: 4, notes: '看竞品', path: ['规划', '市场分析'] })
+  const expand = buildExpandMessages({
+    title: '市场分析',
+    existing: ['目标用户'],
+    count: 4,
+    notes: '看竞品',
+    path: ['规划', '市场分析']
+  })
   check('扩写提示词带当前主题', expand[1].content.includes('市场分析'))
   check('扩写提示词带已有子主题（避免重复）', expand[1].content.includes('目标用户'))
   check('扩写提示词带备注', expand[1].content.includes('看竞品'))
@@ -6084,7 +7077,10 @@ function testAi(): void {
   const polish = buildPolishMessages({ title: '我们做了一个测试' })
   check('润色提示词要求只返回文本', polish[0].content.includes('只返回改写后的那一句'))
   check('润色提示词带原文', polish[1].content.includes('我们做了一个测试'))
-  check('润色可指定风格', buildPolishMessages({ title: 'x', style: '口语化' })[1].content.includes('口语化'))
+  check(
+    '润色可指定风格',
+    buildPolishMessages({ title: 'x', style: '口语化' })[1].content.includes('口语化')
+  )
 
   group('AI：解析模型输出')
 
@@ -6096,14 +7092,30 @@ function testAi(): void {
   - 研发计划`)
   eq('解析出根节点', parsed.root?.title, '产品规划')
   eq('解析出节点总数', parsed.count, 5)
-  eq('一级子节点', parsed.root?.children.map((c) => c.title), ['市场分析', '产品设计', '研发计划'])
-  eq('二级子节点', parsed.root?.children[0].children.map((c) => c.title), ['目标用户'])
+  eq(
+    '一级子节点',
+    parsed.root?.children.map((c) => c.title),
+    ['市场分析', '产品设计', '研发计划']
+  )
+  eq(
+    '二级子节点',
+    parsed.root?.children[0].children.map((c) => c.title),
+    ['目标用户']
+  )
   check('开场白那行被跳过', !JSON.stringify(parsed.root).includes('好的'))
 
   // 模型给出多个并列顶层节点时，套一个根，不散着
   const multiRoot = parseOutline('- 甲\n- 乙')
-  eq('并列顶层套根', multiRoot.root?.children.map((c) => c.title), ['甲', '乙'])
-  check('并列顶层给出提示', multiRoot.warnings.some((w) => w.includes('并列')), multiRoot.warnings.join('|'))
+  eq(
+    '并列顶层套根',
+    multiRoot.root?.children.map((c) => c.title),
+    ['甲', '乙']
+  )
+  check(
+    '并列顶层给出提示',
+    multiRoot.warnings.some((w) => w.includes('并列')),
+    multiRoot.warnings.join('|')
+  )
 
   // 模型常见的几种「不听话」写法都要能处理
   check('代码块包裹能剥掉', parseOutline('```\n- A\n  - B\n```').count === 2)
@@ -6116,7 +7128,11 @@ function testAi(): void {
   )
   check('制表符缩进也能解析', parseOutline('- A\n\t- B').root?.children.length === 1)
   eq('多余空行不影响', parseOutline('- A\n\n\n  - B').count, 2)
-  check('加粗标题去掉星号', parseOutline('- **重要**').root?.title === '重要', parseOutline('- **重要**').root?.title)
+  check(
+    '加粗标题去掉星号',
+    parseOutline('- **重要**').root?.title === '重要',
+    parseOutline('- **重要**').root?.title
+  )
   check(
     '开场白不进入大纲（关键）',
     parseOutline('好的，这是大纲：\n- 甲\n  - 乙').root?.title === '甲',
@@ -6146,11 +7162,23 @@ function testAi(): void {
   check('提示说明了原因', empty.warnings[0].includes('说明文字'), empty.warnings[0])
 
   const bare = parseOutline('甲\n乙\n丙')
-  eq('没有列表符号时按一行一个主题解析', bare.root?.children.map((c) => c.title), ['甲', '乙', '丙'])
-  check('并给出格式提示', bare.warnings.some((w) => w.includes('一行一个主题')), bare.warnings.join('|'))
+  eq(
+    '没有列表符号时按一行一个主题解析',
+    bare.root?.children.map((c) => c.title),
+    ['甲', '乙', '丙']
+  )
+  check(
+    '并给出格式提示',
+    bare.warnings.some((w) => w.includes('一行一个主题')),
+    bare.warnings.join('|')
+  )
 
   eq('平铺列表解析', parseFlatList('- 甲\n- 乙\n- 丙'), ['甲', '乙', '丙'])
-  eq('平铺列表忽略空行与解释', parseFlatList('这是结果：\n\n- 甲\n\n- 乙'), ['这是结果：', '甲', '乙'])
+  eq('平铺列表忽略空行与解释', parseFlatList('这是结果：\n\n- 甲\n\n- 乙'), [
+    '这是结果：',
+    '甲',
+    '乙'
+  ])
   eq('平铺列表剥掉缩进', parseFlatList('  - 甲\n    - 乙'), ['甲', '乙'])
 
   group('AI：润色结果清洗')
@@ -6165,11 +7193,7 @@ function testAi(): void {
 
   group('AI：响应解析与错误翻译')
 
-  eq(
-    '取 message.content',
-    extractContent({ choices: [{ message: { content: '结果' } }] }),
-    '结果'
-  )
+  eq('取 message.content', extractContent({ choices: [{ message: { content: '结果' } }] }), '结果')
   eq('兼容 text 字段', extractContent({ choices: [{ text: '旧格式' }] }), '旧格式')
 
   let noChoices = ''
@@ -6196,8 +7220,14 @@ function testAi(): void {
   }
   check('非对象给出可读错误', notObject.includes('不是合法的 JSON 对象'), notObject)
 
-  check('401 提示检查 Key', describeAiError(401, '{"error":{"message":"invalid api key"}}').includes('API Key'))
-  check('401 带上服务端信息', describeAiError(401, '{"error":{"message":"invalid api key"}}').includes('invalid api key'))
+  check(
+    '401 提示检查 Key',
+    describeAiError(401, '{"error":{"message":"invalid api key"}}').includes('API Key')
+  )
+  check(
+    '401 带上服务端信息',
+    describeAiError(401, '{"error":{"message":"invalid api key"}}').includes('invalid api key')
+  )
   check('404 提示 BaseURL/模型名', describeAiError(404, '').includes('/v1'))
   check('429 提示限流', describeAiError(429, '').includes('限流'))
   check('400 提示模型名或长度', describeAiError(400, '').includes('模型名'))
@@ -6209,10 +7239,18 @@ function testAi(): void {
 
   const toTopic = outlineToTopic({ title: '根', children: [{ title: '子', children: [] }] })
   eq('转成主题树', toTopic.title, '根')
-  eq('子节点也转了', toTopic.children.map((c) => c.title), ['子'])
+  eq(
+    '子节点也转了',
+    toTopic.children.map((c) => c.title),
+    ['子']
+  )
   check('生成了 id', toTopic.id.length > 0 && toTopic.children[0].id.length > 0)
   check('id 互不相同', toTopic.id !== toTopic.children[0].id)
-  eq('默认字段齐全', [toTopic.labels.length, toTopic.markers.length, toTopic.attachments.length], [0, 0, 0])
+  eq(
+    '默认字段齐全',
+    [toTopic.labels.length, toTopic.markers.length, toTopic.attachments.length],
+    [0, 0, 0]
+  )
 
   group('AI：结果写入画布（一步撤销）')
 
@@ -6222,7 +7260,11 @@ function testAi(): void {
   const before = store().undoStack.length
   const added = store().addChildTitles(aiTarget, ['甲', '乙', '  ', '丙'])
   eq('空白标题被忽略', added, 3)
-  eq('子主题真写进去了', find(aiTarget)?.children.map((c) => c.title), ['甲', '乙', '丙'])
+  eq(
+    '子主题真写进去了',
+    find(aiTarget)?.children.map((c) => c.title),
+    ['甲', '乙', '丙']
+  )
   eq('整批只占一步撤销', store().undoStack.length, before + 1)
   store().undo()
   eq('一次撤销整批回退', find(aiTarget)?.children.length, 0)
@@ -6247,7 +7289,11 @@ function testAi(): void {
     children: []
   })
   eq('挂到已有主题下：节点数', childApplied, 1)
-  eq('挂载结果正确', find(hostId)?.children.map((c) => c.title), ['生成的分支'])
+  eq(
+    '挂载结果正确',
+    find(hostId)?.children.map((c) => c.title),
+    ['生成的分支']
+  )
 
   const unknownTarget = store().applyOutlineTree('不存在的主题', {
     title: 'x',
@@ -6266,22 +7312,46 @@ function testImport(): void {
 
   const nested = parseMarkdownOutline('# 产品规划\n## 市场分析\n### 目标用户\n## 产品设计')
   eq('标题按级别嵌套', nested.root?.title, '产品规划')
-  eq('二级标题是子节点', nested.root?.children.map((c) => c.title), ['市场分析', '产品设计'])
-  eq('三级标题挂到二级下', nested.root?.children[0].children.map((c) => c.title), ['目标用户'])
+  eq(
+    '二级标题是子节点',
+    nested.root?.children.map((c) => c.title),
+    ['市场分析', '产品设计']
+  )
+  eq(
+    '三级标题挂到二级下',
+    nested.root?.children[0].children.map((c) => c.title),
+    ['目标用户']
+  )
   eq('节点总数', nested.count, 4)
 
   const withList = parseMarkdownOutline('# 计划\n- 甲\n  - 甲一\n- 乙')
-  eq('列表挂在标题下', withList.root?.children.map((c) => c.title), ['甲', '乙'])
-  eq('列表按缩进嵌套', withList.root?.children[0].children.map((c) => c.title), ['甲一'])
+  eq(
+    '列表挂在标题下',
+    withList.root?.children.map((c) => c.title),
+    ['甲', '乙']
+  )
+  eq(
+    '列表按缩进嵌套',
+    withList.root?.children[0].children.map((c) => c.title),
+    ['甲一']
+  )
   eq('标题+列表总数', withList.count, 4)
 
   const twoSections = parseMarkdownOutline('# 甲\n- x\n# 乙\n- y')
-  eq('同级标题不嵌套', twoSections.root?.children.map((c) => c.title), ['甲', '乙'])
+  eq(
+    '同级标题不嵌套',
+    twoSections.root?.children.map((c) => c.title),
+    ['甲', '乙']
+  )
   check('并列顶层套一个根', twoSections.warnings.length === 1, twoSections.warnings.join('|'))
 
   const noHeading = parseMarkdownOutline('- 根\n  - 子\n    - 孙')
   eq('没有标题时第一个列表项当根', noHeading.root?.title, '根')
-  eq('没有标题也能嵌套', noHeading.root?.children[0].children.map((c) => c.title), ['孙'])
+  eq(
+    '没有标题也能嵌套',
+    noHeading.root?.children[0].children.map((c) => c.title),
+    ['孙']
+  )
 
   const fenced = parseMarkdownOutline('# 标题\n```ts\n- 代码里的不算\n```\n- 真正的项')
   eq('代码块挂到所属标题', fenced.root?.code?.text, '- 代码里的不算')
@@ -6293,21 +7363,37 @@ function testImport(): void {
   eq('front-matter 后节点数正确', frontMatter.count, 2)
 
   const noisy = parseMarkdownOutline('# 标题\n> 引用不是节点\n| a | b |\n| - | - |\n---\n- 项')
-  eq('表格数据行变成子主题', noisy.root?.children.map((c) => c.title), ['a / b', '项'])
+  eq(
+    '表格数据行变成子主题',
+    noisy.root?.children.map((c) => c.title),
+    ['a / b', '项']
+  )
   eq('引用块进备注', noisy.root?.notes, '引用不是节点')
   eq('引用/表格/水平线处理后的节点数', noisy.count, 3)
 
   const codeFallback = parseMarkdownOutline('# T\n```\na\n```\n```\nb\n```')
-  eq('第二个代码块生成「代码」子主题', codeFallback.root?.children.map((c) => c.title), ['代码'])
+  eq(
+    '第二个代码块生成「代码」子主题',
+    codeFallback.root?.children.map((c) => c.title),
+    ['代码']
+  )
   eq('「代码」子主题带内容', codeFallback.root?.children[0].code?.text, 'b')
 
   const taskList = parseMarkdownOutline('# 任务\n- [x] 已完成\n- [ ] 待办')
-  eq('任务列表剥掉勾选框', taskList.root?.children.map((c) => c.title), ['已完成', '待办'])
+  eq(
+    '任务列表剥掉勾选框',
+    taskList.root?.children.map((c) => c.title),
+    ['已完成', '待办']
+  )
 
   const richList = parseMarkdownOutline('- **重点**内容\n- *斜*体\n- `code` 说明')
   eq('粗体进富文本', richList.root?.children[0].rich?.paragraphs[0]?.runs[0]?.bold, true)
   eq('斜体进富文本', richList.root?.children[1].rich?.paragraphs[0]?.runs[0]?.italic, true)
-  eq('行内代码用等宽字体', typeof richList.root?.children[2].rich?.paragraphs[0]?.runs[0]?.fontFamily, 'string')
+  eq(
+    '行内代码用等宽字体',
+    typeof richList.root?.children[2].rich?.paragraphs[0]?.runs[0]?.fontFamily,
+    'string'
+  )
   eq('纯文本标题不受影响', richList.root?.children[0].title, '重点内容')
 
   group('公式：Markdown 数学写法')
@@ -6337,16 +7423,31 @@ function testImport(): void {
 
   const linked = parseMarkdownOutline('# 链接\n- [文档](https://example.com) 首页')
   eq('链接 url 挂到节点超链接', linked.root?.children[0]?.href, 'https://example.com')
-  check('链接文字带下划线样式', linked.root?.children[0]?.rich?.paragraphs[0]?.runs[0]?.underline === true)
+  check(
+    '链接文字带下划线样式',
+    linked.root?.children[0]?.rich?.paragraphs[0]?.runs[0]?.underline === true
+  )
 
   const numbered = parseMarkdownOutline('# 步骤\n1. 第一\n2. 第二\n   1. 第二点一')
-  eq('数字列表可解析', numbered.root?.children.map((c) => c.title), ['第一', '第二'])
-  eq('数字列表缩进嵌套', numbered.root?.children[1].children.map((c) => c.title), ['第二点一'])
+  eq(
+    '数字列表可解析',
+    numbered.root?.children.map((c) => c.title),
+    ['第一', '第二']
+  )
+  eq(
+    '数字列表缩进嵌套',
+    numbered.root?.children[1].children.map((c) => c.title),
+    ['第二点一']
+  )
 
   eq('粗体标记被清理', parseMarkdownOutline('- **重点**内容').root?.title, '重点内容')
   eq('斜体标记被清理', parseMarkdownOutline('- *斜*体').root?.title, '斜体')
   eq('行内代码被清理', parseMarkdownOutline('- `code` 说明').root?.title, 'code 说明')
-  eq('链接只留文字', parseMarkdownOutline('- [文档](https://example.com) 说明').root?.title, '文档 说明')
+  eq(
+    '链接只留文字',
+    parseMarkdownOutline('- [文档](https://example.com) 说明').root?.title,
+    '文档 说明'
+  )
   eq('图片只留替代文字', parseMarkdownOutline('- ![架构图](a.png)').root?.title, '架构图')
   eq('行尾锚点被清理', parseMarkdownOutline('## 标题 ##').root?.title, '标题')
 
@@ -6355,8 +7456,16 @@ function testImport(): void {
   check('空文件给出提示', emptyMd.warnings.length === 1, emptyMd.warnings.join('|'))
 
   const paragraphs = parseMarkdownOutline('这是第一段\n这是第二段')
-  eq('只有段落时按一行一主题导入', paragraphs.root?.children.map((c) => c.title), ['这是第一段', '这是第二段'])
-  check('并给出格式提示', paragraphs.warnings.some((w) => w.includes('一行一个主题')), paragraphs.warnings.join('|'))
+  eq(
+    '只有段落时按一行一主题导入',
+    paragraphs.root?.children.map((c) => c.title),
+    ['这是第一段', '这是第二段']
+  )
+  check(
+    '并给出格式提示',
+    paragraphs.warnings.some((w) => w.includes('一行一个主题')),
+    paragraphs.warnings.join('|')
+  )
 
   const longParagraph = parseMarkdownOutline('x'.repeat(80))
   eq('超长段落不当作主题', longParagraph.root, null)
@@ -6379,8 +7488,16 @@ function testImport(): void {
   </body>
 </opml>`)
   eq('OPML 根节点', opml.root?.title, '中心主题')
-  eq('OPML 子节点', opml.root?.children.map((c) => c.title), ['分支一', '分支二'])
-  eq('OPML 三级节点', opml.root?.children[1].children.map((c) => c.title), ['细节点'])
+  eq(
+    'OPML 子节点',
+    opml.root?.children.map((c) => c.title),
+    ['分支一', '分支二']
+  )
+  eq(
+    'OPML 三级节点',
+    opml.root?.children[1].children.map((c) => c.title),
+    ['细节点']
+  )
   eq('OPML 节点总数', opml.count, 4)
   eq('_note 被导入为备注', opml.root?.children[0].notes, '这是备注')
 
@@ -6388,14 +7505,22 @@ function testImport(): void {
     <outline text="甲"/><outline text="乙"/>
   </body></opml>`)
   eq('并列节点用文件标题套根', opmlMulti.root?.title, '文件标题')
-  eq('并列节点都在根下', opmlMulti.root?.children.map((c) => c.title), ['甲', '乙'])
+  eq(
+    '并列节点都在根下',
+    opmlMulti.root?.children.map((c) => c.title),
+    ['甲', '乙']
+  )
 
   const container = parseOpmlOutline(`<opml version="2.0"><body>
     <outline>
       <outline text="甲"/><outline text="乙"/>
     </outline>
   </body></opml>`)
-  eq('没有 text 的容器节点被展开（不丢数据）', container.root?.children.map((c) => c.title), ['甲', '乙'])
+  eq(
+    '没有 text 的容器节点被展开（不丢数据）',
+    container.root?.children.map((c) => c.title),
+    ['甲', '乙']
+  )
 
   const noBody = parseOpmlOutline('<opml version="2.0"><outline text="甲"/></opml>')
   eq('没有 body 时兜底解析', noBody.root?.title, '甲')
@@ -6420,7 +7545,11 @@ function testImport(): void {
     children: [{ title: '子', children: [] }]
   })
   eq('备注写入模型', noteTopic.notes, '备注 <b>内容</b>')
-  check('备注 HTML 被转义', (noteTopic.notesHtml ?? '').includes('&lt;b&gt;'), String(noteTopic.notesHtml))
+  check(
+    '备注 HTML 被转义',
+    (noteTopic.notesHtml ?? '').includes('&lt;b&gt;'),
+    String(noteTopic.notesHtml)
+  )
   eq('子节点没有备注', noteTopic.children[0].notes, undefined)
 
   group('导入：落地到画布')
@@ -6431,7 +7560,11 @@ function testImport(): void {
   const mdHost = addChildOf(root().id, '宿主')
   const imported = store().applyOutlineTree(mdHost, parsedMd.root!)
   eq('导入节点数', imported, 4)
-  eq('导入层级正确', find(mdHost)?.children[0]?.children[0]?.children.map((c) => c.title), ['React'])
+  eq(
+    '导入层级正确',
+    find(mdHost)?.children[0]?.children[0]?.children.map((c) => c.title),
+    ['React']
+  )
   store().undo()
   eq('一次撤销回到导入前', find(mdHost)?.children.length, 0)
 }
@@ -6502,7 +7635,14 @@ function testHistory(): void {
       'string',
       { name: '没有路径' },
       { path: '   ' },
-      { path: 'D:\\a.xmind', name: 'a.xmind', title: '甲', openedAt: 100, openCount: 2, pinned: true },
+      {
+        path: 'D:\\a.xmind',
+        name: 'a.xmind',
+        title: '甲',
+        openedAt: 100,
+        openCount: 2,
+        pinned: true
+      },
       { path: 'd:\\A.XMIND', name: '重复项', openedAt: 200 },
       { path: 'D:\\b.xmind', openedAt: 'bad', openCount: -3, pinned: 'yes' }
     ]
@@ -6525,14 +7665,22 @@ function testHistory(): void {
     { path: 'b', name: 'b', title: '', openedAt: 5, openCount: 1, pinned: false },
     { path: 'c', name: 'c', title: '', openedAt: 2, openCount: 1, pinned: true }
   ])
-  eq('排序：常用优先，其余按时间倒序', sorted.map((entry) => entry.path), ['c', 'b', 'a'])
+  eq(
+    '排序：常用优先，其余按时间倒序',
+    sorted.map((entry) => entry.path),
+    ['c', 'b', 'a']
+  )
 
   const before = [
     { path: 'x', name: 'x', title: '', openedAt: 1, openCount: 1, pinned: false },
     { path: 'y', name: 'y', title: '', openedAt: 9, openCount: 1, pinned: false }
   ]
   sortEntries(before)
-  eq('排序不修改传入的数组', before.map((entry) => entry.path), ['x', 'y'])
+  eq(
+    '排序不修改传入的数组',
+    before.map((entry) => entry.path),
+    ['x', 'y']
+  )
 
   const many = normalizeHistory({
     entries: Array.from({ length: 40 }, (_, index) => ({
@@ -6638,7 +7786,11 @@ function snap(over: Partial<SnapshotItem> & { id: string }): SnapshotItem {
 function testSnapshots(): void {
   group('版本快照：文档键')
 
-  eq('已保存文档按路径归并（大小写与斜杠都不敏感）', documentKeyOf('D:\\图\\a.xmind'), documentKeyOf('d:/图/a.xmind'))
+  eq(
+    '已保存文档按路径归并（大小写与斜杠都不敏感）',
+    documentKeyOf('D:\\图\\a.xmind'),
+    documentKeyOf('d:/图/a.xmind')
+  )
   check('不同文件是不同的键', documentKeyOf('D:\\a.xmind') !== documentKeyOf('D:\\b.xmind'))
   check('没有路径时返回 null（不记录版本）', documentKeyOf(null) === null)
   check('空白路径也返回 null', documentKeyOf('   ') === null)
@@ -6699,7 +7851,10 @@ function testSnapshots(): void {
   eq('被裁掉的数量正确', many.dropped.length, 10)
 
   const keptIds = new Set(kept.map((item) => item.id))
-  check('被裁的 id 不在保留名单里', many.dropped.every((id) => !keptIds.has(id)))
+  check(
+    '被裁的 id 不在保留名单里',
+    many.dropped.every((id) => !keptIds.has(id))
+  )
   check(
     '留下的是最新的自动版本',
     kept.filter((item) => item.reason === 'auto').every((item) => Number(item.id.slice(1)) >= 20),
@@ -6711,11 +7866,18 @@ function testSnapshots(): void {
 
   const twoDocs = normalizeSnapshotIndex({
     items: [
-      ...Array.from({ length: 40 }, (_, index) => ({ id: `a${index}`, docKey: DOC_A, at: 1000 + index })),
+      ...Array.from({ length: 40 }, (_, index) => ({
+        id: `a${index}`,
+        docKey: DOC_A,
+        at: 1000 + index
+      })),
       { id: 'b1', docKey: DOC_B, at: 1 }
     ]
   })
-  check('另一个文档的版本不受影响', twoDocs.index.items.some((item) => item.id === 'b1'))
+  check(
+    '另一个文档的版本不受影响',
+    twoDocs.index.items.some((item) => item.id === 'b1')
+  )
 
   group('版本快照：增删与查询')
 
@@ -6726,20 +7888,35 @@ function testSnapshots(): void {
   result = addSnapshot(result.index, snap({ id: 'v2', at: 200 }))
   eq('再新增一个', result.index.items.length, 2)
 
-  eq('按时间倒序查询', snapshotsOf(result.index, DOC_A).map((item) => item.id), ['v2', 'v1'])
+  eq(
+    '按时间倒序查询',
+    snapshotsOf(result.index, DOC_A).map((item) => item.id),
+    ['v2', 'v1']
+  )
   eq('查别的文档为空', snapshotsOf(result.index, DOC_B).length, 0)
 
   result = addSnapshot(result.index, snap({ id: 'v2', at: 300 }))
   eq('同 id 覆盖而不是重复', result.index.items.length, 2)
 
   const afterRemove = removeSnapshot(result.index, 'v2')
-  eq('删除生效', snapshotsOf(afterRemove.index, DOC_A).map((item) => item.id), ['v1'])
+  eq(
+    '删除生效',
+    snapshotsOf(afterRemove.index, DOC_A).map((item) => item.id),
+    ['v1']
+  )
   eq('删除会同时上报要删的文件', afterRemove.dropped, ['v2'])
   eq('删除不存在的 id 不报错', removeSnapshot(result.index, 'not-exist').index.items.length, 2)
 
-  const both = addSnapshot(addSnapshot(emptySnapshotIndex(), snap({ id: 'x1' })).index, snap({ id: 'y1', docKey: DOC_B })).index
+  const both = addSnapshot(
+    addSnapshot(emptySnapshotIndex(), snap({ id: 'x1' })).index,
+    snap({ id: 'y1', docKey: DOC_B })
+  ).index
   const cleared = clearDocSnapshots(both, DOC_A)
-  eq('只清指定文档的版本', cleared.index.items.map((item) => item.id), ['y1'])
+  eq(
+    '只清指定文档的版本',
+    cleared.index.items.map((item) => item.id),
+    ['y1']
+  )
   eq('清掉的 id 会一并上报（否则文件永远留在磁盘上）', cleared.dropped, ['x1'])
 
   group('版本快照：自动快照的判定')
@@ -6749,7 +7926,10 @@ function testSnapshots(): void {
   const base = [snap({ id: 'v1', at: 10_000, hash: 'same' })]
   check('内容没变就不重复存', !shouldAutoSnapshot(base, 'same', 10_000 + 60 * 60_000))
   check('内容变了但间隔太近也先不存', !shouldAutoSnapshot(base, 'other', 10_000 + 60_000))
-  check('内容变了且间隔足够才存', shouldAutoSnapshot(base, 'other', 10_000 + SNAPSHOT_LIMITS.minGap))
+  check(
+    '内容变了且间隔足够才存',
+    shouldAutoSnapshot(base, 'other', 10_000 + SNAPSHOT_LIMITS.minGap)
+  )
   check(
     '间隔按最新一条算',
     !shouldAutoSnapshot(
@@ -6798,11 +7978,15 @@ const VER2_DOC = {
               id: 'a2',
               data: {
                 text: '颜色示例',
-                richText: { ops: [{ insert: '普通' }, { insert: '红色', attributes: { color: '#f44f3b' } }] }
+                richText: {
+                  ops: [{ insert: '普通' }, { insert: '红色', attributes: { color: '#f44f3b' } }]
+                }
               }
             }
           ],
-          summary: [{ id: 's1', data: { text: '不常用', type: 'summary', startId: 'a1', endId: 'a2' } }]
+          summary: [
+            { id: 's1', data: { text: '不常用', type: 'summary', startId: 'a1', endId: 'a2' } }
+          ]
         }
       },
       relativeLinks: [{ id: 'l1', text: '等价\n', start: { nodeId: 'a1' }, end: { nodeId: 'a11' } }]
@@ -6830,25 +8014,33 @@ function testEmmx(): void {
     '概要不再作为普通子节点（避免被画两次）',
     !sheet.rootTopic.children.some((child) => child.id === 's1')
   )
-  eq(
-    '关系线两端',
-    [sheet.relationships[0].end1Id, sheet.relationships[0].end2Id],
-    ['a1', 'a11']
-  )
+  eq('关系线两端', [sheet.relationships[0].end1Id, sheet.relationships[0].end2Id], ['a1', 'a11'])
   eq('关系线标题去掉换行', sheet.relationships[0].title, '等价')
   eq(
     '富文本颜色被保留',
     sheet.rootTopic.children[1].titleRich?.paragraphs[0]?.runs?.[1]?.color,
     '#f44f3b'
   )
-  check('纯文字节点不产生富文本（不写冗余数据）', sheet.rootTopic.children[0].titleRich === undefined)
-  check('有告知兼容性处理', parsed.warnings.some((line) => line.includes('亿图脑图')))
+  check(
+    '纯文字节点不产生富文本（不写冗余数据）',
+    sheet.rootTopic.children[0].titleRich === undefined
+  )
+  check(
+    '有告知兼容性处理',
+    parsed.warnings.some((line) => line.includes('亿图脑图'))
+  )
 
   group('亿图脑图：格式识别')
 
-  check('Xmind 的 content.json 不会被误判', parseEmmxDocument([{ id: 'x', rootTopic: {} }]) === null)
+  check(
+    'Xmind 的 content.json 不会被误判',
+    parseEmmxDocument([{ id: 'x', rootTopic: {} }]) === null
+  )
   check('空对象返回 null', parseEmmxDocument({}) === null)
-  check('contents 里没有 root 时返回 null', parseEmmxDocument({ ver: 2, contents: [{ id: 'a' }] }) === null)
+  check(
+    'contents 里没有 root 时返回 null',
+    parseEmmxDocument({ ver: 2, contents: [{ id: 'a' }] }) === null
+  )
   check('非对象返回 null', parseEmmxDocument('nope') === null)
   check('内容项为空数组返回 null', parseEmmxDocument({ ver: 2, contents: [] }) === null)
 
@@ -6856,7 +8048,17 @@ function testEmmx(): void {
 
   const header = new Uint8Array(600).fill(0x01)
   const body = Buffer.from(
-    ['这里是正文内容', 'Vw0E', 'Tool', 'XtD', 'DataFrame', 'fhj', 'coze', 'Python3', 'self-Host'].join('\u0000'),
+    [
+      '这里是正文内容',
+      'Vw0E',
+      'Tool',
+      'XtD',
+      'DataFrame',
+      'fhj',
+      'coze',
+      'Python3',
+      'self-Host'
+    ].join('\u0000'),
     'utf8'
   )
   const bin = new Uint8Array([...header, ...body])
@@ -6906,9 +8108,15 @@ async function testEmmxSamples(): Promise<void> {
       }
       walk(sheet.rootTopic)
       check(`${name}：能打开且有内容`, total >= 2, String(total))
-      check(`${name}：中心主题有名字`, sheet.rootTopic.title.trim().length > 0, sheet.rootTopic.title)
+      check(
+        `${name}：中心主题有名字`,
+        sheet.rootTopic.title.trim().length > 0,
+        sheet.rootTopic.title
+      )
       // 打开之后必须还能存回去，否则只是"看起来能开"
-      const again = await parseXmind(await serializeXmind({ workbook: result.workbook, resources: result.resources }))
+      const again = await parseXmind(
+        await serializeXmind({ workbook: result.workbook, resources: result.resources })
+      )
       let roundTrip = 0
       const count = (topic: Topic): void => {
         roundTrip += 1

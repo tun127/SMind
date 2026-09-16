@@ -43,7 +43,12 @@ function OutlinePreview({ node, depth = 0 }: { node: OutlineNode; depth?: number
   )
 }
 
-export default function AiDialog({ task, onClose, onNotify, onGenerateInNewWindow }: Props): ReactElement {
+export default function AiDialog({
+  task,
+  onClose,
+  onNotify,
+  onGenerateInNewWindow
+}: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
   const selectedId = selection[0] ?? null
@@ -87,9 +92,12 @@ export default function AiDialog({ task, onClose, onNotify, onGenerateInNewWindo
           setError('请先在画布上选中一个主题')
           return
         }
-        const result = await window.api.aiChat(buildPolishMessages({ title: selectedTopic.title, style }), {
-          timeoutMs: 60000
-        })
+        const result = await window.api.aiChat(
+          buildPolishMessages({ title: selectedTopic.title, style }),
+          {
+            timeoutMs: 60000
+          }
+        )
         setRawText(result.content)
         setPolished(cleanPolishedTitle(result.content))
         return
@@ -122,9 +130,7 @@ export default function AiDialog({ task, onClose, onNotify, onGenerateInNewWindo
         setError('请先填写要生成的主题')
         return
       }
-      const result = await window.api.aiChat(
-        buildGenerateMessages({ topic, depth, extra })
-      )
+      const result = await window.api.aiChat(buildGenerateMessages({ topic, depth, extra }))
       setRawText(result.content)
       const parsed = parseOutline(result.content, topic.trim())
       if (!parsed.root) {
@@ -302,7 +308,11 @@ export default function AiDialog({ task, onClose, onNotify, onGenerateInNewWindo
             </div>
             <div className="ai-field">
               <span className="ai-field__label">风格</span>
-              <input className="input" value={style} onChange={(event) => setStyle(event.target.value)} />
+              <input
+                className="input"
+                value={style}
+                onChange={(event) => setStyle(event.target.value)}
+              />
             </div>
           </>
         )}
@@ -332,7 +342,11 @@ export default function AiDialog({ task, onClose, onNotify, onGenerateInNewWindo
             </div>
             <div className="ai-preview__body">
               {flat.map((item, index) => (
-                <div key={`${item}-${index}`} className="ai-preview__row" style={{ paddingLeft: 8 }}>
+                <div
+                  key={`${item}-${index}`}
+                  className="ai-preview__row"
+                  style={{ paddingLeft: 8 }}
+                >
                   <span className="ai-preview__dot" />
                   {item}
                 </div>
@@ -363,7 +377,8 @@ export default function AiDialog({ task, onClose, onNotify, onGenerateInNewWindo
         )}
 
         <div className="ai-note">
-          AI 只在点「生成」时联网，其余功能全程离线。结果会记成<b>一步操作</b>，不满意直接 `Ctrl+Z` 撤回。
+          AI 只在点「生成」时联网，其余功能全程离线。结果会记成<b>一步操作</b>，不满意直接 `Ctrl+Z`
+          撤回。
         </div>
       </div>
     </Modal>

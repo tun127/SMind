@@ -250,7 +250,11 @@ async function sample3() {
         topic('前端', {
           children: [
             track(store, 'react', topic('React', { labels: ['核心'], markers: ['priority-1'] })),
-            track(store, 'typescript', topic('TypeScript', { labels: ['核心'], markers: ['priority-2'] })),
+            track(
+              store,
+              'typescript',
+              topic('TypeScript', { labels: ['核心'], markers: ['priority-2'] })
+            ),
             topic('Canvas 图形学', { markers: ['priority-3'] })
           ]
         })
@@ -579,7 +583,11 @@ async function sample21() {
   zip.file('content.xml', contentXml, FILE_OPTIONS)
   zip.file('styles.xml', stylesXml, FILE_OPTIONS)
   zip.file('meta.xml', metaXml, FILE_OPTIONS)
-  zip.file('META-INF/manifest.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<manifest xmlns="urn:xmind:xmap:xmlns:manifest:1.0"/>\n', FILE_OPTIONS)
+  zip.file(
+    'META-INF/manifest.xml',
+    '<?xml version="1.0" encoding="UTF-8"?>\n<manifest xmlns="urn:xmind:xmap:xmlns:manifest:1.0"/>\n',
+    FILE_OPTIONS
+  )
   zip.file('Thumbnails/thumbnail.png', TINY_PNG, FILE_OPTIONS)
   zip.file('resources/legacy-chart.png', png, FILE_OPTIONS)
   zip.file('attachments/legacy-data.csv', csv, FILE_OPTIONS)

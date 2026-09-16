@@ -60,7 +60,9 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
   const handleSaveCustom = async (): Promise<void> => {
     const name = newName.trim() || `${currentName} 副本`
     try {
-      await window.api.themesSave(deriveCustomTheme(currentTheme, name, `custom-${Date.now().toString(36)}`))
+      await window.api.themesSave(
+        deriveCustomTheme(currentTheme, name, `custom-${Date.now().toString(36)}`)
+      )
       await refreshCustom()
       setNewName('')
       onNotify(`已保存主题「${name}」`)
@@ -110,7 +112,13 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
     <div className="side-panel">
       <div className="side-panel__header">
         <span>主题</span>
-        <button type="button" className="tool-btn" title="关闭" onMouseDown={(e) => e.preventDefault()} onClick={onClose}>
+        <button
+          type="button"
+          className="tool-btn"
+          title="关闭"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onClose}
+        >
           <X size={16} />
         </button>
       </div>
@@ -133,7 +141,9 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
         <div className="side-panel__section">
           <div className="side-panel__title">我的主题</div>
           {customThemes.length === 0 ? (
-            <div className="side-panel__empty">还没有自定义主题。调整下面的配色后点「保存为我的主题」。</div>
+            <div className="side-panel__empty">
+              还没有自定义主题。调整下面的配色后点「保存为我的主题」。
+            </div>
           ) : (
             <div className="theme-grid">
               {customThemes.map((item) => (
@@ -154,7 +164,11 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
             />
-            <button type="button" className="btn btn--primary" onClick={() => void handleSaveCustom()}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => void handleSaveCustom()}
+            >
               保存为我的主题
             </button>
           </div>
@@ -188,7 +202,9 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
               max={6}
               step={0.1}
               value={colors.edgeWidth}
-              onChange={(event) => updateThemeColors({ edgeWidth: Number(event.target.value) }, 'theme-edgeWidth')}
+              onChange={(event) =>
+                updateThemeColors({ edgeWidth: Number(event.target.value) }, 'theme-edgeWidth')
+              }
             />
             <em>{colors.edgeWidth.toFixed(1)}</em>
           </div>
@@ -201,7 +217,9 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
               max={1}
               step={0.05}
               value={colors.edgeOpacity}
-              onChange={(event) => updateThemeColors({ edgeOpacity: Number(event.target.value) }, 'theme-edgeOpacity')}
+              onChange={(event) =>
+                updateThemeColors({ edgeOpacity: Number(event.target.value) }, 'theme-edgeOpacity')
+              }
             />
             <em>{Math.round(colors.edgeOpacity * 100)}%</em>
           </div>
@@ -210,13 +228,19 @@ export default function ThemePanel({ onClose, onNotify, onSetDefaultTheme }: Pro
           <div className="theme-branches">
             {colors.branches.map((color, index) => (
               <div key={index} className="theme-branch">
-                <input type="color" value={color} onChange={(event) => setBranch(index, event.target.value)} />
+                <input
+                  type="color"
+                  value={color}
+                  onChange={(event) => setBranch(index, event.target.value)}
+                />
                 {colors.branches.length > 1 && (
                   <button
                     type="button"
                     className="theme-branch__del"
                     title="移除这个颜色"
-                    onClick={() => updateThemeColors({ branches: colors.branches.filter((_, i) => i !== index) })}
+                    onClick={() =>
+                      updateThemeColors({ branches: colors.branches.filter((_, i) => i !== index) })
+                    }
                   >
                     <X size={12} />
                   </button>
@@ -281,9 +305,18 @@ function ThemeCard({ theme, active, onApply, onDelete }: CardProps): ReactElemen
     >
       <div className="theme-card__preview" style={{ background: theme.colors.canvas }}>
         <span className="theme-card__root" style={{ background: theme.colors.rootFill }} />
-        <span className="theme-card__line" style={{ background: swatches[0] ?? theme.colors.rootFill }} />
-        <span className="theme-card__dot" style={{ background: swatches[1] ?? theme.colors.rootFill }} />
-        <span className="theme-card__dot" style={{ background: swatches[2] ?? theme.colors.rootFill }} />
+        <span
+          className="theme-card__line"
+          style={{ background: swatches[0] ?? theme.colors.rootFill }}
+        />
+        <span
+          className="theme-card__dot"
+          style={{ background: swatches[1] ?? theme.colors.rootFill }}
+        />
+        <span
+          className="theme-card__dot"
+          style={{ background: swatches[2] ?? theme.colors.rootFill }}
+        />
       </div>
       <div className="theme-card__name">{theme.name}</div>
       {onDelete && (

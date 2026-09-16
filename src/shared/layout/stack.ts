@@ -9,7 +9,15 @@
 import type { StructureClass, Topic } from '../model/types'
 import { TOPIC_SIDE_KEY } from '../xmind/constants'
 import type { LayoutResult, MeasureResult, NodeLayout } from './types'
-import { LayoutBuilder, addDecoration, addEdge, bracePath, connectTree, horizontalAnchors, round } from './core'
+import {
+  LayoutBuilder,
+  addDecoration,
+  addEdge,
+  bracePath,
+  connectTree,
+  horizontalAnchors,
+  round
+} from './core'
 import { anchorsForChild, declaresOwnStructure, placeSubtree } from './subtree'
 
 export type XResolver = (
@@ -55,7 +63,9 @@ export function placeVerticalChildren(
     const size = builder.size(child.id)
     const centerY = cursor + extent / 2
     const defaultX =
-      dir === 1 ? parentNode.x + parentNode.width + builder.gapX : parentNode.x - builder.gapX - size.width
+      dir === 1
+        ? parentNode.x + parentNode.width + builder.gapX
+        : parentNode.x - builder.gapX - size.width
     const x = xResolver ? xResolver(child, size, parentNode, dir, depth) : defaultX
     const px = x + (child.position?.x ?? 0)
     let py = centerY - size.height / 2 + (child.position?.y ?? 0)
@@ -68,7 +78,15 @@ export function placeVerticalChildren(
   for (const item of pending) {
     // 分支自己声明了别的结构 → 这棵子树交给对应家族去排
     if (declaresOwnStructure(builder, item.child, inherited)) {
-      placeSubtree(builder, item.child, item.x, item.y, depth, dir === 1 ? 'right' : 'left', inherited)
+      placeSubtree(
+        builder,
+        item.child,
+        item.x,
+        item.y,
+        depth,
+        dir === 1 ? 'right' : 'left',
+        inherited
+      )
     } else {
       const node = builder.add(item.child, item.x, item.y, depth, dir === 1 ? 'right' : 'left')
       placeVerticalChildren(
@@ -124,7 +142,15 @@ export function placeHorizontalColumn(
     const size = builder.size(child.id)
     const childX = side < 0 ? outerX - indent - size.width : outerX + indent
     builder.add(child, childX, cursor, depth + 1, side < 0 ? 'left' : 'right')
-    placeHorizontalColumn(builder, child, side < 0 ? childX : childX + size.width, cursor, side, depth + 1, indent)
+    placeHorizontalColumn(
+      builder,
+      child,
+      side < 0 ? childX : childX + size.width,
+      cursor,
+      side,
+      depth + 1,
+      indent
+    )
     cursor += size.height + builder.gapY
   }
 }
@@ -225,7 +251,8 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
 
-  const resolver: XResolver = (_child, _size, parentNode) => parentNode.x + parentNode.width + lead * 2
+  const resolver: XResolver = (_child, _size, parentNode) =>
+    parentNode.x + parentNode.width + lead * 2
   placeVerticalChildren(
     builder,
     rootNode,
@@ -267,7 +294,14 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
         const kidMidY = round(kid.y + kid.height / 2)
         // 括号到子节点的这段仍然是真实的父子关系，所以走 edge 而不是装饰，
         // 保证「每个子节点都有一条属于自己的连线」这个不变量成立
-        addEdge(result, topic.id, kid.id, { x: braceX, y: kidMidY }, { x: round(kid.x), y: kidMidY }, 'line')
+        addEdge(
+          result,
+          topic.id,
+          kid.id,
+          { x: braceX, y: kidMidY },
+          { x: round(kid.x), y: kidMidY },
+          'line'
+        )
       }
     }
 

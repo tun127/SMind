@@ -31,7 +31,11 @@ import { drawingToSvg } from './svg'
 
 export type ExportFormat = ImageExportFormat
 
-export { IMAGE_EXPORT_FORMATS as EXPORT_FORMATS, IMAGE_EXPORT_SCALES as EXPORT_SCALES, imageExportFormatDef }
+export {
+  IMAGE_EXPORT_FORMATS as EXPORT_FORMATS,
+  IMAGE_EXPORT_SCALES as EXPORT_SCALES,
+  imageExportFormatDef
+}
 
 export interface ExportOptions {
   format: ExportFormat
@@ -160,7 +164,10 @@ async function collectFormulas(layout: LayoutResult, scale: number): Promise<Map
 }
 
 /** 导出当前画布 */
-export async function exportActiveSheet(workbook: Workbook, options: ExportOptions): Promise<ExportResult> {
+export async function exportActiveSheet(
+  workbook: Workbook,
+  options: ExportOptions
+): Promise<ExportResult> {
   const sheet = activeSheet(workbook)
   if (!sheet) throw new Error('当前没有可导出的画布')
 
@@ -170,7 +177,10 @@ export async function exportActiveSheet(workbook: Workbook, options: ExportOptio
 
   // 超大画布自动降倍率，避免超出 canvas 尺寸上限
   const longest = Math.max(layout.bounds.width, layout.bounds.height)
-  const effectiveScale = Math.max(1, Math.min(options.scale, Math.floor(MAX_PIXELS / Math.max(1, longest))))
+  const effectiveScale = Math.max(
+    1,
+    Math.min(options.scale, Math.floor(MAX_PIXELS / Math.max(1, longest)))
+  )
 
   const images = await collectImages(sheet.rootTopic)
   const formulas = await collectFormulas(layout, effectiveScale)

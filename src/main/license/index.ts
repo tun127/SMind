@@ -48,7 +48,9 @@ export async function readLicenseState(): Promise<LicenseState> {
       version: 1,
       key: typeof record.key === 'string' && record.key.length > 0 ? record.key : null,
       trialUsed:
-        typeof record.trialUsed === 'number' && Number.isFinite(record.trialUsed) && record.trialUsed > 0
+        typeof record.trialUsed === 'number' &&
+        Number.isFinite(record.trialUsed) &&
+        record.trialUsed > 0
           ? Math.floor(record.trialUsed)
           : 0
     }
@@ -138,7 +140,9 @@ export async function getLicenseView(): Promise<LicenseView> {
   return licenseViewOf({ pro: pro.pro, holder: pro.holder, trialUsed: state.trialUsed })
 }
 
-export async function activateLicense(raw: string): Promise<{ ok: boolean; message: string; view: LicenseView }> {
+export async function activateLicense(
+  raw: string
+): Promise<{ ok: boolean; message: string; view: LicenseView }> {
   const verified = verifyLicenseKey(raw)
   if (!verified.ok) {
     return { ok: false, message: verified.error, view: await getLicenseView() }

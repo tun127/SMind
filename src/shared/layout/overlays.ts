@@ -32,7 +32,10 @@ export function readCurveOffset(style: NodeStyle | undefined): CurveOffset {
 }
 
 /** 写回弯度偏移；零偏移时把键清掉，避免在文件里留下无用字段 */
-export function withCurveOffset(style: NodeStyle | undefined, offset: CurveOffset): NodeStyle | undefined {
+export function withCurveOffset(
+  style: NodeStyle | undefined,
+  offset: CurveOffset
+): NodeStyle | undefined {
   const properties: Record<string, string> = { ...(style?.properties ?? {}) }
   if (offset.x === 0 && offset.y === 0) delete properties[RELATIONSHIP_CURVE_KEY]
   else properties[RELATIONSHIP_CURVE_KEY] = `${round(offset.x)},${round(offset.y)}`
@@ -199,7 +202,11 @@ function sameBounds(a: Bounds, b: Bounds): Bounds {
   }
 }
 
-export function boundsOfRange(result: LayoutResult, index: TreeIndex, range: string | undefined): Bounds | null {
+export function boundsOfRange(
+  result: LayoutResult,
+  index: TreeIndex,
+  range: string | undefined
+): Bounds | null {
   const topics = resolveRange(index, range)
   if (topics.length === 0) return null
   return boundsOfTopics(topics, result)
@@ -216,10 +223,18 @@ export function boundsOfRange(result: LayoutResult, index: TreeIndex, range: str
  * @param base 两端勾的位置（竖向时是 x 坐标，横向时是 y 坐标）
  * @param spine 主干位置；nib 是中间尖点位置
  */
-function bracePath(axis: 'v' | 'h', spanStart: number, spanEnd: number, base: number, spine: number, nib: number): string {
+function bracePath(
+  axis: 'v' | 'h',
+  spanStart: number,
+  spanEnd: number,
+  base: number,
+  spine: number,
+  nib: number
+): string {
   const mid = (spanStart + spanEnd) / 2
   const r = Math.max(2, Math.min(14, (spanEnd - spanStart) / 4))
-  const p = (s: number, t: number): string => (axis === 'v' ? `${round(t)} ${round(s)}` : `${round(s)} ${round(t)}`)
+  const p = (s: number, t: number): string =>
+    axis === 'v' ? `${round(t)} ${round(s)}` : `${round(s)} ${round(t)}`
   return [
     `M ${p(spanStart, base)}`,
     `Q ${p(spanStart, spine)} ${p(spanStart + r, spine)}`,
@@ -236,7 +251,10 @@ function bracePath(axis: 'v' | 'h', spanStart: number, spanEnd: number, base: nu
 /* ------------------------------------------------------------------ */
 
 /** 关系线：从 A 的边框连到 B 的边框，向外鼓出弧形并带箭头 */
-function relationshipOf(relationship: Relationship, result: LayoutResult): RelationshipLayout | null {
+function relationshipOf(
+  relationship: Relationship,
+  result: LayoutResult
+): RelationshipLayout | null {
   const from = result.nodeMap.get(relationship.end1Id)
   const to = result.nodeMap.get(relationship.end2Id)
   if (!from || !to || from.id === to.id) return null
@@ -247,14 +265,20 @@ function relationshipOf(relationship: Relationship, result: LayoutResult): Relat
   })
 
   /** 从节点中心朝目标方向射出，与节点边框的交点 */
-  const borderPoint = (node: typeof from, target: { x: number; y: number }): { x: number; y: number } => {
+  const borderPoint = (
+    node: typeof from,
+    target: { x: number; y: number }
+  ): { x: number; y: number } => {
     const center = centerOf(node)
     const dx = target.x - center.x
     const dy = target.y - center.y
     if (dx === 0 && dy === 0) return center
     const hw = node.width / 2
     const hh = node.height / 2
-    const scale = Math.min(dx !== 0 ? hw / Math.abs(dx) : Number.POSITIVE_INFINITY, dy !== 0 ? hh / Math.abs(dy) : Number.POSITIVE_INFINITY)
+    const scale = Math.min(
+      dx !== 0 ? hw / Math.abs(dx) : Number.POSITIVE_INFINITY,
+      dy !== 0 ? hh / Math.abs(dy) : Number.POSITIVE_INFINITY
+    )
     return { x: round(center.x + dx * scale), y: round(center.y + dy * scale) }
   }
 
@@ -350,7 +374,10 @@ function boundaryOf(
   const y = round(bounds.minY - BOUNDARY_PAD - titleBand)
   const width = round(bounds.maxX - bounds.minX + BOUNDARY_PAD * 2)
   const height = round(bounds.maxY - bounds.minY + BOUNDARY_PAD * 2 + titleBand)
-  const labelSize = estimateOverlayLabelSize(boundary.title, readOverlayFontSize(boundary.style, BOUNDARY_FONT_SIZE))
+  const labelSize = estimateOverlayLabelSize(
+    boundary.title,
+    readOverlayFontSize(boundary.style, BOUNDARY_FONT_SIZE)
+  )
 
   return {
     id: boundary.id,
@@ -435,7 +462,12 @@ function labelRectOf(
   anchor: 'start' | 'middle' | 'end',
   size: { width: number; height: number }
 ): { x: number; y: number; width: number; height: number } {
-  const left = anchor === 'start' ? label.x : anchor === 'end' ? label.x - size.width : label.x - size.width / 2
+  const left =
+    anchor === 'start'
+      ? label.x
+      : anchor === 'end'
+        ? label.x - size.width
+        : label.x - size.width / 2
   return { x: left, y: label.y - size.height / 2, width: size.width, height: size.height }
 }
 
@@ -500,7 +532,12 @@ function summaryOf(
       labelSize,
       style: summary.style,
       bounds: unionBounds([
-        { x: Math.min(base, nib), y: spanStart, width: Math.abs(nib - base) + 4, height: spanEnd - spanStart },
+        {
+          x: Math.min(base, nib),
+          y: spanStart,
+          width: Math.abs(nib - base) + 4,
+          height: spanEnd - spanStart
+        },
         labelRectOf(label, anchor, labelSize)
       ])
     }
@@ -522,7 +559,12 @@ function summaryOf(
     labelSize,
     style: summary.style,
     bounds: unionBounds([
-      { x: spanStart, y: Math.min(base, nib), width: spanEnd - spanStart, height: Math.abs(nib - base) + 4 },
+      {
+        x: spanStart,
+        y: Math.min(base, nib),
+        width: spanEnd - spanStart,
+        height: Math.abs(nib - base) + 4
+      },
       labelRectOf(label, 'middle', labelSize)
     ])
   }
@@ -563,7 +605,12 @@ export function addOverlays(result: LayoutResult, root: Topic, sheet: Sheet): vo
           maxX: boundary.x + boundary.width,
           maxY: boundary.y + boundary.height
         })
-      : { minX: boundary.x, minY: boundary.y, maxX: boundary.x + boundary.width, maxY: boundary.y + boundary.height }
+      : {
+          minX: boundary.x,
+          minY: boundary.y,
+          maxX: boundary.x + boundary.width,
+          maxY: boundary.y + boundary.height
+        }
   }
   for (const relationship of result.relationships) {
     const points = [

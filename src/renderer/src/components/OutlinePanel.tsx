@@ -224,7 +224,10 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
         <span className="outline-panel__title">
           <ListTree size={15} /> 大纲
         </span>
-        <div className="outline-panel__exports" title={`导出当前画布的大纲（${activeFormatLabel}）`}>
+        <div
+          className="outline-panel__exports"
+          title={`导出当前画布的大纲（${activeFormatLabel}）`}
+        >
           {OUTLINE_FORMATS.map((item) => (
             <button
               key={item.id}
@@ -274,7 +277,11 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
               {row.hasChildren ? (
                 <button
                   type="button"
-                  className={row.collapsed ? 'outline-row__toggle' : 'outline-row__toggle outline-row__toggle--open'}
+                  className={
+                    row.collapsed
+                      ? 'outline-row__toggle'
+                      : 'outline-row__toggle outline-row__toggle--open'
+                  }
                   title={row.collapsed ? '展开' : '折叠'}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => useEditor.getState().toggleCollapse(row.id)}
@@ -297,7 +304,11 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
                 />
               ) : (
                 <span className="outline-row__text" title={row.title}>
-                  {row.title.length > 0 ? row.title : <em className="outline-row__empty">（空主题）</em>}
+                  {row.title.length > 0 ? (
+                    row.title
+                  ) : (
+                    <em className="outline-row__empty">（空主题）</em>
+                  )}
                 </span>
               )}
 
@@ -344,8 +355,8 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
       </div>
 
       <div className="outline-panel__hint">
-        <b>Enter</b> 新建同级 · <b>Tab</b> 降级 · <b>Shift+Tab</b> 升级 · <b>双击</b> 改文字 · <b>空格</b> 折叠 ·{' '}
-        <b>Delete</b> 删除
+        <b>Enter</b> 新建同级 · <b>Tab</b> 降级 · <b>Shift+Tab</b> 升级 · <b>双击</b> 改文字 ·{' '}
+        <b>空格</b> 折叠 · <b>Delete</b> 删除
         <br />
         大纲与导图共用同一份数据，改哪边另一边都会立刻跟着变。
       </div>

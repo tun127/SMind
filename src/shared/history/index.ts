@@ -69,10 +69,12 @@ export function normalizeHistory(raw: unknown): HistoryFile {
     const rawName = typeof item.name === 'string' ? item.name.trim() : ''
     entries.push({
       path,
-      name: rawName.length > 0 ? rawName : path.split(/[\\/]/).pop() ?? path,
+      name: rawName.length > 0 ? rawName : (path.split(/[\\/]/).pop() ?? path),
       title: typeof item.title === 'string' ? item.title.trim() : '',
-      openedAt: typeof item.openedAt === 'number' && Number.isFinite(item.openedAt) ? item.openedAt : 0,
-      openCount: typeof item.openCount === 'number' && item.openCount > 0 ? Math.floor(item.openCount) : 1,
+      openedAt:
+        typeof item.openedAt === 'number' && Number.isFinite(item.openedAt) ? item.openedAt : 0,
+      openCount:
+        typeof item.openCount === 'number' && item.openCount > 0 ? Math.floor(item.openCount) : 1,
       pinned: item.pinned === true
     })
   }
@@ -81,7 +83,10 @@ export function normalizeHistory(raw: unknown): HistoryFile {
   const pinned = sorted.filter((entry) => entry.pinned)
   const recent = sorted.filter((entry) => !entry.pinned).slice(0, HISTORY_LIMIT)
 
-  const saveDir = typeof source.saveDir === 'string' && source.saveDir.trim().length > 0 ? source.saveDir.trim() : null
+  const saveDir =
+    typeof source.saveDir === 'string' && source.saveDir.trim().length > 0
+      ? source.saveDir.trim()
+      : null
 
   return { version: HISTORY_VERSION, entries: [...pinned, ...recent], saveDir }
 }
@@ -96,7 +101,7 @@ export function recordVisit(
 
   const at = visit.at ?? Date.now()
   const rawName = visit.name?.trim() ?? ''
-  const name = rawName.length > 0 ? rawName : path.split(/[\\/]/).pop() ?? path
+  const name = rawName.length > 0 ? rawName : (path.split(/[\\/]/).pop() ?? path)
   const rawTitle = visit.title?.trim() ?? ''
   const existing = file.entries.find((entry) => entry.path.toLowerCase() === path.toLowerCase())
 

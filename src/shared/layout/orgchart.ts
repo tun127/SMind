@@ -15,15 +15,7 @@ export function layoutOrgChart(
   const size = builder.size(root.id)
   const inherited = root.structureClass
   builder.add(root, -size.width / 2, -size.height / 2, 0, 'root')
-  placeOrgChartChildren(
-    builder,
-    root,
-    -size.width / 2,
-    -size.height / 2,
-    0,
-    direction,
-    inherited
-  )
+  placeOrgChartChildren(builder, root, -size.width / 2, -size.height / 2, 0, direction, inherited)
   const result = builder.finish(root)
   connectTree(result, root, 'elbow-v', (parent, child) =>
     anchorsForChild(parent, child, verticalAnchors(parent, child))

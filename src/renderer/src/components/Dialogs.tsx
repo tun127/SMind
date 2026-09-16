@@ -81,7 +81,12 @@ interface UnsavedDialogProps {
   onCancel(): void
 }
 
-export function UnsavedDialog({ fileName, onSave, onDiscard, onCancel }: UnsavedDialogProps): ReactElement {
+export function UnsavedDialog({
+  fileName,
+  onSave,
+  onDiscard,
+  onCancel
+}: UnsavedDialogProps): ReactElement {
   return (
     <Modal
       title="有未保存的修改"

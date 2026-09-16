@@ -82,7 +82,10 @@ export async function checkForUpdateInteractive(win: BrowserWindow | null): Prom
         defaultId: 0,
         noLink: true
       }
-      const choice = win === null ? await dialog.showMessageBox(options) : await dialog.showMessageBox(win, options)
+      const choice =
+        win === null
+          ? await dialog.showMessageBox(options)
+          : await dialog.showMessageBox(win, options)
       if (ready && choice.response === 0) {
         setImmediate(() => autoUpdater.quitAndInstall())
       }

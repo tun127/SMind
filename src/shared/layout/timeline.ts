@@ -40,7 +40,9 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
   if (kids.length > 0) {
     const lastKid = kids[kids.length - 1]
     const lastNode = lastKid ? result.nodeMap.get(lastKid.id) : undefined
-    const endX = lastNode ? round(lastNode.x + lastNode.width + 40) : round(rootFinal.x + rootFinal.width + 80)
+    const endX = lastNode
+      ? round(lastNode.x + lastNode.width + 40)
+      : round(rootFinal.x + rootFinal.width + 80)
     addDecoration(result, {
       d: `M ${round(rootFinal.x + rootFinal.width)} ${spineY} L ${endX} ${spineY}`,
       widthScale: 1.3
@@ -58,7 +60,14 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
         const anchorX = round(childNode.x + childNode.width / 2)
         const above = childNode.y + childNode.height / 2 < spineY
         const nearY = above ? round(childNode.y + childNode.height) : childNode.y
-        addEdge(result, parent.id, childNode.id, { x: anchorX, y: spineY }, { x: anchorX, y: nearY }, 'line')
+        addEdge(
+          result,
+          parent.id,
+          childNode.id,
+          { x: anchorX, y: spineY },
+          { x: anchorX, y: nearY },
+          'line'
+        )
       } else {
         const above = childNode.y + childNode.height / 2 < parent.y + parent.height / 2
         addEdge(
@@ -110,7 +119,9 @@ export function layoutTimelineVertical(root: Topic, builder: LayoutBuilder): Lay
   if (kids.length > 0) {
     const lastKid = kids[kids.length - 1]
     const lastNode = lastKid ? result.nodeMap.get(lastKid.id) : undefined
-    const endY = lastNode ? round(lastNode.y + lastNode.height + 40) : round(rootFinal.y + rootFinal.height + 80)
+    const endY = lastNode
+      ? round(lastNode.y + lastNode.height + 40)
+      : round(rootFinal.y + rootFinal.height + 80)
     addDecoration(result, {
       d: `M ${spineX} ${round(rootFinal.y + rootFinal.height)} L ${spineX} ${endY}`,
       widthScale: 1.3
@@ -128,7 +139,14 @@ export function layoutTimelineVertical(root: Topic, builder: LayoutBuilder): Lay
         const anchorY = round(childNode.y + childNode.height / 2)
         const left = childNode.x + childNode.width / 2 < spineX
         const nearX = left ? round(childNode.x + childNode.width) : childNode.x
-        addEdge(result, parent.id, childNode.id, { x: spineX, y: anchorY }, { x: nearX, y: anchorY }, 'line')
+        addEdge(
+          result,
+          parent.id,
+          childNode.id,
+          { x: spineX, y: anchorY },
+          { x: nearX, y: anchorY },
+          'line'
+        )
       } else {
         const left = childNode.x + childNode.width / 2 < parent.x + parent.width / 2
         addEdge(

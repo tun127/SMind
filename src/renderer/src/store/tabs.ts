@@ -144,7 +144,9 @@ export const useTabs = create<TabsState>()((set, get) => ({
     commitEditing()
     // 当前激活文档的现场存回它的标签
     const parked =
-      tabs.length > 0 ? tabs.map((t) => (t.id === activeId ? { ...t, ...captureOf(t.id) } : t)) : tabs
+      tabs.length > 0
+        ? tabs.map((t) => (t.id === activeId ? { ...t, ...captureOf(t.id) } : t))
+        : tabs
     // 编辑器换成全新文档，再把它拍成新标签
     useEditor.getState().newDocument()
     const fresh = captureOf(createDocId())

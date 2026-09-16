@@ -145,7 +145,14 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
     for (const child of builder.visibleChildren(topic)) {
       const childNode = result.nodeMap.get(child.id)
       if (childNode) {
-        addEdge(result, parent.id, childNode.id, anchorPoint(parent, 'bottom'), anchorPoint(childNode, 'top'), 'elbow-v')
+        addEdge(
+          result,
+          parent.id,
+          childNode.id,
+          anchorPoint(parent, 'bottom'),
+          anchorPoint(childNode, 'top'),
+          'elbow-v'
+        )
       }
       connect(child)
     }
@@ -208,7 +215,13 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
     baseRadius = Math.max(baseRadius, radiusForSector(sector, maxSize))
   }
 
-  const place = (topic: Topic, angle: number, sectorWidth: number, radius: number, depth: number): void => {
+  const place = (
+    topic: Topic,
+    angle: number,
+    sectorWidth: number,
+    radius: number,
+    depth: number
+  ): void => {
     const size = builder.size(topic.id)
     const x = centerX + Math.cos(angle) * radius - size.width / 2
     const y = centerY + Math.sin(angle) * radius - size.height / 2
@@ -249,7 +262,14 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
     for (const child of builder.visibleChildren(topic)) {
       const childNode = result.nodeMap.get(child.id)
       if (childNode) {
-        addEdge(result, parent.id, childNode.id, anchorPoint(parent, 'center'), anchorPoint(childNode, 'center'), 'line')
+        addEdge(
+          result,
+          parent.id,
+          childNode.id,
+          anchorPoint(parent, 'center'),
+          anchorPoint(childNode, 'center'),
+          'line'
+        )
       }
       connect(child)
     }

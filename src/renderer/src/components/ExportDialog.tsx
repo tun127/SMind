@@ -1,6 +1,11 @@
 import { useState, type ReactElement } from 'react'
 import { ImageDown } from 'lucide-react'
-import { IMAGE_EXPORT_FORMATS, IMAGE_EXPORT_SCALES, type ExportBackground, type ImageExportFormat } from '@shared/export/types'
+import {
+  IMAGE_EXPORT_FORMATS,
+  IMAGE_EXPORT_SCALES,
+  type ExportBackground,
+  type ImageExportFormat
+} from '@shared/export/types'
 import { Modal } from './Dialogs'
 import { exportActiveSheet } from '../export'
 import { useEditor } from '../store/editor'
@@ -25,7 +30,11 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
     try {
       const workbook = useEditor.getState().workbook
       const result = await exportActiveSheet(workbook, { format, scale, background })
-      const path = await window.api.saveExport(result.data, result.fileName, result.ext as ImageExportFormat)
+      const path = await window.api.saveExport(
+        result.data,
+        result.fileName,
+        result.ext as ImageExportFormat
+      )
       if (path) {
         onNotify(`已导出：${path}`)
         onClose()
@@ -47,7 +56,12 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
           <button type="button" className="btn" disabled={busy} onClick={onClose}>
             取消
           </button>
-          <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void run()}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={busy}
+            onClick={() => void run()}
+          >
             {busy ? '正在生成…' : '导出'}
           </button>
         </>
@@ -61,7 +75,9 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
               <button
                 key={item.id}
                 type="button"
-                className={item.id === format ? 'export-choice export-choice--active' : 'export-choice'}
+                className={
+                  item.id === format ? 'export-choice export-choice--active' : 'export-choice'
+                }
                 onClick={() => setFormat(item.id)}
               >
                 <span className="export-choice__title">{item.label}</span>
@@ -79,7 +95,9 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
                 <button
                   key={value}
                   type="button"
-                  className={value === scale ? 'export-choice export-choice--active' : 'export-choice'}
+                  className={
+                    value === scale ? 'export-choice export-choice--active' : 'export-choice'
+                  }
                   onClick={() => setScale(value)}
                 >
                   {value}×
@@ -102,7 +120,9 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
               <button
                 key={item.id}
                 type="button"
-                className={item.id === background ? 'export-choice export-choice--active' : 'export-choice'}
+                className={
+                  item.id === background ? 'export-choice export-choice--active' : 'export-choice'
+                }
                 onClick={() => setBackground(item.id)}
               >
                 {item.label}
@@ -112,9 +132,9 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
         </div>
 
         <div className="export-note">
-          导出的是<b>当前画布</b>的全部内容（不受折叠与筛选影响）。
-          PNG 与 PDF 是位图：倍率越高越清晰、文件越大；SVG 是矢量，文字与连线可以再编辑。
-          PDF 目前是<b>单页位图 PDF</b>（不是矢量 PDF）。
+          导出的是<b>当前画布</b>的全部内容（不受折叠与筛选影响）。 PNG 与 PDF
+          是位图：倍率越高越清晰、文件越大；SVG 是矢量，文字与连线可以再编辑。 PDF 目前是
+          <b>单页位图 PDF</b>（不是矢量 PDF）。
         </div>
       </div>
     </Modal>

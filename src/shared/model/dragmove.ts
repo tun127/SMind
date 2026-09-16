@@ -35,7 +35,11 @@ export function parentMapOf(root: Topic): Map<string, string | null> {
  * - 再做一次「去冗余」：父子同时入选时只保留最上面那个父级——
  *   父级一动，它的后代本来就跟着走，两边都记会让这些后代被移动两次。
  */
-export function resolveDragMove(root: Topic, anchorId: string, selection: readonly string[]): DragMove {
+export function resolveDragMove(
+  root: Topic,
+  anchorId: string,
+  selection: readonly string[]
+): DragMove {
   const parentOf = parentMapOf(root)
   const candidates = selection.includes(anchorId) && selection.length > 1 ? selection : [anchorId]
 

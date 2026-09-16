@@ -47,7 +47,8 @@ export const useFormatStore = create<FormatStore>()((set) => ({
 /** 从编辑器读出当前选区/光标处的格式，用于高亮格式栏按钮 */
 export function readFormatState(editor: RichEditor): FormatState {
   const attributes = editor.getAttributes('textStyle') as { color?: unknown; fontSize?: unknown }
-  const parsedSize = typeof attributes.fontSize === 'string' ? Number.parseFloat(attributes.fontSize) : Number.NaN
+  const parsedSize =
+    typeof attributes.fontSize === 'string' ? Number.parseFloat(attributes.fontSize) : Number.NaN
   const align: FormatState['align'] = editor.isActive({ textAlign: 'right' })
     ? 'right'
     : editor.isActive({ textAlign: 'left' })
@@ -59,11 +60,7 @@ export function readFormatState(editor: RichEditor): FormatState {
     italic: editor.isActive('italic'),
     underline: editor.isActive('underline'),
     strike: editor.isActive('strike'),
-    script: editor.isActive('superscript')
-      ? 'super'
-      : editor.isActive('subscript')
-        ? 'sub'
-        : null,
+    script: editor.isActive('superscript') ? 'super' : editor.isActive('subscript') ? 'sub' : null,
     color: typeof attributes.color === 'string' ? attributes.color : null,
     fontSize: Number.isFinite(parsedSize) ? parsedSize : null,
     align,

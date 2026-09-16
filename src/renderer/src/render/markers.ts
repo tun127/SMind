@@ -48,7 +48,13 @@ const COLOR_WORDS: Record<string, string> = {
   gray: '#8b93a1'
 }
 
-const TASK_RATIOS: Record<string, number> = { start: 0, oct: 0.25, quarter: 0.5, '3quar': 0.75, done: 1 }
+const TASK_RATIOS: Record<string, number> = {
+  start: 0,
+  oct: 0.25,
+  quarter: 0.5,
+  '3quar': 0.75,
+  done: 1
+}
 const TASK_COLORS: Record<string, string> = {
   start: NEUTRAL,
   oct: '#2D9CDB',
@@ -105,19 +111,30 @@ export function markerVisualOf(markerId: string): MarkerVisual {
   const smiley = /^smiley-(\w+)$/.exec(markerId)
   if (smiley) {
     const mood = smiley[1]
-    const glyph: MarkerGlyph = mood === 'laugh' ? 'laugh' : mood === 'angry' ? 'angry' : mood === 'cry' ? 'frown' : 'smile'
+    const glyph: MarkerGlyph =
+      mood === 'laugh' ? 'laugh' : mood === 'angry' ? 'angry' : mood === 'cry' ? 'frown' : 'smile'
     const color = mood === 'angry' ? '#EB5757' : mood === 'cry' ? '#2D9CDB' : '#E2B93B'
     return { kind: 'glyph', glyph, color, label: labelOf(markerId) }
   }
 
   const star = /^star-(\w+)$/.exec(markerId)
   if (star) {
-    return { kind: 'glyph', glyph: 'star', color: COLOR_WORDS[star[1] ?? ''] ?? '#E2B93B', label: labelOf(markerId) }
+    return {
+      kind: 'glyph',
+      glyph: 'star',
+      color: COLOR_WORDS[star[1] ?? ''] ?? '#E2B93B',
+      label: labelOf(markerId)
+    }
   }
 
   const flag = /^flag-(\w+)$/.exec(markerId)
   if (flag) {
-    return { kind: 'glyph', glyph: 'flag', color: COLOR_WORDS[flag[1] ?? ''] ?? NEUTRAL, label: labelOf(markerId) }
+    return {
+      kind: 'glyph',
+      glyph: 'flag',
+      color: COLOR_WORDS[flag[1] ?? ''] ?? NEUTRAL,
+      label: labelOf(markerId)
+    }
   }
 
   const symbol = /^symbol-(\w+)$/.exec(markerId)
@@ -127,7 +144,8 @@ export function markerVisualOf(markerId: string): MarkerVisual {
   }
 
   const named = NAMED_GLYPHS[markerId]
-  if (named) return { kind: 'glyph', glyph: named.glyph, color: named.color, label: labelOf(markerId) }
+  if (named)
+    return { kind: 'glyph', glyph: named.glyph, color: named.color, label: labelOf(markerId) }
 
   return { kind: 'glyph', glyph: 'award', color: NEUTRAL, label: labelOf(markerId) }
 }
@@ -139,7 +157,10 @@ export interface MarkerGroup {
 }
 
 export const MARKER_GROUPS: MarkerGroup[] = [
-  { title: '优先级', markers: ['priority-1', 'priority-2', 'priority-3', 'priority-4', 'priority-5'] },
+  {
+    title: '优先级',
+    markers: ['priority-1', 'priority-2', 'priority-3', 'priority-4', 'priority-5']
+  },
   { title: '进度', markers: ['task-start', 'task-oct', 'task-quarter', 'task-3quar', 'task-done'] },
   { title: '星标', markers: ['star-red', 'star-orange', 'star-yellow'] },
   { title: '旗帜', markers: ['flag-red', 'flag-green', 'flag-blue'] },

@@ -53,7 +53,9 @@ export function sanitizeFileName(name: string, maxLength = 60): string {
 /** 取工作簿的默认名字：中心主题 → 画布名 → 未命名导图 */
 export function defaultDocumentName(workbook: Workbook | undefined): string {
   const sheet =
-    workbook?.sheets.find((item) => item.id === workbook.activeSheetId) ?? workbook?.sheets[0] ?? undefined
+    workbook?.sheets.find((item) => item.id === workbook.activeSheetId) ??
+    workbook?.sheets[0] ??
+    undefined
 
   const rootTitle = sanitizeFileName(sheet?.rootTopic?.title ?? '')
   if (rootTitle.length > 0) return rootTitle

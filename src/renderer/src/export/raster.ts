@@ -64,7 +64,12 @@ function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
       total += segment.width
       continue
     }
-    ctx.font = fontOf(segment.fontSize, segment.weight ?? 400, Boolean(segment.italic), segment.fontFamily)
+    ctx.font = fontOf(
+      segment.fontSize,
+      segment.weight ?? 400,
+      Boolean(segment.italic),
+      segment.fontFamily
+    )
     total += ctx.measureText(segment.text).width
   }
 
@@ -77,7 +82,12 @@ function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
       typeof segment.width === 'number'
         ? segment.width
         : ((): number => {
-            ctx.font = fontOf(segment.fontSize, segment.weight ?? 400, Boolean(segment.italic), segment.fontFamily)
+            ctx.font = fontOf(
+              segment.fontSize,
+              segment.weight ?? 400,
+              Boolean(segment.italic),
+              segment.fontFamily
+            )
             return ctx.measureText(segment.text).width
           })()
 
@@ -91,16 +101,29 @@ function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
 
     // 上下标：字号已经在测量里缩小过，这里只做基线偏移（画布上是 vertical-align）
     const shift =
-      segment.script === 'super' ? -segment.fontSize * 0.35 : segment.script === 'sub' ? segment.fontSize * 0.15 : 0
+      segment.script === 'super'
+        ? -segment.fontSize * 0.35
+        : segment.script === 'sub'
+          ? segment.fontSize * 0.15
+          : 0
 
-    ctx.font = fontOf(segment.fontSize, segment.weight ?? 400, Boolean(segment.italic), segment.fontFamily)
+    ctx.font = fontOf(
+      segment.fontSize,
+      segment.weight ?? 400,
+      Boolean(segment.italic),
+      segment.fontFamily
+    )
     ctx.fillStyle = segment.color ?? op.color
     ctx.fillText(segment.text, x, op.baseline + shift)
     x += width
   }
 }
 
-function drawOp(ctx: CanvasRenderingContext2D, op: DrawOp, images: Map<string, HTMLImageElement>): void {
+function drawOp(
+  ctx: CanvasRenderingContext2D,
+  op: DrawOp,
+  images: Map<string, HTMLImageElement>
+): void {
   switch (op.kind) {
     case 'rect': {
       ctx.save()

@@ -36,7 +36,16 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
     level1Fill: '#ffffff',
     level1Text: '#1f2328',
     deepText: '#333a45',
-    branches: ['#2F6BFF', '#00A38B', '#F2994A', '#EB5757', '#9B51E0', '#2D9CDB', '#27AE60', '#E2B93B'],
+    branches: [
+      '#2F6BFF',
+      '#00A38B',
+      '#F2994A',
+      '#EB5757',
+      '#9B51E0',
+      '#2D9CDB',
+      '#27AE60',
+      '#E2B93B'
+    ],
     edgeWidth: 1.6,
     edgeOpacity: 0.85
   }),
@@ -134,7 +143,12 @@ function readColor(source: Record<string, unknown>, key: string): string | undef
   return typeof value === 'string' && HEX_RE.test(value.trim()) ? value.trim() : undefined
 }
 
-function readNumber(source: Record<string, unknown>, key: string, min: number, max: number): number | undefined {
+function readNumber(
+  source: Record<string, unknown>,
+  key: string,
+  min: number,
+  max: number
+): number | undefined {
   const value = source[key]
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
   return Math.min(max, Math.max(min, value))
@@ -164,27 +178,38 @@ export function normalizeThemeColors(raw: unknown): ThemeColors | null {
   }
 
   // 至少要有画布/根节点/分支三类信息之一，否则视为无效文件
-  const hasAnyKey = ['canvas', 'rootFill', 'level1Fill', 'deepText', 'branches'].some((key) => key in raw)
+  const hasAnyKey = ['canvas', 'rootFill', 'level1Fill', 'deepText', 'branches'].some(
+    (key) => key in raw
+  )
   return hasAnyKey ? colors : null
 }
 
 /** 校验并补全一个主题定义 */
-export function normalizeThemeDefinition(raw: unknown, options: { builtin?: boolean } = {}): ThemeDefinition | null {
+export function normalizeThemeDefinition(
+  raw: unknown,
+  options: { builtin?: boolean } = {}
+): ThemeDefinition | null {
   if (!isRecord(raw)) return null
   const colors = normalizeThemeColors(raw.colors ?? raw)
   if (!colors) return null
 
-  const id = typeof raw.id === 'string' && raw.id.trim().length > 0 ? raw.id.trim() : `custom-${Date.now().toString(36)}`
-  const name = typeof raw.name === 'string' && raw.name.trim().length > 0 ? raw.name.trim() : '未命名主题'
+  const id =
+    typeof raw.id === 'string' && raw.id.trim().length > 0
+      ? raw.id.trim()
+      : `custom-${Date.now().toString(36)}`
+  const name =
+    typeof raw.name === 'string' && raw.name.trim().length > 0 ? raw.name.trim() : '未命名主题'
 
   return { id, name, builtin: options.builtin ?? raw.builtin === true, colors }
 }
 
 /** 基于某个主题复制一份（用于「另存为我的主题」） */
-export function deriveCustomTheme(source: ThemeDefinition, name: string, id: string): ThemeDefinition {
+export function deriveCustomTheme(
+  source: ThemeDefinition,
+  name: string,
+  id: string
+): ThemeDefinition {
   return { id, name, builtin: false, colors: cloneColors(source.colors) }
 }
-
-
 
 export { cloneColors }

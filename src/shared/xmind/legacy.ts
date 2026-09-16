@@ -174,8 +174,12 @@ function parseTopic(node: XmlNode): Topic {
   const attachments = parseAttachments(node)
 
   const childrenNode = childOf(node, 'children')
-  const attachedGroup = childrenOf(childrenNode, 'topics').find((group) => attr(group, 'type') !== 'detached')
-  const detachedGroup = childrenOf(childrenNode, 'topics').find((group) => attr(group, 'type') === 'detached')
+  const attachedGroup = childrenOf(childrenNode, 'topics').find(
+    (group) => attr(group, 'type') !== 'detached'
+  )
+  const detachedGroup = childrenOf(childrenNode, 'topics').find(
+    (group) => attr(group, 'type') === 'detached'
+  )
 
   const topic: Topic = {
     id: attr(node, 'id') ?? createId('topic'),
@@ -186,7 +190,10 @@ function parseTopic(node: XmlNode): Topic {
     labels: childrenOf(childOf(node, 'labels'), 'label')
       .map((label) => textOf(label))
       .filter((value): value is string => typeof value === 'string' && value.length > 0),
-    markers: [...childrenOf(childOf(node, 'marker-refs'), 'marker-ref'), ...childrenOf(childOf(node, 'markers'), 'marker')]
+    markers: [
+      ...childrenOf(childOf(node, 'marker-refs'), 'marker-ref'),
+      ...childrenOf(childOf(node, 'markers'), 'marker')
+    ]
       .map((marker) => attr(marker, 'marker-id', 'markerId', 'id'))
       .filter((value): value is string => typeof value === 'string' && value.length > 0)
       .map((markerId) => ({ markerId })),
@@ -223,9 +230,16 @@ function parseSheet(node: XmlNode, index: number): Sheet | null {
   if (!rootTopic) return null
 
   const extensions: unknown[] = []
-  collectUnknown(node, new Set(['topic', 'relationships', 'boundaries', 'summaries', 'title']), extensions)
+  collectUnknown(
+    node,
+    new Set(['topic', 'relationships', 'boundaries', 'summaries', 'title']),
+    extensions
+  )
 
-  const relationships: Relationship[] = childrenOf(childOf(node, 'relationships'), 'relationship').flatMap((rel) => {
+  const relationships: Relationship[] = childrenOf(
+    childOf(node, 'relationships'),
+    'relationship'
+  ).flatMap((rel) => {
     const end1Id = attr(rel, 'end1', 'end1Id')
     const end2Id = attr(rel, 'end2', 'end2Id')
     if (!end1Id || !end2Id) return []
@@ -239,17 +253,28 @@ function parseSheet(node: XmlNode, index: number): Sheet | null {
     ]
   })
 
-  const boundaries: Boundary[] = childrenOf(childOf(node, 'boundaries'), 'boundary').flatMap((item) => {
-    const range = attr(item, 'range')
-    if (!range) return []
-    return [{ id: attr(item, 'id') ?? createId('boundary'), range, title: childText(item, 'title') }]
-  })
+  const boundaries: Boundary[] = childrenOf(childOf(node, 'boundaries'), 'boundary').flatMap(
+    (item) => {
+      const range = attr(item, 'range')
+      if (!range) return []
+      return [
+        { id: attr(item, 'id') ?? createId('boundary'), range, title: childText(item, 'title') }
+      ]
+    }
+  )
 
   const summaries: Summary[] = childrenOf(childOf(node, 'summaries'), 'summary').flatMap((item) => {
     const range = attr(item, 'range')
     const topicId = attr(item, 'topic-id', 'topicId')
     if (!range || !topicId) return []
-    return [{ id: attr(item, 'id') ?? createId('summary'), topicId, range, title: childText(item, 'title') }]
+    return [
+      {
+        id: attr(item, 'id') ?? createId('summary'),
+        topicId,
+        range,
+        title: childText(item, 'title')
+      }
+    ]
   })
 
   const sheet: Sheet = {
@@ -286,7 +311,9 @@ export function parseLegacyContent(tree: XmlNode): LegacyParseResult {
   }
 
   warnings.push('这是 Xmind 8 旧版格式（content.xml），已按兼容模式读取。')
-  warnings.push('原文件的主题与样式来自 styles.xml，本软件暂不解析；保存时会转换为新版（content.json）格式。')
+  warnings.push(
+    '原文件的主题与样式来自 styles.xml，本软件暂不解析；保存时会转换为新版（content.json）格式。'
+  )
 
   const workbook: Workbook = {
     version: MODEL_VERSION,

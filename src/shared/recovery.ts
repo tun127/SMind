@@ -36,7 +36,10 @@ export function parseRecoveryMeta(raw: unknown): RecoveryMeta | null {
  * @param meta 自动存档元信息；null 表示没有可用存档
  * @param originalMtime 原始文件在磁盘上的最新修改时间；文件不存在或不适用时传 null
  */
-export function shouldOfferRecovery(meta: RecoveryMeta | null, originalMtime: number | null): boolean {
+export function shouldOfferRecovery(
+  meta: RecoveryMeta | null,
+  originalMtime: number | null
+): boolean {
   if (!meta) return false
   // 原始文件在自动保存之后又被正常保存过 → 磁盘上的版本不比存档旧，不需要恢复。
   // 用 >= 而不是 >：宁可少提示，也不要因为时间戳相等而反复打扰用户。

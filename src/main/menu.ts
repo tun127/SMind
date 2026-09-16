@@ -30,7 +30,11 @@ export function buildAppMenu(actions: MenuActions): void {
           label: '在新窗口打开画布副本',
           click: () => send('file:open-sheet-window')
         },
-        { label: '打开 / 导入 .xmind…', accelerator: 'CmdOrCtrl+O', click: () => send('file:open') },
+        {
+          label: '打开 / 导入 .xmind…',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => send('file:open')
+        },
         {
           label: '导入',
           submenu: [
@@ -49,7 +53,11 @@ export function buildAppMenu(actions: MenuActions): void {
         {
           label: '导出',
           submenu: [
-            { label: '图片 / SVG / PDF…', accelerator: 'CmdOrCtrl+E', click: () => send('file:export-image') },
+            {
+              label: '图片 / SVG / PDF…',
+              accelerator: 'CmdOrCtrl+E',
+              click: () => send('file:export-image')
+            },
             { type: 'separator' },
             { label: '大纲 · TXT', click: () => send('file:export-txt') },
             { label: '大纲 · Markdown', click: () => send('file:export-md') },

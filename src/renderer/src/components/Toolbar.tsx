@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactElement,
+  type ReactNode
+} from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlignStartVertical,
@@ -150,7 +158,8 @@ function ToolMenu({
     if (!open) return
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target as Node | null
-      if (target && (listRef.current?.contains(target) || buttonRef.current?.contains(target))) return
+      if (target && (listRef.current?.contains(target) || buttonRef.current?.contains(target)))
+        return
       setPosition(null)
     }
     const onKey = (event: KeyboardEvent): void => {
@@ -229,11 +238,7 @@ function ToolMenu({
       <button
         ref={buttonRef}
         type="button"
-        className={[
-          'tool-btn',
-          iconOnly ? '' : 'tool-btn--labeled',
-          open ? 'tool-btn--active' : ''
-        ]
+        className={['tool-btn', iconOnly ? '' : 'tool-btn--labeled', open ? 'tool-btn--active' : '']
           .filter(Boolean)
           .join(' ')}
         title={title}
@@ -366,7 +371,12 @@ const MENU_PINNABLE: ReadonlySet<string> = new Set([
   'shortcuts'
 ])
 
-export default function Toolbar({ actions, outlineOpen = false, hiddenItems = [], onToggleHidden }: Props): ReactElement {
+export default function Toolbar({
+  actions,
+  outlineOpen = false,
+  hiddenItems = [],
+  onToggleHidden
+}: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
   const zoom = useEditor((s) => s.zoom)
@@ -450,7 +460,11 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
       icon: <Plus size={15} />,
       run: () => store().addChild(selectedId ?? root.id)
     },
-    delete: { label: '删除所选主题', icon: <Trash2 size={15} />, run: () => store().deleteSelection() },
+    delete: {
+      label: '删除所选主题',
+      icon: <Trash2 size={15} />,
+      run: () => store().deleteSelection()
+    },
     relationship: {
       label: '关系线',
       icon: <Spline size={15} />,
@@ -476,7 +490,11 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
       run: () => viewportActions.zoomTo(zoom * 1.2)
     },
     fit: { label: '适应画布', icon: <Maximize size={15} />, run: () => viewportActions.fit() },
-    'view-lock': { label: '视角锁定', icon: <Crosshair size={15} />, run: () => store().toggleViewLock() },
+    'view-lock': {
+      label: '视角锁定',
+      icon: <Crosshair size={15} />,
+      run: () => store().toggleViewLock()
+    },
 
     /* ---- 以下默认住在「更多 ▾」里，可拿出到快捷栏（MENU_PINNABLE） ---- */
     'new-window': { label: '新建窗口', icon: <AppWindow size={15} />, run: actions.onNewWindow },
@@ -807,7 +825,12 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
         )}
         {quick(
           'themes-panel',
-          <button type="button" className="tool-btn" title="主题（换配色 / 边框样式）" onClick={actions.onThemes}>
+          <button
+            type="button"
+            className="tool-btn"
+            title="主题（换配色 / 边框样式）"
+            onClick={actions.onThemes}
+          >
             <Palette size={17} />
           </button>
         )}
@@ -910,7 +933,12 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
       <div className="toolbar__group">
         {quick(
           'zoom-out',
-          <button type="button" className="tool-btn" title="缩小 (Ctrl+-)" onClick={() => viewportActions.zoomTo(zoom / 1.2)}>
+          <button
+            type="button"
+            className="tool-btn"
+            title="缩小 (Ctrl+-)"
+            onClick={() => viewportActions.zoomTo(zoom / 1.2)}
+          >
             <ZoomOut size={17} />
           </button>
         )}
@@ -924,13 +952,23 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
         </button>
         {quick(
           'zoom-in',
-          <button type="button" className="tool-btn" title="放大 (Ctrl+=)" onClick={() => viewportActions.zoomTo(zoom * 1.2)}>
+          <button
+            type="button"
+            className="tool-btn"
+            title="放大 (Ctrl+=)"
+            onClick={() => viewportActions.zoomTo(zoom * 1.2)}
+          >
             <ZoomIn size={17} />
           </button>
         )}
         {quick(
           'fit',
-          <button type="button" className="tool-btn" title="适应画布 (Ctrl+1)" onClick={() => viewportActions.fit()}>
+          <button
+            type="button"
+            className="tool-btn"
+            title="适应画布 (Ctrl+1)"
+            onClick={() => viewportActions.fit()}
+          >
             <Maximize size={17} />
           </button>
         )}
@@ -1055,7 +1093,10 @@ export default function Toolbar({ actions, outlineOpen = false, hiddenItems = []
                 ['new-window', '一个窗口一份文档（Ctrl+Shift+N）'],
                 ['sheet-copy', '副本独立：导入/导出/另存都不影响当前文档'],
                 ['history', '最近打开 / 固定常用 / 默认保存位置'],
-                ['default-view-lock', `只影响新开文档（当前${appSettings.defaultViewLock ? '开' : '关'}）`],
+                [
+                  'default-view-lock',
+                  `只影响新开文档（当前${appSettings.defaultViewLock ? '开' : '关'}）`
+                ],
                 [
                   'reset-layout',
                   hasFreePosition ? '把自由摆放的主题放回自动位置' : '选中自由摆放的主题后可用'

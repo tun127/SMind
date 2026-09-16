@@ -63,7 +63,12 @@ export function splitInlineMath(text: string): InlineMathSegment[] {
 /** 一行整句就是数学（`$…$` / `$$…$$` / `\[…\]`）：返回公式源码，否则 null */
 export function matchWholeLineMath(line: string): string | null {
   const text = (line ?? '').trim()
-  const patterns = [/^\$\$([\s\S]+?)\$\$$/, /^\$([\s\S]+?)\$$/, /^\\\[([\s\S]+?)\\\]$/, /^\\\(([\s\S]+?)\\\)$/]
+  const patterns = [
+    /^\$\$([\s\S]+?)\$\$$/,
+    /^\$([\s\S]+?)\$$/,
+    /^\\\[([\s\S]+?)\\\]$/,
+    /^\\\(([\s\S]+?)\\\)$/
+  ]
   for (const pattern of patterns) {
     const hit = pattern.exec(text)
     const inner = (hit?.[1] ?? '').trim()

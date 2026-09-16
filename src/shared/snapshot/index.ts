@@ -82,9 +82,14 @@ function normalizeItem(raw: unknown): SnapshotItem | null {
   const hash = typeof raw.hash === 'string' ? raw.hash.trim() : ''
   if (id.length === 0 || docKey.length === 0) return null
 
-  const reason = REASONS.includes(raw.reason as SnapshotReason) ? (raw.reason as SnapshotReason) : 'auto'
+  const reason = REASONS.includes(raw.reason as SnapshotReason)
+    ? (raw.reason as SnapshotReason)
+    : 'auto'
   const at = typeof raw.at === 'number' && Number.isFinite(raw.at) && raw.at > 0 ? raw.at : 0
-  const size = typeof raw.size === 'number' && Number.isFinite(raw.size) && raw.size > 0 ? Math.floor(raw.size) : 0
+  const size =
+    typeof raw.size === 'number' && Number.isFinite(raw.size) && raw.size > 0
+      ? Math.floor(raw.size)
+      : 0
 
   return {
     id,
