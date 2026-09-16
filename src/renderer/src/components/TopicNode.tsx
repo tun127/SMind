@@ -454,7 +454,11 @@ function TopicNodeInner({
         <button
           type="button"
           className={`topic__collapse topic__collapse--${node.side === 'left' ? 'left' : 'right'}`}
-          title={node.topic.collapsed ? '展开子主题' : '折叠子主题'}
+          title={
+            node.topic.collapsed
+              ? `折叠了 ${countDescendants(node.topic)} 个子主题，点击展开`
+              : '折叠子主题'
+          }
           // 平面样式：只有分支配色的底，不再描白圈/投影（那圈白边看着像高光，用户反馈去掉）
           style={{ background: color }}
           onPointerDown={(event) => event.stopPropagation()}

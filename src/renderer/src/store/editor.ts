@@ -513,6 +513,32 @@ export async function patchAppSettings(patch: Partial<AppSettings>): Promise<App
   return next
 }
 
+/* ---- 视角锁定的会话间持久化 ----
+ * viewLock 原来是纯会话状态：每次重启 / 新开文档都回到设置里的默认值——
+ * 用户刚把开关打开，窗口一重启就"消失"了（关闭态不显眼，看起来像功能坏了）。
+ * 这里用 localStorage 记住最近一次的开关选择：启动、新开文档、打开文档都恢复它；
+ * 「启动默认视角锁定」设置只在用户从未动过开关时作为初值。 */
+const VIEW_LOCK_KEY = 'smind.viewLock'
+
+function readPersistedViewLock(): boolean | null {
+  try {
+    const raw = localStorage.getItem(VIEW_LOCK_KEY)
+    if (raw === '1') return true
+    if (raw === '0') return false
+    return null
+  } catch {
+    return null
+  }
+}
+
+function persistViewLock(on: boolean): void {
+  try {
+    localStorage.setItem(VIEW_LOCK_KEY, on ? '1' : '0')
+  } catch {
+    /* 存不了就算了，只是下次不记忆 */
+  }
+}
+
 export const useEditor = create<EditorState>()((set, get) => ({
   workbook: createWorkbook(),
   filePath: null,
@@ -526,7 +552,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   zoom: 1,
   pan: { x: 0, y: 0 },
-  viewLock: false,
+  // 上次会话的开关选择优先；从未动过开关才用设置默认值
+  viewLock: readPersistedViewLock() ?? false,
 
   search: { ...EMPTY_SEARCH },
   filter: { ...EMPTY_FILTER },
@@ -543,10 +570,14 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   setPan: (pan) => set({ pan }),
 
-  setViewLock: (on) => set({ viewLock: on }),
+  setViewLock: (on) => {
+    persistViewLock(on)
+    set({ viewLock: on })
+  },
 
   toggleViewLock: () => {
     const next = !get().viewLock
+    persistViewLock(next)
     set({ viewLock: next })
     return next
   },
@@ -731,8 +762,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
       ...NO_EDITING,
       undoStack: [],
       redoStack: [],
-      // 新文档按「设置」里的默认视角锁定起手
-      viewLock: state.appSettings.defaultViewLock,
+      // 新文档：优先恢复用户上次的选择；从未动过开关才按「启动默认视角锁定」起手
+      viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
       selectedOverlay: null,
       zoom: 1,
       pan: { x: 0, y: 0 }
@@ -750,7 +781,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
       ...NO_EDITING,
       undoStack: [],
       redoStack: [],
-      viewLock: state.appSettings.defaultViewLock,
+      // 打开文档同样恢复上次的选择（与新建一致）
+      viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
       selectedOverlay: null,
       zoom: 1,
       pan: { x: 0, y: 0 }

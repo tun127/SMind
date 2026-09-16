@@ -1601,6 +1601,10 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* width: max-content 必须显式给：绝对定位元素的收缩宽度会被**包含块右缘**卡住——
+     徽章定位在节点右缘（left: 100%-8px），可用空间只剩 8px，
+     于是折叠数到了三位数就被截成「2…」（AI 批量补全后根节点的折叠数就是三位数，真踩过） */
+  width: max-content;
   min-width: 16px;
   height: 16px;
   margin-top: -8px;
@@ -1611,6 +1615,7 @@ textarea {
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   cursor: pointer;
   box-sizing: border-box;
 }
@@ -1961,6 +1966,11 @@ textarea {
   color: var(--accent);
   font-size: 12px;
   cursor: pointer;
+}
+
+/* 关闭态的开关：灰一点但仍可点、可看见（视角锁定这类"关着就隐形"的开关常驻化） */
+.statusbar__link--dim {
+  color: #6b7684;
 }
 
 .statusbar__link:hover {

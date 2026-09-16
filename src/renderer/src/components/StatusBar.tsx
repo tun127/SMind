@@ -75,19 +75,19 @@ export default function StatusBar(): ReactElement {
             </span>
           </>
         )}
-        {viewLock && (
-          <>
-            <span className="statusbar__sep">|</span>
-            <button
-              type="button"
-              className="statusbar__link"
-              title="视角锁定中：视角始终跟住选中的主题（点击取消）"
-              onClick={() => toggleViewLock()}
-            >
-              视角锁定
-            </button>
-          </>
-        )}
+        <span className="statusbar__sep">|</span>
+        <button
+          type="button"
+          className={viewLock ? 'statusbar__link' : 'statusbar__link statusbar__link--dim'}
+          title={
+            viewLock
+              ? '视角锁定中：视角始终跟住选中的主题（点击取消，快捷键 Ctrl+Shift+L）'
+              : '视角锁定已关：点击开启后，视角会始终跟住选中的主题（快捷键 Ctrl+Shift+L）'
+          }
+          onClick={() => toggleViewLock()}
+        >
+          {viewLock ? '视角锁定' : '视角锁定（关）'}
+        </button>
       </div>
     </div>
   )
