@@ -6,6 +6,7 @@ import {
   ipcMain,
   nativeImage,
   protocol,
+  safeStorage,
   shell
 } from 'electron'
 import { isInstanceAlive, isRecord, isSelfNavigation } from '../shared/guards'
@@ -391,17 +392,77 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 
 const aiConfigFile = (): string => join(app.getPath('userData'), 'ai-config.json')
 
+/**
+ * API Key 的存放：优先用 Electron 的安全存储（Windows 走 DPAPI，密钥绑定当前用户账户）。
+ *
+ * 为什么必须做：Key 是用户真金白银买来的东西，明文躺在 `ai-config.json` 里，
+ * 任何读得到这个文件的东西（云同步盘、备份、别的程序）都拿得到。
+ *
+ * 两条底线：**读的时候兼容老明文**（升级不能把用户的 Key 弄丢），
+ * **写的时候不再落明文**（有安全存储就只写密文）。Linux 没有 keyring 时会退回明文——
+ * 能用比"安全但不能用"重要。
+ */
+function packApiKey(apiKey: string): { apiKey?: string; apiKeyEnc?: string } {
+  if (apiKey.length === 0) return {}
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      return { apiKeyEnc: safeStorage.encryptString(apiKey).toString('base64') }
+    }
+  } catch {
+    /* 落到明文 */
+  }
+  return { apiKey }
+}
+
+function unpackApiKey(raw: Record<string, unknown>): string {
+  const encrypted = typeof raw.apiKeyEnc === 'string' ? raw.apiKeyEnc : ''
+  if (encrypted.length > 0) {
+    try {
+      if (safeStorage.isEncryptionAvailable()) {
+        return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+      }
+    } catch {
+      /* 换了机器 / 换了账户就解不开：当作没有，让用户重填，而不是抛错把面板打挂 */
+    }
+    return ''
+  }
+  return typeof raw.apiKey === 'string' ? raw.apiKey : ''
+}
+
 async function readAiConfig(): Promise<AiConfig> {
   try {
     const raw: unknown = JSON.parse(await fs.readFile(aiConfigFile(), 'utf8'))
-    return normalizeAiConfig(raw).config
+    const record = isRecord(raw) ? raw : {}
+    // 先按普通字段规整，再用（可能解出来的）Key 覆盖：JSON 里可能只有密文
+    return { ...normalizeAiConfig(raw).config, apiKey: unpackApiKey(record) }
   } catch {
     return { ...DEFAULT_AI_CONFIG }
   }
 }
 
 async function writeAiConfig(config: AiConfig): Promise<void> {
-  await fs.writeFile(aiConfigFile(), JSON.stringify(config, null, 2), 'utf8')
+  const { apiKey, ...rest } = config
+  // 注意 apiKey 被摘出去了：有安全存储时文件里**不会**再出现明文 Key
+  const stored = { version: 1, ...rest, ...packApiKey(apiKey) }
+  await fs.writeFile(aiConfigFile(), JSON.stringify(stored, null, 2), 'utf8')
+}
+
+/**
+ * 启动时把老的明文 Key 迁移到安全存储（幂等，只对**存在明文**的文件动手）。
+ *
+ * 不做这一步的话，升级后就一直是明文——除非用户碰巧又保存了一次 AI 设置。
+ */
+async function migrateAiConfigKey(): Promise<void> {
+  try {
+    const raw: unknown = JSON.parse(await fs.readFile(aiConfigFile(), 'utf8'))
+    if (!isRecord(raw)) return
+    const plain = typeof raw.apiKey === 'string' ? raw.apiKey : ''
+    if (plain.length === 0 || !safeStorage.isEncryptionAvailable()) return
+    await writeAiConfig(await readAiConfig())
+    logMain('ai-config-migrated', 'API Key 已迁移到系统安全存储（不再以明文留在配置文件里）')
+  } catch {
+    /* 迁移失败不影响使用：读取时两种格式都认 */
+  }
 }
 
 /** 写工具的名字：主进程据此判断「这次对话真的动了画布吗」（试用计数只认它） */
@@ -2049,6 +2110,8 @@ if (!acquireSingleInstance()) {
   })
 
   void app.whenReady().then(() => {
+    // 先把可能存在的明文 Key 收进系统安全存储（幂等）
+    void migrateAiConfigKey()
     registerResourceProtocol()
     registerIpc()
     buildAppMenu({
