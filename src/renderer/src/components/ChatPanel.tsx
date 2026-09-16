@@ -230,6 +230,29 @@ export default function ChatPanel({
    * 切到别的文档时必须清空，否则会把上一份文档的对话串过去。
    */
   useEffect(() => {
+    /**
+     * 文档切换（含第一次保存、恢复、另存为）时，**进行中的回合必须立刻停**。
+     *
+     * 踩过的坑：回合状态（轮数 / 消息线 / 待执行队列）都在本组件的 ref 里，不随文档走——
+     * `filePath` 一变，下面的逻辑会清空/重载消息（新路径的历史往往是空的），
+     * 而回合还在继续跑：界面上就是「对话消失了、但还在第 14 轮」；
+     * 更糟的是写工具作用于**当前激活文档**——继续跑等于可能把改动落到另一份文档上。
+     */
+    if (requestIdRef.current !== null) {
+      window.api.aiChatStreamCancel(requestIdRef.current)
+      requestIdRef.current = null
+      queueRef.current = null
+      setStreaming(false)
+      setActivity('')
+      setPending(null)
+      setPendingWrite(null)
+      if (turnStartedRef.current) {
+        turnStartedRef.current = false
+        useEditor.getState().commitAiTurn('AI · 回合因切换文档中止')
+      }
+      // console.warn 会被主进程转发进应用日志（渲染层没有独立的日志通道）
+      console.warn('[chat] 进行中的回合因切换文档而中止')
+    }
     if (!filePath) {
       update(() => [])
       return
