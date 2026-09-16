@@ -385,6 +385,22 @@ export interface EditorState {
   setBoundaryTitle(id: string, title: string): void
   setSummaryTitle(id: string, title: string): void
 
+  /* ---- 画布元素：给 AI 用的「不依赖选中」版本 ---- */
+  /**
+   * 连一条关系线（按 id，不读用户当前选中）。
+   *
+   * 为什么不复用上面的 `addRelationship`：那个读的是**选择**，AI 自己改选中会把用户
+   * 的选区搅乱；而且它是**开关**语义（再点一次是删除）——模型重试一次就把线删了。
+   * 这里一律**幂等**：已经连过就返回原 id，不增不减。
+   */
+  connectTopics(end1Id: string, end2Id: string): string | null
+  /** 给这些同级主题加边界（幂等；title 可省略） */
+  addBoundaryFor(topicIds: string[], title?: string): string | null
+  /** 给这些同级主题加概要（幂等；title 省略时为「概要」） */
+  addSummaryFor(topicIds: string[], title?: string): string | null
+  /** 直接设置标记集合（不用 toggle：对模型来说「已存在就删掉」是个陷阱） */
+  setMarkers(id: string, markerIds: string[]): void
+
   /* ---- 主题 ---- */
   /** 应用一整套主题（会把配色写进当前画布） */
   applyTheme(theme: { id: string; name: string; colors: ThemeColors }): void
@@ -1683,6 +1699,60 @@ export const useEditor = create<EditorState>()((set, get) => ({
       activeSheet(draft).summaries.push({ id, topicId, range, title: '概要' })
     }, '添加概要')
     return id
+  },
+
+  connectTopics: (end1Id, end2Id) => {
+    if (end1Id === end2Id) return null
+    const root = activeRoot(get().workbook)
+    // 两端都得真实存在：id 是模型给的，不能默认可信
+    if (!findTopic(root, end1Id) || !findTopic(root, end2Id)) return null
+    const existing = activeSheet(get().workbook).relationships.find(
+      (item) =>
+        (item.end1Id === end1Id && item.end2Id === end2Id) ||
+        (item.end1Id === end2Id && item.end2Id === end1Id)
+    )
+    if (existing) return existing.id
+    const id = createId('rel')
+    get().mutate((draft) => {
+      activeSheet(draft).relationships.push({ id, end1Id, end2Id })
+    }, '添加关系线')
+    return id
+  },
+
+  addBoundaryFor: (topicIds, title) => {
+    const range = buildRange(activeRoot(get().workbook), topicIds)
+    if (!range) return null
+    const existing = activeSheet(get().workbook).boundaries.find((item) => sameRange(item.range, range))
+    if (existing) return existing.id
+    const id = createId('boundary')
+    const text = title?.trim()
+    get().mutate((draft) => {
+      activeSheet(draft).boundaries.push(text ? { id, range, title: text } : { id, range })
+    }, '添加边界')
+    return id
+  },
+
+  addSummaryFor: (topicIds, title) => {
+    const range = buildRange(activeRoot(get().workbook), topicIds)
+    if (!range) return null
+    const topicId = parseRange(range)?.[0]
+    if (!topicId) return null
+    const existing = activeSheet(get().workbook).summaries.find((item) => sameRange(item.range, range))
+    if (existing) return existing.id
+    const id = createId('summary')
+    get().mutate((draft) => {
+      activeSheet(draft).summaries.push({ id, topicId, range, title: title?.trim() || '概要' })
+    }, '添加概要')
+    return id
+  },
+
+  setMarkers: (id, markerIds) => {
+    const wanted = [...new Set(markerIds.map((item) => item.trim()).filter((item) => item.length > 0))]
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      topic.markers = wanted.map((markerId) => ({ markerId }))
+    }, '设置标记')
   },
 
   offsetRelationshipCurve: (id, dx, dy) => {

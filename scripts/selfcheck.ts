@@ -2362,7 +2362,106 @@ function testAgentTools(): void {
 
   group('Agent：只读工具')
 
-  const context: ToolContext = { root, selectedId: labor.id, sheetCount: 2 }
+  const context: ToolContext = {
+    root,
+    selectedId: labor.id,
+    sheetCount: 2,
+    sheet: { id: 'sheet-1', title: '画布 1', rootTopic: root, relationships: [], boundaries: [], summaries: [] }
+  }
+
+  group('Agent：第二批写工具（关系线 / 边界 / 概要 / 标记 / 标签）')
+
+  /** 本组助手：把参数对象直接交给 planWriteTool（root 就是上面那棵 5 节点树） */
+  const plan = (name: string, args: Record<string, unknown>) => planWriteTool(name, JSON.stringify(args), root)
+
+  const relation = plan('addRelationship', { from: '成本/人力', to: '成本/物料' })
+  check('连关系线：解析成 relationship 意图', relation.ok && relation.intent.kind === 'relationship')
+  check(
+    '关系线两端解析成真实 id',
+    relation.ok && relation.intent.kind === 'relationship' && relation.intent.ends.length === 2
+  )
+  check('关系线摘要写出两端标题', relation.summary.includes('人力') && relation.summary.includes('物料'))
+  check('两端不能是同一个主题', plan('addRelationship', { from: '成本', to: '成本' }).ok === false)
+
+  const boundary = plan('addBoundary', { addresses: ['成本/人力', '成本/物料'], title: '两块一起' })
+  check('加边界：解析成 boundary 意图', boundary.ok && boundary.intent.kind === 'boundary')
+  check(
+    '边界的标题原样带上',
+    boundary.ok && boundary.intent.kind === 'boundary' && boundary.intent.title === '两块一起'
+  )
+  check('边界不带标题时为 null（不是空串）', (() => {
+    const r = plan('addBoundary', { addresses: ['成本/人力'] })
+    return r.ok && r.intent.kind === 'boundary' && r.intent.title === null
+  })())
+  check('addresses 为空被拦下', plan('addBoundary', { addresses: [] }).ok === false)
+
+  const summary = plan('addSummary', { addresses: ['成本/人力'] })
+  check('加概要：解析成 summary 意图', summary.ok && summary.intent.kind === 'summary')
+
+  const markers = plan('setMarkers', { address: '成本/人力', markers: ['priority-1', 'task-done'] })
+  check('设置标记：解析成 markers 意图', markers.ok && markers.intent.kind === 'markers')
+  check(
+    '标记是「整体替换」语义（数量与传入一致）',
+    markers.ok && markers.intent.kind === 'markers' && markers.intent.markerIds.length === 2
+  )
+  const bogusMarker = plan('setMarkers', { address: '成本/人力', markers: ['不存在的标记'] })
+  check('乱编的 markerId 被拒绝', bogusMarker.ok === false)
+  check(
+    '拒绝时告诉模型去哪查清单（不自己编）',
+    !bogusMarker.ok && bogusMarker.error.includes('listAttachments'),
+    bogusMarker.ok ? '' : bogusMarker.error
+  )
+
+  const label = plan('addLabel', { address: '成本/人力', label: '重点' })
+  check('加标签：add=true', label.ok && label.intent.kind === 'label' && label.intent.add === true)
+  const unlabel = plan('removeLabel', { address: '成本/人力', label: '重点' })
+  check('去标签：add=false', unlabel.ok && unlabel.intent.kind === 'label' && unlabel.intent.add === false)
+
+  check(
+    '改元素文字：按 id 走（元素没有标题可寻址）',
+    (() => {
+      const r = plan('setAttachmentTitle', { target: 'boundary', id: 'boundary-1', title: '新标题' })
+      return r.ok && r.intent.kind === 'attachmentTitle' && r.intent.id === 'boundary-1'
+    })()
+  )
+  check('元素种类不认识时被拦下', plan('setAttachmentTitle', { target: 'nope', id: 'x', title: '' }).ok === false)
+  check('缺 id 时提醒去 listAttachments 拿', (() => {
+    const r = plan('removeAttachment', { target: 'boundary' })
+    return !r.ok && r.error.includes('listAttachments')
+  })())
+
+  const removeAttachment = plan('removeAttachment', { target: 'relationship', id: 'rel-1' })
+  check('删元素：解析成 attachmentRemove', removeAttachment.ok && removeAttachment.intent.kind === 'attachmentRemove')
+  check(
+    '**删元素标记为破坏性**（渲染层据此先问用户）',
+    removeAttachment.ok && removeAttachment.destructive === true
+  )
+  check('加元素不是破坏性（不该打扰用户）', relation.ok && relation.destructive === false)
+
+  const attachments = runReadTool('listAttachments', '{}', context)
+  check('列元素：空画布如实说明', attachments.content.includes('还没有关系线'))
+  check(
+    '列元素带上可用标记清单（模型不查就会自己编）',
+    attachments.content.includes('priority-1=优先级 1')
+  )
+  check('列元素：过滤用的 address 解析失败时给可读原因', (() => {
+    const r = runReadTool('listAttachments', '{"address":"不存在的主题"}', context)
+    return !r.ok && r.content.includes('searchNodes')
+  })())
+
+  check(
+    '第二批工具已注册进写工具清单',
+    AGENT_WRITE_TOOLS.some((tool) => tool.name === 'addRelationship') &&
+      AGENT_WRITE_TOOLS.some((tool) => tool.name === 'setMarkers')
+  )
+  check(
+    '闸门关闭时第二批工具同样不下发（工具即权限边界）',
+    planAvailableTools(false).every((tool) => tool.name !== 'addRelationship')
+  )
+  check(
+    '只读清单里能看见 listAttachments',
+    planAvailableTools(false).some((tool) => tool.name === 'listAttachments')
+  )
 
   const stats = runReadTool('getDocStats', '{}', context)
   check('文档概况含节点总数', stats.content.includes('节点总数：5'))
@@ -2430,11 +2529,60 @@ function testAgentTools(): void {
 /* 7.11 写工具与「一次命令 = 一步撤销」的事务                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 第二批写工具映射到的 store 动作。
+ *
+ * 规划里的纪律是「每个工具必须映射到**已验证**的 store 动作」——这一组就是那个"已验证"。
+ * 重点盯两件对模型至关重要的事：**幂等**（重试不会增删）与**整体替换**（不是 toggle）。
+ */
+function testAttachmentTools(): void {
+  group('画布元素：AI 用的 store 动作')
+
+  reset()
+  const rootId = root().id
+  const first = addChildOf(rootId, '甲')
+  const second = addChildOf(rootId, '乙')
+
+  const relation = store().connectTopics(first, second)
+  eq('连关系线返回 id', typeof relation === 'string', true)
+  eq('再连一次复用原来那条（幂等：模型重试不会删线）', store().connectTopics(first, second), relation)
+  eq('画布上只有一条关系线', sheet().relationships.length, 1)
+  eq('两端指向正确', sheet().relationships[0]?.end2Id, second)
+  eq('不能自连', store().connectTopics(first, first), null)
+  eq('不存在的 id 不生效', store().connectTopics(first, 'no-such-topic'), null)
+
+  const boundary = store().addBoundaryFor([first, second], '两块')
+  eq('加边界返回 id', typeof boundary === 'string', true)
+  eq('同区间再加复用（幂等）', store().addBoundaryFor([first, second]), boundary)
+  eq('边界标题按传入写入', sheet().boundaries[0]?.title, '两块')
+  eq('画布上只有一个边界', sheet().boundaries.length, 1)
+  // 注意：buildRange 会把能规整的输入（跨级、乱序）自己规整掉，所以"不同级"不是失败条件。
+  // 真正圈不出范围的是**空列表**——这个必须挡住，否则会往画布上塞一个空边界。
+  eq('空列表圈不成范围', store().addBoundaryFor([]), null)
+  eq('空列表也加不了概要', store().addSummaryFor([]), null)
+
+  eq('加概要返回 id', typeof store().addSummaryFor([first, second]), 'string')
+  eq('概要默认标题是「概要」', sheet().summaries[0]?.title, '概要')
+
+  store().setMarkers(first, ['priority-1', 'task-done'])
+  eq('设置标记', find(first)?.markers.length, 2)
+  store().setMarkers(first, ['priority-2'])
+  eq('再设置是**整体替换**（不是 toggle 追加）', find(first)?.markers.length, 1)
+  eq('替换后的 id 正确', find(first)?.markers[0]?.markerId, 'priority-2')
+  store().setMarkers(first, [])
+  eq('传空数组就是清空', find(first)?.markers.length, 0)
+
+  check('这些动作都进了撤销栈（与用户操作同一条管道）', store().undoStack.length > 0)
+  reset()
+}
+
 function testWriteToolsAndTurn(): void {
   group('Agent：写工具的意图规划')
 
-  eq('写工具一共 10 个（第一批 + 批量移动）', AGENT_WRITE_TOOLS.length, 10)
-  eq('全部工具 = 读 4 + 写 10', AGENT_ALL_TOOLS.length, 14)
+  // 工具数量是**纪律**：太多模型会选错（规划里定的「单批 ≤ 12 个」）。
+  // 改这个数字必须是有意的——所以用等值断言钉死，而不是 `>=`。
+  eq('写工具一共 18 个（第一批 10 + 第二批 8）', AGENT_WRITE_TOOLS.length, 18)
+  eq('全部工具 = 读 5 + 写 18', AGENT_ALL_TOOLS.length, 23)
 
   // 注意别把这个变量叫 root：会遮蔽上面那个 root() 助手
   const tree = createTopic('中心主题')
@@ -2666,7 +2814,12 @@ function testWriteToolsAndTurn(): void {
       return r.ok && r.intent.kind === 'moveMany' && r.intent.moves.length === 2
     })()
   )
-  const readContext: ToolContext = { root: tree, selectedId: null, sheetCount: 1 }
+  const readContext: ToolContext = {
+    root: tree,
+    selectedId: null,
+    sheetCount: 1,
+    sheet: { id: 'sheet-2', title: '画布 1', rootTopic: tree, relationships: [], boundaries: [], summaries: [] }
+  }
   check(
     '子树读取把句柄打在每行前面',
     runReadTool(
@@ -8250,6 +8403,7 @@ async function main(): Promise<void> {
   testAgentHelpers()
   testAgentTools()
   testWriteToolsAndTurn()
+  testAttachmentTools()
   testLicenseHelpers()
   await testSafetyHelpers()
   testMisc()

@@ -8,8 +8,10 @@
 
 import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { isRecord } from '../guards'
+import { parseRange } from '../layout'
 import { ancestorsOf, findTopic } from '../model/tree'
-import type { Topic, TopicCode } from '../model/types'
+import type { Sheet, Topic, TopicCode } from '../model/types'
+import { MARKER_LABELS } from '../xmind/constants'
 
 /* ------------------------------------------------------------------ */
 /* 节点标题的识别与切分                                                */
@@ -168,6 +170,16 @@ function schema(
 
 /** 三期 1b 只注册**只读**工具：模型物理上做不了改画布的事 */
 export const AGENT_TOOLS: AgentToolDef[] = [
+  {
+    name: 'listAttachments',
+    description:
+      '列出画布上的**元素**：关系线（含两端主题与元素 id）、边界、概要，以及可用的标记 id 清单。' +
+      '要给某个分支加边界/概要、要连关系线、或要改/删已有的这些元素时，先用它拿到 id——' +
+      '这些元素**没有标题可寻址**，改它们必须用返回的 id。',
+    parameters: schema({
+      address: { type: 'string', description: '只列与这个主题相关的元素（可省略；省略则列全部）' }
+    })
+  },
   {
     name: 'getSelection',
     description:
@@ -410,6 +422,11 @@ export interface ToolContext {
   /** 当前选中的主题 id（没有则 null） */
   selectedId: string | null
   sheetCount: number
+  /**
+   * 当前画布（关系线 / 边界 / 概要挂在它上面）。
+   * 第二批工具要能列出/修改这些元素，光有主题树不够。
+   */
+  sheet: Sheet
 }
 
 export interface ToolResult {
@@ -597,6 +614,54 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     }
   }
 
+  if (name === 'listAttachments') {
+    const sheet = context.sheet
+    const titleOf = (id: string): string => findTopic(context.root, id)?.title ?? '(已删除)'
+    const raw = typeof args.address === 'string' ? args.address.trim() : ''
+    let focus: string | null = null
+    if (raw.length > 0) {
+      const resolved = resolveTopicAddress(context.root, raw)
+      if (!resolved.ok) return { ok: false, content: resolved.error, summary: `列元素失败：${raw}` }
+      focus = resolved.resolved.topic.id
+    }
+    const touches = (ids: string[]): boolean => focus === null || ids.includes(focus)
+
+    const lines: string[] = []
+    const relationships = sheet.relationships.filter((item) => touches([item.end1Id, item.end2Id]))
+    for (const item of relationships) {
+      lines.push(
+        `- 关系线 id=${item.id}：${titleOf(item.end1Id)} → ${titleOf(item.end2Id)}` +
+          (item.title ? `（标注：${item.title}）` : '')
+      )
+    }
+    const rangesOf = (range: string): string[] => parseRange(range) ?? []
+    const boundaries = sheet.boundaries.filter((item) => touches(rangesOf(item.range)))
+    for (const item of boundaries) {
+      const titles = rangesOf(item.range).map(titleOf).join(' ~ ')
+      lines.push(`- 边界 id=${item.id}：${titles}${item.title ? `（标题：${item.title}）` : ''}`)
+    }
+    const summaries = sheet.summaries.filter((item) => touches(rangesOf(item.range)))
+    for (const item of summaries) {
+      const titles = rangesOf(item.range).map(titleOf).join(' ~ ')
+      lines.push(`- 概要 id=${item.id}：${titles}${item.title ? `（标题：${item.title}）` : ''}`)
+    }
+    if (relationships.length + boundaries.length + summaries.length === 0) {
+      lines.push('画布上还没有关系线 / 边界 / 概要。')
+    }
+    // 标记 id 清单：模型不查这份清单就会自己编一个不存在的 markerId
+    lines.push(
+      '可用标记 id（给 setMarkers 用，格式 markerId=含义）：' +
+        Object.entries(MARKER_LABELS)
+          .map(([id, label]) => `${id}=${label}`)
+          .join('、')
+    )
+    return {
+      ok: true,
+      content: lines.join('\n'),
+      summary: `画布元素：${relationships.length} 条关系线、${boundaries.length} 个边界、${summaries.length} 个概要`
+    }
+  }
+
   if (name === 'getDocStats') {
     const counts = countsOf(context.root)
     const lines = [
@@ -660,6 +725,28 @@ export type WriteIntent =
   | { kind: 'code'; id: string; code: TopicCode | null }
   | { kind: 'formula'; id: string; formula: string }
   | { kind: 'ask'; question: string; options: string[] }
+  /* ---- 第二批：画布元素（关系线 / 边界 / 概要）+ 标记 / 标签 ---- */
+  | { kind: 'relationship'; ends: [string, string]; label: string; title: string | null }
+  | { kind: 'boundary'; topicIds: string[]; label: string; title: string | null }
+  | { kind: 'summary'; topicIds: string[]; label: string; title: string | null }
+  | { kind: 'attachmentTitle'; target: AttachmentKind; id: string; title: string }
+  | { kind: 'attachmentRemove'; target: AttachmentKind; id: string; label: string }
+  | { kind: 'markers'; id: string; markerIds: string[] }
+  | { kind: 'label'; id: string; label: string; add: boolean }
+
+/** 画布上的三种元素（第二批工具的共通目标） */
+export type AttachmentKind = 'relationship' | 'boundary' | 'summary'
+
+/** 中文名：摘要与报错里用它，避免用户看到 relationship 这种词 */
+const ATTACHMENT_LABEL: Record<AttachmentKind, string> = {
+  relationship: '关系线',
+  boundary: '边界',
+  summary: '概要'
+}
+
+function readAttachmentKind(raw: unknown): AttachmentKind | null {
+  return raw === 'relationship' || raw === 'boundary' || raw === 'summary' ? raw : null
+}
 
 export type WritePlan =
   | { ok: true; intent: WriteIntent; summary: string; destructive: boolean }
@@ -822,6 +909,106 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
         }
       },
       ['question']
+    )
+  },
+  {
+    name: 'addRelationship',
+    description:
+      '在两个主题之间连一条关系线（可选标注文字）。两端用 address 指定（id / 句柄 / 标题路径 / 唯一标题）。' +
+      '已经连过就复用原来那条，不会重复连。',
+    parameters: schema(
+      {
+        from: { type: 'string', description: '起点主题' },
+        to: { type: 'string', description: '终点主题' },
+        label: { type: 'string', description: '线上的标注文字（可省略）' }
+      },
+      ['from', 'to']
+    )
+  },
+  {
+    name: 'addBoundary',
+    description:
+      '给一组**同级**主题加边界（圈出一个范围），可带标题。addresses 传多个时表示「第一个到最后一个」的连续区间，' +
+      '所以这些主题必须是同一级且相邻。范围已经存在就复用。',
+    parameters: schema(
+      {
+        addresses: { type: 'array', items: { type: 'string' }, description: '要圈进去的主题（1 个或连续几个）' },
+        title: { type: 'string', description: '边界的标题（可省略）' }
+      },
+      ['addresses']
+    )
+  },
+  {
+    name: 'addSummary',
+    description: '给一组**同级**主题加概要（标在右侧的概括框），可带标题。要求与 addBoundary 相同。',
+    parameters: schema(
+      {
+        addresses: { type: 'array', items: { type: 'string' }, description: '要概括的主题（1 个或连续几个）' },
+        title: { type: 'string', description: '概要文字（可省略，默认「概要」）' }
+      },
+      ['addresses']
+    )
+  },
+  {
+    name: 'setAttachmentTitle',
+    description:
+      '改画布元素上的文字：关系线的标注 / 边界的标题 / 概要的文字。' +
+      'id 必须先用 listAttachments 拿到（这些元素没有标题可寻址）。',
+    parameters: schema(
+      {
+        target: { type: 'string', enum: ['relationship', 'boundary', 'summary'], description: '元素种类' },
+        id: { type: 'string', description: '元素 id（来自 listAttachments）' },
+        title: { type: 'string', description: '新的文字（空串表示清空）' }
+      },
+      ['target', 'id', 'title']
+    )
+  },
+  {
+    name: 'removeAttachment',
+    description:
+      '删除一个画布元素（关系线 / 边界 / 概要）。id 来自 listAttachments。' +
+      '这是破坏性操作，用户会被问一次——只有用户确实要删时才用它。',
+    parameters: schema(
+      {
+        target: { type: 'string', enum: ['relationship', 'boundary', 'summary'], description: '元素种类' },
+        id: { type: 'string', description: '元素 id（来自 listAttachments）' }
+      },
+      ['target', 'id']
+    )
+  },
+  {
+    name: 'setMarkers',
+    description:
+      '设置主题的标记图标（**整体替换**，不是追加；传空数组就是清空）。' +
+      'markerId 必须来自 listAttachments 返回的清单，**不要自己编**（编出来的 id 会被拒绝）。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '目标主题' },
+        markers: { type: 'array', items: { type: 'string' }, description: '标记 id 列表（整体替换）' }
+      },
+      ['address', 'markers']
+    )
+  },
+  {
+    name: 'addLabel',
+    description: '给主题加一个标签（短词，例如「重点」「待办」「疑问」）。已经有的标签不会重复加。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '目标主题' },
+        label: { type: 'string', description: '标签文字（短）' }
+      },
+      ['address', 'label']
+    )
+  },
+  {
+    name: 'removeLabel',
+    description: '去掉主题上的一个标签。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '目标主题' },
+        label: { type: 'string', description: '要移除的标签文字' }
+      },
+      ['address', 'label']
     )
   }
 ]
@@ -1174,6 +1361,125 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       ok: true,
       intent: { kind: 'ask', question, options },
       summary: `提问：${question.length > 24 ? `${question.slice(0, 24)}…` : question}`,
+      destructive: false
+    }
+  }
+
+  if (name === 'addRelationship') {
+    const from = typeof args.from === 'string' ? args.from : ''
+    const to = typeof args.to === 'string' ? args.to : ''
+    const source = resolveTopicAddress(root, from)
+    if (!source.ok) return fail(source.error)
+    const target = resolveTopicAddress(root, to)
+    if (!target.ok) return fail(target.error)
+    if (source.resolved.topic.id === target.resolved.topic.id) {
+      return fail('关系线两端不能是同一个主题。')
+    }
+    const label = typeof args.label === 'string' ? args.label.trim() : ''
+    const fromTitle = source.resolved.topic.title
+    const toTitle = target.resolved.topic.title
+    return {
+      ok: true,
+      intent: {
+        kind: 'relationship',
+        ends: [source.resolved.topic.id, target.resolved.topic.id],
+        label: `${fromTitle} → ${toTitle}`,
+        title: label.length > 0 ? label : null
+      },
+      summary: `连关系线：${fromTitle} → ${toTitle}`,
+      destructive: false
+    }
+  }
+
+  if (name === 'addBoundary' || name === 'addSummary') {
+    const rawList = args.addresses
+    const list = Array.isArray(rawList)
+      ? rawList.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : []
+    if (list.length === 0) return fail('addresses 至少要给一个主题。')
+    const topicIds: string[] = []
+    const titles: string[] = []
+    for (const item of list) {
+      const resolved = resolveTopicAddress(root, item)
+      if (!resolved.ok) return fail(resolved.error)
+      topicIds.push(resolved.resolved.topic.id)
+      titles.push(resolved.resolved.topic.title)
+    }
+    const title = typeof args.title === 'string' && args.title.trim().length > 0 ? args.title.trim() : null
+    const shown = titles.join('、')
+    const isBoundary = name === 'addBoundary'
+    return {
+      ok: true,
+      intent: { kind: isBoundary ? 'boundary' : 'summary', topicIds, label: shown, title },
+      summary: `${isBoundary ? '加边界' : '加概要'}：${shown}`,
+      destructive: false
+    }
+  }
+
+  if (name === 'setAttachmentTitle') {
+    const target = readAttachmentKind(args.target)
+    if (!target) return fail('target 只能是 relationship / boundary / summary。')
+    const id = typeof args.id === 'string' ? args.id.trim() : ''
+    if (id.length === 0) return fail('缺少 id：请先用 listAttachments 拿到元素 id。')
+    const title = typeof args.title === 'string' ? args.title.trim() : ''
+    return {
+      ok: true,
+      intent: { kind: 'attachmentTitle', target, id, title },
+      summary: `改${ATTACHMENT_LABEL[target]}文字：${title.length > 0 ? title : '（清空）'}`,
+      destructive: false
+    }
+  }
+
+  if (name === 'removeAttachment') {
+    const target = readAttachmentKind(args.target)
+    if (!target) return fail('target 只能是 relationship / boundary / summary。')
+    const id = typeof args.id === 'string' ? args.id.trim() : ''
+    if (id.length === 0) return fail('缺少 id：请先用 listAttachments 拿到元素 id。')
+    return {
+      ok: true,
+      intent: { kind: 'attachmentRemove', target, id, label: ATTACHMENT_LABEL[target] },
+      summary: `删除${ATTACHMENT_LABEL[target]}（id=${id}）`,
+      // 破坏性：交给渲染层先问一次用户
+      destructive: true
+    }
+  }
+
+  if (name === 'setMarkers') {
+    const address = typeof args.address === 'string' ? args.address : ''
+    const resolved = resolveTopicAddress(root, address)
+    if (!resolved.ok) return fail(resolved.error)
+    const rawList = args.markers
+    const list = Array.isArray(rawList)
+      ? rawList
+          .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          .map((item) => item.trim())
+      : []
+    const unknown = list.filter((markerId) => !(markerId in MARKER_LABELS))
+    if (unknown.length > 0) {
+      return fail(
+        `不认识的标记 id：${unknown.join('、')}。可用 id 见 listAttachments 返回的清单，不要自己编。`
+      )
+    }
+    const title = resolved.resolved.topic.title
+    return {
+      ok: true,
+      intent: { kind: 'markers', id: resolved.resolved.topic.id, markerIds: list },
+      summary: `设置标记（${title}）：${list.length > 0 ? list.join('、') : '清空'}`,
+      destructive: false
+    }
+  }
+
+  if (name === 'addLabel' || name === 'removeLabel') {
+    const address = typeof args.address === 'string' ? args.address : ''
+    const resolved = resolveTopicAddress(root, address)
+    if (!resolved.ok) return fail(resolved.error)
+    const label = typeof args.label === 'string' ? args.label.trim() : ''
+    if (label.length === 0) return fail('label 不能为空。')
+    const add = name === 'addLabel'
+    return {
+      ok: true,
+      intent: { kind: 'label', id: resolved.resolved.topic.id, label, add },
+      summary: `${add ? '加' : '去'}标签（${resolved.resolved.topic.title}）：${label}`,
       destructive: false
     }
   }

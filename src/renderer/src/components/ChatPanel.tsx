@@ -46,7 +46,7 @@ import {
 } from '@shared/agent'
 import type { LicenseView } from '@shared/license'
 import { createId } from '@shared/model/factory'
-import { activeRoot, ancestorsOf, findTopic } from '@shared/model/tree'
+import { activeRoot, activeSheet, ancestorsOf, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
 import { setStage } from '../dev/stage'
 import { useEditor } from '../store/editor'
@@ -446,6 +446,45 @@ export default function ChatPanel({
         store.setFormula(intent.id, intent.formula)
         touched([intent.id])
         return { ok: true, note: '' }
+      /* ---- 第二批：画布元素（关系线 / 边界 / 概要）与标记、标签 ---- */
+      case 'relationship': {
+        const created = store.connectTopics(intent.ends[0], intent.ends[1])
+        if (!created) return { ok: false, note: '连关系线没有生效：两端主题可能已不存在。' }
+        if (intent.title !== null) store.setRelationshipTitle(created, intent.title)
+        touched([intent.ends[0], intent.ends[1]])
+        return { ok: true, note: '' }
+      }
+      case 'boundary': {
+        const created = store.addBoundaryFor(intent.topicIds, intent.title ?? undefined)
+        if (!created) return { ok: false, note: '这些主题不是同级相邻，圈不成一个范围。' }
+        touched(intent.topicIds)
+        return { ok: true, note: '' }
+      }
+      case 'summary': {
+        const created = store.addSummaryFor(intent.topicIds, intent.title ?? undefined)
+        if (!created) return { ok: false, note: '这些主题不是同级相邻，加不了概要。' }
+        touched(intent.topicIds)
+        return { ok: true, note: '' }
+      }
+      case 'attachmentTitle':
+        if (intent.target === 'relationship') store.setRelationshipTitle(intent.id, intent.title)
+        else if (intent.target === 'boundary') store.setBoundaryTitle(intent.id, intent.title)
+        else store.setSummaryTitle(intent.id, intent.title)
+        return { ok: true, note: '' }
+      case 'attachmentRemove':
+        if (intent.target === 'relationship') store.removeRelationship(intent.id)
+        else if (intent.target === 'boundary') store.removeBoundary(intent.id)
+        else store.removeSummary(intent.id)
+        return { ok: true, note: '' }
+      case 'markers':
+        store.setMarkers(intent.id, intent.markerIds)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'label':
+        if (intent.add) store.addLabel(intent.id, intent.label)
+        else store.removeLabel(intent.id, intent.label)
+        touched([intent.id])
+        return { ok: true, note: '' }
       case 'ask':
         return { ok: true, note: '' }
       default:
@@ -580,7 +619,9 @@ export default function ChatPanel({
         const context: ToolContext = {
           root: activeRoot(state.workbook),
           selectedId: state.selection[0] ?? null,
-          sheetCount: state.workbook.sheets.length
+          sheetCount: state.workbook.sheets.length,
+          // 第二批工具（关系线/边界/概要）挂在画布上，不在主题树里
+          sheet: activeSheet(state.workbook)
         }
         setActivity(`正在翻看导图…（${queue.index + 1}/${queue.calls.length}）`)
         const result = runReadTool(call.name, call.argumentsText, context)
