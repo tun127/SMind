@@ -11,7 +11,7 @@ import { layoutSheet, LAYOUT_DEFAULTS } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import { readOverlayTextStyle } from '@shared/model/overlay-style'
-import type { Topic } from '@shared/model/types'
+import type { RichText, Topic } from '@shared/model/types'
 import {
   activeRoot,
   activeSheet,
@@ -42,12 +42,28 @@ import { applyTopicFilter, hitTopicIds, isFilterActive, searchSheet } from '@sha
 import { DEFAULT_STRUCTURE, getStructureDef } from '@shared/xmind/constants'
 import { measureTopic, bumpMeasureEpoch } from '../render/measure'
 import { beginCost, count, isDiagArmed, mark, setStage } from '../dev/stage'
+import { usePacedWorkbook } from '../hooks/usePacedWorkbook'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
 import { viewportActions } from '../render/viewport'
 import { themeColorsOf, useEditor } from '../store/editor'
 import TopicNode from './TopicNode'
+
+/**
+ * 视角锁定的异常告警：**同一类只报一次**。
+ *
+ * 这些告警在排查「视角不跟随 / 抽动」时救过场，不能删；但渲染层的 `console.warn`
+ * 会被主进程转发进应用日志（同步落盘），而它们都处在「每帧」的路径上——
+ * 一旦某个状态持续异常（几何每帧都变、尺寸在震荡），就是每秒几十次 IPC + 写盘，
+ * 告警自己会变成新的卡顿来源。保留首次现场，后续同类记数即可。
+ */
+const viewLockWarned = new Set<string>()
+function warnViewLock(key: string, message: string, extra?: unknown): void {
+  if (viewLockWarned.has(key)) return
+  viewLockWarned.add(key)
+  console.warn(`[viewlock] ${message}`, extra)
+}
 
 /**
  * 可吸附区域在**生长方向**上的外扩量——那里是新子主题会待的一整片区域，所以放得宽。
@@ -145,6 +161,15 @@ export default function Canvas(): ReactElement {
   )
 
   const workbook = useEditor((s) => s.workbook)
+  /** AI 回合进行中？（面板那边开的事务）——只用来决定「布局要不要节流」 */
+  const aiTurnActive = useEditor((s) => s.aiTurn !== null)
+  /**
+   * **布局**用节流后的工作簿：AI 批量写入时把重排合并到每 ~100ms 一次。
+   *
+   * 只影响 layout 的输入：节点文字、选中态、悬停等仍然实时读 `workbook`，
+   * 所以「数据不是旧的，只是位置晚一拍」。用户自己的操作不受影响（不在 AI 回合里时零延迟）。
+   */
+  const layoutWorkbook = usePacedWorkbook(workbook, aiTurnActive)
   const docSeq = useEditor((s) => s.docSeq)
   const zoom = useEditor((s) => s.zoom)
   const pan = useEditor((s) => s.pan)
@@ -278,8 +303,6 @@ export default function Canvas(): ReactElement {
     setPan({ x: current.x + dx, y: current.y + dy })
   }, [setPan])
 
-  /* ---- 拖拽过程中：按 Esc 放弃这次拖拽 ---- */
-
   /* ---- 布局计算 ---- */
   /**
    * 字体（含 KaTeX 的数学字体）加载完成后，公式的真实宽度才稳定。
@@ -307,8 +330,9 @@ export default function Canvas(): ReactElement {
   const renderEpoch = useEditor((s) => s.renderEpoch)
 
   const layout: LayoutResult = useMemo(() => {
-    const root = activeRoot(workbook)
-    const sheet = activeSheet(workbook)
+    // 注意用 layoutWorkbook（节流后）：AI 一挥而就的几十次写入不必次次整图重排
+    const root = activeRoot(layoutWorkbook)
+    const sheet = activeSheet(layoutWorkbook)
     // 正在编辑的节点用「未提交的内容」参与测量，做到边打字边自适应尺寸
     const measure = (topic: Topic, depth: number): ReturnType<typeof measureTopic> =>
       topic.id === editingId && editingRich
@@ -326,7 +350,7 @@ export default function Canvas(): ReactElement {
     return computed
     // fontEpoch / renderEpoch 只用于「强制重新布局」，不是布局的输入
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
+  }, [layoutWorkbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
 
   /**
    * 渲染提交（DOM 落定）后的界标，与「进入 画布布局」配对。
@@ -400,6 +424,8 @@ export default function Canvas(): ReactElement {
     const el = containerRef.current
     const lay = layoutRef.current
     if (!el || !lay) return
+    // 显式把镜头拉回中心＝接管视角，别让跟随循环两帧后把镜头又拽走
+    viewGestureAtRef.current += 1
     const rootNode = lay.nodeMap.get(rootRef.current.id)
     if (!rootNode) return
     const width = el.clientWidth
@@ -416,6 +442,8 @@ export default function Canvas(): ReactElement {
     const el = containerRef.current
     const lay = layoutRef.current
     if (!el || !lay) return
+    // 适应画布同样是显式接管视角
+    viewGestureAtRef.current += 1
     const width = el.clientWidth
     const height = el.clientHeight
     if (width === 0 || height === 0) return
@@ -434,6 +462,8 @@ export default function Canvas(): ReactElement {
     (next: number): void => {
       const el = containerRef.current
       if (!el) return
+      // 缩放按钮/快捷键＝接管视角
+      viewGestureAtRef.current += 1
       const px = el.clientWidth / 2
       const py = el.clientHeight / 2
       const oldZoom = zoomRef.current
@@ -529,14 +559,19 @@ export default function Canvas(): ReactElement {
    *   「锁定开着却不锁」——没有目标时静默不跟随，看起来像功能坏了；
    * - 选择指向一个**已经不存在的主题**（刚删完、撤销回到另一个版本）→ 退回中心主题，
    *   而不是"盯不到就彻底不动"——那正是用户看到的「删除后视角不跟随」；
+   * - 选择指向一个**被折叠收进去的主题** → 同样退回中心主题。
+   *   折叠不会删节点（模型里还在，`findTopic` 找得到），但布局对折叠的子树返回空
+   *   （`visibleChildren`），它已经**不在 nodeMap 里**了——不回退的话 focusId
+   *   会一直指向一个永远等不到的目标，跟随循环空等 90 帧后静默放弃，
+   *   镜头就此失去中心（用户看到的「折叠之后视角不居中了」）。
    * - 其余情况就是当前选中的主题。
    */
   const focusId = useMemo(() => {
     const rootTopic = activeRoot(workbook)
     const picked = selection[0]
     if (!picked || !findTopic(rootTopic, picked)) return rootTopic.id
-    return picked
-  }, [selection, workbook])
+    return layout.nodeMap.has(picked) ? picked : rootTopic.id
+  }, [selection, workbook, layout])
 
   /**
    * 被盯住的主题在布局里的**位置与尺寸**（拼成字符串，方便直接当依赖）。
@@ -559,6 +594,18 @@ export default function Canvas(): ReactElement {
   /** 这个 effect 最近一秒重跑了几次：用来抓「有东西在震荡 → 每帧重跑 → 死循环」 */
   const followRunsRef = useRef<number[]>([])
 
+  /**
+   * 用户「接管视角」的次数（滚轮、拖拽平移、缩放都算）。
+   *
+   * 视角锁定是**自动**动镜头，用户手动操作是**意图**——两者同时动镜头就会互相对拉：
+   * 你往下滚一屏，跟随循环每帧把镜头往回拽 22%，看起来就是「上下抽动一阵」，
+   * 直到 240 帧止损才停（长文档里滚动多，所以「画面一长就抽风」）。
+   * 「正在拖主题就不跟」这条规则早就有，但**滚轮一直漏着**——而滚轮才是浏览长文档的主要方式。
+   * 这里给跟随循环一个让位信号：用户一旦自己动过视角，本轮跟随立刻退出；
+   * 下一次选择变化 / 目标几何变化时重新咬住（与拖拽之后的行为一致）。
+   */
+  const viewGestureAtRef = useRef(0)
+
   useEffect(() => {
     // 正在拖主题时不跟：镜头要是同时在移，指针下的画面会跟着滑，落点就抓不准了。
     // 松手（dragVisual 归零）后视野再咬住它。
@@ -572,7 +619,7 @@ export default function Canvas(): ReactElement {
     recent.push(now)
     followRunsRef.current = recent
     if (recent.length > 60) {
-      console.warn('[viewlock] 依赖每秒变化 60 次以上（有东西在震荡），已暂停跟随', { focusKey })
+      warnViewLock('thrash', '依赖每秒变化 60 次以上（有东西在震荡），已暂停跟随', { focusKey })
       return
     }
     const id = focusId
@@ -580,9 +627,12 @@ export default function Canvas(): ReactElement {
     if (!el) return
     if (el.clientWidth === 0 || el.clientHeight === 0) return
 
+    /** 本轮跟随开始时的「用户接管次数」：中途一变就说明用户自己在动镜头，立刻让位 */
+    const gestureAtStart = viewGestureAtRef.current
     let raf = 0
     /** 目标一时还没出现在布局里（刚删完、刚打开）就先等几帧，别急着放弃 */
     let misses = 0
+    mark('镜头跟随开始', `节点 ${id}`)
     const MAX_MISSES = 90
     /**
      * 跟随循环必须**有止损**。
@@ -604,6 +654,12 @@ export default function Canvas(): ReactElement {
      * 直接拖就是了，下一次选择或位置变化它才重新咬住。
      */
     const step = (): void => {
+      if (viewGestureAtRef.current !== gestureAtStart) {
+        // 用户接管了视角（滚轮/拖拽/缩放）：让位，本轮跟随到此为止。
+        // 这里必须**立刻**返回而不是继续缓动——否则就是跟用户的手抢镜头（抽动的根因）。
+        count('跟随让位')
+        return
+      }
       count('镜头跟随帧')
       setStage('镜头跟随')
       const node = layoutRef.current?.nodeMap.get(id)
@@ -622,12 +678,12 @@ export default function Canvas(): ReactElement {
       const wantY = height / 2 - (node.y + node.height / 2) * z
       if (!Number.isFinite(wantX) || !Number.isFinite(wantY)) {
         // 几何或缩放变成了 NaN/Infinity：再算下去只会每帧写一堆 NaN 进 store
-        console.warn('[viewlock] 目标位置不是有限数，已停止跟随', { focusKey })
+        warnViewLock('nan', '目标位置不是有限数，已停止跟随', { focusKey })
         return
       }
       frames += 1
       if (frames > MAX_FRAMES) {
-        console.warn('[viewlock] 跟随循环未在 240 帧内收敛，已停止（防止烧死主线程）', {
+        warnViewLock('no-converge', '跟随循环未在 240 帧内收敛，已停止（防止烧死主线程）', {
           focusKey,
           pan: panRef.current,
           want: { x: wantX, y: wantY }
@@ -663,25 +719,61 @@ export default function Canvas(): ReactElement {
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const onWheel = (ev: WheelEvent): void => {
-      ev.preventDefault()
-      const currentPan = panRef.current
-      if (ev.ctrlKey || ev.metaKey) {
+    /**
+     * 触控板/滚轮每个物理事件都会触发一次 wheel（实测 120–160 次/秒）。
+     * 以前这里是逐事件 setPan：每次都把整棵画布重渲染一遍，滚动时主线程被打满，
+     * 同期运行的 AI 批量写入会被活活饿死（归因探针实锤的渲染风暴）。
+     * 现在把位移累进局部变量，requestAnimationFrame 每帧最多写一次 store——
+     * 帧间累加、最后一次落账，落点与逐事件处理完全一致。
+     */
+    let raf = 0
+    let pendingDx = 0
+    let pendingDy = 0
+    let pendingZoomDelta = 0
+    let pendingZoomClient: { x: number; y: number } | null = null
+    const flush = (): void => {
+      raf = 0
+      // 阶段名一定要在**真正干活之前**设好：停顿看门狗就是靠它说出「卡在哪一步」
+      setStage('滚轮平移')
+      count('滚轮合帧')
+      if (pendingZoomDelta !== 0 && pendingZoomClient) {
         const rect = el.getBoundingClientRect()
-        const px = ev.clientX - rect.left
-        const py = ev.clientY - rect.top
+        const px = pendingZoomClient.x - rect.left
+        const py = pendingZoomClient.y - rect.top
         const oldZoom = zoomRef.current
-        const z = Math.max(0.1, Math.min(4, oldZoom * Math.exp(-ev.deltaY * 0.0015)))
-        const wx = (px - currentPan.x) / oldZoom
-        const wy = (py - currentPan.y) / oldZoom
+        const z = Math.max(0.1, Math.min(4, oldZoom * Math.exp(-pendingZoomDelta * 0.0015)))
+        const wx = (px - panRef.current.x) / oldZoom
+        const wy = (py - panRef.current.y) / oldZoom
         setZoom(z)
         setPan({ x: px - wx * z, y: py - wy * z })
-      } else {
-        setPan({ x: currentPan.x - ev.deltaX, y: currentPan.y - ev.deltaY })
       }
+      if (pendingDx !== 0 || pendingDy !== 0) {
+        const currentPan = panRef.current
+        setPan({ x: currentPan.x - pendingDx, y: currentPan.y - pendingDy })
+      }
+      pendingDx = 0
+      pendingDy = 0
+      pendingZoomDelta = 0
+      pendingZoomClient = null
+    }
+    const onWheel = (ev: WheelEvent): void => {
+      ev.preventDefault()
+      // 滚轮＝用户接管视角：跟随循环要立刻让位（否则就是跟用户的手抢镜头）
+      viewGestureAtRef.current += 1
+      if (ev.ctrlKey || ev.metaKey) {
+        pendingZoomDelta += ev.deltaY
+        pendingZoomClient = { x: ev.clientX, y: ev.clientY }
+      } else {
+        pendingDx += ev.deltaX
+        pendingDy += ev.deltaY
+      }
+      if (raf === 0) raf = window.requestAnimationFrame(flush)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      if (raf !== 0) window.cancelAnimationFrame(raf)
+    }
   }, [setPan, setZoom])
 
   /* ---- 命中测试与坐标换算 ---- */
@@ -1499,6 +1591,59 @@ export default function Canvas(): ReactElement {
     []
   )
 
+  /* ---- 节点回调：全部只走 useEditor.getState() / ref 拿最新值，引用永远稳定 ---- */
+  /**
+   * TopicNode 有 memo，但只要这里传进去的回调每次渲染都是新函数，
+   * 浅比较必然失败、memo 就整个被架空——以前 8 个内联箭头函数正是这样
+   * 把「每次 pan 更新」放大成「全部可见节点重渲染」的。
+   */
+  const handleNodeDoubleClick = useCallback((id: string): void => {
+    useEditor.getState().beginEdit(id)
+  }, [])
+  const handleNodeRichChange = useCallback((id: string, rich: RichText): void => {
+    const store = useEditor.getState()
+    if (store.editingId === id) store.updateEditingRich(rich)
+  }, [])
+  const handleNodeCancelEdit = useCallback((): void => {
+    useEditor.getState().cancelEdit()
+  }, [])
+  const handleNodeCommitEdit = useCallback((): void => {
+    useEditor.getState().commitEdit()
+  }, [])
+  const handleNodeCommitAndAddChild = useCallback((): void => {
+    useEditor.getState().commitAndAddChild()
+  }, [])
+  const handleNodeCommitAndAddSibling = useCallback((): void => {
+    useEditor.getState().commitAndAddSibling()
+  }, [])
+  const handleNodeNavigateEdit = useCallback(
+    (key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'): void => {
+      // 空主题上的方向键：先提交（空内容不会进撤销栈），再移动选择
+      const store = useEditor.getState()
+      if (store.editingId) store.commitEdit()
+      store.navigateSelection(key)
+    },
+    []
+  )
+  const handleNodeToggleCollapse = useCallback((id: string): void => {
+    // 折叠 / 展开会重排整张图：把被点的那个主题**按在原处**，
+    // 否则用户眼前的画面会整体跳走（看着看着，那一支忽然不见了）。
+    // 视口值走 ref：回调才能保持引用稳定，又不失真（点击瞬间 ref 与渲染值一致）。
+    const lay = layoutRef.current
+    const z = zoomRef.current
+    const p = panRef.current
+    const before = lay?.nodeMap.get(id)
+    const screen = before ? { x: before.x * z + p.x, y: before.y * z + p.y } : null
+    useEditor.getState().toggleCollapse(id)
+    if (!screen || !containerRef.current) return
+    window.requestAnimationFrame(() => {
+      const after = layoutRef.current?.nodeMap.get(id)
+      if (!after) return
+      // 反解平移量：让 after 的世界坐标仍落在同一个屏幕位置
+      useEditor.getState().setPan({ x: screen.x - after.x * z, y: screen.y - after.y * z })
+    })
+  }, [])
+
   /* ---- 空白处：右键/中键拖动平移；左键拖动框选 ---- */
   const handleBackgroundPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>): void => {
@@ -1509,16 +1654,30 @@ export default function Canvas(): ReactElement {
       // 与 Xmind 一致：右键（或中键）拖动平移画布
       if (e.button === 1 || e.button === 2) {
         e.preventDefault()
+        // 手动拖画布＝接管视角（与滚轮同一条规则）
+        viewGestureAtRef.current += 1
         const startX = e.clientX
         const startY = e.clientY
         const startPan = { ...panRef.current }
+        // pointermove 同样是每秒上百次的高频事件：累进局部变量，每帧最多落账一次
+        let raf = 0
+        let targetX = startPan.x
+        let targetY = startPan.y
+        const flush = (): void => {
+          raf = 0
+          setStage('拖拽平移')
+          setPan({ x: targetX, y: targetY })
+        }
         const onMove = (ev: PointerEvent): void => {
-          setPan({ x: startPan.x + (ev.clientX - startX), y: startPan.y + (ev.clientY - startY) })
+          targetX = startPan.x + (ev.clientX - startX)
+          targetY = startPan.y + (ev.clientY - startY)
+          if (raf === 0) raf = window.requestAnimationFrame(flush)
         }
         const detach = (): void => {
           window.removeEventListener('pointermove', onMove)
           window.removeEventListener('pointerup', onUp)
           window.removeEventListener('pointercancel', onCancel)
+          if (raf !== 0) window.cancelAnimationFrame(raf)
         }
         const onCancel = (): void => detach()
         // 右键原地点击不应清空选择
@@ -2009,39 +2168,14 @@ export default function Canvas(): ReactElement {
             }
             dragPrimary={Boolean(dragVisual && dragVisual.anchorId === node.id)}
             onPointerDown={handleNodePointerDown}
-            onDoubleClick={(id) => useEditor.getState().beginEdit(id)}
-            onRichChange={(id, rich) => {
-              const store = useEditor.getState()
-              if (store.editingId === id) store.updateEditingRich(rich)
-            }}
-            onCancelEdit={() => useEditor.getState().cancelEdit()}
-            onCommitEdit={() => useEditor.getState().commitEdit()}
-            onCommitAndAddChild={() => useEditor.getState().commitAndAddChild()}
-            onCommitAndAddSibling={() => useEditor.getState().commitAndAddSibling()}
-            onNavigateEdit={(key) => {
-              // 空主题上的方向键：先提交（空内容不会进撤销栈），再移动选择
-              const store = useEditor.getState()
-              if (store.editingId) store.commitEdit()
-              store.navigateSelection(key)
-            }}
-            onToggleCollapse={(id) => {
-              // 折叠 / 展开会重排整张图：把被点的那个主题**按在原处**，
-              // 否则用户眼前的画面会整体跳走（看着看着，那一支忽然不见了）。
-              const before = layout.nodeMap.get(id)
-              const screen = before
-                ? { x: before.x * zoom + pan.x, y: before.y * zoom + pan.y }
-                : null
-              useEditor.getState().toggleCollapse(id)
-              if (!screen || !containerRef.current) return
-              window.requestAnimationFrame(() => {
-                const after = layoutRef.current?.nodeMap.get(id)
-                if (!after) return
-                // 反解平移量：让 after 的世界坐标仍落在同一个屏幕位置
-                useEditor
-                  .getState()
-                  .setPan({ x: screen.x - after.x * zoom, y: screen.y - after.y * zoom })
-              })
-            }}
+            onDoubleClick={handleNodeDoubleClick}
+            onRichChange={handleNodeRichChange}
+            onCancelEdit={handleNodeCancelEdit}
+            onCommitEdit={handleNodeCommitEdit}
+            onCommitAndAddChild={handleNodeCommitAndAddChild}
+            onCommitAndAddSibling={handleNodeCommitAndAddSibling}
+            onNavigateEdit={handleNodeNavigateEdit}
+            onToggleCollapse={handleNodeToggleCollapse}
           />
         ))}
 
