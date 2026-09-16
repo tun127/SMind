@@ -118,11 +118,24 @@ export function moveTopic(root: Topic, id: string, newParentId: string, index?: 
   return true
 }
 
+/**
+ * 后代数量的身份缓存。
+ *
+ * 折叠徽标/tooltip 会**每个节点**都问一次子树大小，纯递归是 O(节点数 × 平均深度)，
+ * 深嵌套文档下每次重渲染都要重算一遍。主题对象是不可变快照（zustand + immer：
+ * 任何改动都产生新对象、未改动的子树保持同一引用），所以按对象身份缓存是安全的——
+ * 这也是渲染层测量缓存（render/measure.ts 的 identityCache）用的同一套前提。
+ */
+const descendantCache = new WeakMap<Topic, number>()
+
 /** 某个主题的**后代**总数（不含自己）：折叠徽标显示「折叠了多少个节点」用它 */
 export function countDescendants(topic: Topic): number {
+  const cached = descendantCache.get(topic)
+  if (cached !== undefined) return cached
   let n = 0
   for (const child of topic.children) n += 1 + countDescendants(child)
   for (const floating of topic.detachedChildren ?? []) n += 1 + countDescendants(floating)
+  descendantCache.set(topic, n)
   return n
 }
 

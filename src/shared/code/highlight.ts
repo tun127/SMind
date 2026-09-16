@@ -1381,8 +1381,18 @@ function def_startsWith(line: string, i: number, marks: string[]): boolean {
  * 分词结果是只读的纯数据，按 `(language, code)` 复用即可，行为完全不变。
  */
 const HIGHLIGHT_CACHE_LIMIT = 64
-const HIGHLIGHT_CACHE_MAX_INPUT = 20_000
-const highlightCache = new Map<string, CodeLine[]>()
+/**
+ * 缓存的总字符预算。
+ *
+ * 早先的实现给「单个代码块」设了 20000 字符的上限（超了就不进缓存）——
+ * 那是个**病理口子**：AI 往一个节点里写一整份文件时，此后每一次重排
+ * （每次 store 改动、每敲一次字）都会把这段大代码**全量重新分词**，
+ * 正好落在「内容依赖型冻结」的形状上。改成按总字符量限流：
+ * 大代码块也能命中，内存仍有上界。
+ */
+const HIGHLIGHT_CACHE_CHAR_BUDGET = 4_000_000
+const highlightCache = new Map<string, { lines: CodeLine[]; chars: number }>()
+let highlightCacheChars = 0
 
 export function highlightCode(code: string, language: string | undefined): CodeLine[] {
   const id = normalizeCodeLanguage(language)
@@ -1392,16 +1402,24 @@ export function highlightCode(code: string, language: string | undefined): CodeL
     // Map 按插入序淘汰：命中后挪到末尾，近似 LRU
     highlightCache.delete(cacheKey)
     highlightCache.set(cacheKey, cached)
-    return cached
+    return cached.lines
   }
   const result = highlightUncached(code, id)
-  // 超大代码不入缓存：几份 1MB 的代码就能吃掉几十 MB，得不偿失
-  if (code.length <= HIGHLIGHT_CACHE_MAX_INPUT) {
-    if (highlightCache.size >= HIGHLIGHT_CACHE_LIMIT) {
+  // 单块就超过总预算的（病态输入）：本次照常返回，只是不进缓存
+  if (code.length <= HIGHLIGHT_CACHE_CHAR_BUDGET) {
+    while (
+      highlightCache.size > 0 &&
+      (highlightCache.size >= HIGHLIGHT_CACHE_LIMIT ||
+        highlightCacheChars + code.length > HIGHLIGHT_CACHE_CHAR_BUDGET)
+    ) {
       const oldest = highlightCache.keys().next().value
-      if (oldest !== undefined) highlightCache.delete(oldest)
+      if (oldest === undefined) break
+      const evicted = highlightCache.get(oldest)
+      highlightCache.delete(oldest)
+      if (evicted) highlightCacheChars -= evicted.chars
     }
-    highlightCache.set(cacheKey, result)
+    highlightCache.set(cacheKey, { lines: result, chars: code.length })
+    highlightCacheChars += code.length
   }
   return result
 }

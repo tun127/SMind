@@ -311,22 +311,29 @@ export default function ChatPanel({
    * 都有完整的 wire（含全部工具参数）与 workbook，可用 scripts/run-diag-freeze.mjs
    * 对真实内容逐块复现定位。 */
   const lastDumpAtRef = useRef(0)
+  /** 上一次转储的序列化耗时：决定「强制转储」还要不要每次都跑 */
+  const dumpCostRef = useRef(0)
   const dumpDiag = useCallback((reason: string, force = false): void => {
     const now = performance.now()
-    // 节流 2 秒：转储本身要序列化整个 workbook，绝不能变成新的性能负担
-    if (!force && now - lastDumpAtRef.current < 2000) return
+    // 节流 2 秒。强制转储（每个写调用一次）本来是取证必需的——冻结就发生在
+    // 某次写入之后，晚一步的转储可能永远跑不到。但**大文档**下它每次都要
+    // 同步序列化整份 workbook，会变成新的负担；所以实测超过 25ms 就退回节流模式，
+    // 牺牲一点现场新度、换掉这条新的卡顿来源。
+    const heavy = dumpCostRef.current > 25
+    if ((!force || heavy) && now - lastDumpAtRef.current < 2000) return
     lastDumpAtRef.current = now
     try {
-      void window.api.diagDump(
-        JSON.stringify({
-          at: new Date().toISOString(),
-          reason,
-          round: roundRef.current,
-          wire: wireRef.current,
-          messages: messagesRef.current,
-          workbook: useEditor.getState().workbook
-        })
-      )
+      const startedAt = performance.now()
+      const payload = JSON.stringify({
+        at: new Date().toISOString(),
+        reason,
+        round: roundRef.current,
+        wire: wireRef.current,
+        messages: messagesRef.current,
+        workbook: useEditor.getState().workbook
+      })
+      dumpCostRef.current = performance.now() - startedAt
+      void window.api.diagDump(payload)
     } catch {
       /* 取证绝不能把正常流程弄崩 */
     }
@@ -407,16 +414,13 @@ export default function ChatPanel({
           : { ok: false, note: '移动没有生效：目标位置不合法。' }
       }
       case 'moveMany': {
-        // 批量移动：逐条落（每条都是一次 store.moveNode，都在同一步撤销里）。
+        // 批量移动：一次写入落完（都在同一步撤销里）。逐条调 moveNode 时，
+        // 每条都要扫一遍全树清失效的边界/概要——一次最多 200 条就是 200 遍全树，
+        // 终态一样但成本差一个数量级。
         // 个别条目可能因为前面条目改变了结构而落空——如实把比例回喂给模型
-        let movedCount = 0
-        for (const move of intent.moves) {
-          const moved = store.moveNode(move.id, move.targetId, move.index ?? undefined)
-          if (moved) {
-            movedCount += 1
-            touched([move.id, move.targetId])
-          }
-        }
+        const appliedMoves = store.moveNodes(intent.moves)
+        for (const move of appliedMoves) touched([move.id, move.targetId])
+        const movedCount = appliedMoves.length
         if (movedCount === 0) return { ok: false, note: '一个都没有移动成功：目标位置可能不合法。' }
         return {
           ok: true,

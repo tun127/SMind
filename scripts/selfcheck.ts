@@ -696,6 +696,106 @@ function testMove(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 7.2 批量移动（AI 的 moveTopics 走这里）                             */
+/* ------------------------------------------------------------------ */
+
+function testMoveMany(): void {
+  group('批量移动：语义与逐条 moveNode 等价，但只清一次覆盖层')
+
+  interface ShapeNode {
+    title: string
+    children: ShapeNode[]
+  }
+  const ids = (): { rootId: string; a: string; b: string; c: string; d: string } => {
+    reset()
+    const rootId = root().id
+    const a = addChildOf(rootId, 'A')
+    const b = addChildOf(rootId, 'B')
+    const c = addChildOf(rootId, 'C')
+    const d = addChildOf(c, 'C-1')
+    return { rootId, a, b, c, d }
+  }
+  /** 把整棵树压成一行，用来对比两条路径的终态 */
+  const shape = (): string => {
+    const out: string[] = []
+    const visit = (topic: ShapeNode, prefix: string): void => {
+      out.push(`${prefix}>${topic.title}`)
+      for (const child of topic.children) visit(child, `${prefix}>${topic.title}`)
+    }
+    visit(root(), '')
+    return out.join('|')
+  }
+  const plan = (t: { rootId: string; a: string; b: string; c: string; d: string }) => [
+    { id: t.a, targetId: t.b, index: null },
+    { id: t.d, targetId: t.a, index: null },
+    { id: t.c, targetId: t.rootId, index: 0 }
+  ]
+
+  // ① 批量入口：条条都成功，且后一条能看到前一条造成的结构变化
+  {
+    const t = ids()
+    const applied = store().moveNodes([
+      { id: t.a, targetId: t.b, index: null },
+      { id: t.c, targetId: t.a, index: null }
+    ])
+    eq(
+      '两条都执行成功',
+      applied.map((move) => move.id),
+      [t.a, t.c]
+    )
+    check('A 挂到 B 下', findParent(root(), t.a)?.id === t.b)
+    check('C 挂到 A 下（看得到前一条的结果）', findParent(root(), t.c)?.id === t.a)
+    eq('选中落到最后一个成功的', store().selection, [t.c])
+  }
+
+  // ② 终态等价：同一棵树、同一串操作，批量与逐条必须得到一模一样的形状
+  {
+    const viaBatch = ids()
+    store().moveNodes(plan(viaBatch))
+    const batchShape = shape()
+
+    const viaSequential = ids()
+    for (const move of plan(viaSequential)) {
+      store().moveNode(move.id, move.targetId, move.index ?? undefined)
+    }
+    eq('批量与逐条 moveNode 的终态一致', batchShape, shape())
+  }
+
+  // ③ 拒绝规则与逐条一致；全部落空时不留下空的撤销记录
+  {
+    const t = ids()
+    const before = store().undoStack.length
+    eq(
+      '根主题不可移动',
+      store().moveNodes([{ id: t.rootId, targetId: t.a, index: null }]).length,
+      0
+    )
+    eq('不能移进自己的后代', store().moveNodes([{ id: t.c, targetId: t.d, index: null }]).length, 0)
+    eq(
+      '同父级 + 没给位置＝跳过',
+      store().moveNodes([{ id: t.a, targetId: t.rootId, index: null }]).length,
+      0
+    )
+    eq('全部落空时不留下撤销记录', store().undoStack.length, before)
+    eq(
+      '同父级 + 显式位置＝允许',
+      store().moveNodes([{ id: t.a, targetId: t.rootId, index: 99 }]).length,
+      1
+    )
+    eq('这次才留下撤销记录', store().undoStack.length, before + 1)
+  }
+
+  // ④ 与 settleAfterMove 同理：移动过的手动偏移必须清掉，否则会「预览在这里、松手在别处」
+  {
+    const t = ids()
+    store().offsetPosition(t.a, 40, 25)
+    check('偏移已写入', find(t.a)?.position !== undefined)
+    store().moveNodes([{ id: t.a, targetId: t.b, index: null }])
+    check('批量移动清掉了手动偏移', find(t.a)?.position === undefined)
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* 7.5 拖拽落点：拖到兄弟上排序、拖到其它节点上成为子主题（Xmind 同款）  */
 /* ------------------------------------------------------------------ */
 
@@ -8142,6 +8242,7 @@ async function main(): Promise<void> {
   testUndoRedo()
   testDelete()
   testMove()
+  testMoveMany()
   testNodeDrag()
   testUndoGranularity()
   testCollapseSelection()

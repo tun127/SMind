@@ -260,6 +260,17 @@ export interface EditorState {
    */
   moveNode(id: string, targetId: string, index?: number): boolean
   /**
+   * 批量移动（AI 的 `moveTopics` 工具走这里）：一次写入落完，返回**实际成功**的条目。
+   *
+   * 逐条调 `moveNode` 终态相同，但每条都要跑一次 `settleAfterMove` → `pruneOverlays`
+   * 的**全树扫描**——一次最多 200 条就是 200 遍全树（O(k×N)），
+   * 正是「AI 批量整理大导图」时的固定放大器。
+   */
+  moveNodes(moves: Array<{ id: string; targetId: string; index: number | null }>): Array<{
+    id: string
+    targetId: string
+  }>
+  /**
    * 用快捷键微调选中主题（与亿图脑图一致，适合结构复杂时精确挪动）：
    * - `↑` / `↓`：在同级里上移 / 下移一位
    * - `Home` / `End`：移到同级的最前 / 最后
@@ -1345,6 +1356,34 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }, '移动主题')
     if (ok) set({ selection: [id] })
     return ok
+  },
+
+  moveNodes: (moves) => {
+    const applied: Array<{ id: string; targetId: string }> = []
+    get().mutate((draft) => {
+      const draftRoot = activeRoot(draft)
+      for (const move of moves) {
+        // 与 moveNode 逐条调用时的准入规则完全一致，只是不再每条都清一遍覆盖层
+        if (move.id === draftRoot.id) continue
+        if (isSelfOrDescendant(draftRoot, move.id, move.targetId)) continue
+        const parent = findParent(draftRoot, move.id)
+        // 同父级、又没给插入位置 → 等于原地不动（与 moveNode 的规则一致）
+        if (parent && parent.id === move.targetId && move.index === null) continue
+        if (!moveTopic(draftRoot, move.id, move.targetId, move.index ?? undefined)) continue
+        // 必须清掉自由摆放偏移：留着它节点会落在「自动位置 + 偏移」，
+        // 看起来像「落点预览在这里、松手却跑到别处」（与 settleAfterMove 同理）
+        const moved = findTopic(draftRoot, move.id)
+        if (moved) moved.position = undefined
+        applied.push({ id: move.id, targetId: move.targetId })
+      }
+      // 失效覆盖层只在这里清一次：pruneOverlays 只看最终树、结果幂等，
+      // 所以终态与「每条都清一遍」等价，成本从 O(k×N) 降到 O(N + k)
+      if (applied.length > 0) pruneOverlays(activeSheet(draft))
+    }, '批量移动主题')
+    // 逐条调用时每次都会把选中设成刚移动的那个，这里保留同一语义：落到最后一个成功的
+    const last = applied[applied.length - 1]
+    if (last) set({ selection: [last.id] })
+    return applied
   },
 
   dropNode: (id, targetId, mode) => {
