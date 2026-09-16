@@ -1,5 +1,6 @@
 import {
   memo,
+  useMemo,
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
@@ -145,6 +146,38 @@ function TopicNodeInner({
   const codeMetrics = code ? (node.codeMetrics ?? codeBlockMetrics(code)) : null
   const codeBox =
     code && codeMetrics ? { width: codeMetrics.width, height: codeMetrics.height } : null
+
+  /**
+   * 代码块的高亮结果 → React 元素数组，按（内容, 语言）缓存。
+   *
+   * 这是渲染成本的主体：**一个 token 一个带内联样式对象的 `<span>`**，
+   * 10KB 代码就是约 1900 个。AI 每写一次都会让布局对象换新 → 这个节点必然重渲染，
+   * 不缓存就要把整段代码的 span 全部重建一遍（24 个代码块 × 60 次写入＝百万级）。
+   * 元素数组引用不变时 React 会跳过整棵子树——内容没变就一次都不用重建。
+   */
+  const codeText = code?.text ?? ''
+  const codeLanguage = code?.language ?? ''
+  const codeLines = useMemo(
+    () =>
+      highlightCode(codeText, codeLanguage).map((line, lineIndex, all) => (
+        <span key={lineIndex} className="topic__code-line">
+          {line.tokens.map((token, tokenIndex) => (
+            <span
+              key={tokenIndex}
+              style={{
+                color: CODE_TOKEN_COLORS[token.kind],
+                // 注释用斜体，和常见编辑器观感一致
+                fontStyle: token.kind === 'comment' ? 'italic' : undefined
+              }}
+            >
+              {token.text}
+            </span>
+          ))}
+          {lineIndex < all.length - 1 ? '\n' : null}
+        </span>
+      )),
+    [codeText, codeLanguage]
+  )
   /** 拉伸时的最小尺寸：代码块缩到下限时的大小 + 内边距（框不能比内容还小） */
   const padding = nodePaddingOf(node.depth)
   const minSize = codeMinNodeSize(code, padding)
@@ -375,23 +408,7 @@ function TopicNodeInner({
                 padding: `${codeMetrics.header}px ${codeMetrics.paddingX}px ${codeMetrics.paddingY}px`
               }}
             >
-              {highlightCode(code.text, code.language).map((line, lineIndex, all) => (
-                <span key={lineIndex} className="topic__code-line">
-                  {line.tokens.map((token, tokenIndex) => (
-                    <span
-                      key={tokenIndex}
-                      style={{
-                        color: CODE_TOKEN_COLORS[token.kind],
-                        // 注释用斜体，和常见编辑器观感一致
-                        fontStyle: token.kind === 'comment' ? 'italic' : undefined
-                      }}
-                    >
-                      {token.text}
-                    </span>
-                  ))}
-                  {lineIndex < all.length - 1 ? '\n' : null}
-                </span>
-              ))}
+              {codeLines}
             </pre>
           </div>
         )}
