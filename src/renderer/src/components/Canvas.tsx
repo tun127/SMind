@@ -490,16 +490,18 @@ export default function Canvas(): ReactElement {
   /**
    * 视角锁定要盯住的那个主题。
    *
-   * - 选择为空（点了画布空白处）→ 什么都不跟，镜头留给用户自己摆；
+   * - 选择为空（点了画布空白处）→ **跟中心主题**：开锁的瞬间视角立即有明确反馈
+   *   （居中到中心主题）。以前这里是"什么都不做"，结果就是用户看到的
+   *   「锁定开着却不锁」——没有目标时静默不跟随，看起来像功能坏了；
    * - 选择指向一个**已经不存在的主题**（刚删完、撤销回到另一个版本）→ 退回中心主题，
    *   而不是"盯不到就彻底不动"——那正是用户看到的「删除后视角不跟随」；
    * - 其余情况就是当前选中的主题。
    */
   const focusId = useMemo(() => {
-    if (selection.length === 0) return ''
     const rootTopic = activeRoot(workbook)
     const picked = selection[0]
-    return picked && findTopic(rootTopic, picked) ? picked : rootTopic.id
+    if (!picked || !findTopic(rootTopic, picked)) return rootTopic.id
+    return picked
   }, [selection, workbook])
 
   /**
