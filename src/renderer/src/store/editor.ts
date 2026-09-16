@@ -6,10 +6,25 @@ import {
   type OverlayKind,
   type OverlayTextStylePatch
 } from '@shared/model/overlay-style'
-import type { Attachment, RichText, Sheet, ThemeColors, Topic, TopicImage, Workbook } from '@shared/model/types'
+import type {
+  Attachment,
+  RichText,
+  Sheet,
+  ThemeColors,
+  Topic,
+  TopicCode,
+  TopicImage,
+  Workbook
+} from '@shared/model/types'
 import { createId, createTopic, createWorkbook } from '@shared/model/factory'
 import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
-import { appendToRich, hasFormatting, normalizeRich, plainTextOf, richFromPlain } from '@shared/richtext'
+import {
+  appendToRich,
+  hasFormatting,
+  normalizeRich,
+  plainTextOf,
+  richFromPlain
+} from '@shared/richtext'
 import {
   EMPTY_FILTER,
   countOccurrences,
@@ -37,13 +52,7 @@ import {
   moveTopic,
   walk
 } from '@shared/model/tree'
-import {
-  buildRange,
-  parseRange,
-  readCurveOffset,
-  sameRange,
-  withCurveOffset
-} from '@shared/layout'
+import { buildRange, parseRange, readCurveOffset, sameRange, withCurveOffset } from '@shared/layout'
 import { RELATIONSHIP_CURVE_KEY, TOPIC_SIDE_KEY } from '@shared/xmind/constants'
 import { notesHtmlFrom } from '@shared/richtext'
 import { resolveDrop, type DropMode } from '@shared/model/drop'
@@ -257,7 +266,9 @@ export interface EditorState {
    * - `←`：升级，成为父级的后一个兄弟
    * - `→`：降级，成为前一个兄弟的最后一个子主题
    */
-  moveSelectionByKey(key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End'): boolean
+  moveSelectionByKey(
+    key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End'
+  ): boolean
   /**
    * 按方向键在主题之间移动**选择**（← 父级、→ 第一个子级、↑↓ 同级）。
    *
@@ -303,7 +314,7 @@ export interface EditorState {
   /** 设置 LaTeX 公式源码（传空字符串即移除） */
   setFormula(id: string, formula: string): void
   /** 设置/移除节点里的代码块（language + text 都为空即移除） */
-  setCode(id: string, code: { language: string; text: string } | null): void
+  setCode(id: string, code: TopicCode | null): void
   /** 设置/移除节点内图片（字节由主进程存进包内资源） */
   setImage(id: string, image: TopicImage | null): void
   addAttachment(id: string, attachment: Attachment): void
@@ -565,7 +576,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
     get().mutate((draft) => {
       for (const sheet of draft.sheets) {
         walk(sheet.rootTopic, (topic) => {
-          const result = replaceInText(topic.title, query, search.replacement, search.options.caseSensitive)
+          const result = replaceInText(
+            topic.title,
+            query,
+            search.replacement,
+            search.options.caseSensitive
+          )
           if (result.count === 0) return
           topic.title = result.text
           // 文本长度变了，原来的富文本区间就对不上了，必须一并清掉
@@ -590,7 +606,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
     get().mutate((draft) => {
       const target = findTopic(activeRoot(draft), topicId)
       if (!target) return
-      const result = replaceInText(target.title, query, search.replacement, search.options.caseSensitive)
+      const result = replaceInText(
+        target.title,
+        query,
+        search.replacement,
+        search.options.caseSensitive
+      )
       target.title = result.text
       target.titleRich = undefined
     }, '替换文本')
@@ -699,7 +720,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   newDocument: () =>
     set((state) => ({
-      workbook: createWorkbook({ rootTitle: '中心主题', seedBranches: ['分支主题 1', '分支主题 2'] }),
+      workbook: createWorkbook({
+        rootTitle: '中心主题',
+        seedBranches: ['分支主题 1', '分支主题 2']
+      }),
       filePath: null,
       dirty: false,
       docSeq: state.docSeq + 1,
@@ -786,7 +810,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
     set({
       workbook: next,
       dirty: true,
-      undoStack: [...undoStack, { label, patches, inverse, coalesceKey, time: now, selectionBefore }].slice(-HISTORY_LIMIT),
+      undoStack: [
+        ...undoStack,
+        { label, patches, inverse, coalesceKey, time: now, selectionBefore }
+      ].slice(-HISTORY_LIMIT),
       redoStack: []
     })
     return true
@@ -894,7 +921,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   beginEdit: (id, insertText) => {
     const topic = findTopic(activeRoot(get().workbook), id)
-    const base = topic?.titleRich ? normalizeRich(topic.titleRich) : richFromPlain(topic?.title ?? '')
+    const base = topic?.titleRich
+      ? normalizeRich(topic.titleRich)
+      : richFromPlain(topic?.title ?? '')
     const rich = insertText ? appendToRich(base, insertText) : base
     set({ editingId: id, ...editingContent(rich), selection: [id] })
   },
@@ -1058,7 +1087,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const stillThere = get().selection.filter(
       (item) => item !== id && findTopic(activeRoot(get().workbook), item) !== null
     )
-    set({ selection: stillThere.length > 0 ? stillThere : parent ? [parent.id] : [], ...NO_EDITING })
+    set({
+      selection: stillThere.length > 0 ? stillThere : parent ? [parent.id] : [],
+      ...NO_EDITING
+    })
     return true
   },
 
@@ -1172,9 +1204,16 @@ export const useEditor = create<EditorState>()((set, get) => ({
         const minHeight = Math.max(0, ...mins.map((item) => item.height))
         const clamped =
           minWidth > next.width || minHeight > next.height
-            ? { width: Math.max(next.width, Math.round(minWidth)), height: Math.max(next.height, Math.round(minHeight)) }
+            ? {
+                width: Math.max(next.width, Math.round(minWidth)),
+                height: Math.max(next.height, Math.round(minHeight))
+              }
             : next
-        if (topic.sizeOverride?.width === clamped.width && topic.sizeOverride?.height === clamped.height) return
+        if (
+          topic.sizeOverride?.width === clamped.width &&
+          topic.sizeOverride?.height === clamped.height
+        )
+          return
         topic.sizeOverride = clamped
       },
       next ? '拉伸节点' : '恢复节点自动尺寸',
@@ -1199,9 +1238,11 @@ export const useEditor = create<EditorState>()((set, get) => ({
     // 每次按键各记一步撤销，**刻意不合并**：移动是数组重排，
     // 合并两步的 inverse 会因为下标错位而改坏 children（见 moveNode 的说明）。
     if (key === 'ArrowUp') return index === 0 ? false : state.moveNode(id, parent.id, index - 1)
-    if (key === 'ArrowDown') return index === last ? false : state.moveNode(id, parent.id, index + 1)
+    if (key === 'ArrowDown')
+      return index === last ? false : state.moveNode(id, parent.id, index + 1)
     if (key === 'Home') return index === 0 ? false : state.moveNode(id, parent.id, 0)
-    if (key === 'End') return index === last ? false : state.moveNode(id, parent.id, parent.children.length)
+    if (key === 'End')
+      return index === last ? false : state.moveNode(id, parent.id, parent.children.length)
 
     if (key === 'ArrowLeft') {
       // 升级：挪到父级的后面，成为父级的兄弟
@@ -1465,21 +1506,26 @@ export const useEditor = create<EditorState>()((set, get) => ({
   setImage: (id, image) => {
     // 拿不到像素尺寸时不要写 0，交给渲染层走「尺寸未知」的兜底框
     const positive = (value: number | undefined): number | undefined =>
-      typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : undefined
+      typeof value === 'number' && Number.isFinite(value) && value > 0
+        ? Math.round(value)
+        : undefined
     const next: TopicImage | null = image
       ? { path: image.path, width: positive(image.width), height: positive(image.height) }
       : null
 
-    get().mutate((draft) => {
-      const topic = findTopic(activeRoot(draft), id)
-      if (!topic) return
-      if (!next) {
-        if (topic.image === undefined) return
-        topic.image = undefined
-        return
-      }
-      topic.image = { ...next }
-    }, next ? '插入图片' : '移除图片')
+    get().mutate(
+      (draft) => {
+        const topic = findTopic(activeRoot(draft), id)
+        if (!topic) return
+        if (!next) {
+          if (topic.image === undefined) return
+          topic.image = undefined
+          return
+        }
+        topic.image = { ...next }
+      },
+      next ? '插入图片' : '移除图片'
+    )
   },
 
   addAttachment: (id, attachment) => {
@@ -1569,12 +1615,16 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   offsetRelationshipCurve: (id, dx, dy) => {
-    get().mutate((draft) => {
-      const target = activeSheet(draft).relationships.find((item) => item.id === id)
-      if (!target) return
-      const current = readCurveOffset(target.style)
-      target.style = withCurveOffset(target.style, { x: current.x + dx, y: current.y + dy })
-    }, '调整关系线弯度', `curve:${id}`)
+    get().mutate(
+      (draft) => {
+        const target = activeSheet(draft).relationships.find((item) => item.id === id)
+        if (!target) return
+        const current = readCurveOffset(target.style)
+        target.style = withCurveOffset(target.style, { x: current.x + dx, y: current.y + dy })
+      },
+      '调整关系线弯度',
+      `curve:${id}`
+    )
   },
 
   resetRelationshipCurve: (id) => {
@@ -1595,8 +1645,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   selectedOverlay: null,
 
-  selectOverlay: (kind, id) =>
-    set({ selectedOverlay: { kind, id }, selection: [], ...NO_EDITING }),
+  selectOverlay: (kind, id) => set({ selectedOverlay: { kind, id }, selection: [], ...NO_EDITING }),
 
   clearOverlaySelection: () => set({ selectedOverlay: null }),
 
@@ -1608,7 +1657,11 @@ export const useEditor = create<EditorState>()((set, get) => ({
     get().mutate((draft) => {
       const sheet = activeSheet(draft)
       const list =
-        kind === 'summary' ? sheet.summaries : kind === 'boundary' ? sheet.boundaries : sheet.relationships
+        kind === 'summary'
+          ? sheet.summaries
+          : kind === 'boundary'
+            ? sheet.boundaries
+            : sheet.relationships
       const target = list.find((item) => item.id === id)
       if (!target) return
       const next = withOverlayTextStyle(target.style, patch)
@@ -1719,11 +1772,16 @@ export const useEditor = create<EditorState>()((set, get) => ({
   applyTheme: (theme) => {
     const current = (() => {
       const { workbook } = get()
-      return (workbook.sheets.find((s) => s.id === workbook.activeSheetId) ?? workbook.sheets[0])?.theme
+      return (workbook.sheets.find((s) => s.id === workbook.activeSheetId) ?? workbook.sheets[0])
+        ?.theme
     })()
     // 已经是这个主题（例如启动时套用「设置」里的默认主题）就别再写一次：
     // 否则新建文档一上来就被记成"有未保存改动"，标题栏立刻出现 ●
-    if (current && current.id === theme.id && JSON.stringify(current.colors) === JSON.stringify(theme.colors)) {
+    if (
+      current &&
+      current.id === theme.id &&
+      JSON.stringify(current.colors) === JSON.stringify(theme.colors)
+    ) {
       return
     }
     get().mutate((draft) => {
@@ -1766,8 +1824,6 @@ export const useEditor = create<EditorState>()((set, get) => ({
 /* 派生工具                                                            */
 /* ------------------------------------------------------------------ */
 
-
-
 /**
  * 工具栏「关系线 / 边界 / 概要」三个开关的当前状态。
  * 返回已存在元素的 id，按钮据此显示为「已按下」，用户也能看出再点一次会取消。
@@ -1800,12 +1856,14 @@ export function overlayToggleOf(
   const range = buildRange(activeRoot(workbook), selection)
   return {
     relationshipId,
-    boundaryId: range ? (sheet.boundaries.find((item) => sameRange(item.range, range))?.id ?? null) : null,
-    summaryId: range ? (sheet.summaries.find((item) => sameRange(item.range, range))?.id ?? null) : null
+    boundaryId: range
+      ? (sheet.boundaries.find((item) => sameRange(item.range, range))?.id ?? null)
+      : null,
+    summaryId: range
+      ? (sheet.summaries.find((item) => sameRange(item.range, range))?.id ?? null)
+      : null
   }
 }
-
-
 
 /**
  * 落盘用的快照。

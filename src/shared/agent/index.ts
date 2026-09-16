@@ -9,7 +9,7 @@
 import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { isRecord } from '../guards'
 import { ancestorsOf, findTopic } from '../model/tree'
-import type { Topic } from '../model/types'
+import type { Topic, TopicCode } from '../model/types'
 
 /* ------------------------------------------------------------------ */
 /* 节点标题的识别与切分                                                */
@@ -63,7 +63,10 @@ export function buildTitleIndex(root: Topic, minLength = 2): Map<string, TitleIn
  * 只认**标题原文**（这正是 system 提示词要求模型引用节点的方式）；
  * 同一标题出现多次都会被识别。
  */
-export function segmentTitleMentions(text: string, index: Map<string, TitleIndexEntry[]>): TextSegment[] {
+export function segmentTitleMentions(
+  text: string,
+  index: Map<string, TitleIndexEntry[]>
+): TextSegment[] {
   // 防御：内容可能来自历史记录等外部数据。坏数据最多让这段不高亮，
   // **绝不能把整个界面带崩**（这里真崩过一次：上游把 content 清成了 undefined）。
   if (typeof text !== 'string' || text.length === 0) return []
@@ -132,7 +135,10 @@ export const AGENT_MAX_TOOL_CALLS = 60
  *
  * 返回 reason 是为了**告诉用户为什么停了**——静默停下会让人以为 AI 坏了。
  */
-export function canContinueAgentLoop(round: number, toolCallsUsed: number): { ok: boolean; reason: string } {
+export function canContinueAgentLoop(
+  round: number,
+  toolCallsUsed: number
+): { ok: boolean; reason: string } {
   if (toolCallsUsed >= AGENT_MAX_TOOL_CALLS) {
     return { ok: false, reason: `已达到本次最多 ${AGENT_MAX_TOOL_CALLS} 次工具调用的上限` }
   }
@@ -153,7 +159,10 @@ export interface AgentToolDef {
 }
 
 /** 拼 JSON Schema 的小工具：少一层括号，schema 一眼能读 */
-function schema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
+function schema(
+  properties: Record<string, unknown>,
+  required: string[] = []
+): Record<string, unknown> {
   return { type: 'object', properties, required }
 }
 
@@ -258,7 +267,8 @@ function suggestTitles(root: Topic, query: string, limit = 5): string[] {
   const out: string[] = []
   const visit = (topic: Topic): void => {
     if (out.length >= limit) return
-    if (topic.title.length > 0 && topic.title !== query && topic.title.includes(query)) out.push(topic.title)
+    if (topic.title.length > 0 && topic.title !== query && topic.title.includes(query))
+      out.push(topic.title)
     for (const child of topic.children) visit(child)
   }
   visit(root)
@@ -411,7 +421,11 @@ export interface ToolResult {
 }
 
 /** 缩进大纲；到底或超行数上限时标注「未展开」 */
-function outlineOf(topic: Topic, depth: number, maxLines = 120): { text: string; truncated: boolean } {
+function outlineOf(
+  topic: Topic,
+  depth: number,
+  maxLines = 120
+): { text: string; truncated: boolean } {
   const lines: string[] = []
   let truncated = false
   const visit = (node: Topic, level: number): void => {
@@ -465,7 +479,13 @@ function stringArg(args: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function intArg(args: Record<string, unknown>, key: string, fallback: number, min: number, max: number): number {
+function intArg(
+  args: Record<string, unknown>,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number
+): number {
   const value = args[key]
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return Math.min(max, Math.max(min, Math.round(value)))
@@ -570,7 +590,11 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     const tail = outline.truncated
       ? '\n（内容较多已截断——需要细节请缩小 depth 或指定更具体的分支）'
       : ''
-    return { ok: true, content: `${header}\n${outline.text}${tail}`, summary: `读取子树：${topic.title}` }
+    return {
+      ok: true,
+      content: `${header}\n${outline.text}${tail}`,
+      summary: `读取子树：${topic.title}`
+    }
   }
 
   if (name === 'getDocStats') {
@@ -598,7 +622,10 @@ export const AGENT_TOOL_RESULT_MAX = 8000
 export function runReadTool(name: string, argumentsText: string, context: ToolContext): ToolResult {
   const result = executeReadTool(name, argumentsText, context)
   if (result.content.length <= AGENT_TOOL_RESULT_MAX) return result
-  return { ...result, content: `${result.content.slice(0, AGENT_TOOL_RESULT_MAX)}\n…（结果过长已截断）` }
+  return {
+    ...result,
+    content: `${result.content.slice(0, AGENT_TOOL_RESULT_MAX)}\n…（结果过长已截断）`
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -623,10 +650,14 @@ export type WriteIntent =
    * 批量移动：整理大导图的正路。一次工具调用搬很多节点，
    * 否则「把 84 个平铺节点归类」这种任务在任何调用上限下都做不完。
    */
-  | { kind: 'moveMany'; moves: Array<{ id: string; targetId: string; index: number | null }>; requested: number }
+  | {
+      kind: 'moveMany'
+      moves: Array<{ id: string; targetId: string; index: number | null }>
+      requested: number
+    }
   | { kind: 'collapse'; id: string; collapsed: boolean }
   | { kind: 'notes'; id: string; text: string }
-  | { kind: 'code'; id: string; code: { language: string; text: string } | null }
+  | { kind: 'code'; id: string; code: TopicCode | null }
   | { kind: 'formula'; id: string; formula: string }
   | { kind: 'ask'; question: string; options: string[] }
 
@@ -784,7 +815,11 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
     parameters: schema(
       {
         question: { type: 'string', description: '要问用户的问题' },
-        options: { type: 'array', items: { type: 'string' }, description: '可选的候选答案（最多 5 个）' }
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选的候选答案（最多 5 个）'
+        }
       },
       ['question']
     )
@@ -956,10 +991,15 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     // 否则会出现「计划说执行了、实际被忽略」的错位。要重排就显式给 index。
     const chain = ancestorsOf(root, source.topic.id)
     if (chain[chain.length - 1] === destination.topic.id && args.index === undefined) {
-      return fail(`「${source.topic.title}」本来就在「${destination.topic.title}」下面，这次没有改动。`)
+      return fail(
+        `「${source.topic.title}」本来就在「${destination.topic.title}」下面，这次没有改动。`
+      )
     }
     const rawIndex = args.index
-    const index = typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.max(0, Math.round(rawIndex)) : null
+    const index =
+      typeof rawIndex === 'number' && Number.isFinite(rawIndex)
+        ? Math.max(0, Math.round(rawIndex))
+        : null
     return {
       ok: true,
       intent: { kind: 'move', id: source.topic.id, targetId: destination.topic.id, index },
@@ -1018,8 +1058,14 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       }
       const rawIndex = item.index
       const slot =
-        typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.max(0, Math.round(rawIndex)) : null
-      moves.push({ id: source.resolved.topic.id, targetId: destination.resolved.topic.id, index: slot })
+        typeof rawIndex === 'number' && Number.isFinite(rawIndex)
+          ? Math.max(0, Math.round(rawIndex))
+          : null
+      moves.push({
+        id: source.resolved.topic.id,
+        targetId: destination.resolved.topic.id,
+        index: slot
+      })
     }
 
     if (moves.length === 0) {
@@ -1084,7 +1130,11 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     const language = stringArg(args, 'language')
     return {
       ok: true,
-      intent: { kind: 'code', id: target.topic.id, code: { language: language.length > 0 ? language : 'text', text } },
+      intent: {
+        kind: 'code',
+        id: target.topic.id,
+        code: { language: language.length > 0 ? language : 'text', text }
+      },
       summary: `给「${target.topic.title}」写代码块（${language.length > 0 ? language : 'text'}）`,
       destructive: false
     }
@@ -1095,12 +1145,18 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     if ('problem' in target) return target.problem
     if (typeof args.formula !== 'string') return fail('formula 必须是字符串。')
     // 模型常常好心地把公式包在 $…$ 里，这里替它剥掉（与公式输入框的处理一致）
-    const formula = args.formula.trim().replace(/^\$\$?/, '').replace(/\$\$?$/, '').trim()
+    const formula = args.formula
+      .trim()
+      .replace(/^\$\$?/, '')
+      .replace(/\$\$?$/, '')
+      .trim()
     return {
       ok: true,
       intent: { kind: 'formula', id: target.topic.id, formula },
       summary:
-        formula.length === 0 ? `移除「${target.topic.title}」的公式` : `给「${target.topic.title}」写公式`,
+        formula.length === 0
+          ? `移除「${target.topic.title}」的公式`
+          : `给「${target.topic.title}」写公式`,
       destructive: false
     }
   }
@@ -1110,7 +1166,9 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     if (question.length === 0) return fail('question 不能为空。')
     const rawOptions = args.options
     const options = Array.isArray(rawOptions)
-      ? rawOptions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 5)
+      ? rawOptions
+          .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          .slice(0, 5)
       : []
     return {
       ok: true,
