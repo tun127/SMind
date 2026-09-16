@@ -48,6 +48,24 @@ async function main(): Promise<void> {
     process.exit(0)
   }
 
+  /**
+   * 自测钩子：故意让指定索引**永不返回**，用来把父进程的「超时判毒块」分支真的跑一遍。
+   *
+   * 为什么需要它：这条分支是整个工具的**判决路径**（"哪个块是毒块"），
+   * 但正常文档里已经很难再触发它了——真触发过它的自旋 bug（`@` / `\`）已经修掉，
+   * 于是这条路径长期处于「逻辑上应该对、从没被真正执行过」的状态。
+   * 用法：`$env:DIAG_FAKE_SPIN='1'; node scripts/run-diag-freeze.mjs <xmind>`
+   * 预期：#1 通过、#2 判为毒块并把内容写进 .tmp-check/poison-2.txt。
+   */
+  if ((process.env.DIAG_FAKE_SPIN ?? '') === String(index)) {
+    console.log(`自测：索引 ${index} 故意制造死循环，父进程应当判它为毒块`)
+    let spin = 0
+    for (;;) {
+      spin = (spin + 1) % 1_000_000
+      if (spin < 0) break
+    }
+  }
+
   // 1) 分词（渲染时现场调用的那个）
   const lines = highlightCode(block.text, block.language)
   console.log(`分词 OK：${lines.length} 行`)
