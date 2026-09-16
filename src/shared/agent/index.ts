@@ -932,7 +932,11 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
       '所以这些主题必须是同一级且相邻。范围已经存在就复用。',
     parameters: schema(
       {
-        addresses: { type: 'array', items: { type: 'string' }, description: '要圈进去的主题（1 个或连续几个）' },
+        addresses: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '要圈进去的主题（1 个或连续几个）'
+        },
         title: { type: 'string', description: '边界的标题（可省略）' }
       },
       ['addresses']
@@ -940,10 +944,15 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
   },
   {
     name: 'addSummary',
-    description: '给一组**同级**主题加概要（标在右侧的概括框），可带标题。要求与 addBoundary 相同。',
+    description:
+      '给一组**同级**主题加概要（标在右侧的概括框），可带标题。要求与 addBoundary 相同。',
     parameters: schema(
       {
-        addresses: { type: 'array', items: { type: 'string' }, description: '要概括的主题（1 个或连续几个）' },
+        addresses: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '要概括的主题（1 个或连续几个）'
+        },
         title: { type: 'string', description: '概要文字（可省略，默认「概要」）' }
       },
       ['addresses']
@@ -956,7 +965,11 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
       'id 必须先用 listAttachments 拿到（这些元素没有标题可寻址）。',
     parameters: schema(
       {
-        target: { type: 'string', enum: ['relationship', 'boundary', 'summary'], description: '元素种类' },
+        target: {
+          type: 'string',
+          enum: ['relationship', 'boundary', 'summary'],
+          description: '元素种类'
+        },
         id: { type: 'string', description: '元素 id（来自 listAttachments）' },
         title: { type: 'string', description: '新的文字（空串表示清空）' }
       },
@@ -970,7 +983,11 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
       '这是破坏性操作，用户会被问一次——只有用户确实要删时才用它。',
     parameters: schema(
       {
-        target: { type: 'string', enum: ['relationship', 'boundary', 'summary'], description: '元素种类' },
+        target: {
+          type: 'string',
+          enum: ['relationship', 'boundary', 'summary'],
+          description: '元素种类'
+        },
         id: { type: 'string', description: '元素 id（来自 listAttachments）' }
       },
       ['target', 'id']
@@ -984,7 +1001,11 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
     parameters: schema(
       {
         address: { type: 'string', description: '目标主题' },
-        markers: { type: 'array', items: { type: 'string' }, description: '标记 id 列表（整体替换）' }
+        markers: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '标记 id 列表（整体替换）'
+        }
       },
       ['address', 'markers']
     )
@@ -1405,7 +1426,8 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       topicIds.push(resolved.resolved.topic.id)
       titles.push(resolved.resolved.topic.title)
     }
-    const title = typeof args.title === 'string' && args.title.trim().length > 0 ? args.title.trim() : null
+    const title =
+      typeof args.title === 'string' && args.title.trim().length > 0 ? args.title.trim() : null
     const shown = titles.join('、')
     const isBoundary = name === 'addBoundary'
     return {

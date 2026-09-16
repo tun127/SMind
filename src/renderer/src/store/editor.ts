@@ -1722,7 +1722,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
   addBoundaryFor: (topicIds, title) => {
     const range = buildRange(activeRoot(get().workbook), topicIds)
     if (!range) return null
-    const existing = activeSheet(get().workbook).boundaries.find((item) => sameRange(item.range, range))
+    const existing = activeSheet(get().workbook).boundaries.find((item) =>
+      sameRange(item.range, range)
+    )
     if (existing) return existing.id
     const id = createId('boundary')
     const text = title?.trim()
@@ -1737,7 +1739,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!range) return null
     const topicId = parseRange(range)?.[0]
     if (!topicId) return null
-    const existing = activeSheet(get().workbook).summaries.find((item) => sameRange(item.range, range))
+    const existing = activeSheet(get().workbook).summaries.find((item) =>
+      sameRange(item.range, range)
+    )
     if (existing) return existing.id
     const id = createId('summary')
     get().mutate((draft) => {
@@ -1747,7 +1751,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   setMarkers: (id, markerIds) => {
-    const wanted = [...new Set(markerIds.map((item) => item.trim()).filter((item) => item.length > 0))]
+    const wanted = [
+      ...new Set(markerIds.map((item) => item.trim()).filter((item) => item.length > 0))
+    ]
     get().mutate((draft) => {
       const topic = findTopic(activeRoot(draft), id)
       if (!topic) return

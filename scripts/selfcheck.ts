@@ -2366,21 +2366,35 @@ function testAgentTools(): void {
     root,
     selectedId: labor.id,
     sheetCount: 2,
-    sheet: { id: 'sheet-1', title: '画布 1', rootTopic: root, relationships: [], boundaries: [], summaries: [] }
+    sheet: {
+      id: 'sheet-1',
+      title: '画布 1',
+      rootTopic: root,
+      relationships: [],
+      boundaries: [],
+      summaries: []
+    }
   }
 
   group('Agent：第二批写工具（关系线 / 边界 / 概要 / 标记 / 标签）')
 
   /** 本组助手：把参数对象直接交给 planWriteTool（root 就是上面那棵 5 节点树） */
-  const plan = (name: string, args: Record<string, unknown>) => planWriteTool(name, JSON.stringify(args), root)
+  const plan = (name: string, args: Record<string, unknown>) =>
+    planWriteTool(name, JSON.stringify(args), root)
 
   const relation = plan('addRelationship', { from: '成本/人力', to: '成本/物料' })
-  check('连关系线：解析成 relationship 意图', relation.ok && relation.intent.kind === 'relationship')
+  check(
+    '连关系线：解析成 relationship 意图',
+    relation.ok && relation.intent.kind === 'relationship'
+  )
   check(
     '关系线两端解析成真实 id',
     relation.ok && relation.intent.kind === 'relationship' && relation.intent.ends.length === 2
   )
-  check('关系线摘要写出两端标题', relation.summary.includes('人力') && relation.summary.includes('物料'))
+  check(
+    '关系线摘要写出两端标题',
+    relation.summary.includes('人力') && relation.summary.includes('物料')
+  )
   check('两端不能是同一个主题', plan('addRelationship', { from: '成本', to: '成本' }).ok === false)
 
   const boundary = plan('addBoundary', { addresses: ['成本/人力', '成本/物料'], title: '两块一起' })
@@ -2389,10 +2403,13 @@ function testAgentTools(): void {
     '边界的标题原样带上',
     boundary.ok && boundary.intent.kind === 'boundary' && boundary.intent.title === '两块一起'
   )
-  check('边界不带标题时为 null（不是空串）', (() => {
-    const r = plan('addBoundary', { addresses: ['成本/人力'] })
-    return r.ok && r.intent.kind === 'boundary' && r.intent.title === null
-  })())
+  check(
+    '边界不带标题时为 null（不是空串）',
+    (() => {
+      const r = plan('addBoundary', { addresses: ['成本/人力'] })
+      return r.ok && r.intent.kind === 'boundary' && r.intent.title === null
+    })()
+  )
   check('addresses 为空被拦下', plan('addBoundary', { addresses: [] }).ok === false)
 
   const summary = plan('addSummary', { addresses: ['成本/人力'] })
@@ -2415,23 +2432,39 @@ function testAgentTools(): void {
   const label = plan('addLabel', { address: '成本/人力', label: '重点' })
   check('加标签：add=true', label.ok && label.intent.kind === 'label' && label.intent.add === true)
   const unlabel = plan('removeLabel', { address: '成本/人力', label: '重点' })
-  check('去标签：add=false', unlabel.ok && unlabel.intent.kind === 'label' && unlabel.intent.add === false)
+  check(
+    '去标签：add=false',
+    unlabel.ok && unlabel.intent.kind === 'label' && unlabel.intent.add === false
+  )
 
   check(
     '改元素文字：按 id 走（元素没有标题可寻址）',
     (() => {
-      const r = plan('setAttachmentTitle', { target: 'boundary', id: 'boundary-1', title: '新标题' })
+      const r = plan('setAttachmentTitle', {
+        target: 'boundary',
+        id: 'boundary-1',
+        title: '新标题'
+      })
       return r.ok && r.intent.kind === 'attachmentTitle' && r.intent.id === 'boundary-1'
     })()
   )
-  check('元素种类不认识时被拦下', plan('setAttachmentTitle', { target: 'nope', id: 'x', title: '' }).ok === false)
-  check('缺 id 时提醒去 listAttachments 拿', (() => {
-    const r = plan('removeAttachment', { target: 'boundary' })
-    return !r.ok && r.error.includes('listAttachments')
-  })())
+  check(
+    '元素种类不认识时被拦下',
+    plan('setAttachmentTitle', { target: 'nope', id: 'x', title: '' }).ok === false
+  )
+  check(
+    '缺 id 时提醒去 listAttachments 拿',
+    (() => {
+      const r = plan('removeAttachment', { target: 'boundary' })
+      return !r.ok && r.error.includes('listAttachments')
+    })()
+  )
 
   const removeAttachment = plan('removeAttachment', { target: 'relationship', id: 'rel-1' })
-  check('删元素：解析成 attachmentRemove', removeAttachment.ok && removeAttachment.intent.kind === 'attachmentRemove')
+  check(
+    '删元素：解析成 attachmentRemove',
+    removeAttachment.ok && removeAttachment.intent.kind === 'attachmentRemove'
+  )
   check(
     '**删元素标记为破坏性**（渲染层据此先问用户）',
     removeAttachment.ok && removeAttachment.destructive === true
@@ -2444,10 +2477,13 @@ function testAgentTools(): void {
     '列元素带上可用标记清单（模型不查就会自己编）',
     attachments.content.includes('priority-1=优先级 1')
   )
-  check('列元素：过滤用的 address 解析失败时给可读原因', (() => {
-    const r = runReadTool('listAttachments', '{"address":"不存在的主题"}', context)
-    return !r.ok && r.content.includes('searchNodes')
-  })())
+  check(
+    '列元素：过滤用的 address 解析失败时给可读原因',
+    (() => {
+      const r = runReadTool('listAttachments', '{"address":"不存在的主题"}', context)
+      return !r.ok && r.content.includes('searchNodes')
+    })()
+  )
 
   check(
     '第二批工具已注册进写工具清单',
@@ -2545,7 +2581,11 @@ function testAttachmentTools(): void {
 
   const relation = store().connectTopics(first, second)
   eq('连关系线返回 id', typeof relation === 'string', true)
-  eq('再连一次复用原来那条（幂等：模型重试不会删线）', store().connectTopics(first, second), relation)
+  eq(
+    '再连一次复用原来那条（幂等：模型重试不会删线）',
+    store().connectTopics(first, second),
+    relation
+  )
   eq('画布上只有一条关系线', sheet().relationships.length, 1)
   eq('两端指向正确', sheet().relationships[0]?.end2Id, second)
   eq('不能自连', store().connectTopics(first, first), null)
@@ -2818,7 +2858,14 @@ function testWriteToolsAndTurn(): void {
     root: tree,
     selectedId: null,
     sheetCount: 1,
-    sheet: { id: 'sheet-2', title: '画布 1', rootTopic: tree, relationships: [], boundaries: [], summaries: [] }
+    sheet: {
+      id: 'sheet-2',
+      title: '画布 1',
+      rootTopic: tree,
+      relationships: [],
+      boundaries: [],
+      summaries: []
+    }
   }
   check(
     '子树读取把句柄打在每行前面',
