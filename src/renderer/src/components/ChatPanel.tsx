@@ -48,7 +48,7 @@ import type { LicenseView } from '@shared/license'
 import { createId } from '@shared/model/factory'
 import { activeRoot, activeSheet, ancestorsOf, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
-import { setStage } from '../dev/stage'
+import { armDiag, beginCost, disarmDiag, reportCosts, setStage } from '../dev/stage'
 import { useEditor } from '../store/editor'
 import type { AiTask } from './AiDialog'
 
@@ -501,6 +501,13 @@ export default function ChatPanel({
 
   /** 结束本轮：把 AI 的改动并成一步撤销，并把「改了什么」留在气泡里 */
   const commitTurn = (): void => {
+    /**
+     * 回合收尾先落一行**耗时归属**——这一行直接回答「刚才这十几秒花在哪了」。
+     * 例如：`AI 回合结束：画布布局×12 共 3400ms(最慢 900) · 应用写意图×12 共 210ms(最慢 30)
+     * · 代码块渲染×288 · 代码块 span 共 45 万`。
+     */
+    reportCosts('AI 回合结束')
+    disarmDiag()
     const log = writeLogRef.current
     if (turnStartedRef.current) {
       const label = log.length > 0 ? `AI · ${log.slice(0, 2).join('、')}` : 'AI · 修改导图'
@@ -677,7 +684,10 @@ export default function ChatPanel({
       }
 
       setActivity(`正在改画布…（${queue.index + 1}/${queue.calls.length}）`)
+      // 进这一阶段先落一行：真卡死时它就是日志里最后一条（案发现场）
+      const endWrite = beginCost('应用写意图', plan.intent.kind)
       const applied = applyWriteIntent(plan.intent)
+      endWrite()
       // 强制转储：冻结就发生在某次应用之后的渲染里，这份就是「案发前的最后现场」
       dumpDiag(`已应用 ${plan.intent.kind}（${queue.index + 1}/${queue.calls.length}）`, true)
       if (applied.ok) writesAppliedRef.current += 1
@@ -715,7 +725,9 @@ export default function ChatPanel({
     if (!pending) return
 
     if (approve) {
+      const endWrite = beginCost('应用写意图', pending.intent.kind)
       const applied = applyWriteIntent(pending.intent)
+      endWrite()
       if (applied.ok) writesAppliedRef.current += 1
       else writesFailedRef.current += 1
       pushToolResult(
@@ -900,6 +912,9 @@ export default function ChatPanel({
         ...wireRef.current,
         { role: 'assistant', content: event.content, toolCalls: calls }
       ]
+      // 工具调用即将开跑：打开取证输出。卡死正好都发生在这条路径上，
+      // 所以只有这里开——用户自己的日常编辑不会产生任何诊断日志
+      armDiag(`AI 回合：${calls.length} 个工具调用`)
       dumpDiag(`收到 ${calls.length} 个工具调用`)
       toolCallsUsedRef.current += calls.length
       queueRef.current = { calls, index: 0 }

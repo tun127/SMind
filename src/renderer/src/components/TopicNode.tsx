@@ -23,6 +23,7 @@ import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
 import { HIGHLIGHT_BG } from '@shared/richtext'
 import { countDescendants } from '@shared/model/tree'
 import { useEditor } from '../store/editor'
+import { count, isDiagArmed, noteAmount } from '../dev/stage'
 import type { RichText, ThemeColors } from '@shared/model/types'
 import { richFromPlain } from '@shared/richtext'
 import { formulaHtml, formulaSize } from '../render/formula'
@@ -157,6 +158,20 @@ function TopicNodeInner({
    */
   const codeText = code?.text ?? ''
   const codeLanguage = code?.language ?? ''
+  /**
+   * 卡死取证的计数点：代码块渲染次数 + 建出来的 span 总量。
+   *
+   * 这两个数正是「写入次数 × 代码总量」二次放大的直接证据：10~15 次 setCode
+   * 若报出「代码块渲染×288 · span 共 45 万」，就说明每次写入都在重建整批 span。
+   * 只在取证开启时统计（用户日常编辑零开销）。
+   */
+  if (code && isDiagArmed()) {
+    count('代码块渲染')
+    let spans = 0
+    for (const line of highlightCode(codeText, codeLanguage)) spans += line.tokens.length
+    noteAmount('代码块 span', spans)
+  }
+
   const codeLines = useMemo(
     () =>
       highlightCode(codeText, codeLanguage).map((line, lineIndex, all) => (

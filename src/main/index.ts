@@ -776,18 +776,40 @@ function createWindow(
    * 卡死这种问题，主进程只能看到「无响应」，看不到**是谁**在刷警告/报错；
    * 把渲染层的 warning/error 收上来，下次翻日志就能直接定位。
    */
-  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-    // 阶段心跳（[stage] 开头）一律记：卡死时它就是现场——最后一条心跳说明卡在哪一步
-    if (message.startsWith('[stage]')) {
-      logMain('stage', message)
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    // Electron 32+ 把详情挂在事件对象上（新签名只给一个参数），旧签名仍传位置参数。
+    // 两种都兼容：这条通道是**卡死取证唯一可靠的出口**（渲染进程被堵死时，
+    // 只有已经写出来的 console 能被主进程落到日志里），不能因为签名变化静默失效。
+    const details = event as unknown as {
+      message?: unknown
+      level?: unknown
+      lineNumber?: unknown
+      sourceId?: unknown
+    }
+    const text =
+      typeof details.message === 'string'
+        ? details.message
+        : typeof message === 'string'
+          ? message
+          : ''
+    const rawLevel: unknown = details.level ?? level
+    const source = typeof details.sourceId === 'string' ? details.sourceId : sourceId
+    const lineNo = typeof details.lineNumber === 'number' ? details.lineNumber : line
+
+    // 阶段心跳（[stage] 开头）一律记：卡死时它就是现场——最后一条 heartbeat 说明卡在哪一步
+    if (text.startsWith('[stage]')) {
+      logMain('stage', text)
       return
     }
-    if (level < 2) return
-    logMain(
-      'renderer-console',
-      `${level === 3 ? 'error' : 'warn'} ${message}`,
-      `${sourceId}:${line}`
-    )
+    const severe =
+      typeof rawLevel === 'string'
+        ? rawLevel === 'warning' || rawLevel === 'error'
+        : typeof rawLevel === 'number'
+          ? rawLevel >= 2
+          : false
+    if (!severe) return
+    const label = typeof rawLevel === 'string' ? rawLevel : rawLevel === 3 ? 'error' : 'warn'
+    logMain('renderer-console', `${label} ${text}`, `${source}:${lineNo}`)
   })
 
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {

@@ -1,10 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactElement
+} from 'react'
 import { layoutSheet, LAYOUT_DEFAULTS } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import { readOverlayTextStyle } from '@shared/model/overlay-style'
 import type { Topic } from '@shared/model/types'
-import { activeRoot, activeSheet, findParent, findTopic, isSelfOrDescendant } from '@shared/model/tree'
+import {
+  activeRoot,
+  activeSheet,
+  countTopics,
+  findParent,
+  findTopic,
+  isSelfOrDescendant
+} from '@shared/model/tree'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove, type DragMove } from '@shared/model/dragmove'
 import {
   blockReasonOf,
@@ -26,7 +41,7 @@ import {
 import { applyTopicFilter, hitTopicIds, isFilterActive, searchSheet } from '@shared/search'
 import { DEFAULT_STRUCTURE, getStructureDef } from '@shared/xmind/constants'
 import { measureTopic, bumpMeasureEpoch } from '../render/measure'
-import { count, setStage } from '../dev/stage'
+import { beginCost, count, isDiagArmed, mark, setStage } from '../dev/stage'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
@@ -179,7 +194,9 @@ export default function Canvas(): ReactElement {
   const [dropBlocked, setDropBlocked] = useState('')
 
   /** 左键框选：矩形用容器内的局部坐标，便于直接定位 */
-  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(
+    null
+  )
 
   /** 双击画布上的边界/概要/关系线标题后，就地编辑文字 */
   const [titleEdit, setTitleEdit] = useState<{
@@ -242,7 +259,8 @@ export default function Canvas(): ReactElement {
     const rect = el.getBoundingClientRect()
     const EDGE = 72
     const MAX_SPEED = 26
-    const speed = (distance: number): number => Math.min(MAX_SPEED, ((EDGE - distance) / EDGE) * MAX_SPEED)
+    const speed = (distance: number): number =>
+      Math.min(MAX_SPEED, ((EDGE - distance) / EDGE) * MAX_SPEED)
 
     const left = pointer.x - rect.left
     const right = rect.right - pointer.x
@@ -299,12 +317,26 @@ export default function Canvas(): ReactElement {
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
     count('画布布局')
     setStage('画布布局')
+    // 进这一阶段先落一行：布局是「写完之后的提交/排版」里最重的一步，
+    // 真卡死时最后一条就是它，且带上节点数（内容依赖型问题一眼能看出来）
+    const endLayout = beginCost('画布布局', isDiagArmed() ? `节点 ${countTopics(root)}` : '')
     const computed = layoutSheet(root, measure, {}, sheet)
+    endLayout()
     setStage('画布布局完成')
     return computed
     // fontEpoch / renderEpoch 只用于「强制重新布局」，不是布局的输入
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
+
+  /**
+   * 渲染提交（DOM 落定）后的界标，与「进入 画布布局」配对。
+   *
+   * 卡死时最后一条日志落在哪一边，就直接指认了性质：
+   * 「进入 画布布局」→ 卡在计算；「画布提交完成」→ 卡在 DOM 提交（例如 token span 爆炸）。
+   */
+  useEffect(() => {
+    mark('画布提交完成', `节点 ${layout.nodes.length}`)
+  }, [layout])
 
   const layoutRef = useRef<LayoutResult>(layout)
   layoutRef.current = layout
@@ -328,7 +360,9 @@ export default function Canvas(): ReactElement {
   const boundaryGroups = useMemo(() => {
     const groups = new Map<string, { d: string; titles: typeof layout.boundaries }>()
     for (const boundary of layout.boundaries) {
-      const color = boundary.branchId ? branchColorOf(colors, layout, boundary.branchId) : colors.deepText
+      const color = boundary.branchId
+        ? branchColorOf(colors, layout, boundary.branchId)
+        : colors.deepText
       const entry = groups.get(color) ?? { d: '', titles: [] }
       entry.d = entry.d.length > 0 ? `${entry.d} ${boundary.d}` : boundary.d
       entry.titles.push(boundary)
@@ -651,14 +685,17 @@ export default function Canvas(): ReactElement {
   }, [setPan, setZoom])
 
   /* ---- 命中测试与坐标换算 ---- */
-  const screenToWorld = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
-    const el = containerRef.current
-    if (!el) return { x: 0, y: 0 }
-    const rect = el.getBoundingClientRect()
-    const z = zoomRef.current
-    const p = panRef.current
-    return { x: (clientX - rect.left - p.x) / z, y: (clientY - rect.top - p.y) / z }
-  }, [])
+  const screenToWorld = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } => {
+      const el = containerRef.current
+      if (!el) return { x: 0, y: 0 }
+      const rect = el.getBoundingClientRect()
+      const z = zoomRef.current
+      const p = panRef.current
+      return { x: (clientX - rect.left - p.x) / z, y: (clientY - rect.top - p.y) / z }
+    },
+    []
+  )
 
   const hitTest = useCallback((wx: number, wy: number, excludeId = ''): string | null => {
     const lay = layoutRef.current
@@ -925,7 +962,8 @@ export default function Canvas(): ReactElement {
       const parent = findParent(rootTopic, draggedId)
       if (!rootRect || !selfRect || !parent || parent.id !== rootTopic.id) return null
       // 只有"向两侧展开"的思维导图结构才有左右可言；逻辑图、树形图、组织架构图都是单侧的
-      if (getStructureDef(rootTopic.structureClass ?? DEFAULT_STRUCTURE).family !== 'mindmap') return null
+      if (getStructureDef(rootTopic.structureClass ?? DEFAULT_STRUCTURE).family !== 'mindmap')
+        return null
       const current: 'left' | 'right' =
         selfRect.x + selfRect.width / 2 < rootRect.x + rootRect.width / 2 ? 'left' : 'right'
       // 指针落在中心主题的左右边框之外才算「换到那一侧」；压在中心主题身上时维持原侧
@@ -1079,8 +1117,7 @@ export default function Canvas(): ReactElement {
         // 早先乘了缩放系数，放大时会异常黏、缩小时几乎失效。
         const withinHysteresis =
           Boolean(latch) &&
-          Math.hypot(ev.clientX - (latch?.px ?? 0), ev.clientY - (latch?.py ?? 0)) <
-            DROP_HYSTERESIS
+          Math.hypot(ev.clientX - (latch?.px ?? 0), ev.clientY - (latch?.py ?? 0)) < DROP_HYSTERESIS
         if (latch && latch.key !== freshKey && withinHysteresis) {
           // 还在迟滞半径里：保留上一次的裁决，不让提示在分界线上乱跳。
           // 空裁决（停在父级身上＝原地不动）也一起参与，否则提示会一闪一闪。
@@ -1102,7 +1139,7 @@ export default function Canvas(): ReactElement {
 
         dropPlanRef.current = plan
         setDropTarget(plan ? { id: plan.targetId, mode: plan.mode } : null)
-        setDropLabel(group > 1 ? `${group} 个主题` : findTopic(rootTopic, id)?.title ?? '')
+        setDropLabel(group > 1 ? `${group} 个主题` : (findTopic(rootTopic, id)?.title ?? ''))
         setSideTarget(side)
         setFreeDrop(free)
         setDropBlocked(blocked)
@@ -1411,7 +1448,11 @@ export default function Canvas(): ReactElement {
 
   /** 选中画布元素（概要 / 边界 / 关系线）并打开属性面板：文字、字体、删除都在面板里 */
   const pickOverlay = useCallback(
-    (event: ReactPointerEvent<SVGElement>, kind: 'summary' | 'boundary' | 'relationship', id: string): void => {
+    (
+      event: ReactPointerEvent<SVGElement>,
+      kind: 'summary' | 'boundary' | 'relationship',
+      id: string
+    ): void => {
       event.stopPropagation()
       const store = useEditor.getState()
       store.selectOverlay(kind, id)
@@ -1421,39 +1462,42 @@ export default function Canvas(): ReactElement {
   )
 
   /* ---- 拖动关系线的线身：整体移动弧线（弯度偏移） ---- */
-  const handleCurvePointerDown = useCallback((e: ReactPointerEvent<SVGPathElement>, relationshipId: string): void => {
-    if (e.button !== 0) return
-    e.stopPropagation()
-    const store = useEditor.getState()
-    // 点线身 = 选中这条关系线（顺手把属性面板打开），拖才改弯度：
-    // 否则「点一下线上什么都没有发生」，看起来就像这条线选不中
-    store.selectOverlay('relationship', relationshipId)
-    store.requestNodePanel()
-    if (store.editingId) store.commitEdit()
+  const handleCurvePointerDown = useCallback(
+    (e: ReactPointerEvent<SVGPathElement>, relationshipId: string): void => {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      const store = useEditor.getState()
+      // 点线身 = 选中这条关系线（顺手把属性面板打开），拖才改弯度：
+      // 否则「点一下线上什么都没有发生」，看起来就像这条线选不中
+      store.selectOverlay('relationship', relationshipId)
+      store.requestNodePanel()
+      if (store.editingId) store.commitEdit()
 
-    let lastX = e.clientX
-    let lastY = e.clientY
+      let lastX = e.clientX
+      let lastY = e.clientY
 
-    const onMove = (ev: PointerEvent): void => {
-      const z = zoomRef.current
-      const dx = (ev.clientX - lastX) / z
-      const dy = (ev.clientY - lastY) / z
-      lastX = ev.clientX
-      lastY = ev.clientY
-      if (dx === 0 && dy === 0) return
-      useEditor.getState().offsetRelationshipCurve(relationshipId, dx, dy)
-    }
-    const detach = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-    }
-    const onUp = (): void => detach()
+      const onMove = (ev: PointerEvent): void => {
+        const z = zoomRef.current
+        const dx = (ev.clientX - lastX) / z
+        const dy = (ev.clientY - lastY) / z
+        lastX = ev.clientX
+        lastY = ev.clientY
+        if (dx === 0 && dy === 0) return
+        useEditor.getState().offsetRelationshipCurve(relationshipId, dx, dy)
+      }
+      const detach = (): void => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', onUp)
+      }
+      const onUp = (): void => detach()
 
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-  }, [])
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', onUp)
+    },
+    []
+  )
 
   /* ---- 空白处：右键/中键拖动平移；左键拖动框选 ---- */
   const handleBackgroundPointerDown = useCallback(
@@ -1564,7 +1608,9 @@ export default function Canvas(): ReactElement {
     const x1 = (size.width - pan.x) / zoom + margin
     const y1 = (size.height - pan.y) / zoom + margin
     return layout.nodes.filter(
-      (n) => n.id === editingId || (n.x + n.width >= x0 && n.x <= x1 && n.y + n.height >= y0 && n.y <= y1)
+      (n) =>
+        n.id === editingId ||
+        (n.x + n.width >= x0 && n.x <= x1 && n.y + n.height >= y0 && n.y <= y1)
     )
   }, [layout, pan.x, pan.y, zoom, size.width, size.height, editingId])
 
@@ -1576,7 +1622,9 @@ export default function Canvas(): ReactElement {
 
   const searchHits = useMemo(
     () =>
-      activeQuery.trim().length > 0 ? hitTopicIds(searchSheet(sheet, activeQuery, search.options)) : null,
+      activeQuery.trim().length > 0
+        ? hitTopicIds(searchSheet(sheet, activeQuery, search.options))
+        : null,
     [sheet, activeQuery, search.options]
   )
 
@@ -1616,7 +1664,6 @@ export default function Canvas(): ReactElement {
    * 必须整棵一起移动：只挪自己会让子节点的连接线留在原地、看起来像断了一地。
    */
   const dragSet = useMemo(() => (dragVisual ? new Set(dragVisual.moving.ids) : null), [dragVisual])
-
 
   /**
    * 拖拽时把连线分成两拨：
@@ -1733,7 +1780,9 @@ export default function Canvas(): ReactElement {
 
           {/* 选中边界的虚线框（与概要一致：选中就能在面板里改文字与字体） */}
           {layout.boundaries.map((boundary) =>
-            selectedOverlay?.kind === 'boundary' && selectedOverlay.id === boundary.id && boundary.bounds ? (
+            selectedOverlay?.kind === 'boundary' &&
+            selectedOverlay.id === boundary.id &&
+            boundary.bounds ? (
               <rect
                 key={`boundary-selected-${boundary.id}`}
                 className="overlay-selected"
@@ -1779,7 +1828,11 @@ export default function Canvas(): ReactElement {
               >
                 {/* 边界标题同样支持换行（自上而下排） */}
                 {overlayTitleLines(boundary.title).map((line, index) => (
-                  <tspan key={index} x={boundary.label.x} dy={index === 0 ? 0 : OVERLAY_TITLE_LINE_HEIGHT}>
+                  <tspan
+                    key={index}
+                    x={boundary.label.x}
+                    dy={index === 0 ? 0 : OVERLAY_TITLE_LINE_HEIGHT}
+                  >
                     {line.length > 0 ? line : '\u00A0'}
                   </tspan>
                 ))}
@@ -1790,9 +1843,12 @@ export default function Canvas(): ReactElement {
           {/* 概要：覆盖一组同级主题的大括号 + 概要文字。
               文字为空时也画占位文字与命中区——否则「把文字删空」之后就再也点不到它了 */}
           {layout.summaries.map((summary) => {
-            const color = summary.branchId ? branchColorOf(colors, layout, summary.branchId) : colors.deepText
+            const color = summary.branchId
+              ? branchColorOf(colors, layout, summary.branchId)
+              : colors.deepText
             const text = readOverlayTextStyle(summary.style, { fontSize: 13, bold: true })
-            const selected = selectedOverlay?.kind === 'summary' && selectedOverlay.id === summary.id
+            const selected =
+              selectedOverlay?.kind === 'summary' && selectedOverlay.id === summary.id
             const labelSize = summary.labelSize ?? { width: 48, height: OVERLAY_TITLE_LINE_HEIGHT }
             const labelLeft =
               summary.anchor === 'start'
@@ -1972,14 +2028,18 @@ export default function Canvas(): ReactElement {
               // 折叠 / 展开会重排整张图：把被点的那个主题**按在原处**，
               // 否则用户眼前的画面会整体跳走（看着看着，那一支忽然不见了）。
               const before = layout.nodeMap.get(id)
-              const screen = before ? { x: before.x * zoom + pan.x, y: before.y * zoom + pan.y } : null
+              const screen = before
+                ? { x: before.x * zoom + pan.x, y: before.y * zoom + pan.y }
+                : null
               useEditor.getState().toggleCollapse(id)
               if (!screen || !containerRef.current) return
               window.requestAnimationFrame(() => {
                 const after = layoutRef.current?.nodeMap.get(id)
                 if (!after) return
                 // 反解平移量：让 after 的世界坐标仍落在同一个屏幕位置
-                useEditor.getState().setPan({ x: screen.x - after.x * zoom, y: screen.y - after.y * zoom })
+                useEditor
+                  .getState()
+                  .setPan({ x: screen.x - after.x * zoom, y: screen.y - after.y * zoom })
               })
             }}
           />
@@ -2004,7 +2064,13 @@ export default function Canvas(): ReactElement {
               selectedOverlay?.kind === 'relationship' && selectedOverlay.id === relationship.id
             return (
               <g key={`relationship-${relationship.id}`}>
-                <path d={relationship.d} fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+                <path
+                  d={relationship.d}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                />
                 {/* 线身的可拖拽命中区在节点下面那一层，见上方 canvas__overlay 命中层 */}
 
                 <path
@@ -2099,7 +2165,12 @@ export default function Canvas(): ReactElement {
                     r={7}
                     fill={color}
                     onPointerDown={(event) =>
-                      handleRelationshipPointerDown(event, relationship.id, handle.end, handle.point)
+                      handleRelationshipPointerDown(
+                        event,
+                        relationship.id,
+                        handle.end,
+                        handle.point
+                      )
                     }
                   >
                     <title>拖到另一个主题上可改接这一端</title>
@@ -2278,7 +2349,9 @@ export default function Canvas(): ReactElement {
               top:
                 titleEdit.y -
                 13 -
-                ((Math.max(1, overlayTitleLines(titleEdit.value).length) - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2,
+                ((Math.max(1, overlayTitleLines(titleEdit.value).length) - 1) *
+                  OVERLAY_TITLE_LINE_HEIGHT) /
+                  2,
               transform:
                 titleEdit.anchor === 'middle'
                   ? 'translateX(-50%)'
@@ -2325,7 +2398,9 @@ export default function Canvas(): ReactElement {
         </span>
         <span className="canvas__drag-legend-sep">·</span>
         <span
-          className={dragVisual && dropTarget && dropTarget.mode !== 'child' ? 'is-active' : undefined}
+          className={
+            dragVisual && dropTarget && dropTarget.mode !== 'child' ? 'is-active' : undefined
+          }
         >
           拖到同级之间＝插进那一层
         </span>
