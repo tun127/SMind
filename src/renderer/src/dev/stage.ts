@@ -204,17 +204,41 @@ const inRenderer = typeof window !== 'undefined' && typeof window.setInterval ==
  */
 const WATCHDOG_TICK_MS = 500
 const STALL_MS = 700
+/** 只有「比当前节奏还慢这么多倍」才在节流状态下仍然报警（真死循环往往远超它） */
+const STALL_MULTIPLE = 3
 if (inRenderer) {
   let lastTickAt = performance.now()
+  const recent: number[] = []
+  const median = (list: number[]): number => {
+    if (list.length === 0) return 0
+    const sorted = [...list].sort((a, b) => a - b)
+    return sorted[Math.floor(sorted.length / 2)] ?? 0
+  }
   window.setInterval(() => {
     const now = performance.now()
     const delta = now - lastTickAt
     lastTickAt = now
-    if (delta >= STALL_MS) {
+    /**
+     * 只报「相对当前节奏的异常」。
+     *
+     * 教训：窗口被遮挡 / 最小化时，Chromium 会把定时器压到 1Hz——那是**节流**不是卡顿。
+     * 一开始没区分，结果空闲窗口里整屏都是「主线程停顿 1000ms」，把真现场淹了。
+     * 现在：页面不可见不报；连续多拍都慢（基线本身就慢）也不报；
+     * 只有「单独一拍慢」或「远比当前节奏更慢」才算真的把主线程堵住了。
+     */
+    const baseline = median(recent)
+    const throttled = baseline >= STALL_MS
+    if (
+      delta >= STALL_MS &&
+      document.visibilityState === 'visible' &&
+      (!throttled || delta >= baseline * STALL_MULTIPLE)
+    ) {
       console.log(
         `[stage] 主线程停顿 ${Math.round(delta)}ms（停顿前最后阶段：${stage}${armed ? '' : ' · 诊断未开启'}）`
       )
     }
+    recent.push(delta)
+    if (recent.length > 8) recent.shift()
   }, WATCHDOG_TICK_MS)
 }
 
