@@ -7,7 +7,17 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement
 } from 'react'
-import { Bot, ClipboardPaste, Eraser, Send, Settings2, Sparkles, Square, TriangleAlert, X } from 'lucide-react'
+import {
+  Bot,
+  ClipboardPaste,
+  Eraser,
+  Send,
+  Settings2,
+  Sparkles,
+  Square,
+  TriangleAlert,
+  X
+} from 'lucide-react'
 import {
   addUsage,
   buildChatSystemPrompt,
@@ -267,6 +277,33 @@ export default function ChatPanel({
     wireRef.current = [...wireRef.current, { role: 'tool', toolCallId: call.id, content }]
   }
 
+  /**
+   * 已成功执行的调用：把消息线里它的完整参数压成短摘要。
+   *
+   * 轮内每执行完一个调用就把**整条消息线**原样重发给模型——setCode 的整段代码、
+   * insertSubtree 的整段大纲全都原样带着。几十个调用就能把单轮提示词撑到
+   * 60k+ token，光让服务端读一遍就要一两分钟：UI 没死，但像死了（实测单轮往返 125s）。
+   * 执行结果已经在对应的 tool 消息里，参数本体对后续轮次没有用处；
+   * 保留开头一段是为万一模型想引用自己刚才写的内容时还有个抓手。
+   */
+  const compressExecutedCallArgs = (callId: string): void => {
+    const HEAD = 200
+    wireRef.current = wireRef.current.map((msg) => {
+      if (msg.role !== 'assistant' || !msg.toolCalls?.some((c) => c.id === callId)) return msg
+      return {
+        ...msg,
+        toolCalls: msg.toolCalls.map((c) =>
+          c.id === callId && c.argumentsText.length > HEAD
+            ? {
+                ...c,
+                argumentsText: `${c.argumentsText.slice(0, HEAD)}…（此调用已成功执行，参数其余部分省略；执行结果见下方对应的工具消息）`
+              }
+            : c
+        )
+      }
+    })
+  }
+
   /** 把「AI 干了什么」记到界面与日志上 */
   const noteAction = (summary: string, counts: boolean): void => {
     if (counts) writeLogRef.current = [...writeLogRef.current, summary]
@@ -299,7 +336,8 @@ export default function ChatPanel({
 
     /** 记下这次动过的节点：回合结束时闪一下（「看得见」是放手让 AI 干的前提） */
     const touched = (ids: Array<string | null | undefined>): void => {
-      for (const id of ids) if (typeof id === 'string' && id.length > 0) changedIdsRef.current.push(id)
+      for (const id of ids)
+        if (typeof id === 'string' && id.length > 0) changedIdsRef.current.push(id)
     }
 
     switch (intent.kind) {
@@ -317,7 +355,10 @@ export default function ChatPanel({
         if (added === 0) return { ok: false, note: '目标主题已不存在，插入没有生效。' }
         // 新增完比原来多出来的那批就是新节点，顺手也闪它们本人
         const after = findTopic(activeRoot(store.workbook), intent.id)
-        touched([intent.id, ...(after?.children ?? []).filter((child) => !before.has(child.id)).map((c) => c.id)])
+        touched([
+          intent.id,
+          ...(after?.children ?? []).filter((child) => !before.has(child.id)).map((c) => c.id)
+        ])
         return { ok: true, note: '' }
       }
       case 'delete': {
@@ -326,12 +367,16 @@ export default function ChatPanel({
         const parentId = chain[chain.length - 1]
         const removed = store.deleteTopic(intent.id)
         if (removed) touched([parentId])
-        return removed ? { ok: true, note: '' } : { ok: false, note: '目标主题已不存在，删除没有生效。' }
+        return removed
+          ? { ok: true, note: '' }
+          : { ok: false, note: '目标主题已不存在，删除没有生效。' }
       }
       case 'move': {
         const moved = store.moveNode(intent.id, intent.targetId, intent.index ?? undefined)
         if (moved) touched([intent.id, intent.targetId])
-        return moved ? { ok: true, note: '' } : { ok: false, note: '移动没有生效：目标位置不合法。' }
+        return moved
+          ? { ok: true, note: '' }
+          : { ok: false, note: '移动没有生效：目标位置不合法。' }
       }
       case 'moveMany': {
         // 批量移动：逐条落（每条都是一次 store.moveNode，都在同一步撤销里）。
@@ -347,7 +392,10 @@ export default function ChatPanel({
         if (movedCount === 0) return { ok: false, note: '一个都没有移动成功：目标位置可能不合法。' }
         return {
           ok: true,
-          note: movedCount < intent.requested ? `成功 ${movedCount}/${intent.requested}，其余目标位置不合法` : ''
+          note:
+            movedCount < intent.requested
+              ? `成功 ${movedCount}/${intent.requested}，其余目标位置不合法`
+              : ''
         }
       }
       case 'collapse':
@@ -373,7 +421,9 @@ export default function ChatPanel({
     }
   }
 
-  const setPending = (value: { call: ToolCall; intent: WriteIntent; summary: string } | null): void => {
+  const setPending = (
+    value: { call: ToolCall; intent: WriteIntent; summary: string } | null
+  ): void => {
     pendingRef.current = value
     setPendingWrite(value ? { summary: value.summary } : null)
   }
@@ -426,8 +476,7 @@ export default function ChatPanel({
       })
     }
     if (log.length > 0) {
-      const text =
-        log.length > 6 ? `${log.slice(0, 6).join('；')}…` : log.join('；')
+      const text = log.length > 6 ? `${log.slice(0, 6).join('；')}…` : log.join('；')
       // 已保存的文档在动手前存过版本快照；把它写出来，用户才知道「重启之后怎么回去」
       const hasSnapshot = useEditor.getState().filePath !== null
       update((prev) => {
@@ -438,7 +487,10 @@ export default function ChatPanel({
           : '撤销：按一次 Ctrl+Z 全部回退（未保存的文档没有版本快照，应用重启后无从回退）。'
         return [
           ...prev.slice(0, -1),
-          { ...last, content: `${last.content}\n\n——\n已改动：${text}（共 ${log.length} 处）\n${undoLine}` }
+          {
+            ...last,
+            content: `${last.content}\n\n——\n已改动：${text}（共 ${log.length} 处）\n${undoLine}`
+          }
         ]
       })
     }
@@ -507,7 +559,11 @@ export default function ChatPanel({
         return
       }
 
-      const plan = planWriteTool(call.name, call.argumentsText, activeRoot(useEditor.getState().workbook))
+      const plan = planWriteTool(
+        call.name,
+        call.argumentsText,
+        activeRoot(useEditor.getState().workbook)
+      )
       if (!plan.ok) {
         // 规划失败：把原因回喂给模型让它自己纠正，不打断整轮
         pushToolResult(call, plan.error)
@@ -523,10 +579,16 @@ export default function ChatPanel({
         update((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
-          const options = plan.intent.kind === 'ask' && plan.intent.options.length > 0 ? `\n可选：${plan.intent.options.join(' / ')}` : ''
+          const options =
+            plan.intent.kind === 'ask' && plan.intent.options.length > 0
+              ? `\n可选：${plan.intent.options.join(' / ')}`
+              : ''
           return [
             ...prev.slice(0, -1),
-            { ...last, content: `${last.content}\n\n${plan.intent.kind === 'ask' ? plan.intent.question : ''}${options}` }
+            {
+              ...last,
+              content: `${last.content}\n\n${plan.intent.kind === 'ask' ? plan.intent.question : ''}${options}`
+            }
           ]
         })
         requestIdRef.current = null
@@ -545,7 +607,9 @@ export default function ChatPanel({
       const applied = applyWriteIntent(plan.intent)
       if (applied.ok) writesAppliedRef.current += 1
       else writesFailedRef.current += 1
-      const written = applied.ok ? `已执行：${plan.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note
+      const written = applied.ok
+        ? `已执行：${plan.summary}${applied.note ? `（${applied.note}）` : ''}`
+        : applied.note
       // 失败也要在面板上留一行痕迹：否则用户只在气泡里看到它"说要改"，
       // 却没有任何地方告诉他这一步**没执行**
       if (!applied.ok) noteAction(`未执行：${plan.summary}`, false)
@@ -558,7 +622,10 @@ export default function ChatPanel({
             '也可以用一条 moveTopics 带很多项；不要一次只搬一个。）'
           : ''
       pushToolResult(call, written + nudge)
-      if (applied.ok) noteAction(plan.summary, true)
+      if (applied.ok) {
+        noteAction(plan.summary, true)
+        compressExecutedCallArgs(call.id)
+      }
       queue.index += 1
       yieldThen()
     }
@@ -576,9 +643,16 @@ export default function ChatPanel({
       const applied = applyWriteIntent(pending.intent)
       if (applied.ok) writesAppliedRef.current += 1
       else writesFailedRef.current += 1
-      pushToolResult(pending.call, applied.ok ? `已执行：${pending.summary}${applied.note ? `（${applied.note}）` : ''}` : applied.note)
-      if (applied.ok) noteAction(pending.summary, true)
-      else noteAction(`未执行：${pending.summary}`, false)
+      pushToolResult(
+        pending.call,
+        applied.ok
+          ? `已执行：${pending.summary}${applied.note ? `（${applied.note}）` : ''}`
+          : applied.note
+      )
+      if (applied.ok) {
+        noteAction(pending.summary, true)
+        compressExecutedCallArgs(pending.call.id)
+      } else noteAction(`未执行：${pending.summary}`, false)
     } else {
       // 拒绝也要如实回喂：否则模型以为删掉了，后面的判断全错
       pushToolResult(
@@ -685,7 +759,10 @@ export default function ChatPanel({
         update((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
-          const content = last.content.trim().length > 0 ? last.content : '（模型没有返回内容，换个说法或换个模型再试）'
+          const content =
+            last.content.trim().length > 0
+              ? last.content
+              : '（模型没有返回内容，换个说法或换个模型再试）'
           return [...prev.slice(0, -1), { ...last, content }]
         })
         requestIdRef.current = null
@@ -724,7 +801,10 @@ export default function ChatPanel({
 
         // 撞上限 ≠ 不回答：去掉工具再问**一次**，让它把已经看到的东西讲清楚
         patchLast({
-          toolNotes: [...(messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []), gate.reason]
+          toolNotes: [
+            ...(messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []),
+            gate.reason
+          ]
         })
         forceNoToolsRef.current = true
         wireRef.current = [
@@ -741,7 +821,10 @@ export default function ChatPanel({
       }
 
       // 有工具调用：把助手这一轮记进消息线（协议要求带上 tool_calls），然后逐个处理
-      wireRef.current = [...wireRef.current, { role: 'assistant', content: event.content, toolCalls: calls }]
+      wireRef.current = [
+        ...wireRef.current,
+        { role: 'assistant', content: event.content, toolCalls: calls }
+      ]
       toolCallsUsedRef.current += calls.length
       queueRef.current = { calls, index: 0 }
       processQueueRef.current()
@@ -754,7 +837,9 @@ export default function ChatPanel({
     requestIdRef.current = requestId
     setStreaming(true)
     setActivity(
-      roundRef.current === 0 ? '正在思考…' : `正在思考…（第 ${roundRef.current + 1} 轮，还在翻资料）`
+      roundRef.current === 0
+        ? '正在思考…'
+        : `正在思考…（第 ${roundRef.current + 1} 轮，还在翻资料）`
     )
     setStage(`AI 第 ${roundRef.current + 1} 轮`)
     void window.api
@@ -764,7 +849,11 @@ export default function ChatPanel({
       .catch((error: unknown) => {
         // invoke 被拒（参数无效 / 没配 Key）：同样以事件形式收尾，只有一条代码路径。
         // 顺手剥掉 Electron 那层「Error invoking remote method …」包装，只留人话
-        handleEvent({ requestId, kind: 'error', message: readableIpcError((error as Error).message) })
+        handleEvent({
+          requestId,
+          kind: 'error',
+          message: readableIpcError((error as Error).message)
+        })
       })
   }, [handleEvent])
 
@@ -807,7 +896,11 @@ export default function ChatPanel({
         const topic = findTopic(root, id)
         const path = topicPathOf(root, id)
         if (topic && path) {
-          mentioned.set(id, { title: topic.title, handle: shortHandleOf(id), path: path.join(' → ') })
+          mentioned.set(id, {
+            title: topic.title,
+            handle: shortHandleOf(id),
+            path: path.join(' → ')
+          })
         }
       }
 
@@ -882,7 +975,9 @@ export default function ChatPanel({
           .trim()
         if (clip.length === 0) {
           // 剪贴板里没有文字（多半是图片）——静悄悄没反应最容易被当成「功能坏了」
-          setHint('剪贴板里没有文字。如果复制的是图片：聊天目前只能发文字，可以把图里的文字打出来，或直接问我。')
+          setHint(
+            '剪贴板里没有文字。如果复制的是图片：聊天目前只能发文字，可以把图里的文字打出来，或直接问我。'
+          )
           return
         }
         const el = inputRef.current
@@ -954,7 +1049,9 @@ export default function ChatPanel({
              以前输入框只在试用用完后才出现，想提前激活的人找不到地方 */
           <button
             type="button"
-            className={license.pro ? 'chat-panel__badge chat-panel__badge--pro' : 'chat-panel__badge'}
+            className={
+              license.pro ? 'chat-panel__badge chat-panel__badge--pro' : 'chat-panel__badge'
+            }
             title={
               license.pro
                 ? `Pro${license.holder ? `（${license.holder}）` : ''}：AI 可以直接改画布（点击查看 / 取消激活）`
@@ -967,7 +1064,10 @@ export default function ChatPanel({
           </button>
         )}
         {sessionTokens > 0 && (
-          <span className="chat-panel__badge" title="本次会话累计的 token 消耗（按服务商回报累计；清空对话时归零）">
+          <span
+            className="chat-panel__badge"
+            title="本次会话累计的 token 消耗（按服务商回报累计；清空对话时归零）"
+          >
             {formatTokenCount(sessionTokens)} tok
           </span>
         )}
@@ -1028,13 +1128,16 @@ export default function ChatPanel({
                 <p>
                   用自然语言聊这页导图，也可以直接让它改图。
                   <br />
-                  它会自己翻看结构；删分支这类操作会<strong>先问你</strong>，
-                  改完按一次 <strong>Ctrl+Z</strong> 可以整体撤销。
+                  它会自己翻看结构；删分支这类操作会<strong>先问你</strong>， 改完按一次{' '}
+                  <strong>Ctrl+Z</strong> 可以整体撤销。
                 </p>
               </div>
             )}
             {messages.map((msg) => (
-              <div key={msg.id} className={msg.role === 'user' ? 'chat-msg chat-msg--user' : 'chat-msg'}>
+              <div
+                key={msg.id}
+                className={msg.role === 'user' ? 'chat-msg chat-msg--user' : 'chat-msg'}
+              >
                 <div className="chat-msg__bubble">
                   {msg.role === 'user' ? (
                     msg.content
@@ -1054,7 +1157,10 @@ export default function ChatPanel({
                       {renderAssistantText(msg.content)}
                       {msg.warning && <div className="chat-msg__warning">{msg.warning}</div>}
                       {msg.usage && (
-                        <div className="chat-msg__usage" title="按服务商回报统计（问 + 答），多轮工具调用已累计">
+                        <div
+                          className="chat-msg__usage"
+                          title="按服务商回报统计（问 + 答），多轮工具调用已累计"
+                        >
                           tokens {formatTokenCount(msg.usage.totalTokens)}（问{' '}
                           {msg.usage.promptTokens.toLocaleString()} · 答{' '}
                           {msg.usage.completionTokens.toLocaleString()}）
@@ -1063,9 +1169,11 @@ export default function ChatPanel({
                     </>
                   )}
                   {/* 还在写：末尾一个闪烁光标，一眼看出「这条还没完」 */}
-                  {streaming && msg.role === 'assistant' && msg.id === messages[messages.length - 1]?.id && (
-                    <span className="chat-msg__caret" aria-hidden="true" />
-                  )}
+                  {streaming &&
+                    msg.role === 'assistant' &&
+                    msg.id === messages[messages.length - 1]?.id && (
+                      <span className="chat-msg__caret" aria-hidden="true" />
+                    )}
                   {msg.aborted && <span className="chat-msg__stop">（已停止）</span>}
                 </div>
               </div>
@@ -1121,7 +1229,11 @@ export default function ChatPanel({
                 <button type="button" className="btn" onClick={() => resolvePending(false)}>
                   跳过
                 </button>
-                <button type="button" className="btn btn--primary" onClick={() => resolvePending(true)}>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => resolvePending(true)}
+                >
                   执行
                 </button>
               </div>
@@ -1142,7 +1254,9 @@ export default function ChatPanel({
                     placeholder="把购买时拿到的许可码整串粘进来（可以带换行）"
                     onChange={(event) => setLicenseKey(event.target.value)}
                   />
-                  {licenseMessage && <div className="chat-panel__activate-msg">{licenseMessage}</div>}
+                  {licenseMessage && (
+                    <div className="chat-panel__activate-msg">{licenseMessage}</div>
+                  )}
                   <div className="chat-panel__activate-actions">
                     <button
                       type="button"
@@ -1195,10 +1309,14 @@ export default function ChatPanel({
                 // 粘进来的是图片（截图）：textarea 会静默什么都不发生，用户只会觉得「粘贴坏了」。
                 // 明确说一句，并告诉他图片该粘到哪儿。
                 const data = event.clipboardData
-                const hasImage = Array.from(data.items).some((item) => item.type.startsWith('image/'))
+                const hasImage = Array.from(data.items).some((item) =>
+                  item.type.startsWith('image/')
+                )
                 if (hasImage && data.getData('text/plain').trim().length === 0) {
                   event.preventDefault()
-                  setHint('剪贴板里是图片：聊天目前只能发文字。图片可以直接粘到画布的主题上，文字请用截图里的文字或直接描述。')
+                  setHint(
+                    '剪贴板里是图片：聊天目前只能发文字。图片可以直接粘到画布的主题上，文字请用截图里的文字或直接描述。'
+                  )
                 }
               }}
             />
