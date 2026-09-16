@@ -23,7 +23,9 @@ import {
   buildChatSystemPrompt,
   buildSkeletonDigest,
   claimsAppliedChange,
+  compressHistory,
   countTopicTree,
+  digestPreamble,
   readableIpcError,
   formatTokenCount,
   type AiMessage,
@@ -86,10 +88,9 @@ interface ChatMsg {
 }
 
 /**
- * 发给模型的历史条数上限。
- * 防长对话把上下文撑爆（8k 的模型几轮就满）；真正的「压缩」在后续迭代做。
+ * 历史不再用「截断 N 条」处理：截断会让模型忘掉之前干过什么，用户说"继续"时它从零重读一遍导图。
+ * 现在走 `compressHistory`（三期）：最近几轮保留原文，更早的折叠成「此前做过什么」。
  */
-const MAX_HISTORY = 16
 
 /** 快捷提问：只跟 AI 聊，不动画布 */
 const QUICK_PROMPTS = ['总结这页导图的主要内容', '指出这个导图结构上薄弱的地方']
@@ -1037,9 +1038,21 @@ export default function ChatPanel({
         mentionedNodes: [...mentioned.values()].slice(0, 5)
       })
 
+      // 上下文压缩（三期）：最近几轮原文 + 更早轮次折叠成「此前做过什么」。
+      // 工具条目（toolNotes）参与摘要——它是"我做过什么"最可靠的来源
+      // （模型可能把结论说错，执行记录不会）。
+      const compressed = compressHistory(
+        messagesRef.current.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+          toolNotes: msg.toolNotes
+        }))
+      )
       const history: AiMessage[] = [
-        ...messagesRef.current
-          .slice(-MAX_HISTORY)
+        ...(compressed.digest.length > 0
+          ? [{ role: 'user' as const, content: digestPreamble(compressed.digest) }]
+          : []),
+        ...compressed.recent
           .filter((msg) => msg.content.trim().length > 0)
           .map((msg): AiMessage => ({ role: msg.role, content: msg.content })),
         { role: 'user', content: text }

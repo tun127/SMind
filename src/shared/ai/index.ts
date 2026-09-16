@@ -778,6 +778,99 @@ export function readableIpcError(message: string): string {
   return message.slice(colon + 2).replace(/^Error:\s*/, '')
 }
 
+/* ------------------------------------------------------------------ */
+/* 上下文压缩（三期）：把更早的轮次折叠成「此前做过什么」               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 压缩器的输入：比 `AiMessage` 多一条「这一轮干了什么」（面板上的工具条目）。
+ *
+ * 不能直接吃 AiMessage：工具条目只存在于面板的消息里，而它们恰恰是
+ * 「我做过什么」最可靠的来源（结论可能被模型说错，工具条目是执行记录）。
+ */
+export interface CompressibleMessage {
+  role: 'user' | 'assistant'
+  content: string
+  /** 这一轮 AI 执行过的工具调用摘要 */
+  toolNotes?: string[]
+}
+
+export interface CompressedHistory {
+  /** 折叠出来的「此前做过什么」；空串表示没折叠任何东西 */
+  digest: string
+  /** 保留原文的消息（最早的在前） */
+  recent: CompressibleMessage[]
+  /** 被折叠了几条 */
+  collapsed: number
+}
+
+/** 保留最近几条原文：够模型接着聊，又不至于把上下文撑爆 */
+export const HISTORY_KEEP_RECENT = 6
+/** 摘要的长度上限（超出就从**最早**的条目开始丢：越近的越重要） */
+export const HISTORY_DIGEST_MAX = 1200
+
+function firstLineOf(text: string): string {
+  const line =
+    text
+      .split('\n')
+      .map((item) => item.trim())
+      .find((item) => item.length > 0) ?? ''
+  return line.length > 80 ? `${line.slice(0, 80)}…` : line
+}
+
+/**
+ * 折叠更早的轮次，压成一段「此前做过什么」。
+ *
+ * 为什么不是直接截断：`slice(-16)` 会让模型忘掉之前干过什么，用户说「继续」时
+ * 它就从零重新读一遍导图——在大导图上就是把同一种折腾重复一遍（真被投诉过）。
+ * 而本项目的底层判断是「**文档本身是 agent 的持久记忆**」：对话可以激进压缩，
+ * 因为任何细节它都能用只读工具重新探查回来；但「我做过什么」必须留着。
+ *
+ * 不做模型调用：**纯函数、零成本、可自检**。摘要内容是确定性的——
+ * 每条旧消息取「用户让我…」+「我做了…」（没有工具条目时才退回「我说过…」）。
+ */
+export function compressHistory(
+  messages: readonly CompressibleMessage[],
+  options: { keepRecent?: number; maxDigest?: number } = {}
+): CompressedHistory {
+  const keep = Math.max(2, options.keepRecent ?? HISTORY_KEEP_RECENT)
+  const maxDigest = Math.max(0, options.maxDigest ?? HISTORY_DIGEST_MAX)
+  const cut = Math.max(0, messages.length - keep)
+  const older = messages.slice(0, cut)
+  const recent = messages.slice(cut)
+  if (older.length === 0) return { digest: '', recent: [...messages], collapsed: 0 }
+
+  const lines: string[] = []
+  for (const message of older) {
+    const text = firstLineOf(message.content)
+    if (message.role === 'user') {
+      if (text.length > 0) lines.push(`- 用户让我：${text}`)
+      continue
+    }
+    const notes = (message.toolNotes ?? []).filter((note) => note.trim().length > 0)
+    if (notes.length > 0) lines.push(`- 我做了：${notes.slice(0, 6).join('、')}`)
+    else if (text.length > 0) lines.push(`- 我说过：${text}`)
+  }
+
+  // 太长就从最早丢：越近的越重要
+  let digest = lines.join('\n')
+  while (digest.length > maxDigest && lines.length > 1) {
+    lines.shift()
+    digest = lines.join('\n')
+  }
+  if (digest.length > maxDigest) digest = `${digest.slice(0, maxDigest)}…`
+  return { digest, recent, collapsed: older.length }
+}
+
+/** 把摘要包装成一条可以塞进消息线的内容（带一句"别凭记忆改"的提醒） */
+export function digestPreamble(digest: string): string {
+  return (
+    '（以下是更早对话的折叠摘要，供你了解上下文。它是**概括**，细节请直接重新读取导图或搜索，' +
+    '不要凭这份摘要里的印象去改节点。）\n' +
+    digest
+  )
+}
+
 /** 展示用：1234 → 「1.2k」；45 → 「45」 */
 export function formatTokenCount(count: number): string {
   if (!Number.isFinite(count) || count <= 0) return '0'

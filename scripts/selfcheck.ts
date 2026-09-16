@@ -46,6 +46,8 @@ import {
   accumulateToolCalls,
   addUsage,
   claimsAppliedChange,
+  compressHistory,
+  digestPreamble,
   readableIpcError,
   countTopicTree,
   createSseLineSplitter,
@@ -53,6 +55,8 @@ import {
   extractStreamDelta,
   finalizeToolCalls,
   formatTokenCount,
+  HISTORY_DIGEST_MAX,
+  HISTORY_KEEP_RECENT,
   normalizeChatHistory,
   toWireMessages
 } from '../src/shared/ai'
@@ -1797,6 +1801,55 @@ function testAiChatHelpers(): void {
     readableIpcError('Error invoking remote method'),
     'Error invoking remote method'
   )
+
+  group('AI 聊天：上下文压缩（三期）')
+
+  eq('默认保留最近 6 条原文', HISTORY_KEEP_RECENT, 6)
+  eq('摘要上限 1200 字', HISTORY_DIGEST_MAX, 1200)
+
+  const shortHistory = compressHistory([
+    { role: 'user', content: '你好' },
+    { role: 'assistant', content: '你好，我是助手' }
+  ])
+  eq('历史短时不折叠（不注入摘要）', shortHistory.digest, '')
+  eq('短历史全部保留原文', shortHistory.recent.length, 2)
+  eq('没折叠任何东西时计数为 0', shortHistory.collapsed, 0)
+
+  const longHistory = compressHistory(
+    Array.from({ length: 20 }, (_, index) => ({
+      role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      content: `第 ${index} 条消息\n第二行不该出现在摘要里`,
+      toolNotes: index % 2 === 1 ? [`执行工具 ${index}`] : undefined
+    }))
+  )
+  eq('保留最近 6 条原文', longHistory.recent.length, 6)
+  eq('折叠掉其余 14 条', longHistory.collapsed, 14)
+  check('摘要里写清「用户让我…」', longHistory.digest.includes('用户让我：第 0 条消息'))
+  check(
+    '摘要里写清「我做了…」，且用的是**工具条目**（模型自述会说错，执行记录不会）',
+    longHistory.digest.includes('我做了：执行工具 1')
+  )
+  check('摘要只取首行（不把整段塞回去）', !longHistory.digest.includes('第二行不该出现在摘要里'))
+
+  const cappedDigest = compressHistory(
+    Array.from({ length: 40 }, (_, index) => ({
+      role: 'user' as const,
+      content: `这是一条很长很长的指令编号 ${index}，`.repeat(3)
+    })),
+    { maxDigest: 200 }
+  )
+  check(
+    '摘要超长时截到上限内',
+    cappedDigest.digest.length <= 201,
+    `实际=${cappedDigest.digest.length}`
+  )
+  // 注意：最近 6 条是**保留原文**的，所以最新被折叠的是第 33 条（第 34~39 条不进摘要）。
+  // 这一条同时钉住了「裁剪从最早丢」和「保留窗口不吃摘要」两件事。
+  check('超长裁剪从最早丢（最近被折叠的事必须留着）', cappedDigest.digest.includes('编号 33'))
+  check('保留窗口内的消息不会混进摘要', !cappedDigest.digest.includes('编号 39'))
+
+  check('摘要包装带一句「别凭记忆改」的提醒', digestPreamble('abc').includes('不要凭这份摘要'))
+
   check(
     '未选中时明确写出来',
     buildChatSystemPrompt({
