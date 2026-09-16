@@ -3221,6 +3221,92 @@ function firstOverlap(layout: LayoutResult): [string, string] | null {
   return null
 }
 
+/**
+ * 覆盖层（边界/概要）侵入了**非成员**节点没有？
+ *
+ * 注意：边界本来就该把自己的成员框在里面，所以成员节点不算入侵；
+ * 要防的是紧邻的**外部**分支被标题带 / 括号压住（文档里记的那条遗留）。
+ */
+function overlayIntruder(layout: LayoutResult, members: Set<string>): [string, string] | null {
+  const hit = (a: { x: number; y: number; width: number; height: number }, b: typeof a): boolean =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+  const outside = layout.nodes.filter((node) => !members.has(node.id))
+  for (const boundary of layout.boundaries) {
+    for (const node of outside) {
+      if (hit(boundary, node)) {
+        return [
+          `边界「${boundary.title ?? ''}」(${Math.round(boundary.y)}..${Math.round(boundary.y + boundary.height)})`,
+          `${node.topic.title}(${Math.round(node.y)}..${Math.round(node.y + node.height)})`
+        ]
+      }
+    }
+  }
+  for (const summary of layout.summaries) {
+    const size = summary.labelSize ?? { width: 0, height: 0 }
+    const label = { x: summary.label.x, y: summary.label.y, width: size.width, height: size.height }
+    for (const node of outside) {
+      if (hit(label, node)) return [`概要「${summary.title ?? ''}」`, node.topic.title]
+    }
+  }
+  return null
+}
+
+function testOverlayReserve(): void {
+  group('布局预留：边界/概要不再侵入相邻分支')
+
+  // 逻辑图：给中间两支加边界，上方/下方那两支不许被标题带或边框压住
+  reset()
+  const rRoot = root().id
+  addChildOf(rRoot, '上方分支')
+  const mid1 = addChildOf(rRoot, '中间一')
+  const mid2 = addChildOf(rRoot, '中间二')
+  addChildOf(rRoot, '下方分支')
+  store().setStructure('org.xmind.ui.logic.right', rRoot)
+  const boundaryId = store().addBoundaryFor([mid1, mid2], '边界标题')
+  const logicLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+  check(
+    '边界进入了布局',
+    logicLayout.boundaries.some((item) => item.id === boundaryId),
+    String(logicLayout.boundaries.length)
+  )
+  const logicHit = overlayIntruder(logicLayout, new Set([mid1, mid2]))
+  check('逻辑图：边界不侵入相邻分支', logicHit === null, logicHit ? logicHit.join(' ⨯ ') : '')
+
+  // 组织架构图：给前两个表头加边界，父节点与这一行之间要让出标题带
+  reset()
+  const oRoot = root().id
+  const h1 = addChildOf(oRoot, '表头一')
+  const h2 = addChildOf(oRoot, '表头二')
+  addChildOf(oRoot, '表头三')
+  store().setStructure('org.xmind.ui.org-chart.down', oRoot)
+  const orgBoundary = store().addBoundaryFor([h1, h2], '边界标题')
+  const orgLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+  check(
+    '组织架构图：边界进入了布局',
+    orgLayout.boundaries.some((item) => item.id === orgBoundary)
+  )
+  const orgHit = overlayIntruder(orgLayout, new Set([h1, h2]))
+  check('组织架构图：边界不侵入相邻分支', orgHit === null, orgHit ? orgHit.join(' ⨯ ') : '')
+
+  // 预留真的接进了摆放：有边界时区间首支必须比没有边界时更靠下
+  reset()
+  const pRoot = root().id
+  addChildOf(pRoot, '上方分支')
+  const q1 = addChildOf(pRoot, '中间一')
+  const q2 = addChildOf(pRoot, '中间二')
+  store().setStructure('org.xmind.ui.logic.right', pRoot)
+  const plain = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+  store().addBoundaryFor([q1, q2], '边界标题')
+  const reserved = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+  const plainMidY = plain.nodeMap.get(q1)?.y ?? 0
+  const reservedMidY = reserved.nodeMap.get(q1)?.y ?? 0
+  check(
+    '有边界时区间首支被往下让开（预留真的接进了摆放）',
+    reservedMidY > plainMidY,
+    `${Math.round(plainMidY)} → ${Math.round(reservedMidY)}`
+  )
+}
+
 function testLayoutNoOverlap(): void {
   group('布局正确性：自动布局无节点重叠（多行长文本）')
   const titles = [
@@ -3261,6 +3347,47 @@ function testLayoutNoOverlap(): void {
     `${JSON.stringify({ dx: Math.round(draggedBox.x), dy: Math.round(draggedBox.y), dh: Math.round(draggedBox.height) })} vs ${JSON.stringify({ ix: Math.round(insertedBox.x), iy: Math.round(insertedBox.y) })}`
   )
   check('拖过的节点仍带偏移（不是被强行归位）', Boolean(draggedBox.topic.position))
+
+  // 组织架构行：横向偏移过的兄弟不许压到右边的人（竖直家族那套避让的**转置**）
+  reset()
+  const orgRowRoot = root().id
+  const orgA = addChildOf(orgRowRoot, '被拖向右的节点')
+  addChildOf(orgRowRoot, '右邻居一')
+  addChildOf(orgRowRoot, '右邻居二')
+  store().setStructure('org.xmind.ui.org-chart.down')
+  store().offsetPositions([{ id: orgA, dx: 170, dy: 0 }])
+  const orgRow = layoutSheet(root(), multilineMeasure)
+  const orgRowHit = firstOverlap(orgRow)
+  check(
+    '组织架构行：横向偏移不会压到右邻居',
+    orgRowHit === null,
+    orgRowHit ? orgRowHit.join(' ⨯ ') : ''
+  )
+  check('组织架构行：偏移仍然保留', Boolean(orgRow.nodeMap.get(orgA)?.topic.position))
+
+  // 矩阵列：纵向偏移过的格子不许压到同列的下一个格位
+  reset()
+  const matrixRoot = root().id
+  const header = addChildOf(matrixRoot, '表头')
+  const cellA = addChildOf(header, '第一格')
+  addChildOf(header, '第二格')
+  addChildOf(header, '第三格')
+  store().setStructure('org.xmind.ui.matrix')
+  const matrixPlain = layoutSheet(root(), multilineMeasure)
+  store().offsetPositions([{ id: cellA, dx: 0, dy: 40 }])
+  const matrix = layoutSheet(root(), multilineMeasure)
+  const matrixHit = firstOverlap(matrix)
+  check(
+    '矩阵列：纵向偏移不会压到下一格位',
+    matrixHit === null,
+    matrixHit ? matrixHit.join(' ⨯ ') : ''
+  )
+  check('矩阵列：偏移仍然保留', Boolean(matrix.nodeMap.get(cellA)?.topic.position))
+  check(
+    '矩阵列：纵向偏移真的生效（矩阵以前完全不认偏移）',
+    (matrix.nodeMap.get(cellA)?.y ?? 0) > (matrixPlain.nodeMap.get(cellA)?.y ?? 0) + 10,
+    `${Math.round(matrixPlain.nodeMap.get(cellA)?.y ?? 0)} → ${Math.round(matrix.nodeMap.get(cellA)?.y ?? 0)}`
+  )
 
   // 分支级组合：逻辑图根 + 分支各自声明鱼骨 / 组织架构 / 矩阵
   reset()
@@ -8471,6 +8598,7 @@ async function main(): Promise<void> {
   testTheme()
   testDefaultTheme()
   testLayout()
+  testOverlayReserve()
   testRecovery()
   await testNodeElements()
   await testMediaElements()

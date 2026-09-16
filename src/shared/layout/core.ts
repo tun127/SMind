@@ -91,6 +91,7 @@ export class LayoutBuilder {
   private readonly verticalCache = new Map<string, number>()
   private readonly horizontalCache = new Map<string, number>()
   private readonly subtreeExtentCache = new Map<string, { width: number; height: number }>()
+  private readonly depthCache = new Map<string, number>()
   private readonly finishHooks: Array<(result: LayoutResult) => void> = []
 
   constructor(
@@ -143,7 +144,7 @@ export class LayoutBuilder {
     return node
   }
 
-  /** 子树垂直占用的高度（含自身与间距） */
+  /** 子树垂直占用的高度（含自身与间距、以及边界/概要的预留） */
   verticalExtent(topic: Topic): number {
     const cached = this.verticalCache.get(topic.id)
     if (cached !== undefined) return cached
@@ -153,7 +154,12 @@ export class LayoutBuilder {
     for (let i = 0; i < kids.length; i += 1) {
       const kid = kids[i]
       if (!kid) continue
-      total += this.verticalExtent(kid) + (i > 0 ? this.gapY : 0)
+      // 预留量要一起往上传播：否则祖先那一层按「没有留白」估槽位，又会压回来
+      total +=
+        this.verticalExtent(kid) +
+        this.reserveTop(kid) +
+        this.reserveBottom(kid) +
+        (i > 0 ? this.gapY : 0)
     }
     const value = Math.max(size.height, kids.length > 0 ? total : 0)
     this.verticalCache.set(topic.id, value)
@@ -181,13 +187,23 @@ export class LayoutBuilder {
     return topic.collapsed ? [] : topic.children
   }
 
-  /** 子树层数：叶子返回 1 */
+  /**
+   * 子树层数：叶子返回 1。
+   *
+   * 按 id 缓存：鱼骨图与时间轴会对**每个一级分支**问一次（用来定主脊长度），
+   * 分支自己又声明同类结构时会层层再问——不缓存就退化成 O(节点数 × 深度)。
+   * 只依赖树的形状（`collapsed` 只在跑布局前定好），一次布局里结果恒定。
+   */
   maxDepth(topic: Topic): number {
+    const cached = this.depthCache.get(topic.id)
+    if (cached !== undefined) return cached
     let depth = 0
     for (const child of this.visibleChildren(topic)) {
       depth = Math.max(depth, this.maxDepth(child))
     }
-    return depth + 1
+    const value = depth + 1
+    this.depthCache.set(topic.id, value)
+    return value
   }
 
   /** 直接子节点纵向排列所需的总高度（不含自身） */
@@ -200,6 +216,42 @@ export class LayoutBuilder {
       total += this.size(kid.id).height + (i > 0 ? this.gapY : 0)
     }
     return total
+  }
+
+  /* ---- 边界 / 概要用掉的外侧空间（见 overlays.overlayReserves） ---- */
+  private overlayTop = new Map<string, number>()
+  private overlayBottom = new Map<string, number>()
+  private overlayRight = new Map<string, number>()
+
+  /**
+   * 交给布局一份「哪些主题的外侧要留白」。
+   *
+   * 边界/概要画在区间外面，以前布局不为此留白 → 紧邻的分支会被标题带或括号压住。
+   * 这里把留白量接进摆放算法（与绘制共用同一批常量，所以留白与图形一致）。
+   */
+  applyOverlayReserves(reserves: {
+    top: Map<string, number>
+    bottom: Map<string, number>
+    right: Map<string, number>
+  }): void {
+    this.overlayTop = reserves.top
+    this.overlayBottom = reserves.bottom
+    this.overlayRight = reserves.right
+  }
+
+  /** 这个主题上方要为边界标题带留出的高度 */
+  reserveTop(topic: Topic): number {
+    return this.overlayTop.get(topic.id) ?? 0
+  }
+
+  /** 这个主题下方要为边界边框留出的高度 */
+  reserveBottom(topic: Topic): number {
+    return this.overlayBottom.get(topic.id) ?? 0
+  }
+
+  /** 这个主题右侧要为概要括号留出的宽度 */
+  reserveRight(topic: Topic): number {
+    return this.overlayRight.get(topic.id) ?? 0
   }
 
   /** 注册一个「坐标归一化之后」执行的钩子：嵌套结构的装饰与连线要在最终坐标上补画 */
@@ -231,13 +283,22 @@ export class LayoutBuilder {
       extent = { width: size.width, height: size.height }
     } else if (family === 'orgchart') {
       // 横向铺行：宽 = 各子树宽之和；高 = 自身 + 一行里最高的子树
+      // 边界/概要的预留同样计入：横向上给「右邻居」留出括号，纵向上给整行留出标题带
       let width = 0
       let childHeight = 0
+      let topReserve = 0
+      let bottomReserve = 0
       kids.forEach((child, index) => {
-        width += this.horizontalExtent(child) + (index > 0 ? this.gapX : 0)
+        width +=
+          this.horizontalExtent(child) + this.reserveRight(child) + (index > 0 ? this.gapX : 0)
         childHeight = Math.max(childHeight, this.subtreeExtent(child, effective).height)
+        topReserve = Math.max(topReserve, this.reserveTop(child))
+        bottomReserve = Math.max(bottomReserve, this.reserveBottom(child))
       })
-      extent = { width: Math.max(size.width, width), height: size.height + this.gapY + childHeight }
+      extent = {
+        width: Math.max(size.width, width),
+        height: size.height + this.gapY + topReserve + childHeight + bottomReserve
+      }
     } else if (family === 'fishbone') {
       // 沿主脊向右展开：宽 = 自身 + 各分支横向占用；高 = 上下骨刺 + 最深一列
       const boneOffset = Math.max(size.height / 2 + this.gapY * 3, 46)

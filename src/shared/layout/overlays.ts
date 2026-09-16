@@ -174,7 +174,7 @@ const EMPTY_BOUNDS: Bounds = {
 }
 
 /** 主题及其所有后代的包围盒；折叠的子树不参与 */
-function boundsOfTopic(topic: Topic, result: LayoutResult, acc: Bounds): void {
+function accumulateBounds(topic: Topic, result: LayoutResult, acc: Bounds): void {
   const node = result.nodeMap.get(topic.id)
   if (node) {
     acc.minX = Math.min(acc.minX, node.x)
@@ -183,13 +183,42 @@ function boundsOfTopic(topic: Topic, result: LayoutResult, acc: Bounds): void {
     acc.maxY = Math.max(acc.maxY, node.y + node.height)
   }
   if (topic.collapsed) return
-  for (const child of topic.children) boundsOfTopic(child, result, acc)
+  for (const child of topic.children) accumulateBounds(child, result, acc)
 }
 
-function boundsOfTopics(topics: Topic[], result: LayoutResult): Bounds | null {
-  const acc = { ...EMPTY_BOUNDS }
-  for (const topic of topics) boundsOfTopic(topic, result, acc)
-  if (!Number.isFinite(acc.minX)) return null
+/**
+ * 全树「子树包围盒」索引：一次后序遍历 O(n) 建好（键是主题 id）。
+ *
+ * 以前每个边界/概要都各自递归一遍自己区间的子树——B 个边界就是 O(B × 节点数)。
+ * AI 一批加十几个边界/概要时这项会明显放大；建一次索引后，
+ * 取任一区间的包围盒只花 O(区间长度)。
+ */
+function indexSubtreeBounds(root: Topic, result: LayoutResult): Map<string, Bounds | null> {
+  const map = new Map<string, Bounds | null>()
+  const visit = (topic: Topic): Bounds | null => {
+    const node = result.nodeMap.get(topic.id)
+    let acc: Bounds | null = node
+      ? { minX: node.x, minY: node.y, maxX: node.x + node.width, maxY: node.y + node.height }
+      : null
+    if (!topic.collapsed) {
+      for (const child of topic.children) {
+        const childBounds = visit(child)
+        if (childBounds) acc = acc ? sameBounds(acc, childBounds) : childBounds
+      }
+    }
+    map.set(topic.id, acc)
+    return acc
+  }
+  visit(root)
+  return map
+}
+
+function boundsOfTopics(topics: Topic[], boundsOf: Map<string, Bounds | null>): Bounds | null {
+  let acc: Bounds | null = null
+  for (const topic of topics) {
+    const item = boundsOf.get(topic.id)
+    if (item) acc = acc ? sameBounds(acc, item) : item
+  }
   return acc
 }
 
@@ -202,6 +231,55 @@ function sameBounds(a: Bounds, b: Bounds): Bounds {
   }
 }
 
+/**
+ * 边界/概要向外占用的空间（按「区间两端那个主题」记账）。
+ *
+ * 背景：边界与概要画在区间**外面**，以前布局完全不为此留白——紧邻的分支
+ * （上一个/下一个兄弟，或组织架构图里的右邻居）就可能被标题带或括号压住。
+ * Xmind 的布局引擎会预留，这里用同一套常量把「要留多少」交给布局：
+ * - `top`：区间第一个主题上方 = 边框内边距 + （有标题时的）标题带；
+ * - `bottom`：区间最后一个主题下方 = 边框内边距；
+ * - `right`：概要括号在区间外侧，需要「间距 + 尖点 + 一点文字宽度」。
+ *
+ * 与绘制共用同一批常量（`BOUNDARY_PAD` / `BOUNDARY_TITLE_H` / `SUMMARY_*`），
+ * 所以「留出来的白」与「画出来的黑」不会各说各话。
+ */
+export interface OverlayReserves {
+  top: Map<string, number>
+  bottom: Map<string, number>
+  right: Map<string, number>
+}
+
+export function overlayReserves(root: Topic, sheet: Sheet): OverlayReserves {
+  const index = indexTree(root)
+  const top = new Map<string, number>()
+  const bottom = new Map<string, number>()
+  const right = new Map<string, number>()
+  const bump = (map: Map<string, number>, id: string, value: number): void => {
+    map.set(id, Math.max(map.get(id) ?? 0, value))
+  }
+
+  for (const boundary of sheet.boundaries) {
+    const topics = resolveRange(index, boundary.range)
+    const first = topics[0]
+    const last = topics[topics.length - 1]
+    if (!first || !last) continue
+    const titleBand = boundary.title && boundary.title.length > 0 ? BOUNDARY_TITLE_H : 0
+    bump(top, first.id, BOUNDARY_PAD + titleBand)
+    bump(bottom, last.id, BOUNDARY_PAD)
+  }
+
+  for (const summary of sheet.summaries) {
+    const topics = resolveRange(index, summary.range)
+    const last = topics[topics.length - 1]
+    if (!last) continue
+    // 括号 → 尖点 → 文字；文字宽度不可预知，按一个保守的定值留一点
+    bump(right, last.id, SUMMARY_GAP + SUMMARY_NIB + 48)
+  }
+
+  return { top, bottom, right }
+}
+
 export function boundsOfRange(
   result: LayoutResult,
   index: TreeIndex,
@@ -209,7 +287,9 @@ export function boundsOfRange(
 ): Bounds | null {
   const topics = resolveRange(index, range)
   if (topics.length === 0) return null
-  return boundsOfTopics(topics, result)
+  const acc = { ...EMPTY_BOUNDS }
+  for (const topic of topics) accumulateBounds(topic, result, acc)
+  return Number.isFinite(acc.minX) ? acc : null
 }
 
 /* ------------------------------------------------------------------ */
@@ -362,10 +442,12 @@ export function roundedRectPath(
 
 function boundaryOf(
   boundary: { id: string; range: string; title?: string; style?: NodeStyle },
-  result: LayoutResult,
-  index: TreeIndex
+  index: TreeIndex,
+  boundsOf: Map<string, Bounds | null>
 ): BoundaryLayout | null {
-  const bounds = boundsOfRange(result, index, boundary.range)
+  // 区间只解一次：以前这里解了两次（算包围盒一次、取 branchId 又一次）
+  const topics = resolveRange(index, boundary.range)
+  const bounds = boundsOfTopics(topics, boundsOf)
   if (!bounds) return null
 
   const hasTitle = Boolean(boundary.title && boundary.title.length > 0)
@@ -382,7 +464,7 @@ function boundaryOf(
   return {
     id: boundary.id,
     title: boundary.title,
-    branchId: resolveRange(index, boundary.range)[0]?.id,
+    branchId: topics[0]?.id,
     x,
     y,
     width,
@@ -474,10 +556,11 @@ function labelRectOf(
 function summaryOf(
   summary: { id: string; topicId: string; range: string; title?: string; style?: NodeStyle },
   result: LayoutResult,
-  index: TreeIndex
+  index: TreeIndex,
+  boundsOf: Map<string, Bounds | null>
 ): SummaryLayout | null {
   const topics = resolveRange(index, summary.range)
-  const bounds = boundsOfTopics(topics, result)
+  const bounds = boundsOfTopics(topics, boundsOf)
   if (!bounds) return null
 
   // 概要文字：优先用概要对象自带的标题，
@@ -580,14 +663,16 @@ function summaryOf(
  */
 export function addOverlays(result: LayoutResult, root: Topic, sheet: Sheet): void {
   const index = indexTree(root)
+  // 子树包围盒只建一次：所有边界/概要共用（以前每个都各递归一遍自己的区间）
+  const boundsOf = indexSubtreeBounds(root, result)
 
   for (const boundary of sheet.boundaries) {
-    const layout = boundaryOf(boundary, result, index)
+    const layout = boundaryOf(boundary, index, boundsOf)
     if (layout) result.boundaries.push(layout)
   }
 
   for (const summary of sheet.summaries) {
-    const layout = summaryOf(summary, result, index)
+    const layout = summaryOf(summary, result, index, boundsOf)
     if (layout) result.summaries.push(layout)
   }
 

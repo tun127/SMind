@@ -8,7 +8,7 @@
 import type { Sheet, Topic } from '../model/types'
 import { getStructureDef } from '../xmind/constants'
 import { LAYOUT_DEFAULTS, LayoutBuilder } from './core'
-import { addOverlays } from './overlays'
+import { addOverlays, overlayReserves } from './overlays'
 import { layoutBrace, layoutLogic, layoutMindmap, layoutSpreadsheet, layoutTree } from './stack'
 import { layoutOrgChart } from './orgchart'
 import { layoutFishbone, layoutMatrix, layoutRadial } from './graphic'
@@ -40,6 +40,8 @@ export function layoutSheet(
     options.padding ?? LAYOUT_DEFAULTS.padding
   )
   builder.measureAll(rootTopic)
+  // 边界/概要在区间外侧占用的空间，先交给布局（否则标题带与括号会压住紧邻的分支）
+  if (sheet) builder.applyOverlayReserves(overlayReserves(rootTopic, sheet))
 
   const cls = rootTopic.structureClass
   const family = getStructureDef(cls).family

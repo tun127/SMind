@@ -116,19 +116,39 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
   const headerTop = rootNode.y + rootSize.height + builder.gapY * 2.6
   let cursor = 0
 
+  /**
+   * 单元格的横向位置：居中对齐 + 手动偏移，但**钳在列内**。
+   *
+   * 表格语义下「一格挪到隔壁列上面」说不通（列宽是按子树算好的，
+   * 越界就会压住右边的列）；纵向的偏移仍然完全生效，并按下推避让处理。
+   */
+  const cellX = (colLeft: number, colWidth: number, size: { width: number }, x: number): number => {
+    const centered = colLeft + (colWidth - size.width) / 2 + x
+    const max = colLeft + Math.max(0, colWidth - size.width)
+    return Math.min(Math.max(centered, colLeft), max)
+  }
+
   for (const header of kids) {
     const colLeft = cursor
     const colWidth = maxWidthOf(builder, header)
     const headerSize = builder.size(header.id)
 
-    builder.add(header, colLeft + (colWidth - headerSize.width) / 2, headerTop, 1, 'down')
+    builder.add(
+      header,
+      cellX(colLeft, colWidth, headerSize, header.position?.x ?? 0),
+      headerTop + (header.position?.y ?? 0),
+      1,
+      'down'
+    )
 
     let rowY = headerTop + headerSize.height + builder.gapY * 1.6
     const walk = (topic: Topic, depth: number): void => {
       for (const child of builder.visibleChildren(topic)) {
         const size = builder.size(child.id)
-        builder.add(child, colLeft + (colWidth - size.width) / 2, rowY, depth, 'down')
-        rowY += size.height + builder.gapY
+        const y = rowY + (child.position?.y ?? 0)
+        builder.add(child, cellX(colLeft, colWidth, size, child.position?.x ?? 0), y, depth, 'down')
+        // 手动偏移过的格子不许压到同列的下一个格位（与其它家族同一套避让）
+        rowY = y + size.height + builder.gapY
         walk(child, depth + 1)
       }
     }

@@ -44,7 +44,12 @@ export function placeVerticalChildren(
   for (let i = 0; i < kids.length; i += 1) {
     const kid = kids[i]
     if (!kid) continue
-    total += builder.subtreeExtent(kid, inherited).height + (i > 0 ? builder.gapY : 0)
+    // 边界/概要在这一支外侧占用的空间也算进槽位高度，否则会压住相邻兄弟
+    total +=
+      builder.subtreeExtent(kid, inherited).height +
+      builder.reserveTop(kid) +
+      builder.reserveBottom(kid) +
+      (i > 0 ? builder.gapY : 0)
   }
 
   let cursor = parentNode.y + parentNode.height / 2 - total / 2
@@ -68,11 +73,12 @@ export function placeVerticalChildren(
         : parentNode.x - builder.gapX - size.width
     const x = xResolver ? xResolver(child, size, parentNode, dir, depth) : defaultX
     const px = x + (child.position?.x ?? 0)
-    let py = centerY - size.height / 2 + (child.position?.y ?? 0)
+    // 上方有边界标题带时要往下让出那段空间（预留量只在区间首/末那一支上非零）
+    let py = centerY - size.height / 2 + (child.position?.y ?? 0) + builder.reserveTop(child)
     if (py < floor) py = floor
-    floor = py + size.height + builder.gapY
+    floor = py + size.height + builder.reserveBottom(child) + builder.gapY
     pending.push({ child, x: px, y: py })
-    cursor += extent + builder.gapY
+    cursor += extent + builder.reserveTop(child) + builder.reserveBottom(child) + builder.gapY
   }
 
   for (const item of pending) {

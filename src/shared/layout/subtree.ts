@@ -203,20 +203,36 @@ function placeMatrixChildren(
   for (let c = 0; c < cols; c += 1) {
     let cursorY = top
     const cellX = left + colWidths.slice(0, c).reduce((a, b) => a + b, 0) + builder.gapX * c
+    /**
+     * 与其它家族同一套避让思路：同一列里逐个下推。
+     *
+     * 矩阵只消费 `position.y`（横向靠格位，不吃 x 偏移），所以手动拖过的节点
+     * 会往下压到同列的下一个格位上。先按「上一格的底边 + 间距」算好每个格位的最终 y，
+     * 再摆子树。没有偏移时判据恒不触发，坐标与以前完全一致。
+     */
+    const column: Array<{ child: Topic; y: number }> = []
+    let floor = Number.NEGATIVE_INFINITY
     for (let r = 0; r < rows; r += 1) {
       const index = r * cols + c
       if (index >= kids.length) break
       const child = kids[index]
       if (!child) break
       const size = builder.size(child.id)
-      const cellY = cursorY + ((rowHeights[r] ?? 0) - size.height) / 2 + (child.position?.y ?? 0)
+      const desiredY = cursorY + ((rowHeights[r] ?? 0) - size.height) / 2 + (child.position?.y ?? 0)
+      const cellY = desiredY < floor ? floor : desiredY
+      floor = cellY + size.height + builder.gapY
+      column.push({ child, y: cellY })
+      cursorY += (rowHeights[r] ?? 0) + builder.gapY
+    }
+
+    for (const item of column) {
+      const { child, y: cellY } = item
       if (declaresOwnStructure(builder, child, inherited)) {
         placeSubtree(builder, child, cellX, cellY, depth + 1, 'right', inherited)
       } else {
         builder.add(child, cellX, cellY, depth + 1, 'right')
         placeMatrixChildren(builder, child, cellX, cellY, depth + 1, inherited)
       }
-      cursorY += (rowHeights[r] ?? 0) + builder.gapY
     }
   }
 }
