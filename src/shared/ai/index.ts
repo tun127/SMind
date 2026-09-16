@@ -505,6 +505,14 @@ export function describeAiError(status: number, bodyText: string): string {
 /* ------------------------------------------------------------------ */
 
 /** 统计一棵主题树的节点总数（含根） */
+/**
+ * 子树节点总数（含自己）。
+ *
+ * 注意与 `@shared/model/tree` 的 `countTopics` **不等价**：后者走 `walk`，
+ * 会把 `detachedChildren`（自由摆放的主题）也数进去，这里只跟 `children`。
+ * 别把两者合并——有浮动节点的文档会静默多算。这一处用于给模型报「这个分支多大」，
+ * 与画布上的实体层级保持一致。
+ */
 export function countTopicTree(root: Topic): number {
   let total = 1
   for (const child of root.children) total += countTopicTree(child)
