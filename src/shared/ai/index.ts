@@ -25,6 +25,15 @@ export interface AiConfig {
   model: string
   /** 采样温度（0.2 稳定，0.9 发散） */
   temperature: number
+  /**
+   * 单次回复的输出上限（token）；**0 = 不发送这个字段**（用服务商默认值）。
+   *
+   * 为什么必须显式给足：多数服务商的默认输出上限只有 1.5k~2k token，
+   * 而「完整详细的大纲」（多考点 + 解释 + 真题）动辄 4k~8k——
+   * 写到一半被服务端掐断，用户看到的就是「只写了粗分」。
+   * 多数实现支持更大的值；不认这个字段的服务商会报错，主进程会自动去掉它重试一次。
+   */
+  maxTokens: number
 }
 
 /** 界面上要用的配置视图：**不包含完整 Key**，只给掩码 */
@@ -32,6 +41,7 @@ export interface AiConfigView {
   baseUrl: string
   model: string
   temperature: number
+  maxTokens: number
   hasKey: boolean
   /** 例如 sk-…3f9c；没有 Key 时为 null */
   keyPreview: string | null
@@ -41,7 +51,9 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
   baseUrl: 'https://api.deepseek.com/v1',
   apiKey: '',
   model: 'deepseek-chat',
-  temperature: 0.6
+  temperature: 0.6,
+  // 足够装下一份"完整详细"的大纲；嫌慢/嫌贵可在 AI 设置里调小或填 0
+  maxTokens: 8192
 }
 
 /** 常见服务商的预设，方便一键填 BaseURL */
@@ -84,7 +96,15 @@ export function normalizeAiConfig(raw: unknown): { config: AiConfig; warnings: s
   if (temperature < 0) temperature = 0
   if (temperature > 2) temperature = 2
 
-  return { config: { baseUrl, model, apiKey, temperature }, warnings }
+  // 0 是合规值（表示不发送该字段）；负数与超大值都夹回可用区间
+  let maxTokens =
+    typeof source.maxTokens === 'number' && Number.isFinite(source.maxTokens)
+      ? Math.round(source.maxTokens)
+      : DEFAULT_AI_CONFIG.maxTokens
+  if (maxTokens < 0) maxTokens = 0
+  if (maxTokens > 65536) maxTokens = 65536
+
+  return { config: { baseUrl, model, apiKey, temperature, maxTokens }, warnings }
 }
 
 /** 把配置转成界面上要展示的形态（Key 只给掩码） */
@@ -96,6 +116,7 @@ export function toConfigView(config: AiConfig): AiConfigView {
     baseUrl: config.baseUrl,
     model: config.model,
     temperature: config.temperature,
+    maxTokens: config.maxTokens,
     hasKey: key.length > 0,
     keyPreview: preview
   }
@@ -145,7 +166,11 @@ export interface AiMessage {
 
 const OUTLINE_SYSTEM =
   '你是思维导图助手。输出必须是**缩进大纲**：每行一个节点，以「- 」开头，' +
-  '子节点比父节点多缩进两个空格。只输出大纲本身，不要解释、不要客套、不要用代码块包裹。'
+  '子节点比父节点多缩进两个空格。节点下面可以另起一行用 `> ` 写这个节点的备注（解释、答案、补充说明）。' +
+  '只输出大纲本身，不要解释、不要客套、不要用代码块包裹。'
+
+/** 生成详细程度：骨架（快速起图）/ 详细（完整考点 + 解释 + 真题） */
+export type GenerateDetail = 'skeleton' | 'detailed'
 
 /** 一键生成导图的提示词 */
 export function buildGenerateMessages(input: {
@@ -154,12 +179,31 @@ export function buildGenerateMessages(input: {
   depth?: number
   /** 额外要求（用户自由填写） */
   extra?: string
+  /** 详细程度；默认骨架（与历史行为一致） */
+  detail?: GenerateDetail
 }): AiMessage[] {
   const depth = input.depth && input.depth > 0 ? input.depth : 3
-  const lines = [
-    `主题：${input.topic}`,
-    `要求：最多 ${depth} 层，第一行是中心主题，下面按层级展开；用简体中文；每个节点尽量简短（不超过 12 字）。`
-  ]
+  const lines = [`主题：${input.topic}`]
+  if (input.detail === 'detailed') {
+    /**
+     * 详细模式：用户要的是「完整 + 有解释 + 有真题」，不是几个大方向。
+     *
+     * 以前只有一条「最多 N 层、每个节点不超过 12 字」——那正是"只写粗分"的来源：
+     * 12 字装不下任何知识点，只能写标题词；模型于是给出一副骨架。
+     */
+    lines.push(
+      `要求：最多 ${depth} 层，第一行是中心主题，下面按层级展开；用简体中文。` +
+        `覆盖这个主题的**全部高频考点**（宁可多列，不要只写几个大方向就收工）：`,
+      '1. 每个节点写成**具体的知识点**（15~40 字），不要只有两三个字的空标题；',
+      '2. 每个考点的下一行用 `> ` 写 40~100 字的解释：讲清"是什么、为什么、怎么考"；',
+      '3. 有代表性的考点下面补 1~2 道真题：写成子主题「真题：…」，答案与解析也放在 `> ` 行里；',
+      '4. 严格用缩进大纲：每行以「- 」开头，子节点比父节点多缩进两个空格。'
+    )
+  } else {
+    lines.push(
+      `要求：最多 ${depth} 层，第一行是中心主题，下面按层级展开；用简体中文；每个节点尽量简短（不超过 12 字）。`
+    )
+  }
   if (input.extra && input.extra.trim().length > 0) lines.push(`补充要求：${input.extra.trim()}`)
   return [
     { role: 'system', content: OUTLINE_SYSTEM },
@@ -290,9 +334,34 @@ export function parseOutlineLine(
 
 /** 短句才可能是主题；带句号的长句通常是模型的解释文字 */
 export function looksLikeTopic(text: string): boolean {
-  if (/[。！？!?]$/.test(text.trim())) return false
-  if (/[，,；;].*[，,；;]/.test(text) && [...text].length > 20) return false
-  return [...text.trim()].length <= 24
+  const trimmed = text.trim()
+  if (/[。！？!?]$/.test(trimmed)) return false
+  /**
+   * 阈值放宽过（24 → 40 字；多逗号那条 20 → 30 字）。
+   *
+   * 原因：这条规则只在「模型既没用 `- ` 标记、也没缩进」的兜底路径生效，
+   * 但它会**静默丢掉**长行——而"详细的考点"恰恰是长行
+   * （如「性能优化：减少重排、合并写入、避免频繁 setState」26 字，正好被旧阈值误杀）。
+   * 详细内容被当成杂音丢掉，方向正好相反。宁可多收进几个长节点，
+   * 也不要把用户要的细节悄悄吃掉（丢弃时另有警告，见 parseOutline）。
+   */
+  if (/[，,；;].*[，,；;]/.test(trimmed) && [...trimmed].length > 30) return false
+  return [...trimmed].length <= 40
+}
+
+/**
+ * 「解释行」：`> 文字` —— 成为**上一个主题的备注**。
+ *
+ * 这是本项目"详细图"的载体：模型在缩进大纲里给某个考点跟一行 `> …`，
+ * 这行就落到该主题的备注里（可搜索、可导出、不占画布宽度）。
+ * 语法与 Markdown 引用块一致——`shared/import/markdown.ts` 的导入器也是这么认的，
+ * 于是「AI 生成的详细大纲」与「Markdown 导入的详细大纲」是同一套写法。
+ */
+export function parseNoteLine(line: string): string | null {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith('>')) return null
+  const text = trimmed.replace(/^>\s?/, '').trim()
+  return text.length > 0 ? text : null
 }
 
 /**
@@ -311,15 +380,39 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
   const lines = body.split(/\r?\n/)
 
   const all: Array<{ depth: number; text: string; marked: boolean }> = []
+  /** 与 all 一一对应：该行的解释（`> …`），没有则为空串 */
+  const notesOf: string[] = []
+  /** 还没出现任何主题时的解释行：无处挂靠，计入警告而不是静默丢弃 */
+  let orphanNotes = 0
   for (const line of lines) {
+    const note = parseNoteLine(line)
+    if (note !== null) {
+      const index = all.length - 1
+      if (index < 0) {
+        orphanNotes += 1
+      } else {
+        const previous = notesOf[index] ?? ''
+        notesOf[index] = previous.length > 0 ? `${previous}\n${note}` : note
+      }
+      continue
+    }
     const item = parseOutlineLine(line)
-    if (item) all.push(item)
+    if (item) {
+      all.push(item)
+      notesOf.push('')
+    }
+  }
+  if (orphanNotes > 0) {
+    warnings.push(
+      `有 ${orphanNotes} 行「> 解释」出现在任何主题之前，已忽略（解释要写在对应主题的下一行）`
+    )
   }
 
-  let parsed = all.filter((item) => item.marked || item.depth > 0)
+  const indexed = all.map((item, index) => ({ item, note: notesOf[index] ?? '' }))
+  let parsed = indexed.filter(({ item }) => item.marked || item.depth > 0)
 
   if (parsed.length === 0) {
-    const terse = all.filter((item) => looksLikeTopic(item.text))
+    const terse = indexed.filter(({ item }) => looksLikeTopic(item.text))
     if (terse.length === 0) {
       return {
         root: null,
@@ -328,24 +421,34 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
         wrapped: false
       }
     }
+    // 丢弃要**说出来**：以前是静默丢，用户只看到"内容怎么变少了"，无从查起
+    const rejected = indexed.length - terse.length
     parsed = terse
     warnings.push('模型没有用缩进大纲的格式，已按「一行一个主题」解析')
+    if (rejected > 0) {
+      warnings.push(
+        `其中 ${rejected} 行不像主题（过长或像解释文字）被跳过；` +
+          '想要完整保留细节，可以让它用「- 」开头的缩进大纲、解释写成「> 」行'
+      )
+    }
   }
 
   // 归一化深度：第一行深度当作 0，避免模型整体缩进导致层级错位
   // 模型偶尔会回一段没有任何大纲行的内容：这时 parsed 为空，
   // 直接取 parsed[0].depth 会抛异常，把"模型答得不好"升级成一次崩溃
-  const baseDepth = parsed[0]?.depth ?? 0
-  for (const item of parsed) item.depth = Math.max(0, item.depth - baseDepth)
+  const baseDepth = parsed[0]?.item.depth ?? 0
 
   const roots: OutlineNode[] = []
   const stack: Array<{ depth: number; node: OutlineNode }> = []
 
-  for (const item of parsed) {
+  for (const { item, note } of parsed) {
+    const depth = Math.max(0, item.depth - baseDepth)
     const node: OutlineNode = { title: item.text, children: [] }
+    // `> 解释` 落到备注：详细内容不占画布宽度，但能搜索、能导出、能看见
+    if (note.length > 0) node.notes = note
     while (stack.length > 0) {
       const top = stack[stack.length - 1]
-      if (!top || top.depth < item.depth) break
+      if (!top || top.depth < depth) break
       stack.pop()
     }
 
@@ -353,7 +456,7 @@ export function parseOutline(text: string, fallbackRootTitle = 'AI 生成'): Par
     if (parent) parent.node.children.push(node)
     else roots.push(node)
 
-    stack.push({ depth: item.depth, node })
+    stack.push({ depth, node })
   }
 
   let root: OutlineNode
@@ -651,7 +754,22 @@ export function buildChatSystemPrompt(input: {
       'moveTopics 里、或一次回复里一次发完；**不要一次只搬一个**——那会让用户等几十轮。' +
       '两次调用之间也不要写解说文字，全部做完再总结。' +
       '12. **只有工具真的返回「已执行」之后，才可以说"已经改好了"**。没落到画布的改动一律说成' +
-      '「我打算……（还没执行）」；工具返回「未执行」时如实转述原因，不要含糊过去。'
+      '「我打算……（还没执行）」；工具返回「未执行」时如实转述原因，不要含糊过去。',
+    /**
+     * 第 13 条：内容密度。用户抱怨「让它写完整详细的导图，它只写完粗分」的直接对策。
+     *
+     * 以前的 12 条里没有任何一条谈"内容该有多详细"：规则 1 的「直接、简洁」管的是
+     * **回答语气**，模型却容易把它推广到节点内容上，于是每个节点只写两三个字的标题词。
+     * 与「详细模式」的对话框提示词配套（那一条走 buildGenerateMessages）。
+     */
+    '13. **用户要求"完整 / 详细 / 全面 / 尽量多"时，绝不要只给骨架**：' +
+      '一次 insertSubtree 就交出**多层完整大纲**——每个分支下面都要有实质内容' +
+      '（写具体的知识点 / 要点，15~40 字，不要只有两三个字的空标题）；' +
+      '每个节点的下一行用 `> ` 写 40~100 字的解释（它会成为该主题的**备注**，不占画布宽度）；' +
+      '在关键节点下补 1~2 道真题或示例（写成子主题「真题：…」，答案与解析同样放 `> ` 行里）。' +
+      '分支多时**分几次 insertSubtree**（一个分支一次），不要试图一次写完——' +
+      '那会被服务商的输出上限截断，只交出一半。' +
+      '也不要一边写一边贴长篇解说：先把图写全，最后用两三句话总结。'
   ].join('\n')
 }
 
@@ -704,6 +822,14 @@ export type AiStreamEvent =
       aborted: boolean
       /** 这一轮模型请求的工具调用（空数组 = 说完了） */
       toolCalls: ToolCall[]
+      /**
+       * 输出被服务商截断了（`finish_reason: 'length'`）。
+       *
+       * 以前这个信息被**丢掉**：解析出来了、没人用，于是「被掐断」和「正常说完」
+       * 在应用里长得一模一样——用户看到的就是"AI 怎么只写了一点点"。
+       * 带上它，界面才能如实说明并引导续写。
+       */
+      truncated?: boolean
       /** token 消耗（服务商回报；不支持 usage 的服务商没有这个字段，界面就不显示） */
       usage?: TokenUsage
     }

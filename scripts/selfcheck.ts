@@ -7494,11 +7494,25 @@ function testAi(): void {
     normalizeAiConfig({ temperature: Number.NaN }).config.temperature,
     DEFAULT_AI_CONFIG.temperature
   )
+  // 输出上限：默认必须给足（服务商默认值只有 1.5k~2k，会把"完整详细的大纲"写到一半掐断）
+  eq('默认输出上限给足', DEFAULT_AI_CONFIG.maxTokens, 8192)
+  eq('空配置用默认输出上限', defaults.config.maxTokens, DEFAULT_AI_CONFIG.maxTokens)
+  eq('0 是合规值（表示不发送该字段）', normalizeAiConfig({ maxTokens: 0 }).config.maxTokens, 0)
+  eq('负输出上限夹到 0', normalizeAiConfig({ maxTokens: -5 }).config.maxTokens, 0)
+  eq('超大输出上限夹到 65536', normalizeAiConfig({ maxTokens: 1e9 }).config.maxTokens, 65536)
+  eq('小数取整', normalizeAiConfig({ maxTokens: 2048.6 }).config.maxTokens, 2049)
+  eq(
+    '非法输出上限回退默认',
+    normalizeAiConfig({ maxTokens: Number.NaN }).config.maxTokens,
+    DEFAULT_AI_CONFIG.maxTokens
+  )
+  eq('界面能读到输出上限', toConfigView(DEFAULT_AI_CONFIG).maxTokens, DEFAULT_AI_CONFIG.maxTokens)
 
   const view = toConfigView({
     baseUrl: 'https://x/v1',
     model: 'm',
     temperature: 0.5,
+    maxTokens: 8192,
     apiKey: 'sk-abcdef123456'
   })
   eq('掩码保留前缀与后四位', view.keyPreview, 'sk-…3456')
@@ -7552,6 +7566,26 @@ function testAi(): void {
   check(
     '没写层级时给默认值',
     buildGenerateMessages({ topic: 'x' })[1].content.includes('最多 3 层')
+  )
+
+  // 详细模式：用户要的「完整考点 + 解释 + 真题」必须写进提示词里，
+  // 否则模型只会给出一副骨架（这正是"只写粗分"的来源之一）
+  const detailedPrompt = buildGenerateMessages({
+    topic: '计算机四级',
+    depth: 4,
+    detail: 'detailed'
+  })
+  check('详细模式：要求覆盖全部高频考点', detailedPrompt[1].content.includes('全部高频考点'))
+  check('详细模式：要求写具体知识点（不是空标题）', detailedPrompt[1].content.includes('15~40 字'))
+  check('详细模式：要求每个考点配解释', detailedPrompt[1].content.includes('> '))
+  check('详细模式：要求补真题', detailedPrompt[1].content.includes('真题'))
+  check(
+    '骨架模式仍是短标题（与历史行为一致）',
+    buildGenerateMessages({ topic: 'x', detail: 'skeleton' })[1].content.includes('不超过 12 字')
+  )
+  check(
+    '系统提示词说明 `> ` 会变成备注',
+    buildGenerateMessages({ topic: 'x' })[0].content.includes('备注')
   )
 
   const expand = buildExpandMessages({
@@ -7648,6 +7682,45 @@ function testAi(): void {
 
   const deepJump = parseOutline('- 根\n      - 跳级子节点')
   check('层级跳跃不会崩（按最近父级挂）', (deepJump.root?.children.length ?? 0) >= 1)
+
+  // 「详细内容」的载体：`> 解释` 落到上一个主题的**备注**（不占画布宽度、可搜索可导出）
+  const noted = parseOutline('- 考点一\n  > 这是解释\n- 考点二\n  > 第二段解释')
+  // 2 个并列顶层会套一个壳根，所以是 3；解释行本身不算节点
+  eq('解释行不算节点（2 个主题 + 1 个壳根）', noted.count, 3)
+  eq('解释进入对应节点的备注', noted.root?.children[0]?.notes, '这是解释')
+  eq('第二个节点的备注也对', noted.root?.children[1]?.notes, '第二段解释')
+  eq(
+    '同一节点多行解释会拼起来',
+    parseOutline('- 甲\n  > 第一行\n  > 第二行').root?.notes,
+    '第一行\n第二行'
+  )
+  eq('没有解释时不产生备注字段', parseOutline('- 甲').root?.notes, undefined)
+
+  const orphanNote = parseOutline('> 无主的解释\n- 甲')
+  eq('无主解释不静默丢（给一次警告）', orphanNote.warnings.length, 1)
+  check(
+    '并说明为什么忽略',
+    orphanNote.warnings[0]?.includes('出现在任何主题之前') === true,
+    orphanNote.warnings.join('|')
+  )
+  eq('无主解释不影响节点', orphanNote.root?.title, '甲')
+
+  // 长行不再被静默丢弃：这条 27 字、无逗号的行在旧阈值（24 字）下会被吃掉
+  eq(
+    '兜底路径不再丢掉长行',
+    parseOutline('性能优化：减少重排与合并写入避免频繁触发重渲染导致卡顿').count,
+    1
+  )
+  const dropped = parseOutline(
+    '这一行是模型的解释文字，包含多个逗号，长度超过了阈值，应该被跳过\n甲\n乙'
+  )
+  check(
+    '确实丢行时给出计数与原因',
+    dropped.warnings.some((warning) => warning.includes('被跳过')),
+    dropped.warnings.join('|')
+  )
+  // 甲 / 乙 两个并列顶层 → 套一个壳根 → 3
+  eq('丢行不影响保留下来的节点（2 个主题 + 1 个壳根）', dropped.count, 3)
 
   const empty = parseOutline('很抱歉，我无法完成这个请求。')
   eq('只有说明文字时根为 null', empty.root, null)

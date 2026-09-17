@@ -8,6 +8,7 @@ import {
   countOutlineNodes,
   parseFlatList,
   parseOutline,
+  type GenerateDetail,
   type OutlineNode
 } from '@shared/ai'
 import { ancestorsOf, activeRoot, findTopic } from '@shared/model/tree'
@@ -30,17 +31,31 @@ interface Props {
 
 /** 生成结果的树形预览 */
 function OutlinePreview({ node, depth = 0 }: { node: OutlineNode; depth?: number }): ReactElement {
+  const note = node.notes?.trim() ?? ''
   return (
     <>
       <div className="ai-preview__row" style={{ paddingLeft: 8 + depth * 16 }}>
         {depth === 0 ? <Sparkles size={12} /> : <span className="ai-preview__dot" />}
         {node.title}
       </div>
+      {note.length > 0 && (
+        <div className="ai-preview__note" style={{ paddingLeft: 8 + depth * 16 + 18 }}>
+          {note}
+        </div>
+      )}
       {node.children.map((child, index) => (
         <OutlinePreview key={`${child.title}-${index}`} node={child} depth={depth + 1} />
       ))}
     </>
   )
+}
+
+/** 带解释（备注）的节点数：告诉用户"详细"详在哪，而不是只给一个总节点数 */
+function countNotedNodes(node: OutlineNode | null): number {
+  if (!node) return 0
+  let total = node.notes && node.notes.trim().length > 0 ? 1 : 0
+  for (const child of node.children) total += countNotedNodes(child)
+  return total
 }
 
 export default function AiDialog({
@@ -58,7 +73,21 @@ export default function AiDialog({
   )
 
   const [topic, setTopic] = useState(selectedTopic?.title ?? '')
-  const [depth, setDepth] = useState(3)
+  /**
+   * 层级默认 4（原来是 3）。
+   *
+   * 3 层对"我要一份完整的导图"来说太浅了：一层大方向 + 一层分类就没有下文，
+   * 看起来正是"只写完粗分"。
+   */
+  const [depth, setDepth] = useState(4)
+  /**
+   * 详细程度，默认**详细**。
+   *
+   * 原来的提示词是「最多 N 层、每个节点不超过 12 字」——12 字装不下任何知识点，
+   * 模型只能写标题词，于是只出一副骨架。用户要的是"有解释、有例子"的图，
+   * 所以默认走详细模式（骨架模式仍然保留给"先起个框架"的用法）。
+   */
+  const [detail, setDetail] = useState<GenerateDetail>('detailed')
   const [extra, setExtra] = useState('')
   const [count, setCount] = useState(5)
   const [style, setStyle] = useState('简洁、专业、通顺')
@@ -130,7 +159,7 @@ export default function AiDialog({
         setError('请先填写要生成的主题')
         return
       }
-      const result = await window.api.aiChat(buildGenerateMessages({ topic, depth, extra }))
+      const result = await window.api.aiChat(buildGenerateMessages({ topic, depth, extra, detail }))
       setRawText(result.content)
       const parsed = parseOutline(result.content, topic.trim())
       if (!parsed.root) {
@@ -138,6 +167,18 @@ export default function AiDialog({
         return
       }
       if (parsed.warnings.length > 0) onNotify(parsed.warnings.join('；'))
+      /**
+       * 被服务商的输出上限截断时**必须说出来**。
+       *
+       * 这是「AI 只写了粗分」最常见的原因：内容写到一半被服务端掐断，
+       * 而 finish_reason 以前根本没人看，用户只看到一副"貌似完整"的浅图。
+       */
+      if (result.finishReason === 'length') {
+        onNotify(
+          '注意：本次输出被服务商的**输出上限**截断了，后面的内容没有发出（结果可能只是前一部分）。' +
+            '可以减少层级、把「详细程度」改为骨架，或到「AI 设置」把「单次输出上限」调大后重试。'
+        )
+      }
       setOutline(parsed.root)
     } catch (err) {
       setError((err as Error).message)
@@ -194,6 +235,7 @@ export default function AiDialog({
       (task === 'polish' && polished.trim().length > 0))
 
   const totalPreview = outline ? countOutlineNodes(outline) : flat.length
+  const notedPreview = outline ? countNotedNodes(outline) : 0
 
   return (
     <Modal
@@ -230,6 +272,27 @@ export default function AiDialog({
                   if (event.key === 'Enter') void run()
                 }}
               />
+            </div>
+            <div className="ai-field ai-field--row">
+              <span className="ai-field__label">详细程度</span>
+              <div className="ai-choices">
+                <button
+                  type="button"
+                  className={detail === 'detailed' ? 'ai-choice ai-choice--active' : 'ai-choice'}
+                  title="覆盖尽量多的考点，每个节点配解释，关键考点补真题（内容多、耗时略长）"
+                  onClick={() => setDetail('detailed')}
+                >
+                  详细
+                </button>
+                <button
+                  type="button"
+                  className={detail === 'skeleton' ? 'ai-choice ai-choice--active' : 'ai-choice'}
+                  title="只出骨架：短标题、快速起图，细节之后再补"
+                  onClick={() => setDetail('skeleton')}
+                >
+                  骨架
+                </button>
+              </div>
             </div>
             <div className="ai-field ai-field--row">
               <span className="ai-field__label">层级</span>
@@ -327,7 +390,9 @@ export default function AiDialog({
         {outline && (
           <div className="ai-preview">
             <div className="ai-preview__head">
-              <Check size={13} /> 解析出 {totalPreview} 个主题，预览：
+              <Check size={13} /> 解析出 {totalPreview} 个主题
+              {notedPreview > 0 ? `（其中 ${notedPreview} 个带解释）` : ''}
+              ，预览：
             </div>
             <div className="ai-preview__body">
               <OutlinePreview node={outline} />

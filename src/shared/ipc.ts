@@ -445,6 +445,8 @@ export interface AiConfigPatch {
   baseUrl?: string
   model?: string
   temperature?: number
+  /** 单次回复输出上限；0 = 不发送该字段（用服务商默认值） */
+  maxTokens?: number
   apiKey?: string
 }
 
@@ -454,6 +456,8 @@ export interface AiChatResult {
   model: string
   /** 本次消耗的 token（服务端没给就是 null） */
   totalTokens: number | null
+  /** 结束原因；`length` 表示输出被服务商截断（内容可能不完整） */
+  finishReason: string | null
 }
 
 export interface AiTestResult {

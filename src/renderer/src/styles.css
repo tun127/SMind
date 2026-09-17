@@ -850,6 +850,16 @@ textarea {
   line-height: 1.6;
 }
 
+/* 节点的解释（`> ` 行会成为备注）：预览里也要看得见，
+   否则用户无法判断"详细"到底详在哪 */
+.ai-preview__note {
+  padding: 0 8px 2px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .ai-preview__dot {
   flex: none;
   width: 5px;

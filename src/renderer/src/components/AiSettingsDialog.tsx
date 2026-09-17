@@ -32,6 +32,7 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
   const [baseUrl, setBaseUrl] = useState(DEFAULT_AI_CONFIG.baseUrl)
   const [model, setModel] = useState(DEFAULT_AI_CONFIG.model)
   const [temperature, setTemperature] = useState(DEFAULT_AI_CONFIG.temperature)
+  const [maxTokens, setMaxTokens] = useState(DEFAULT_AI_CONFIG.maxTokens)
   const [apiKey, setApiKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -50,6 +51,7 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
         setBaseUrl(current.baseUrl)
         setModel(current.model)
         setTemperature(current.temperature)
+        setMaxTokens(current.maxTokens)
       } catch (error) {
         onNotify(`读取 AI 配置失败：${(error as Error).message}`)
       }
@@ -97,7 +99,13 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
     try {
       setBusy(true)
       // Key 留空表示「不改动已保存的 Key」
-      const next = await window.api.aiConfigSave({ baseUrl, model, temperature, apiKey })
+      const next = await window.api.aiConfigSave({
+        baseUrl,
+        model,
+        temperature,
+        maxTokens,
+        apiKey
+      })
       setView(next)
       setApiKey('')
       if (notify) {
@@ -274,6 +282,25 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
         </div>
         <span className="ai-field__hint">
           越低越稳定保守，越高越发散有创意。生成导图建议 0.5–0.8。
+        </span>
+
+        <div className="ai-field ai-field--row">
+          <span className="ai-field__label">单次输出上限</span>
+          <input
+            type="number"
+            className="input"
+            min={0}
+            max={65536}
+            step={512}
+            value={maxTokens}
+            onChange={(event) => setMaxTokens(Number(event.target.value))}
+          />
+          <span className="ai-field__value">token</span>
+        </div>
+        <span className="ai-field__hint">
+          AI **一次回复**最多能写多少内容。调太小会让「生成完整详细的导图」写到一半被服务商截断
+          （默认 8192）；填 0 表示不发送这个字段、交给服务商决定——多数服务商默认只有 1.5k~2k，
+          最容易出现"只写了粗分"。服务商不接受这个字段时会自动去掉重试，不会把请求搞死。
         </span>
 
         {testResult && (

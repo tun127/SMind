@@ -869,6 +869,22 @@ export default function ChatPanel({
         return
       }
 
+      /**
+       * 输出被服务商的**输出上限**截断（`finish_reason = length`）。
+       *
+       * 以前这个信息被丢掉：解析出来了、没人用，于是「被服务商掐断」和「正常说完」
+       * 在应用里长得一模一样——用户看到的是"AI 怎么只写了一点点"，
+       * 既不知道是模型懒、还是被截断，也无从下手。
+       * 现在如实说明并给出下一步（这是"只写粗分"最常见的原因）。
+       */
+      if (event.truncated) {
+        patchLast({
+          warning:
+            '本回合的输出被服务商的**输出上限**截断了（剩余内容没有发出），所以看起来"只写了一半"。' +
+            '回复「继续」可以接着写完；想一次写更多，去「AI 设置」把「单次输出上限」调大。'
+        })
+      }
+
       const calls = event.toolCalls
       if (calls.length === 0) {
         update((prev) => {

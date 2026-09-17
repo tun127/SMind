@@ -506,22 +506,30 @@ async function callAiStream(
 
   let full = ''
   let model: string | null = null
+  /** 结束原因：`stop` = 说完了、`tool_calls` = 要调工具、`length` = **被输出上限截断** */
+  let finishReason: string | null = null
   /** 本轮模型请求的工具调用（分片累积；空数组 = 说完了） */
   let toolCalls: ToolCall[] = []
   /** token 消耗（开了 include_usage 后随最后一个分片到来；服务商不支持就没有） */
   let usage: TokenUsage | null = null
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
+    /**
+     * 请求体抽成函数，是为了**能去掉 max_tokens 重发一次**：
+     * 有些服务商不认这个字段（或我们的值超过它自己的上限），400 里会点名它。
+     * 那样"输出上限"这个设置就永远不会把请求搞死。
+     */
+    const buildBody = (includeMaxTokens: boolean): string =>
+      JSON.stringify({
         model: config.model,
         messages: toWireMessages(messages),
         temperature: config.temperature,
         stream: true,
+        /**
+         * **显式给出输出上限**。不给的话用服务商默认值——很多默认只有 1.5k~2k token，
+         * 而「完整详细的大纲」（考点 + 解释 + 真题）动辄 4k~8k，
+         * 写到一半就被服务端掐断，用户看到的就是"AI 只写了粗分"。
+         */
+        ...(includeMaxTokens && config.maxTokens > 0 ? { max_tokens: config.maxTokens } : {}),
         // 让服务商在流末尾回报 token 消耗（面板要显示「这次花了多少」）。
         // OpenAI 兼容实现基本都支持；不认这个字段的会忽略它，无害
         stream_options: { include_usage: true },
@@ -534,14 +542,37 @@ async function callAiStream(
               parallel_tool_calls: true
             }
           : {})
-      }),
-      signal: controller.signal
-    })
+      })
 
+    const send = (includeMaxTokens: boolean): Promise<Response> =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.apiKey}`
+        },
+        body: buildBody(includeMaxTokens),
+        signal: controller.signal
+      })
+
+    let response = await send(config.maxTokens > 0)
     if (!response.ok) {
       // 错误响应不是流：整段读出来交给统一的错误翻译
       const body = await response.text()
-      throw new Error(describeAiError(response.status, body))
+      const rejectsMaxTokens =
+        config.maxTokens > 0 && /max_?(tokens|length|output|new_tokens)/i.test(body)
+      if (rejectsMaxTokens) {
+        response = await send(false)
+        if (!response.ok) {
+          throw new Error(describeAiError(response.status, await response.text()))
+        }
+        logMain(
+          'ai-max-tokens-unsupported',
+          `服务商不接受 max_tokens，已去掉该字段重发（原响应：${body.slice(0, 160)}）`
+        )
+      } else {
+        throw new Error(describeAiError(response.status, body))
+      }
     }
     if (!response.body) throw new Error('AI 服务没有返回流式内容')
 
@@ -561,6 +592,8 @@ async function callAiStream(
         if (!delta) continue
         if (delta.model) model = delta.model
         if (delta.usage) usage = delta.usage
+        // 结束原因要留住：`length` 意味着这次输出被服务商的输出上限掐断了
+        if (delta.finishReason) finishReason = delta.finishReason
         // 工具调用的参数是**逐片追加**的字符串，必须按 index 累积（见 accumulateToolCalls）
         if (delta.toolCalls.length > 0) toolCalls = accumulateToolCalls(toolCalls, delta.toolCalls)
         emit(think.push(delta.text))
@@ -589,6 +622,8 @@ async function callAiStream(
       model: model ?? config.model,
       aborted: controller.signal.aborted,
       toolCalls: finalCalls,
+      // 如实上报"被截断"：以前这个信息被丢掉，用户只看到"AI 怎么只写了一点"
+      ...(finishReason === 'length' ? { truncated: true } : {}),
       ...(usage ? { usage } : {})
     })
   } catch (error) {
@@ -640,24 +675,36 @@ async function callAi(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
+    const buildBody = (includeMaxTokens: boolean): string =>
+      JSON.stringify({
         model: config.model,
         messages,
         temperature: config.temperature,
+        // 与流式请求同理：不显式给上限，服务商默认值会把长输出掐断
+        ...(includeMaxTokens && config.maxTokens > 0 ? { max_tokens: config.maxTokens } : {}),
         stream: false
-      }),
-      signal: controller.signal
-    })
+      })
 
-    const text = await response.text()
+    const send = (includeMaxTokens: boolean): Promise<Response> =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.apiKey}`
+        },
+        body: buildBody(includeMaxTokens),
+        signal: controller.signal
+      })
+
+    let response = await send(config.maxTokens > 0)
+    let text = await response.text()
     if (!response.ok) {
-      throw new Error(describeAiError(response.status, text))
+      // 服务商不认 max_tokens：去掉它重发一次（见 callAiStream 的同款处理）
+      if (config.maxTokens > 0 && /max_?(tokens|length|output|new_tokens)/i.test(text)) {
+        response = await send(false)
+        text = await response.text()
+      }
+      if (!response.ok) throw new Error(describeAiError(response.status, text))
     }
 
     let payload: unknown
@@ -672,7 +719,14 @@ async function callAi(
     const totalTokens = usage && typeof usage.total_tokens === 'number' ? usage.total_tokens : null
     const model =
       isRecord(payload) && typeof payload.model === 'string' ? payload.model : config.model
-    return { content, model, totalTokens }
+    // 结束原因：`length` = 被输出上限截断（界面要如实提示，别让用户以为模型只肯写这么多）
+    const choices = isRecord(payload) && Array.isArray(payload.choices) ? payload.choices : []
+    const firstChoice: unknown = choices[0]
+    const finishReason =
+      isRecord(firstChoice) && typeof firstChoice.finish_reason === 'string'
+        ? firstChoice.finish_reason
+        : null
+    return { content, model, totalTokens, finishReason }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(
@@ -1586,6 +1640,11 @@ function registerIpc(): void {
           ? patch.model.trim()
           : current.model,
       temperature: typeof patch.temperature === 'number' ? patch.temperature : current.temperature,
+      // 0 是合规值（表示"不发送 max_tokens"），不能用 `||` 兜底
+      maxTokens:
+        typeof patch.maxTokens === 'number' && Number.isFinite(patch.maxTokens)
+          ? Math.round(patch.maxTokens)
+          : current.maxTokens,
       // 空字符串表示「不改动已保存的 Key」，避免用户看不到明文时误清空
       apiKey:
         typeof patch.apiKey === 'string' && patch.apiKey.trim().length > 0
