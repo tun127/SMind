@@ -1272,8 +1272,10 @@ export default function ChatPanel({
         selectedTitles,
         totalNodes: countTopicTree(root),
         sheetCount: state.workbook.sheets.length,
-        // 生成规格按用户的档位走（min 省 token / high 80 分 / max 90 分）
+        // 生成规格按用户的档位走（min 省 token / mid 80 分 / max 90 分）
         tier,
+        // 用户这一轮的原话：用来粗判任务类型，决定注入「生成规格 / 编辑模块 / 未判定兜底」
+        latestRequest: text,
         // 能不能改，以主进程的许可判定为准：写工具没下发时，提示词也必须如实说
         canWrite: license?.canWrite ?? true,
         writeHint: license?.writeHint ?? null,
