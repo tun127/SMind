@@ -8531,6 +8531,27 @@ function testAi(): void {
   check('要求写具体内容（保留数字/结论/条件）', docPrompt[1].content.includes('数字'))
   check('解释直接成子节点（不用备注行）', docPrompt[1].content.includes('不要用 `> `'))
   check('禁止「XX 的概述」这类空节点', docPrompt[1].content.includes('概述'))
+  /**
+   * 单一来源：三条质量判据住在 `QUALITY_CHECKS`，聊天层与文档规格都引用它。
+   * 这里钉「两处字面一致」——否则以后改了这边、那边过期，模型会同时看到两套说法。
+   */
+  const qualityHints = ['有信息量：删掉它', '是事实不是评价', '可操作：读到叶子就能答题']
+  check(
+    '文档规格复用聊天层同一套质量判据（单一来源）',
+    qualityHints.every((hint) => docPrompt[1].content.includes(hint))
+  )
+  // 不能借用别的作用域里的 `prompt` 变量：这个名字会撞上宿主环境的全局函数，就地构造一份
+  const chatWithCriteria = buildChatSystemPrompt({
+    skeleton: '- 甲（2 个节点）',
+    selectedTitles: [],
+    totalNodes: 2,
+    sheetCount: 1,
+    canWrite: true
+  })
+  check(
+    '聊天层也带同一套判据（两处字面一致）',
+    qualityHints.every((hint) => chatWithCriteria.includes(hint))
+  )
   check('带上文档全文与文件名', docPrompt[1].content.includes('【文档全文】'))
   check('带上文件名', docPrompt[1].content.includes('报告.md'))
 
