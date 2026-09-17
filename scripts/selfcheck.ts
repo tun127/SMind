@@ -1880,7 +1880,21 @@ function testAiChatHelpers(): void {
   check('默认就按详细规格生成', prompt.includes('默认就按详细规格来'))
   check('详细规格是全领域通用（不限考题）', prompt.includes('任何领域都适用'))
   check('详细规格给了规模下限', prompt.includes('至少 100 个节点'))
-  check('解释写进 `> ` 行成为备注', prompt.includes('> '))
+  check('保质保量是第一优先', prompt.includes('保质保量是第一优先'))
+  // 2026-09 政策反转：解释不再写备注行，而是**直接成子节点**（备注在画布上不显眼）
+  check('明确禁止把解释写成 `> ` 备注行', prompt.includes('不要用 `> `'))
+  check('考题必须诚实标注（自编不得标「真题」）', prompt.includes('把自编的题标成「真题」是造假'))
+  check(
+    '信息不足以判断时先问（通用原则，ReAct：信息不够先问）',
+    prompt.includes('信息不足以判断时，先问再动手')
+  )
+  check('列出了典型的不确定场景（含考试科目）', prompt.includes('考试科目'))
+  check('同时防止另一个极端：能确定就直接做，不拿提问当拖延', prompt.includes('不要拿提问当拖延'))
+  check('生成结束要核对数量达标（不够就继续补）', prompt.includes('数量是否达到承诺'))
+  check(
+    'askUser 在可用工具清单里（第 15 条的落点）',
+    AGENT_ALL_TOOLS.some((t) => t.name === 'askUser')
+  )
   check('要求分几次 insertSubtree（避免被输出上限截断）', prompt.includes('分几次 insertSubtree'))
 
   // 绝不能把「去画布上点选」推给用户（实测踩过），复述式指令要能自己定位
