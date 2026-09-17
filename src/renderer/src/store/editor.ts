@@ -378,6 +378,10 @@ export interface EditorState {
    */
   nodePanelTick: number
   requestNodePanel(): void
+  /** 「备注」聚焦信号（自增值），NodePanel 监听它 */
+  notesFocusTick: number
+  /** 请求节点面板聚焦到备注输入框（画布上的备注指示图标点击用）；面板会随之自动打开 */
+  requestNotesFocus(): void
   /** 改画布级元素标题样式（字号 / 加粗 / 斜体 / 颜色），一步撤销 */
   setOverlayStyle(kind: OverlayKind, id: string, patch: OverlayTextStylePatch): void
   /** 请求节点面板聚焦到代码输入框（Alt+C 用）；面板未打开时会随打开自动聚焦 */
@@ -1912,6 +1916,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   codeFocusTick: 0,
   requestCodeFocus: () => set((s) => ({ codeFocusTick: s.codeFocusTick + 1 })),
+
+  notesFocusTick: 0,
+  requestNotesFocus: () =>
+    set((s) => ({ nodePanelTick: s.nodePanelTick + 1, notesFocusTick: s.notesFocusTick + 1 })),
 
   formulaFocusTick: 0,
   requestFormulaFocus: () => set((s) => ({ formulaFocusTick: s.formulaFocusTick + 1 })),

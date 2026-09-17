@@ -2325,6 +2325,45 @@ textarea {
   color: var(--text);
 }
 
+/* 思维链直播：推理模型的思考过程，边想边显示；正文开始后自动收起成一行 */
+.chat-think {
+  margin: 2px 0 6px;
+  border-left: 3px solid var(--border);
+  padding-left: 8px;
+}
+
+.chat-think__summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 12px;
+  user-select: none;
+}
+
+.chat-think__body {
+  margin-top: 4px;
+  padding: 6px 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  background: rgba(127, 127, 127, 0.06);
+  border-radius: 6px;
+}
+
+/* 画布节点的指示图标（备注 / 链接 / 附件）：可点，点了直达节点属性面板 */
+.topic__indicator {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
 /* 已挂上的文档：显示在输入框上方，可单独移除 */
 .chat-panel__docs {
   display: flex;

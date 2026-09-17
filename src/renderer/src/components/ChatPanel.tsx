@@ -73,6 +73,11 @@ interface ChatMsg {
   content: string
   /** 这条回答被用户手动停止——标注出来，别让人以为说完了 */
   aborted?: boolean
+  /**
+   * 思维链（推理模型的思考过程，可折叠展示）。
+   * 只用于界面直播：**不进历史存档**（normalizeChatHistory 只留 role/content）。
+   */
+  thinking?: string
   /** 这一轮里 AI 做过什么（工具调用摘要），让用户看得见它干的事 */
   toolNotes?: string[]
   /** 这条回答花了多少 token（多轮工具调用会累计；服务商没回报就没有） */
@@ -930,6 +935,7 @@ export default function ChatPanel({
           if (!last || last.role !== 'assistant') return prev
           const merged: ChatMsg = { ...last }
           if (patch.content !== undefined) merged.content = patch.content
+          if (patch.thinking !== undefined) merged.thinking = patch.thinking
           if (patch.aborted !== undefined) merged.aborted = patch.aborted
           if (patch.toolNotes !== undefined) merged.toolNotes = patch.toolNotes
           return [...prev.slice(0, -1), merged]
@@ -941,6 +947,16 @@ export default function ChatPanel({
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
           return [...prev.slice(0, -1), { ...last, content: last.content + event.text }]
+        })
+        return
+      }
+
+      if (event.kind === 'reasoning') {
+        // 思维链直播：边想边显示，正文一开始就自动收起（界面在渲染层做）
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          return [...prev.slice(0, -1), { ...last, thinking: (last.thinking ?? '') + event.text }]
         })
         return
       }
@@ -1013,6 +1029,11 @@ export default function ChatPanel({
             '本回合的输出被服务商的**输出上限**截断了（剩余内容没有发出），所以看起来"只写了一半"。' +
             '回复「继续」可以接着写完；想一次写更多，去「AI 设置」把「单次输出上限」调大。'
         })
+      }
+
+      // 思维链全文兜底：流式期间已逐片拼过，这里以完整版为准（防丢片）
+      if (event.kind === 'done' && event.reasoning && event.reasoning.length > 0) {
+        patchLast({ thinking: event.reasoning })
       }
 
       const calls = event.toolCalls
@@ -1507,6 +1528,29 @@ export default function ChatPanel({
                             </span>
                           ))}
                         </div>
+                      )}
+                      {msg.thinking && msg.thinking.trim().length > 0 && (
+                        /**
+                         * 思维链展示（对齐 DeepSeek 网页的体验）：
+                         * 思考中 → 展开直播；正文一开始 → 自动收起成一行，可点开回看。
+                         */
+                        <details
+                          className="chat-think"
+                          open={
+                            streaming &&
+                            msg.id === messages[messages.length - 1]?.id &&
+                            msg.content.trim().length === 0
+                          }
+                        >
+                          <summary className="chat-think__summary">
+                            {streaming &&
+                            msg.id === messages[messages.length - 1]?.id &&
+                            msg.content.trim().length === 0
+                              ? '思考中…（展开看过程）'
+                              : '已深度思考（点击展开）'}
+                          </summary>
+                          <div className="chat-think__body">{msg.thinking}</div>
+                        </details>
                       )}
                       {renderAssistantText(msg.content)}
                       {msg.warning && <div className="chat-msg__warning">{msg.warning}</div>}

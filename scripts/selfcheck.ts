@@ -2558,6 +2558,65 @@ function testAgentTools(): void {
     4
   )
 
+  group('AI：思维链直播')
+
+  eq(
+    'reasoning_content 能取到',
+    extractStreamDelta('{"choices":[{"delta":{"reasoning_content":"想"}}]}')?.reasoning,
+    '想'
+  )
+  eq(
+    '普通文本分片的 reasoning 为空串',
+    extractStreamDelta('{"choices":[{"delta":{"content":"嗨"}}]}')?.reasoning,
+    ''
+  )
+  eq(
+    '同一分片里 content 与 reasoning 各归各',
+    (() => {
+      const delta = extractStreamDelta(
+        '{"choices":[{"delta":{"content":"答","reasoning_content":"想"}}]}'
+      )
+      return delta ? `${delta.text}/${delta.reasoning}` : ''
+    })(),
+    '答/想'
+  )
+  {
+    // `<think>` 混在 content 里的模型：气泡拿不到它，直播通道拿得到
+    const thinkPieces: string[] = []
+    const filter = createThinkingFilter((piece) => thinkPieces.push(piece))
+    const visible = [
+      filter.push('答'),
+      filter.push('<thi'),
+      filter.push('nk>想'),
+      filter.push('</th'),
+      filter.push('ink>完'),
+      filter.flush()
+    ].join('')
+    eq('标签被切成两半也能滤干净', visible, '答完')
+    eq('滤掉的思维链进直播通道', thinkPieces.join(''), '想')
+  }
+  {
+    // 不传回调时行为与从前完全一致（纯过滤）
+    const plain = createThinkingFilter()
+    eq('不传回调时依旧只过滤', [plain.push('a<think>b</think>c'), plain.flush()].join(''), 'ac')
+  }
+
+  group('AI：内容成节点（不写备注）的反向约束')
+
+  const detailedPrompt = buildGenerateMessages({ topic: '计算机网络', detail: 'detailed' })[1]
+    .content
+  // 注意：提示词里会「提到」`> ` 是为了**禁止**它，所以断言查的是禁止语句，不是"不提及"
+  check('详细模式明确禁用备注行', detailedPrompt.includes('不要用 `> `'))
+  check('详细模式不再要求写备注行', !detailedPrompt.includes('下一行用 `> `'))
+  check('详细模式明确禁止空泛点题节点', detailedPrompt.includes('禁止空泛点题'))
+  // insertSubtree 是**写**工具，在 ALL 清单里（只读清单 AGENT_TOOLS 里没有它）
+  const insertTool = AGENT_ALL_TOOLS.find((tool) => tool.name === 'insertSubtree')
+  check(
+    'insertSubtree 工具描述明确禁用备注行',
+    (insertTool?.description ?? '').includes('不要用 `> `')
+  )
+  check('insertSubtree 要求节点自带信息量', (insertTool?.description ?? '').includes('自带信息量'))
+
   // 参数是**跨片拼起来的**：一次覆盖式赋值只会拿到半截 JSON
   const step1 = accumulateToolCalls(
     [],

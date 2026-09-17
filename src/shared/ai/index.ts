@@ -171,7 +171,8 @@ export interface AiMessage {
 
 const OUTLINE_SYSTEM =
   '你是思维导图助手。输出必须是**缩进大纲**：每行一个节点，以「- 」开头，' +
-  '子节点比父节点多缩进两个空格。节点下面可以另起一行用 `> ` 写这个节点的备注（解释、答案、补充说明）。' +
+  '子节点比父节点多缩进两个空格。解释与说明**直接写成子节点**（如「要点：…」「例：…」），' +
+  '不要用 `> ` 备注行——备注在画布上不显眼，用户要看的是节点本身。' +
   '只输出大纲本身，不要解释、不要客套、不要用代码块包裹。'
 
 /** 生成详细程度：骨架（快速起图）/ 详细（完整考点 + 解释 + 真题） */
@@ -200,12 +201,13 @@ export function buildGenerateMessages(input: {
       `要求：最多 ${depth} 层，第一行是中心主题，下面按层级展开；用简体中文。` +
         `覆盖这个主题的**完整结构**（该领域的主要板块都要有，不要只列几个大方向就收工），` +
         `目标规模**至少 100 个节点**（大主题该更多就更多）：`,
-      '1. 每个节点写成**具体内容**（15~40 字），不要只有两三个字的空标题；',
-      '2. 每个节点的下一行用 `> ` 写 40~100 字的解释 / 说明：讲清"是什么、为什么、怎么用"；',
-      '3. 关键节点下补 1~2 个**例子**：考题类主题写真题，其它领域写实例 / 案例 / 代码 / 数据，',
-      '   写成子主题（如「例：…」）或放进 `> ` 行里都行；',
-      '4. 严格用缩进大纲：每行以「- 」开头，子节点比父节点多缩进两个空格；',
-      '5. 内容多就直接写完，**不要因为"太长"而自行删减**；宁可写满也不要提前收尾。'
+      '1. 每个节点都是**具体知识点**（15~40 字）：定义要带关键特征，公式要带表达式与适用条件，' +
+        '对比要写出差异点，规范要写出关键条款 / 数字；',
+      '2. **禁止空泛点题**：不许出现「XX 的基础知识」「XX 的概述」「了解 / 掌握 XX」这类不含信息量的节点；',
+      '3. 解释与细节**直接写成子节点**（「要点：…」「公式：…」「易错：…」「例：…」），不要用 `> ` 备注行；',
+      '4. 考题类主题补**真题**：写清题型 / 考法 / 答案要点（如「例：（真题）考察信道容量，答：香农公式 C=Blog₂(1+S/N)」）；',
+      '5. 严格用缩进大纲：每行以「- 」开头，子节点比父节点多缩进两个空格；',
+      '6. 内容多就直接写完，**不要因为"太长"而自行删减**；宁可写满也不要提前收尾。'
     )
   } else {
     lines.push(
@@ -233,10 +235,10 @@ export function buildGenerateMessages(input: {
 function documentSpecLines(depth: number): string[] {
   return [
     `1. 覆盖文档的**全部章节与要点**（文档里有的内容不要漏；宁可多列，不要只写几个大方向）；最多 ${depth} 层；`,
-    '2. 每个节点写成**具体内容**（15~40 字），不要只有两三个字的空标题；',
-    '3. 每个节点的下一行用 `> ` 写 40~100 字说明（是什么 / 为什么 / 关键数据），' +
-      '**尽量引用原文里的原话、数字或结论**；文档里的例子、数据、结论不要丢；',
-    '4. 关键处补 1~2 个具体例子 / 数据 / 结论（写成子主题，或放进 `> ` 行里）；',
+    '2. 每个节点写成**具体内容**（15~40 字）：保留原文里的数字、结论、条件，不要只点题；' +
+      '**禁止**「XX 的概述 / 小结」这类不含信息量的节点；',
+    '3. 解释与细节**直接写成子节点**（要点 / 数据 / 结论 / 例子各成节点），不要用 `> ` 备注行；',
+    '4. 文档里的例子、数据、结论**不要丢**，单独成节点并尽量引用原文原话；',
     '5. 严格用缩进大纲：每行以「- 」开头，子节点比父节点多缩进两个空格；' +
       '不要开场白、不要代码块包裹、不要写"本文介绍了…"这类废话节点。'
   ]
@@ -1013,11 +1015,11 @@ export function buildChatSystemPrompt(input: {
       '（除非他明确说"只要框架 / 先给个大纲 / 不用太细"）——**任何领域都适用**，不只是考题：' +
       '① 覆盖这个主题的**完整结构**（该领域的主要板块都要有，不要只开几个大方向就收工），' +
       '目标规模**至少 100 个节点**（大主题该更多就更多）；' +
-      '② 每个节点写**具体内容**（15~40 字，不要只有两三个字的空标题）；' +
-      '③ 每个节点的下一行用 `> ` 写 40~100 字的解释 / 说明（它会成为该主题的**备注**，' +
-      '不占画布宽度、可搜索可导出）；' +
-      '④ 关键节点下补 1~2 个**例子**：考题类主题写真题，其它领域写实例 / 案例 / 代码 / 数据；' +
-      '写进子主题（如「例：…」）或 `> ` 行里都行。' +
+      '② 每个节点写**具体内容**（15~40 字）：定义带关键特征、公式带表达式与条件、对比写差异——' +
+      '**禁止**「XX 的基础知识 / 概述 / 简介」「了解 XX」这类不含信息量的空泛节点；' +
+      '③ 解释与细节**直接写成子节点**（「要点：…」「公式：…」「易错：…」「例：…」），' +
+      '**不要用 `> ` 备注行**——备注在画布上不显眼，用户要的是看得见的内容；' +
+      '④ 考题类主题补**真题**：写清题型 / 考法 / 答案要点；其它领域补实例 / 案例 / 代码 / 数据，都写成子主题；' +
       '⑤ 分支多时**分几次 insertSubtree**（一个分支一次），不要试图一次写完——' +
       '单次输出有上限，硬写会被截断、只交出一半。' +
       '不要在过程中贴长篇解说：先把图写全，最后用两三句话总结。',
@@ -1035,7 +1037,7 @@ export function buildChatSystemPrompt(input: {
       '② 之后每完成一步：先用一两句话**简短反馈**（刚做了什么、接下来做什么），' +
       '再用 updatePlan 把 done 加一，然后继续动手——不要闷头连做十几步不吭声；' +
       '③ 全部做完后**必须自检**：用 findIncompleteNodes 查该有的内容有没有漏' +
-      '（要"详细"的图就查 notes 里缺解释的，结构类任务可查 children），必要时用 getDocStats 核对数量；' +
+      '（要"详细"的图就查**叶子节点**——细到不能再细才算讲透；结构类任务也查 children），必要时用 getDocStats 核对数量；' +
       '发现问题**当场修正**，不要瞒报；' +
       '④ 最后给总结：完成了多少处、自检结论、还有哪些没做及原因。' +
       '小改动（改个标题、搬一个节点、换个结构）不必写计划，直接做。'
@@ -1085,6 +1087,11 @@ export type AiStreamEvent =
   | { requestId: string; kind: 'chunk'; text: string }
   | {
       requestId: string
+      kind: 'reasoning'
+      text: string
+    }
+  | {
+      requestId: string
       kind: 'done'
       content: string
       model: string
@@ -1099,6 +1106,8 @@ export type AiStreamEvent =
        * 带上它，界面才能如实说明并引导续写。
        */
       truncated?: boolean
+      /** 思维链全文（有才有；界面用它兜底，保证与流式期间拼出的不一致时以它为准） */
+      reasoning?: string
       /** token 消耗（服务商回报；不支持 usage 的服务商没有这个字段，界面就不显示） */
       usage?: TokenUsage
     }
@@ -1293,6 +1302,8 @@ function readUsage(raw: unknown): TokenUsage | null {
 
 export interface StreamDelta {
   text: string
+  /** 推理模型的思维链增量（`reasoning_content`；多数实现 / 分片没有，为空串） */
+  reasoning: string
   /** 服务端实际使用的模型名（每个分片都带，取到一次即可） */
   model: string | null
   /** 本片里的工具调用增量（没有则为空数组） */
@@ -1336,27 +1347,48 @@ export function extractStreamDelta(dataLine: string): StreamDelta | null {
   if (!isRecord(parsed)) return null
   const model = typeof parsed.model === 'string' ? parsed.model : null
   const usage = readUsage(parsed.usage)
+  /** 思维链增量：DeepSeek 推理模型 / 通义 Qwen3 等把它放在 `reasoning_content` */
+  const reasoningOf = (source: unknown): string =>
+    isRecord(source) && typeof source.reasoning_content === 'string' ? source.reasoning_content : ''
   const choices = parsed.choices
   if (!Array.isArray(choices) || choices.length === 0) {
     // usage 专属分片（choices 为空）：有 usage 就收下，没有才丢
-    return usage ? { text: '', model, toolCalls: [], finishReason: null, usage } : null
+    return usage
+      ? { text: '', reasoning: '', model, toolCalls: [], finishReason: null, usage }
+      : null
   }
   const first = choices[0]
   if (!isRecord(first))
-    return usage ? { text: '', model, toolCalls: [], finishReason: null, usage } : null
+    return usage
+      ? { text: '', reasoning: '', model, toolCalls: [], finishReason: null, usage }
+      : null
   const finishReason = typeof first.finish_reason === 'string' ? first.finish_reason : null
   const delta = first.delta
   const toolCalls = isRecord(delta) ? readToolCallDeltas(delta.tool_calls) : []
 
   // 绝大多数实现是 delta.content；少数把整段塞在 message.content
   if (isRecord(delta) && typeof delta.content === 'string') {
-    return { text: delta.content, model, toolCalls, finishReason, usage }
+    return {
+      text: delta.content,
+      reasoning: reasoningOf(delta),
+      model,
+      toolCalls,
+      finishReason,
+      usage
+    }
   }
   const message = first.message
   if (isRecord(message) && typeof message.content === 'string') {
-    return { text: message.content, model, toolCalls, finishReason, usage }
+    return {
+      text: message.content,
+      reasoning: reasoningOf(message),
+      model,
+      toolCalls,
+      finishReason,
+      usage
+    }
   }
-  return { text: '', model, toolCalls, finishReason, usage }
+  return { text: '', reasoning: reasoningOf(delta), model, toolCalls, finishReason, usage }
 }
 
 /** 解析 delta.tool_calls：各实现字段略有出入，能取多少取多少 */
@@ -1434,7 +1466,7 @@ function tagTailLength(text: string): number {
  * ——气泡里孤零零挂个标签，就是它（真事）。
  * 增量是分片到达的，标签可能被切成两半，所以尾巴要留住等下一片。
  */
-export function createThinkingFilter(): ThinkingFilter {
+export function createThinkingFilter(onThink?: (piece: string) => void): ThinkingFilter {
   let inThink = false
   let pending = ''
   return {
@@ -1445,10 +1477,13 @@ export function createThinkingFilter(): ThinkingFilter {
         if (inThink) {
           const close = pending.indexOf(THINK_CLOSE)
           if (close < 0) {
-            // 整段都在思维链里：只留可能是标签前缀的尾巴，其余丢弃
-            pending = pending.slice(pending.length - tagTailLength(pending))
+            // 整段都在思维链里：只留可能是标签前缀的尾巴，其余交给 onThink（直播用）
+            const keep = tagTailLength(pending)
+            if (onThink && pending.length > keep) onThink(pending.slice(0, pending.length - keep))
+            pending = pending.slice(pending.length - keep)
             return out
           }
+          if (onThink && close > 0) onThink(pending.slice(0, close))
           pending = pending.slice(close + THINK_CLOSE.length)
           inThink = false
           continue
@@ -1475,6 +1510,7 @@ export function createThinkingFilter(): ThinkingFilter {
     },
     flush(): string {
       const rest = inThink ? '' : pending
+      if (inThink && onThink && pending.length > 0) onThink(pending)
       pending = ''
       inThink = false
       return rest

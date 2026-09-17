@@ -554,6 +554,8 @@ async function callAiStream(
   streamAborters.set(requestId, controller)
 
   let full = ''
+  /** 思维链（推理模型才有；只用于界面直播，不进正文、不进历史） */
+  let reasoning = ''
   let model: string | null = null
   /** 结束原因：`stop` = 说完了、`tool_calls` = 要调工具、`length` = **被输出上限截断** */
   let finishReason: string | null = null
@@ -608,9 +610,15 @@ async function callAiStream(
 
     const splitter = createSseLineSplitter()
     const decoder = new TextDecoder()
-    // 思维链一律滤掉：有些模型把 ` thought… response` 塞进 content 一起流出来，
-    // 不过滤的话用户气泡里就会挂着这种标签（真出现过）
-    const think = createThinkingFilter()
+    // 思维链不再只能扔掉：reasoning_content / <think> 里的内容**转发给界面直播**
+    // （用户盯着一屏工具条目时，看得见它"在想什么"比一个转圈强得多）；
+    // 但它不进正文（full），也不会存进历史——只是过程展示。
+    const emitReasoning = (text: string): void => {
+      if (text.length === 0) return
+      reasoning += text
+      push({ requestId, kind: 'reasoning', text })
+    }
+    const think = createThinkingFilter(emitReasoning)
     const emit = (text: string): void => {
       if (text.length === 0) return
       full += text
@@ -626,6 +634,7 @@ async function callAiStream(
         if (delta.finishReason) finishReason = delta.finishReason
         // 工具调用的参数是**逐片追加**的字符串，必须按 index 累积（见 accumulateToolCalls）
         if (delta.toolCalls.length > 0) toolCalls = accumulateToolCalls(toolCalls, delta.toolCalls)
+        if (delta.reasoning.length > 0) emitReasoning(delta.reasoning)
         emit(think.push(delta.text))
       }
     }
@@ -654,6 +663,7 @@ async function callAiStream(
       toolCalls: finalCalls,
       // 如实上报"被截断"：以前这个信息被丢掉，用户只看到"AI 怎么只写了一点"
       ...(isTruncatedFinish(finishReason) ? { truncated: true } : {}),
+      ...(reasoning.length > 0 ? { reasoning } : {}),
       ...(usage ? { usage } : {})
     })
   } catch (error) {

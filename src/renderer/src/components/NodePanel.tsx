@@ -61,6 +61,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const setSizeOverride = useEditor((s) => s.setSizeOverride)
   const codeFocusTick = useEditor((s) => s.codeFocusTick)
   const formulaFocusTick = useEditor((s) => s.formulaFocusTick)
+  const notesFocusTick = useEditor((s) => s.notesFocusTick)
   const setImage = useEditor((s) => s.setImage)
   const addAttachment = useEditor((s) => s.addAttachment)
   const removeAttachment = useEditor((s) => s.removeAttachment)
@@ -100,6 +101,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const [codeLangDraft, setCodeLangDraft] = useState(() => defaultCodeLanguage())
   const codeAreaRef = useRef<HTMLTextAreaElement | null>(null)
   const formulaAreaRef = useRef<HTMLTextAreaElement | null>(null)
+  const notesAreaRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Alt+C 的落点：面板一打开（或已打开时收到信号）就把焦点交给代码输入框
   useEffect(() => {
@@ -110,6 +112,11 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   useEffect(() => {
     if (formulaFocusTick > 0) formulaAreaRef.current?.focus()
   }, [formulaFocusTick])
+
+  // 画布上的备注指示图标点击：聚焦备注输入框（面板随 requestNotesFocus 自动打开）
+  useEffect(() => {
+    if (notesFocusTick > 0) notesAreaRef.current?.focus()
+  }, [notesFocusTick])
 
   // 只在「切换所选节点」时同步草稿，输入过程中绝不覆盖用户正在敲的内容
   useEffect(() => {
@@ -516,6 +523,7 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
         <div className="side-panel__title">备注</div>
         <textarea
+          ref={notesAreaRef}
           className="input input--area"
           rows={5}
           placeholder="记录这个主题的详细说明（点别处或离开输入框时保存）"

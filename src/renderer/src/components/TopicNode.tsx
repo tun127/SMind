@@ -297,7 +297,27 @@ function TopicNodeInner({
         {node.accessory.items.length > 0 && (
           <div className="topic__accessory" style={{ height: node.accessory.height }}>
             {node.accessory.items.map((item, index) => (
-              <IndicatorIcon key={`i-${index}-${item.kind}`} kind={item.kind} />
+              <button
+                key={`i-${index}-${item.kind}`}
+                type="button"
+                className="topic__indicator"
+                title={
+                  item.kind === 'notes'
+                    ? '有备注 · 点击查看 / 编辑'
+                    : item.kind === 'link'
+                      ? '有超链接 · 点击打开节点属性'
+                      : '有附件 · 点击打开节点属性'
+                }
+                onClick={(event) => {
+                  // 别让点击冒泡成「选中 / 进入编辑」：用户点的是指示图标
+                  event.stopPropagation()
+                  const editor = useEditor.getState()
+                  if (item.kind === 'notes') editor.requestNotesFocus()
+                  else editor.requestNodePanel()
+                }}
+              >
+                <IndicatorIcon kind={item.kind} />
+              </button>
             ))}
           </div>
         )}
