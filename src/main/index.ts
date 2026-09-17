@@ -1698,6 +1698,8 @@ function registerIpc(): void {
         typeof patch.maxTokens === 'number' && Number.isFinite(patch.maxTokens)
           ? Math.round(patch.maxTokens)
           : current.maxTokens,
+      // 质量档位：不传就沿用已保存的（normalizeAiConfig 会挡掉非法值）
+      tier: patch.tier ?? current.tier,
       // 空字符串表示「不改动已保存的 Key」，避免用户看不到明文时误清空
       apiKey:
         typeof patch.apiKey === 'string' && patch.apiKey.trim().length > 0

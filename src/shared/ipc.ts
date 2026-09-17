@@ -1,5 +1,5 @@
 import type { Workbook } from './model/types'
-import type { AiConfigView, AiMessage, AiStreamEvent, ChatHistoryEntry } from './ai'
+import type { AiConfigView, AiMessage, AiStreamEvent, ChatHistoryEntry, QualityTier } from './ai'
 import type { LicenseView } from './license'
 import type { ImageExportFormat } from './export/types'
 import type { HistoryEntry } from './history'
@@ -468,6 +468,8 @@ export interface AiConfigPatch {
   temperature?: number
   /** 单次回复输出上限；0 = 不发送该字段（用服务商默认值） */
   maxTokens?: number
+  /** 生成质量档位（min / high / max） */
+  tier?: QualityTier
   apiKey?: string
 }
 

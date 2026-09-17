@@ -48,6 +48,9 @@ import {
   claimsAppliedChange,
   compressHistory,
   CONTINUATION_MIN_OVERLAP,
+  DEFAULT_QUALITY_TIER,
+  normalizeQualityTier,
+  QUALITY_TIERS,
   digestPreamble,
   readableIpcError,
   countTopicTree,
@@ -1930,6 +1933,48 @@ function testAiChatHelpers(): void {
     }).includes('用户这句话里提到的节点'),
     false
   )
+
+  group('AI：生成质量档位（min / high / max）')
+
+  eq('三档：min / high / max', QUALITY_TIERS.map((item) => item.id).join('/'), 'min/high/max')
+  check(
+    '每档都有标签与说明',
+    QUALITY_TIERS.every((item) => item.label.length > 0 && item.hint.length > 0)
+  )
+  eq('默认档是 high（80 分）', DEFAULT_QUALITY_TIER, 'high')
+  eq('非法档位回退到默认', normalizeQualityTier('bogus'), 'high')
+  eq('合法档位原样保留', normalizeQualityTier('max'), 'max')
+  eq('配置归一化认档位', normalizeAiConfig({ tier: 'min' }).config.tier, 'min')
+  eq('配置里的坏档位回退', normalizeAiConfig({ tier: 42 }).config.tier, 'high')
+
+  const promptOf = (tier: 'min' | 'high' | 'max'): string =>
+    buildChatSystemPrompt({
+      skeleton: digest,
+      selectedTitles: [],
+      totalNodes: 5,
+      sheetCount: 1,
+      canWrite: true,
+      tier
+    })
+  const minPrompt = promptOf('min')
+  const maxPrompt = promptOf('max')
+  check('min 档自称省 token 及格档', minPrompt.includes('省 token 的及格档'))
+  check('min 档规模 40~80 节点', minPrompt.includes('40~80 个节点'))
+  check('min 档不做 80 分三件事', !minPrompt.includes('冲 80 分的三件事'))
+  check('min 档自检是轻量的', minPrompt.includes('轻量自检'))
+  check('max 档按 90 分要求', maxPrompt.includes('90 分'))
+  check('max 档要求每板块至少 3 层', maxPrompt.includes('至少 3 层'))
+  check('max 档要求叶子补两类深度信息', maxPrompt.includes('边界条件'))
+  check('max 档自检要通读找「外行味」节点', maxPrompt.includes('外行味'))
+  check(
+    '三档共用底线：都不写备注行',
+    [minPrompt, prompt, maxPrompt].every((p) => p.includes('不要用 `> `'))
+  )
+  check(
+    '三档共用底线：都要求诚实标注例题',
+    [minPrompt, prompt, maxPrompt].every((p) => p.includes('模拟题'))
+  )
+  check('档位不越权改 token 上限（提示词里不提 max_tokens）', !maxPrompt.includes('max_tokens'))
 
   group('AI 聊天：结果声明检测（兜住「说改了其实没改」）')
 
@@ -8408,7 +8453,8 @@ function testAi(): void {
     model: 'm',
     temperature: 0.5,
     maxTokens: 8192,
-    apiKey: 'sk-abcdef123456'
+    apiKey: 'sk-abcdef123456',
+    tier: 'high'
   })
   eq('掩码保留前缀与后四位', view.keyPreview, 'sk-…3456')
   check('界面上不出现完整 Key', !JSON.stringify(view).includes('sk-abcdef123456'))

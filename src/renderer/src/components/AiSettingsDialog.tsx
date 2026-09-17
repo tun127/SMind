@@ -1,6 +1,14 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { CheckCircle2, Plug, Settings2, XCircle } from 'lucide-react'
-import { AI_PRESETS, DEFAULT_AI_CONFIG, type AiConfigView } from '@shared/ai'
+import {
+  AI_PRESETS,
+  DEFAULT_AI_CONFIG,
+  DEFAULT_QUALITY_TIER,
+  normalizeQualityTier,
+  QUALITY_TIERS,
+  type AiConfigView,
+  type QualityTier
+} from '@shared/ai'
 import type { LicenseView } from '@shared/license'
 import { Modal } from './Dialogs'
 
@@ -33,6 +41,7 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
   const [model, setModel] = useState(DEFAULT_AI_CONFIG.model)
   const [temperature, setTemperature] = useState(DEFAULT_AI_CONFIG.temperature)
   const [maxTokens, setMaxTokens] = useState(DEFAULT_AI_CONFIG.maxTokens)
+  const [tier, setTier] = useState<QualityTier>(DEFAULT_QUALITY_TIER)
   const [apiKey, setApiKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -52,6 +61,7 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
         setModel(current.model)
         setTemperature(current.temperature)
         setMaxTokens(current.maxTokens)
+        setTier(current.tier)
       } catch (error) {
         onNotify(`读取 AI 配置失败：${(error as Error).message}`)
       }
@@ -104,6 +114,7 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
         model,
         temperature,
         maxTokens,
+        tier,
         apiKey
       })
       setView(next)
@@ -301,6 +312,25 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
           AI **一次回复**最多能写多少内容。调太小会让「生成完整详细的导图」写到一半被服务商截断
           （默认 8192）；填 0 表示不发送这个字段、交给服务商决定——多数服务商默认只有 1.5k~2k，
           最容易出现"只写了粗分"。服务商不接受这个字段时会自动去掉重试，不会把请求搞死。
+        </span>
+
+        <div className="ai-field ai-field--row">
+          <span className="ai-field__label">生成质量档位</span>
+          <select
+            className="input"
+            value={tier}
+            onChange={(event) => setTier(normalizeQualityTier(event.target.value))}
+          >
+            {QUALITY_TIERS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <span className="ai-field__hint">
+          {QUALITY_TIERS.find((item) => item.id === tier)?.hint ?? ''}
+          。档位只改「要求的规模与深度」，**不改**上面的 token 上限——两件事分开。
         </span>
 
         {testResult && (

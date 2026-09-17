@@ -29,8 +29,10 @@ import {
   digestPreamble,
   readableIpcError,
   formatTokenCount,
+  DEFAULT_QUALITY_TIER,
   type AiMessage,
   type AiStreamEvent,
+  type QualityTier,
   type TokenUsage,
   type ToolCall
 } from '@shared/ai'
@@ -132,6 +134,8 @@ export default function ChatPanel({
   const [draft, setDraft] = useState('')
   /** null = 还没查完；false = 没配 Key（显示引导）；true = 可用 */
   const [hasKey, setHasKey] = useState<boolean | null>(null)
+  /** 生成质量档位（在主进程的 AI 配置里，启动时读一次；改档位去「AI 设置」） */
+  const [tier, setTier] = useState<QualityTier>(DEFAULT_QUALITY_TIER)
   /**
    * 许可状态（Pro / 试用剩余）。
    *
@@ -268,7 +272,10 @@ export default function ChatPanel({
   useEffect(() => {
     void window.api
       .aiConfigGet()
-      .then((view) => setHasKey(view.hasKey))
+      .then((view) => {
+        setHasKey(view.hasKey)
+        setTier(view.tier)
+      })
       .catch(() => setHasKey(false))
   }, [])
 
@@ -1230,6 +1237,8 @@ export default function ChatPanel({
         selectedTitles,
         totalNodes: countTopicTree(root),
         sheetCount: state.workbook.sheets.length,
+        // 生成规格按用户的档位走（min 省 token / high 80 分 / max 90 分）
+        tier,
         // 能不能改，以主进程的许可判定为准：写工具没下发时，提示词也必须如实说
         canWrite: license?.canWrite ?? true,
         writeHint: license?.writeHint ?? null,
@@ -1286,7 +1295,7 @@ export default function ChatPanel({
       setDraft('')
       runRound()
     },
-    [runRound, update, license, titleIndex]
+    [runRound, update, license, titleIndex, tier]
   )
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
