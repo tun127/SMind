@@ -1892,7 +1892,12 @@ function testAiChatHelpers(): void {
   check('同时防止另一个极端：能确定就直接做，不拿提问当拖延', prompt.includes('不要拿提问当拖延'))
   check('先铺骨架（考试类按官方考纲，一个不漏）', prompt.includes('官方考纲'))
   check('合格线用「行家视角」表述（各领域通用，不限考试）', prompt.includes('行家'))
-  check('合格线是「60 分」', prompt.includes('60 分'))
+  check('合格线是「60 分」，但按「80 分」标准要求自己', prompt.includes('80 分'))
+  check(
+    '80 分三件事写进了提示词（层次逻辑 / 重点区分 / 叶子粒度）',
+    prompt.includes('冲 80 分的三件事')
+  )
+  check('术语必须准确（不许编行话）', prompt.includes('术语必须准确'))
   check('合格标准是覆盖率而不是凑数（不搞机械配额）', prompt.includes('合格标准是覆盖率'))
   check(
     'askUser 在可用工具清单里（第 15 条的落点）',
@@ -2667,6 +2672,7 @@ function testAgentTools(): void {
   check('详细模式不再要求写备注行', !detailedPrompt.includes('下一行用 `> `'))
   check('详细模式明确禁止空泛点题节点', detailedPrompt.includes('禁止空泛点题'))
   check('详细模式先铺骨架（行家共识划分，不挑方向）', detailedPrompt.includes('先铺骨架'))
+  check('详细模式同步 80 分要求', detailedPrompt.includes('80 分'))
   // insertSubtree 是**写**工具，在 ALL 清单里（只读清单 AGENT_TOOLS 里没有它）
   const insertTool = AGENT_ALL_TOOLS.find((tool) => tool.name === 'insertSubtree')
   check(
