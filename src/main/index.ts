@@ -45,6 +45,7 @@ import {
   extractContent,
   extractStreamDelta,
   finalizeToolCalls,
+  isTruncatedFinish,
   normalizeAiConfig,
   normalizeChatHistory,
   toConfigView,
@@ -652,7 +653,7 @@ async function callAiStream(
       aborted: controller.signal.aborted,
       toolCalls: finalCalls,
       // 如实上报"被截断"：以前这个信息被丢掉，用户只看到"AI 怎么只写了一点"
-      ...(finishReason === 'length' ? { truncated: true } : {}),
+      ...(isTruncatedFinish(finishReason) ? { truncated: true } : {}),
       ...(usage ? { usage } : {})
     })
   } catch (error) {

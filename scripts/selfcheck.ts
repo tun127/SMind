@@ -57,6 +57,8 @@ import {
   formatTokenCount,
   HISTORY_DIGEST_MAX,
   HISTORY_KEEP_RECENT,
+  isTruncatedFinish,
+  joinContinuation,
   normalizeChatHistory,
   toWireMessages
 } from '../src/shared/ai'
@@ -2459,6 +2461,75 @@ function testAgentTools(): void {
     '结束原因能取到',
     extractStreamDelta('{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}')?.finishReason,
     'tool_calls'
+  )
+
+  group('AI：截断判据与续写拼接')
+
+  eq('length 判为被截断', isTruncatedFinish('length'), true)
+  eq('大小写与空格也认（各服务商写法不统一）', isTruncatedFinish(' Length '), true)
+  eq('stop 不算截断', isTruncatedFinish('stop'), false)
+  eq('tool_calls 不算截断', isTruncatedFinish('tool_calls'), false)
+  eq(
+    '拿不到结束原因时不判截断（宁可漏判，也不平白多发一次付费请求）',
+    isTruncatedFinish(null),
+    false
+  )
+
+  /**
+   * 续写拼接：这是「自动续写」唯一的启发式，改坏的后果是**静默**的
+   * （多出半句话节点、或某一行悄悄消失），所以每条结局都钉住。
+   *
+   * 注意下面第 2 条：模型**逐字重发**被截断的那一行时，两份都会被丢掉。
+   * 这符合本函数的预设（「重复的那份是残片，不值得留」），
+   * 但如果模型实际是在重发**上一行完整内容**当锚点，那一行就丢了——
+   * 两种输入长得一模一样，无法区分（见第 6 条的说明）。
+   */
+  eq(
+    '截断点落在一行中间：丢掉残片，保留模型重写后的完整行',
+    joinContinuation('- 甲\n- 乙（半句', '- 乙写成完整的一行\n- 丙'),
+    '- 甲\n- 乙写成完整的一行\n- 丙'
+  )
+  eq(
+    '模型逐字重发残片：残片与重发的那份都去掉',
+    joinContinuation('- 甲\n- 乙（半句', '- 乙（半句\n- 丙'),
+    '- 甲\n- 丙'
+  )
+  eq(
+    '前一段正好以换行结尾：不误丢最后一行完整内容',
+    joinContinuation('- 甲\n- 乙\n', '- 丙'),
+    '- 甲\n- 乙\n- 丙'
+  )
+  eq('续写什么都没返回时不产生空行', joinContinuation('- 甲\n- 乙', ''), '- 甲')
+  eq('前段为空时续写直接接上', joinContinuation('', '- 甲'), '- 甲')
+
+  /**
+   * 已知限制（**未擅自改**，需一次真模型观察才能定方向）：
+   * 截断正好落在行尾、且模型接着写新行（没有重发）时，前一段最后一行会被丢掉。
+   * 这是「残片必须丢」与「完整行不能丢」两种解释冲突的地方：
+   * 从输入无法判断那一行是完整还是半截。
+   * 当前取舍是「宁可有残片就先丢掉」（避免半句话节点），代价是可能少一个节点。
+   */
+  eq(
+    '已知限制：截断落在行尾且模型没重发 → 最后一行被丢弃',
+    joinContinuation(joinContinuation('- 甲\n- 乙（半', '- 乙完整\n- 丙'), '- 丁'),
+    '- 甲\n- 乙完整\n- 丁'
+  )
+  const joined = joinContinuation('- 甲\n- 乙（半', '- 乙\n- 丙\n- 丁')
+  eq('拼接缝上不会出现重复行', joined.split('\n').length, new Set(joined.split('\n')).size)
+  check(
+    '拼接结果里不会留下空行',
+    joined.split('\n').every((line) => line.length > 0),
+    joined
+  )
+  /**
+   * 去重只发生在**拼接缝**上（前段最后一行 vs 续写第一行），**不做全局去重**：
+   * 同级出现两个同名主题完全合法（比如两个「其他」），
+   * 全局去重会把用户真要的节点合掉——比留一行重复更糟。
+   */
+  eq(
+    '续写内部出现的同名行不会被合掉（那是模型的合法输出）',
+    joinContinuation('- 甲\n- 乙（半', '- 乙\n- 丙\n- 丙').split('\n').length,
+    4
   )
 
   // 参数是**跨片拼起来的**：一次覆盖式赋值只会拿到半截 JSON
@@ -8544,6 +8615,28 @@ function testAi(): void {
   })
   eq('目标主题不存在时不会崩（返回计数但什么都没写）', unknownTarget, 1)
   eq('确实没有写进任何地方', find(hostId)?.children.length, 1)
+
+  /**
+   * 「AI 详细图」的核心载体：`> 解释` 会变成节点备注。
+   * 上面测了 `outlineToTopic` 层（见「导入：备注一并带进模型」）与这一层的层级/撤销，
+   * 但**「备注经 applyOutlineTree 真的写进 store」**正好落在两者的夹缝里——补上，
+   * 否则「解释去哪了」这种回归只能靠用户发现。
+   */
+  reset()
+  const noteHost = addChildOf(root().id, '宿主')
+  store().applyOutlineTree(noteHost, {
+    title: '考点',
+    notes: '这是解释',
+    children: [{ title: '子考点', notes: '子解释', children: [] }]
+  })
+  eq('备注经 applyOutlineTree 落进 store', find(noteHost)?.children[0]?.notes, '这是解释')
+  eq('子节点的备注也落进 store', find(noteHost)?.children[0]?.children[0]?.notes, '子解释')
+  check(
+    '备注同时生成 notesHtml（搜索与导出要用）',
+    (find(noteHost)?.children[0]?.notesHtml ?? '').length > 0
+  )
+  store().applyOutlineTree(noteHost, { title: '无备注', children: [] })
+  eq('没有备注时不写空串（避免正文区出现空块）', find(noteHost)?.children[1]?.notes, undefined)
 }
 
 /* ------------------------------------------------------------------ */

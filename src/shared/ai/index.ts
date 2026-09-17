@@ -31,7 +31,8 @@ export interface AiConfig {
    * 为什么必须显式给足：多数服务商的默认输出上限只有 1.5k~2k token，
    * 而「完整详细的大纲」（多考点 + 解释 + 真题）动辄 4k~8k——
    * 写到一半被服务端掐断，用户看到的就是「只写了粗分」。
-   * 多数实现支持更大的值；不认这个字段的服务商会报错，主进程会自动去掉它重试一次。
+   * 多数实现支持更大的值；不认这个字段的服务商会报错，主进程会**逐级降档**重试
+   * （16384 → 8192 → 4096 → 2048 → 不发送），不会把请求搞死。
    */
   maxTokens: number
 }
@@ -622,6 +623,32 @@ export function parseFlatList(text: string): string[] {
   return out
 }
 
+/* ------------------------------------------------------------------ */
+/* 续写拼接                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 拼接「被截断的前半段」与「续写的后半段」。
+ *
+ * 关键处理：截断点常常落在一行**中间**，那半行在模型眼里不算完整内容，
+ * 所以先把最后一行丢掉再拼——否则会留下半句话节点、或把一行切成两行。
+ * 另外模型经常重复上一条的最后一行，这里顺手去重。
+ *
+ * 为什么住在 shared：它是「自动续写」唯一的启发式。改坏的后果是**静默**的
+ * （多出一行半句话、或节点重复），而渲染层的文件跑不进 node 自检——
+ * 放在这里才能被断言钉住。
+ */
+export function joinContinuation(previous: string, next: string): string {
+  const previousLines = previous.split(/\r?\n/)
+  const droppedLine = (previousLines[previousLines.length - 1] ?? '').trim()
+  if (droppedLine.length > 0) previousLines.pop()
+  const nextLines = next.split(/\r?\n/)
+  if (droppedLine.length > 0 && (nextLines[0] ?? '').trim() === droppedLine) nextLines.shift()
+  return [previousLines.join('\n').trimEnd(), nextLines.join('\n').trim()]
+    .filter((part) => part.length > 0)
+    .join('\n')
+}
+
 /**
  * 润色结果清洗：模型常常不听话地加上引号、编号或换行。
  * 只保留第一行，去掉包裹的引号与「1. 」这类前缀。
@@ -1164,6 +1191,20 @@ export interface StreamDelta {
   finishReason: string | null
   /** token 消耗（开了 include_usage 时，最后一个分片会带；多数分片没有） */
   usage: TokenUsage | null
+}
+
+/**
+ * 服务商的结束原因是否表示「输出被上限截断」。
+ *
+ * 只认 OpenAI 兼容的 `length`，**不猜**别家的写法：误判成截断会多发一次
+ * （要付费的）续写请求，漏判只是少提示一句——宁可漏判。
+ *
+ * 抽成纯函数是为了能被自检钉住。这条判断决定「被掐断」与「正常说完」是否
+ * 还长得一模一样：以前 `finish_reason` 解析出来了却没人用，用户看到的就是
+ * 「AI 怎么只写了一点点」，无从判断是模型懒还是被截断。
+ */
+export function isTruncatedFinish(finishReason: string | null | undefined): boolean {
+  return (finishReason ?? '').trim().toLowerCase() === 'length'
 }
 
 /**
