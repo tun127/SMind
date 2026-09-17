@@ -39,6 +39,7 @@ import {
   DEFAULT_AI_CONFIG,
   accumulateToolCalls,
   chatCompletionsUrl,
+  createRepetitionGuard,
   createSseLineSplitter,
   createThinkingFilter,
   describeAiError,
@@ -556,6 +557,9 @@ async function callAiStream(
   let full = ''
   /** 思维链（推理模型才有；只用于界面直播，不进正文、不进历史） */
   let reasoning = ''
+  /** 退化循环熔断：同一行被复读到门槛就止损（真事：flash 模型在超长上下文里复读几百行） */
+  const repetition = createRepetitionGuard()
+  let degenerated = false
   let model: string | null = null
   /** 结束原因：`stop` = 说完了、`tool_calls` = 要调工具、`length` = **被输出上限截断** */
   let finishReason: string | null = null
@@ -622,6 +626,7 @@ async function callAiStream(
     const emit = (text: string): void => {
       if (text.length === 0) return
       full += text
+      if (repetition(text)) degenerated = true
       push({ requestId, kind: 'chunk', text })
     }
     const feed = (piece: string): void => {
@@ -645,11 +650,24 @@ async function callAiStream(
       if (done) break
       if (controller.signal.aborted) break
       feed(decoder.decode(value, { stream: true }))
+      // 退化熔断：不再读下去——多读一行就是多烧一笔钱
+      if (degenerated) break
     }
     // 收尾：解码器里可能还压着没有换行的最后一行
     feed(decoder.decode())
     // 过滤器里可能留着「像标签前缀其实是正文」的尾巴
     emit(think.flush())
+
+    if (degenerated) {
+      // 复读的尾巴裁掉：它不该进正文，更不该跟着上下文进下一轮（会把下一轮也拖进退化）
+      const lines = full.split('\n')
+      const last = (lines[lines.length - 1] ?? '').trim()
+      let end = lines.length
+      if (last.length > 0) while (end > 1 && (lines[end - 1] ?? '').trim() === last) end -= 1
+      const kept = lines.slice(0, end).join('\n')
+      full = last.length > 0 ? `${kept}\n${last}` : kept
+      logMain('ai-degeneration-guard', '模型输出陷入自我重复，已熔断并裁掉复读尾巴')
+    }
 
     const finalCalls = finalizeToolCalls(toolCalls)
     toolNames = finalCalls.map((call) => call.name)
@@ -663,6 +681,7 @@ async function callAiStream(
       toolCalls: finalCalls,
       // 如实上报"被截断"：以前这个信息被丢掉，用户只看到"AI 怎么只写了一点"
       ...(isTruncatedFinish(finishReason) ? { truncated: true } : {}),
+      ...(degenerated ? { degenerated: true } : {}),
       ...(reasoning.length > 0 ? { reasoning } : {}),
       ...(usage ? { usage } : {})
     })

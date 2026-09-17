@@ -1106,6 +1106,12 @@ export type AiStreamEvent =
        * 带上它，界面才能如实说明并引导续写。
        */
       truncated?: boolean
+      /**
+       * 输出陷入**自我重复**（退化循环），已熔断止损。
+       * flash 档模型在超长上下文里的典型失效：同一行连吐几百遍。
+       * 界面要如实告知并给下一步（重试 / 换模型）。
+       */
+      degenerated?: boolean
       /** 思维链全文（有才有；界面用它兜底，保证与流式期间拼出的不一致时以它为准） */
       reasoning?: string
       /** token 消耗（服务商回报；不支持 usage 的服务商没有这个字段，界面就不显示） */
@@ -1326,6 +1332,49 @@ export interface StreamDelta {
  */
 export function isTruncatedFinish(finishReason: string | null | undefined): boolean {
   return (finishReason ?? '').trim().toLowerCase() === 'length'
+}
+
+/** 退化熔断的触发门槛：同一行**逐字相同**且连续出现这么多次 */
+export const DEGENERATION_MAX_REPEAT = 10
+
+/**
+ * 退化循环熔断：模型把同一行**原样**反复输出（真事：flash 档模型在超长上下文里
+ * 连续吐了几百行「（我来执行）。」——那不是思考，是退化，只会白烧用户的钱和时间）。
+ *
+ * 判据刻意保守：**完整成行**、**去掉首尾空白后逐字相同**、连续 ≥ `DEGENERATION_MAX_REPEAT` 次。
+ * 正常内容里连续多行完全相同几乎不存在（列表也有编号、标点、缩进差异）；
+ * 宁可晚几行熔断，也不要误杀合法内容。
+ *
+ * 返回 true 表示已触发（触发后持续返回 true，调用方应当停止读取并收尾）。
+ */
+export function createRepetitionGuard(
+  maxRepeat: number = DEGENERATION_MAX_REPEAT
+): (delta: string) => boolean {
+  let pending = ''
+  let lastLine: string | null = null
+  let repeats = 0
+  let tripped = false
+  return (delta: string): boolean => {
+    if (tripped) return true
+    pending += delta
+    const parts = pending.split('\n')
+    pending = parts.pop() ?? '' // 最后一段可能是半行，留到下一片再判
+    for (const line of parts) {
+      const trimmed = line.trim()
+      if (trimmed.length === 0) continue
+      if (trimmed === lastLine) {
+        repeats += 1
+        if (repeats >= maxRepeat) {
+          tripped = true
+          return true
+        }
+      } else {
+        lastLine = trimmed
+        repeats = 1
+      }
+    }
+    return false
+  }
 }
 
 /**

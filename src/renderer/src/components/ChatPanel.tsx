@@ -1036,6 +1036,15 @@ export default function ChatPanel({
         patchLast({ thinking: event.reasoning })
       }
 
+      // 退化熔断：如实告知并给下一步（这是模型退化，不是用户做错了什么）
+      if (event.kind === 'done' && event.degenerated) {
+        patchLast({
+          warning:
+            '模型输出陷入**自我重复**（退化循环），已自动熔断止损、裁掉复读部分。' +
+            '重试通常可恢复；反复出现请换更强的模型（如 deepseek-chat），或新开一个会话减小上下文。'
+        })
+      }
+
       const calls = event.toolCalls
       if (calls.length === 0) {
         update((prev) => {
@@ -1147,6 +1156,12 @@ export default function ChatPanel({
         : `正在思考…（第 ${roundRef.current + 1} 轮，还在翻资料）`
     )
     setStage(`AI 第 ${roundRef.current + 1} 轮`)
+    // 上下文体积观测：退化循环与「越聊越贵」都和它有关——先有数据，再谈压缩
+    console.warn(
+      `[chat] 本轮上下文：${wireRef.current.length} 条消息 / ${
+        JSON.stringify(wireRef.current).length
+      } 字符`
+    )
     void window.api
       .aiChatStream(requestId, wireRef.current, {
         useTools: useToolsRef.current && !forceNoToolsRef.current,

@@ -51,8 +51,10 @@ import {
   digestPreamble,
   readableIpcError,
   countTopicTree,
+  createRepetitionGuard,
   createSseLineSplitter,
   createThinkingFilter,
+  DEGENERATION_MAX_REPEAT,
   extractStreamDelta,
   finalizeToolCalls,
   formatTokenCount,
@@ -2600,6 +2602,44 @@ function testAgentTools(): void {
     const plain = createThinkingFilter()
     eq('不传回调时依旧只过滤', [plain.push('a<think>b</think>c'), plain.flush()].join(''), 'ac')
   }
+
+  group('AI：退化循环熔断')
+
+  eq('门槛是 10 次连续重复', DEGENERATION_MAX_REPEAT, 10)
+  {
+    const guard = createRepetitionGuard(5)
+    eq('正常内容不触发', guard('- 甲\n- 乙\n- 丙\n'), false)
+    eq('同样的行没到门槛不触发', guard('- 重复行\n- 重复行\n- 重复行\n- 重复行\n'), false)
+    eq(
+      '同一行连续达到门槛即触发',
+      guard('- 重复行\n- 重复行\n- 重复行\n- 重复行\n- 重复行\n'),
+      true
+    )
+    eq('触发后持续返回 true（调用方应当停读）', guard('- 重复行\n'), true)
+  }
+  eq(
+    '半行跨片也能累计（分片任意位置断开）',
+    (() => {
+      const g = createRepetitionGuard(3)
+      g('- 循\n')
+      g('- 循环\n')
+      g('- 循环\n')
+      return g('- 循环\n')
+    })(),
+    true
+  )
+  eq(
+    '不同行会重置计数（重置后未到新门槛不触发）',
+    (() => {
+      const g = createRepetitionGuard(4)
+      g('- 甲\n')
+      g('- 甲\n\n')
+      g('- 甲\n')
+      g('- 乙\n')
+      return g('- 甲\n- 甲\n')
+    })(),
+    false
+  )
 
   group('AI：内容成节点（不写备注）的反向约束')
 
