@@ -627,26 +627,136 @@ export function parseFlatList(text: string): string[] {
 /* 续写拼接                                                            */
 /* ------------------------------------------------------------------ */
 
+/** 续写首行与前一段尾行的关系 */
+export type ContinuationRelation =
+  /** 逐字相同：模型把上一行重发了一遍 */
+  | 'repeat'
+  /** 续写首行是尾行的**加长版**：模型在补完这一行 */
+  | 'extended'
+  /** 两行内容无关：各自独立 */
+  | 'fresh'
+  /** 尾行为空（前一段正好以换行结尾）：没有可拼的东西 */
+  | 'none'
+
+export interface ContinuationMerge {
+  text: string
+  relation: ContinuationRelation
+  /** 前一段的最后一行（原样，未 trim）——出问题时靠它定位 */
+  tail: string
+  /** 续写的第一行（原样，未 trim） */
+  head: string
+}
+
+/** 「加长版」判定所需的最短重叠：太短会把「缓存 / 缓存策略」这种兄弟节点误判成同一行 */
+export const CONTINUATION_MIN_OVERLAP = 6
+
 /**
- * 拼接「被截断的前半段」与「续写的后半段」。
+ * 这一行看起来像「被截断的残片」吗？
  *
- * 关键处理：截断点常常落在一行**中间**，那半行在模型眼里不算完整内容，
- * 所以先把最后一行丢掉再拼——否则会留下半句话节点、或把一行切成两行。
- * 另外模型经常重复上一条的最后一行，这里顺手去重。
- *
- * 为什么住在 shared：它是「自动续写」唯一的启发式。改坏的后果是**静默**的
- * （多出一行半句话、或节点重复），而渲染层的文件跑不进 node 自检——
- * 放在这里才能被断言钉住。
+ * 只认**括号没配平**这一条：残片最常见的形状是「- 考点（重点」这种半截括号，
+ * 而完整标题里出现不配对括号极少。**不用**「以逗号/冒号结尾」这类信号——
+ * 「考点一：」本身就是合法标题，那样会误伤。
  */
-export function joinContinuation(previous: string, next: string): string {
+function looksTruncatedLine(line: string): boolean {
+  const pairs: Array<[string, string]> = [
+    ['（', '）'],
+    ['【', '】'],
+    ['《', '》'],
+    ['「', '」'],
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}']
+  ]
+  for (const [open, close] of pairs) {
+    const opens = [...line].filter((ch) => ch === open).length
+    const closes = [...line].filter((ch) => ch === close).length
+    if (opens > closes) return true
+  }
+  return false
+}
+
+/** 把两段文本接起来：各自去掉首尾空白，中间一个换行；空段直接跳过 */
+function joinText(before: string, after: string): string {
+  return [before.trimEnd(), after.trim()].filter((part) => part.length > 0).join('\n')
+}
+
+/**
+ * 拼接「被截断的前半段」与「续写的后半段」，并说明是**按哪种关系**拼的。
+ *
+ * 为什么要区分关系：截断点可能落在一行中间，也可能正好落在行尾；
+ * 而「最后一行到底写完没有」这个信息**不在字符串里**——同样两段文本，
+ * 可能对应「模型在补完残行」与「模型另起一行」两种完全不同的意图。
+ *
+ * 所以这里**不猜**：只在能确认模型重写了那一行时才丢掉它，其余一律保留。
+ * 宁可多留一个看得见的残句，也不静默吃掉一个用户要的节点
+ * （少一个考点的表现和「AI 又漏了」一模一样，用户无从发现）。
+ *
+ * 三条规则（按优先级）：
+ * 1. **加长版**（尾行是续写首行的前缀，且重叠 ≥ `CONTINUATION_MIN_OVERLAP`）
+ *    → 模型在补完这行：丢掉尾行、保留续写首行。这是唯一「丢掉的内容已经在新文本里」的情形。
+ * 2. **逐字相同**：残片（括号没配平）→ 两份都丢（只是把残片原样重发了一遍）；
+ *    否则说明这行本来就完整 → 保留一份。
+ * 3. **两行无关** → 都保留。这里以前是无条件丢掉尾行，于是「截断正好落在行尾」时
+ *    会静默少一个节点——修复的正是这一条。
+ *
+ * 配套的提示词也一起改了（`renderer/src/ai/outlineRun.ts` 的续写指令：
+ * 没写完就**从行首完整重写一遍**）——让「残行」变成「加长版」，正好落在第 1 条上。
+ *
+ * 为什么住在 shared：渲染层的文件跑不进 node 自检，而这条启发式坏掉的后果是**静默**的。
+ */
+export function mergeContinuation(previous: string, next: string): ContinuationMerge {
   const previousLines = previous.split(/\r?\n/)
-  const droppedLine = (previousLines[previousLines.length - 1] ?? '').trim()
-  if (droppedLine.length > 0) previousLines.pop()
-  const nextLines = next.split(/\r?\n/)
-  if (droppedLine.length > 0 && (nextLines[0] ?? '').trim() === droppedLine) nextLines.shift()
-  return [previousLines.join('\n').trimEnd(), nextLines.join('\n').trim()]
-    .filter((part) => part.length > 0)
-    .join('\n')
+  const tail = previousLines[previousLines.length - 1] ?? ''
+  const head = next.split(/\r?\n/)[0] ?? ''
+  const trimmedTail = tail.trim()
+  const trimmedHead = head.trim()
+
+  // 前一段正好以换行结尾：没有半行要处理，直接接上
+  if (trimmedTail.length === 0) {
+    return { text: joinText(previous, next), relation: 'none', tail, head }
+  }
+
+  // 1. 加长版：模型把这一行重写得更长了 → 丢掉旧的那份，保留模型这份
+  if (
+    trimmedHead.length > trimmedTail.length &&
+    trimmedTail.length >= CONTINUATION_MIN_OVERLAP &&
+    trimmedHead.startsWith(trimmedTail)
+  ) {
+    previousLines.pop()
+    return {
+      text: joinText(previousLines.join('\n'), next),
+      relation: 'extended',
+      tail,
+      head
+    }
+  }
+
+  // 2. 逐字相同
+  if (trimmedHead === trimmedTail) {
+    if (looksTruncatedLine(trimmedTail)) {
+      // 残片被原样重发：两份都去掉（它不构成内容）
+      const nextLines = next.split(/\r?\n/)
+      previousLines.pop()
+      nextLines.shift()
+      return {
+        text: joinText(previousLines.join('\n'), nextLines.join('\n')),
+        relation: 'repeat',
+        tail,
+        head
+      }
+    }
+    // 完整的一行被重发：保留一份（丢掉前一份，留下模型这份）
+    previousLines.pop()
+    return { text: joinText(previousLines.join('\n'), next), relation: 'repeat', tail, head }
+  }
+
+  // 3. 两行无关：都保留（不再无条件丢尾行）
+  return { text: joinText(previous, next), relation: 'fresh', tail, head }
+}
+
+/** 只要拼好的文本（调用方不关心关系时用它） */
+export function joinContinuation(previous: string, next: string): string {
+  return mergeContinuation(previous, next).text
 }
 
 /**

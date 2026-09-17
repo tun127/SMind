@@ -47,6 +47,7 @@ import {
   addUsage,
   claimsAppliedChange,
   compressHistory,
+  CONTINUATION_MIN_OVERLAP,
   digestPreamble,
   readableIpcError,
   countTopicTree,
@@ -59,6 +60,7 @@ import {
   HISTORY_KEEP_RECENT,
   isTruncatedFinish,
   joinContinuation,
+  mergeContinuation,
   normalizeChatHistory,
   toWireMessages
 } from '../src/shared/ai'
@@ -2476,45 +2478,69 @@ function testAgentTools(): void {
   )
 
   /**
-   * 续写拼接：这是「自动续写」唯一的启发式，改坏的后果是**静默**的
+   * 续写拼接：这是「自动续写」唯一的启发式，坏掉的后果是**静默**的
    * （多出半句话节点、或某一行悄悄消失），所以每条结局都钉住。
    *
-   * 注意下面第 2 条：模型**逐字重发**被截断的那一行时，两份都会被丢掉。
-   * 这符合本函数的预设（「重复的那份是残片，不值得留」），
-   * 但如果模型实际是在重发**上一行完整内容**当锚点，那一行就丢了——
-   * 两种输入长得一模一样，无法区分（见第 6 条的说明）。
+   * 核心约束：**只在能确认模型重写了那一行时才丢掉它**。
+   * 因为「最后一行写完没有」这个信息不在字符串里——同样两段文本，
+   * 可能是「模型在补完残行」，也可能是「模型另起一行」。
    */
+  const fragment = '- 乙：内存泄漏排查（重'
+  const completed = '- 乙：内存泄漏排查（重点看堆快照）'
+
+  eq('最短重叠是 6 字', CONTINUATION_MIN_OVERLAP, 6)
   eq(
-    '截断点落在一行中间：丢掉残片，保留模型重写后的完整行',
-    joinContinuation('- 甲\n- 乙（半句', '- 乙写成完整的一行\n- 丙'),
-    '- 甲\n- 乙写成完整的一行\n- 丙'
+    '加长版：判定为 extended（模型在补完这一行）',
+    mergeContinuation(`- 甲\n${fragment}`, completed).relation,
+    'extended'
   )
   eq(
-    '模型逐字重发残片：残片与重发的那份都去掉',
+    '加长版：只留模型重写的那一行（内容没丢——它就在新文本里）',
+    joinContinuation(`- 甲\n${fragment}`, `${completed}\n- 丙`),
+    `- 甲\n${completed}\n- 丙`
+  )
+
+  /**
+   * 下面两条是**原缺陷的正向验证**（改前是反着断言"已知限制"的）：
+   * 以前无条件丢掉前一段的尾行，于是「截断正好落在行尾」时会静默少一个节点。
+   */
+  eq(
+    '尾行完整且模型另起一行：两行都保留（以前会丢掉尾行）',
+    joinContinuation('- 甲\n- 乙', '- 丙\n- 丁'),
+    '- 甲\n- 乙\n- 丙\n- 丁'
+  )
+  eq('两行无关时关系记为 fresh', mergeContinuation('- 甲\n- 乙', '- 丙').relation, 'fresh')
+  eq(
+    '尾行完整且被逐字重发：保留一份（以前两份都丢，等于少一个节点）',
+    joinContinuation('- 甲\n- 乙', '- 乙\n- 丙'),
+    '- 甲\n- 乙\n- 丙'
+  )
+  eq(
+    '残片被逐字重发：两份都去掉（残片不构成内容）',
     joinContinuation('- 甲\n- 乙（半句', '- 乙（半句\n- 丙'),
     '- 甲\n- 丙'
   )
+  eq(
+    '重写但没保持前缀：两份都留（宁可看得见重复，也不静默丢内容）',
+    joinContinuation('- 甲\n- 乙（半句', '- 乙写成完整的一行\n- 丙'),
+    '- 甲\n- 乙（半句\n- 乙写成完整的一行\n- 丙'
+  )
+  eq(
+    '重叠太短的兄弟节点不会被误判成"同一行"（缓存 / 缓存策略）',
+    joinContinuation('- 缓存', '- 缓存策略'),
+    '- 缓存\n- 缓存策略'
+  )
+
   eq(
     '前一段正好以换行结尾：不误丢最后一行完整内容',
     joinContinuation('- 甲\n- 乙\n', '- 丙'),
     '- 甲\n- 乙\n- 丙'
   )
-  eq('续写什么都没返回时不产生空行', joinContinuation('- 甲\n- 乙', ''), '- 甲')
+  eq('尾行为空时关系记为 none', mergeContinuation('- 甲\n', '- 丙').relation, 'none')
+  eq('续写什么都没返回时，不去动前一段的尾行', joinContinuation('- 甲\n- 乙', ''), '- 甲\n- 乙')
   eq('前段为空时续写直接接上', joinContinuation('', '- 甲'), '- 甲')
 
-  /**
-   * 已知限制（**未擅自改**，需一次真模型观察才能定方向）：
-   * 截断正好落在行尾、且模型接着写新行（没有重发）时，前一段最后一行会被丢掉。
-   * 这是「残片必须丢」与「完整行不能丢」两种解释冲突的地方：
-   * 从输入无法判断那一行是完整还是半截。
-   * 当前取舍是「宁可有残片就先丢掉」（避免半句话节点），代价是可能少一个节点。
-   */
-  eq(
-    '已知限制：截断落在行尾且模型没重发 → 最后一行被丢弃',
-    joinContinuation(joinContinuation('- 甲\n- 乙（半', '- 乙完整\n- 丙'), '- 丁'),
-    '- 甲\n- 乙完整\n- 丁'
-  )
-  const joined = joinContinuation('- 甲\n- 乙（半', '- 乙\n- 丙\n- 丁')
+  const joined = joinContinuation('- 甲\n- 乙（半', '- 丙\n- 丁')
   eq('拼接缝上不会出现重复行', joined.split('\n').length, new Set(joined.split('\n')).size)
   check(
     '拼接结果里不会留下空行',
@@ -2528,7 +2554,7 @@ function testAgentTools(): void {
    */
   eq(
     '续写内部出现的同名行不会被合掉（那是模型的合法输出）',
-    joinContinuation('- 甲\n- 乙（半', '- 乙\n- 丙\n- 丙').split('\n').length,
+    joinContinuation('- 甲\n- 乙（半', '- 丙\n- 丙').split('\n').length,
     4
   )
 
