@@ -11,6 +11,7 @@ import {
   Bot,
   ClipboardPaste,
   Eraser,
+  Paperclip,
   Send,
   Settings2,
   Sparkles,
@@ -33,6 +34,8 @@ import {
   type TokenUsage,
   type ToolCall
 } from '@shared/ai'
+import type { OutlineFormat } from '@shared/outline'
+import type { ExtractedDocument } from '@shared/document'
 import {
   buildTitleIndex,
   canContinueAgentLoop,
@@ -91,6 +94,23 @@ interface ChatMsg {
  * 历史不再用「截断 N 条」处理：截断会让模型忘掉之前干过什么，用户说"继续"时它从零重读一遍导图。
  * 现在走 `compressHistory`（三期）：最近几轮保留原文，更早的折叠成「此前做过什么」。
  */
+
+/**
+ * 导出格式：从工具参数里取，非法值一律回退 md。
+ *
+ * 放在这里而不是 shared 层：这是**界面侧**的决定（要调哪个导出通道），
+ * 纯逻辑层只管把 format 原样带给渲染层。
+ */
+function exportFormatOf(argumentsText: string): OutlineFormat {
+  try {
+    const parsed = JSON.parse(argumentsText) as { format?: unknown }
+    const raw = typeof parsed.format === 'string' ? parsed.format.trim().toLowerCase() : ''
+    if (raw === 'txt' || raw === 'opml' || raw === 'md') return raw
+  } catch {
+    /* 参数坏了就用默认格式 */
+  }
+  return 'md'
+}
 
 /** 快捷提问：只跟 AI 聊，不动画布 */
 const QUICK_PROMPTS = ['总结这页导图的主要内容', '指出这个导图结构上薄弱的地方']
@@ -163,6 +183,55 @@ export default function ChatPanel({
    * "现在走到第几步、还剩什么"——这是用户能一眼看出"它有没有跑偏"的唯一地方。
    */
   const [plan, setPlan] = useState<{ steps: string[]; done: number } | null>(null)
+  /**
+   * 挂在这个会话上的文档（拖进面板 / 点 📎 选进来的）。
+   *
+   * 只有正文，没有路径——读取与解析都在主进程做完了。AI 用 `readDocument` 工具
+   * 按关键词或分段读它，于是"这份文档讲了什么"可以在对话里问，而不必先出一张图。
+   */
+  const [docs, setDocs] = useState<Array<{ name: string; text: string }>>([])
+  /** 工具上下文要读它（回调里拿得到最新的），所以另存一份 ref */
+  const docsRef = useRef<Array<{ name: string; text: string }>>([])
+  useEffect(() => {
+    docsRef.current = docs
+  }, [docs])
+
+  /** 挂一份文档（读取与解析都在主进程，渲染层不碰文件系统） */
+  const attachDocumentBytes = useCallback((extracted: ExtractedDocument): void => {
+    setDocs((prev) => [
+      ...prev.filter((doc) => doc.name !== extracted.name),
+      { name: extracted.name, text: extracted.text }
+    ])
+    setHint(
+      `已挂上《${extracted.name}》（${extracted.label} · ${extracted.chars.toLocaleString()} 字）` +
+        '——可以直接问它里面的内容（只在本次会话有效）'
+    )
+  }, [])
+
+  const attachDocumentFile = useCallback(
+    (file: File): void => {
+      void (async () => {
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          attachDocumentBytes(await window.api.documentExtract(file.name, bytes))
+        } catch (error) {
+          setHint(readableIpcError((error as Error).message))
+        }
+      })()
+    },
+    [attachDocumentBytes]
+  )
+
+  const pickDocument = useCallback((): void => {
+    void (async () => {
+      try {
+        const extracted = await window.api.documentPick()
+        if (extracted) attachDocumentBytes(extracted)
+      } catch (error) {
+        setHint(readableIpcError((error as Error).message))
+      }
+    })()
+  }, [attachDocumentBytes])
   const filePath = useEditor((s) => s.filePath)
   const workbook = useEditor((s) => s.workbook)
   /** 标题索引：把回复里提到的节点变成可点击引用（按首字分桶，大文档也不卡） */
@@ -477,6 +546,17 @@ export default function ChatPanel({
         store.setStructure(intent.structureClass, intent.id)
         touched([intent.id])
         return { ok: true, note: '' }
+      case 'sortChildren': {
+        store.sortChildren(intent.id, intent.orderedIds, intent.renumber)
+        touched([intent.id, ...intent.orderedIds])
+        return { ok: true, note: intent.renumber ? '顺序与编号都已更新' : '顺序已更新' }
+      }
+      case 'dedupe': {
+        const merged = store.mergeTopics(intent.groups)
+        if (merged === 0) return { ok: false, note: '没有可合并的（组内可能存在父子包含关系）。' }
+        touched(intent.groups.map((group) => group.keepId))
+        return { ok: true, note: `共删除 ${merged} 个重复节点` }
+      }
       case 'notes':
         store.setNotes(intent.id, intent.text)
         touched([intent.id])
@@ -673,9 +753,38 @@ export default function ChatPanel({
           selectedId: state.selection[0] ?? null,
           sheetCount: state.workbook.sheets.length,
           // 第二批工具（关系线/边界/概要）挂在画布上，不在主题树里
-          sheet: activeSheet(state.workbook)
+          sheet: activeSheet(state.workbook),
+          // 挂在这个会话上的文档：readDocument 工具靠它把文档变成可问答的上下文
+          documents: docsRef.current
         }
         setActivity(`正在翻看导图…（${queue.index + 1}/${queue.calls.length}）`)
+        /**
+         * 导出大纲：要弹系统的「保存到…」对话框，属于**宿主动作**（纯逻辑层做不了），
+         * 所以在这里执行；结果如实回喂——用户可能在对话框里点了取消。
+         * 队列在这里暂停（`index` 在 finally 里才前进）：对话没选完就继续跑别的事会很怪。
+         */
+        if (call.name === 'exportOutline') {
+          const format = exportFormatOf(call.argumentsText)
+          setActivity('等待你选择保存位置…')
+          void window.api
+            .exportOutline(useEditor.getState().workbook, format)
+            .then((path) => {
+              pushToolResult(
+                call,
+                path ? `已导出到：${path}` : '用户在保存对话框里取消了，没有导出。'
+              )
+              noteAction(path ? `已导出大纲（${format}）` : '导出被取消', Boolean(path))
+            })
+            .catch((error: unknown) => {
+              pushToolResult(call, `导出失败：${(error as Error).message}`)
+              noteAction('导出大纲失败', false)
+            })
+            .finally(() => {
+              queue.index += 1
+              yieldThen()
+            })
+          return
+        }
         /**
          * 计划工具：把它的产物**显示出来**。
          * 解析参数（steps / done）而不是去猜回显文字——参数才是模型的原始意图。
@@ -1250,7 +1359,28 @@ export default function ChatPanel({
     })
 
   return (
-    <div className="side-panel chat-panel">
+    <div
+      className="side-panel chat-panel"
+      /* 拖文件到这里 = 挂成"可问答的上下文"。
+         导图文件（.xmind 等）不接：那是「打开文档」的事，交给窗口层。 */
+      onDragOver={(event) => {
+        const files = event.dataTransfer?.files
+        const first = files && files.length > 0 ? files[0] : null
+        if (first && !/\.(xmind|emmx|emm)$/i.test(first.name)) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+      }}
+      onDrop={(event) => {
+        const picked = Array.from(event.dataTransfer?.files ?? []).find(
+          (item) => !/\.(xmind|emmx|emm)$/i.test(item.name)
+        )
+        if (!picked) return
+        event.preventDefault()
+        event.stopPropagation()
+        attachDocumentFile(picked)
+      }}
+    >
       <div className="side-panel__header">
         <span className="chat-panel__title">
           <Bot size={15} />
@@ -1541,6 +1671,29 @@ export default function ChatPanel({
 
           {hint && <div className="chat-panel__activate-msg chat-panel__hint">{hint}</div>}
 
+          {docs.length > 0 && (
+            <div className="chat-panel__docs">
+              {docs.map((doc) => (
+                <span
+                  key={doc.name}
+                  className="chat-panel__doc"
+                  title={`${doc.text.length.toLocaleString()} 字 · 只在本次会话有效`}
+                >
+                  <Paperclip size={11} />
+                  {doc.name}
+                  <button
+                    type="button"
+                    className="chat-panel__doc-remove"
+                    title="移除这份文档"
+                    onClick={() => setDocs((prev) => prev.filter((item) => item.name !== doc.name))}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="chat-panel__input">
             <textarea
               ref={inputRef}
@@ -1564,6 +1717,16 @@ export default function ChatPanel({
                 }
               }}
             />
+            <button
+              type="button"
+              className="btn"
+              title="挂一份文档（docx / xlsx / pptx / md / txt / csv …）：挂上后可以直接问它里面的内容。也可以直接把文件拖到这里"
+              disabled={streaming}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={pickDocument}
+            >
+              <Paperclip size={14} />
+            </button>
             <button
               type="button"
               className="btn"

@@ -9,7 +9,7 @@
 import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { isRecord } from '../guards'
 import { parseRange } from '../layout'
-import { ancestorsOf, findTopic, walk } from '../model/tree'
+import { ancestorsOf, findTopic, isSelfOrDescendant, walk } from '../model/tree'
 import type { Sheet, Topic, TopicCode } from '../model/types'
 import { DEFAULT_STRUCTURE, MARKER_LABELS, STRUCTURES } from '../xmind/constants'
 
@@ -248,6 +248,37 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     )
   },
   {
+    name: 'readDocument',
+    description:
+      '读取**用户挂在这个会话上的文档**（聊天面板里拖进来的 / 点 📎 选的）。' +
+      '用户的要求与某份文档有关、或你需要原文依据时用它，**不要凭空作答**。' +
+      '用法：不填 name 时只有一份文档就直接读；填 name 选指定文档（先不填 query 调一次可看到' +
+      '可用文档清单与本段范围）；填 query 就返回包含该关键词的片段（带行号，最适合问答）；' +
+      '不填 query 则按 offset/limit 返回一段（默认从头 6000 字）。',
+    parameters: schema(
+      {
+        name: { type: 'string', description: '文档名（可只写一部分），不填 = 唯一的那份' },
+        query: { type: 'string', description: '要查找的关键词（推荐：比整篇读更省更快）' },
+        offset: { type: 'integer', description: '从第几个字符开始（默认 0）' },
+        limit: { type: 'integer', description: '最多返回多少字符（默认 6000，最多 12000）' }
+      },
+      []
+    )
+  },
+  {
+    name: 'exportOutline',
+    description:
+      '把当前画布导出成大纲文件：txt（纯文本）/ md（Markdown）/ opml（可导入其它导图软件）。' +
+      '会弹出系统的「保存到…」对话框，用户自己选位置——**不要在用户没要求时主动导出**。' +
+      '用户说"导出大纲 / 存成 Markdown / 给我 OPML"时用它。',
+    parameters: schema(
+      {
+        format: { type: 'string', description: 'txt / md / opml，默认 md' }
+      },
+      []
+    )
+  },
+  {
     name: 'findIncompleteNodes',
     description:
       '按「完整性」筛查节点，用来**自检有没有漏**：哪些节点缺备注（解释）、缺子节点（叶子）、缺代码块。' +
@@ -260,6 +291,17 @@ export const AGENT_TOOLS: AgentToolDef[] = [
         scope: { type: 'string', description: '限定在哪一支下面查，不填 = 整篇' },
         limit: { type: 'integer', description: '最多列出几个（默认 20，最多 50）' }
       },
+      []
+    )
+  },
+  {
+    name: 'findDuplicates',
+    description:
+      '按「同名」查重：找出**规范化后标题相同**的节点（忽略空白、标点、全角半角、尾部编号与' +
+      '「（补充）/ 副本」后缀），并给出每组的句柄与路径；另外列出「疑似近义」（一个标题是另一个的一部分）。' +
+      'AI 分批写入后最容易留下重复，整理收尾时用它先看清楚，再决定要不要调 mergeDuplicates 合并。',
+    parameters: schema(
+      { scope: { type: 'string', description: '限定在哪一支下面查，不填 = 整篇' } },
       []
     )
   }
@@ -468,6 +510,13 @@ export interface ToolContext {
    * 第二批工具要能列出/修改这些元素，光有主题树不够。
    */
   sheet: Sheet
+  /**
+   * 用户挂在这个会话上的文档（拖进聊天面板或点 📎 选进来的）。
+   *
+   * 内容是**纯文本**——读取与解析在主进程完成（`shared/document`），
+   * 这里只拿到结果。`readDocument` 工具靠它把文档变成可问答的上下文。
+   */
+  documents?: Array<{ name: string; text: string }>
 }
 
 export interface ToolResult {
@@ -530,6 +579,62 @@ function countsOf(root: Topic): {
   }
   visit(root, 1)
   return { total, branches: root.children.length, maxLevel, notes, codes, formulas }
+}
+
+/**
+ * 标题规范化：判断"是不是同一个主题"用。
+ *
+ * 去空白、全角转半角、去常见标点、去掉尾部编号与「（补充）/ 副本」这类后缀、小写。
+ * **只用于查重**，不改动任何真实标题——判错了也只是多列一组候选。
+ */
+export function normalizeTopicTitle(raw: string): string {
+  let text = raw.trim().toLowerCase()
+  // 全角 → 半角（字母、数字与常见标点）
+  text = text.replace(/[\uff01-\uff5e]/g, (ch) =>
+    String.fromCharCode((ch.charCodeAt(0) - 0xfee0) | 0)
+  )
+  text = text.replace(/\s+/g, '')
+  // 尾部「(1)」「（补充）」「- 副本」这类后缀
+  text = text.replace(/[(（[【][^)）\]】]*[)）\]】]$/, '')
+  text = text.replace(/[-—–_]*(副本|copy|补充|续|待补)\d*$/i, '')
+  // 标点全去掉：`性能优化` 与 `性能优化！` 是同一个主题
+  text = text.replace(/[.,:;!?'"`~!@#$%^&*()[\]{}<>/\\|+=_-]/g, '')
+  return text
+}
+
+/** 规范化后同名的分组（只有 ≥2 个成员的组才返回）；按文档顺序 */
+function duplicateGroups(scope: Topic): Array<{ title: string; ids: string[] }> {
+  const byKey = new Map<string, { title: string; ids: string[] }>()
+  walk(scope, (topic) => {
+    const key = normalizeTopicTitle(topic.title)
+    // 太短的标题（"一"、"a"）不参与查重：误判代价大于收益
+    if (key.length < 2) return
+    const group = byKey.get(key)
+    if (group) group.ids.push(topic.id)
+    else byKey.set(key, { title: topic.title, ids: [topic.id] })
+  })
+  return [...byKey.values()].filter((group) => group.ids.length > 1)
+}
+
+/** 「疑似近义」：一个标题包含另一个（长度 ≥3），只作为候选提示，不自动合并 */
+function similarTitleHints(scope: Topic): string[] {
+  const entries: Array<{ id: string; key: string }> = []
+  walk(scope, (topic) => {
+    const key = normalizeTopicTitle(topic.title)
+    if (key.length >= 3) entries.push({ id: topic.id, key })
+  })
+  const hints: string[] = []
+  for (let a = 0; a < entries.length && hints.length < 6; a += 1) {
+    for (let b = a + 1; b < entries.length && hints.length < 6; b += 1) {
+      const left = entries[a]
+      const right = entries[b]
+      if (!left || !right || left.key === right.key) continue
+      if (left.key.includes(right.key) || right.key.includes(left.key)) {
+        hints.push(`[#${shortHandleOf(left.id)}] 与 [#${shortHandleOf(right.id)}]`)
+      }
+    }
+  }
+  return hints
 }
 
 function stringArg(args: Record<string, unknown>, key: string): string {
@@ -719,6 +824,138 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
   }
 
   /**
+   * 读用户挂上来的文档。
+   *
+   * 文档内容可能很长（几十万字），所以默认**只给一段**、并支持按关键词取片段：
+   * 问答场景里 model 要的是"哪几行说了这件事"，不是"把整份文档再读一遍"。
+   */
+  if (name === 'readDocument') {
+    const docs = context.documents ?? []
+    if (docs.length === 0) {
+      return {
+        ok: false,
+        content:
+          '这个会话里还没有挂文档。请告诉用户：把文档（docx / md / txt / csv / xlsx / pptx）' +
+          '拖进聊天面板、或点输入框旁的 📎 选一份，然后我再读。',
+        summary: '读文档：会话里没有文档'
+      }
+    }
+    const wanted = stringArg(args, 'name').toLowerCase()
+    const picked =
+      wanted.length === 0
+        ? docs.length === 1
+          ? docs[0]
+          : null
+        : (docs.find((doc) => doc.name.toLowerCase() === wanted) ??
+          docs.find((doc) => doc.name.toLowerCase().includes(wanted)))
+    if (!picked) {
+      const list = docs.map((doc) => `${doc.name}（${doc.text.length} 字）`).join('、')
+      return {
+        ok: false,
+        content:
+          docs.length === 1
+            ? `这个会话里只有一份文档：${list}。请不填 name 直接读它。`
+            : `name 不明确或没找到。可用文档：${list}。请从中挑一个（可只写一部分名字）。`,
+        summary: '读文档：需要指定文档'
+      }
+    }
+
+    const query = stringArg(args, 'query')
+    if (query.length > 0) {
+      const lines = picked.text.split('\n')
+      const hits: string[] = []
+      const needle = query.toLowerCase()
+      for (let index = 0; index < lines.length && hits.length < 12; index += 1) {
+        const line = lines[index] ?? ''
+        if (!line.toLowerCase().includes(needle)) continue
+        // 命中行带上前后各一行：只看孤立一行常常读不出上下文
+        const from = Math.max(0, index - 1)
+        const to = Math.min(lines.length - 1, index + 1)
+        const block = lines
+          .slice(from, to + 1)
+          .map((text, offset) => `${from + offset + 1}| ${text}`)
+        hits.push(block.join('\n'))
+      }
+      return {
+        ok: true,
+        content:
+          hits.length === 0
+            ? `《${picked.name}》里没有找到「${query}」。可以换个关键词，或先不填 query 读一段看结构。`
+            : `《${picked.name}》中含「${query}」的片段（行号|原文）：\n\n${hits.join('\n\n')}`,
+        summary: `读文档：${picked.name} 命中「${query}」${hits.length} 处`
+      }
+    }
+
+    const offset = intArg(args, 'offset', 0, 0, picked.text.length)
+    const limit = intArg(args, 'limit', 6000, 200, 12000)
+    const slice = picked.text.slice(offset, offset + limit)
+    const more = offset + limit < picked.text.length
+    return {
+      ok: true,
+      content:
+        `《${picked.name}》第 ${offset}~${offset + slice.length} 字（共 ${picked.text.length} 字）` +
+        `${more ? '——还有更多，可加大 offset 继续读，或直接用 query 查关键词' : '（已到末尾）'}：\n\n${slice}`,
+      summary: `读文档：${picked.name}（${offset}~${offset + slice.length} 字）`
+    }
+  }
+
+  if (name === 'exportOutline') {
+    // 真正的导出由渲染层执行（要弹系统保存对话框）；走到这里说明宿主没有接管
+    const format = stringArg(args, 'format') || 'md'
+    return {
+      ok: true,
+      content: `导出请求已交给界面执行（格式：${format}）。`,
+      summary: `导出大纲：${format}`
+    }
+  }
+
+  /**
+   * 查重：按「规范化后同名」找出重复主题（只读，不改画布）。
+   *
+   * 自动合并前先让模型看清楚有哪些重复——它可能认出"这两个其实不是一件事"。
+   */
+  if (name === 'findDuplicates') {
+    const scope = stringArg(args, 'scope')
+    let base = context.root
+    let scopeNote = '整篇'
+    if (scope.length > 0) {
+      const resolved = resolveTopicAddress(context.root, scope)
+      if (!resolved.ok) return { ok: false, content: resolved.error, summary: `查重失败：${scope}` }
+      base = resolved.resolved.topic
+      scopeNote = `「${base.title}」这一支`
+    }
+    const pathOf = (id: string): string =>
+      ancestorsOf(context.root, id)
+        .map((ancestor) => findTopic(context.root, ancestor)?.title ?? '')
+        .filter((title) => title.length > 0)
+        .join(' → ')
+    const groups = duplicateGroups(base)
+    const lines: string[] = [`按「同名」查重（范围：${scopeNote}）：`]
+    if (groups.length === 0) lines.push('- 没有发现同名主题 ✅')
+    for (const group of groups) {
+      lines.push(`- 「${group.title}」×${group.ids.length}：`)
+      for (const id of group.ids) {
+        const title = findTopic(context.root, id)?.title ?? ''
+        lines.push(`    [#${shortHandleOf(id)}] ${title}（路径：${pathOf(id)}）`)
+      }
+    }
+    const hints = similarTitleHints(base)
+    if (hints.length > 0) {
+      lines.push(
+        '- **疑似近义**（一个是另一个的一部分，需你自己判断要不要合）：' + hints.join('、')
+      )
+    }
+    if (groups.length > 0) {
+      lines.push('要合并就调 mergeDuplicates（会删掉多余的那几个，界面上会请用户确认）。')
+    }
+    return {
+      ok: true,
+      content: lines.join('\n'),
+      summary: `查重：${groups.length} 组同名`
+    }
+  }
+
+  /**
    * 执行计划：**不改画布**，只是把计划与进度回显给模型和用户。
    *
    * 为什么做成工具而不是"让它先说一段计划"：说一段话没有任何约束力，下一步它就可能跑偏；
@@ -880,6 +1117,10 @@ export type WriteIntent =
   | { kind: 'collapse'; id: string; collapsed: boolean }
   /** 切换结构（思维导图 / 鱼骨 / 时间轴 …）：整张图或某一支 */
   | { kind: 'structure'; id: string; structureClass: string }
+  /** 同级排序（+ 可选自动编号）：orderedIds 是排好的子主题顺序 */
+  | { kind: 'sortChildren'; id: string; orderedIds: string[]; renumber: boolean }
+  /** 合并同名主题：每组保留 keepId，把 mergeIds 的内容并进去后删掉它们 */
+  | { kind: 'dedupe'; groups: Array<{ keepId: string; mergeIds: string[] }> }
   | { kind: 'notes'; id: string; text: string }
   | { kind: 'code'; id: string; code: TopicCode | null }
   | { kind: 'formula'; id: string; formula: string }
@@ -1212,6 +1453,42 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
         }
       },
       ['structure']
+    )
+  },
+  {
+    name: 'sortSiblings',
+    description:
+      '给某个主题的**同级子主题排序**（默认按标题），可选**自动编号**（1. 2. 3. …，会先去掉旧编号）。' +
+      '整理类任务的收尾常用：把并列的分支按顺序排好、或给步骤类内容编号。' +
+      'by 可选 title（默认，按标题）/ length（按标题长度）；order 可选 asc（默认）/ desc。' +
+      '注意：编号会重写子主题标题，**该标题上的局部格式（加粗/颜色）会跟着被清掉**（与手工改名一致）。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '排谁的子主题，不填 = 中心主题' },
+        by: { type: 'string', description: 'title（默认）/ length' },
+        order: { type: 'string', description: 'asc（默认）/ desc' },
+        renumber: { type: 'boolean', description: 'true = 顺带加「1. 2. 」编号' }
+      },
+      []
+    )
+  },
+  {
+    name: 'mergeDuplicates',
+    description:
+      '合并**同名重复**的主题（同名判定同 findDuplicates：忽略空白/标点/全角半角/尾部编号与"（补充）"后缀）。' +
+      '保留内容最完整的那个，把其余的**子主题搬过来、缺的备注/代码/公式/标签补上**，再删掉多余节点。' +
+      '**这是删节点的操作**，界面上会先请用户确认。要精确控制就先 findDuplicates 看清有哪些组，' +
+      '用 titles 只合并指定的那几组，否则合并范围内全部同名组。',
+    parameters: schema(
+      {
+        scope: { type: 'string', description: '限定在哪一支里合并，不填 = 整篇' },
+        titles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '只合并这些标题（原文照抄），不填则合并全部同名组'
+        }
+      },
+      []
     )
   }
 ]
@@ -1725,7 +2002,117 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     }
   }
 
+  if (name === 'sortSiblings') {
+    const address = stringArg(args, 'address')
+    let parent = root
+    if (address.length > 0) {
+      const resolved = resolveTopicAddress(root, address)
+      if (!resolved.ok) return fail(resolved.error)
+      parent = resolved.resolved.topic
+    }
+    if (parent.children.length < 2) {
+      return fail(`「${parent.title}」下面只有 ${parent.children.length} 个子主题，不需要排序。`)
+    }
+    const by = stringArg(args, 'by') === 'length' ? 'length' : 'title'
+    const desc = stringArg(args, 'order') === 'desc'
+    const ordered = [...parent.children].sort((left, right) => {
+      const base =
+        by === 'length'
+          ? left.title.length - right.title.length
+          : left.title.localeCompare(right.title, 'zh-Hans-CN', {
+              numeric: true,
+              sensitivity: 'base'
+            })
+      // 同键时按 id 兜底：顺序稳定，用户重复调用不会每次都变
+      return (desc ? -base : base) || left.id.localeCompare(right.id)
+    })
+    return {
+      ok: true,
+      intent: {
+        kind: 'sortChildren',
+        id: parent.id,
+        orderedIds: ordered.map((topic) => topic.id),
+        renumber: args.renumber === true
+      },
+      summary:
+        `按${by === 'length' ? '标题长度' : '标题'}${desc ? '倒序' : '正序'}排列「${parent.title}」的 ` +
+        `${ordered.length} 个子主题${args.renumber === true ? '，并重新编号' : ''}`,
+      destructive: false
+    }
+  }
+
+  if (name === 'mergeDuplicates') {
+    const scopeArg = stringArg(args, 'scope')
+    let base = root
+    if (scopeArg.length > 0) {
+      const resolved = resolveTopicAddress(root, scopeArg)
+      if (!resolved.ok) return fail(resolved.error)
+      base = resolved.resolved.topic
+    }
+    const rawTitles = Array.isArray(args.titles) ? args.titles : []
+    const wanted = rawTitles
+      .filter((title): title is string => typeof title === 'string' && title.trim().length > 0)
+      .map((title) => normalizeTopicTitle(title))
+
+    const groups = duplicateGroups(base).filter(
+      (group) => wanted.length === 0 || wanted.includes(normalizeTopicTitle(group.title))
+    )
+    if (groups.length === 0) {
+      return fail('没有找到可合并的同名主题（可以先调 findDuplicates 看看）。')
+    }
+
+    const planned: Array<{ keepId: string; mergeIds: string[] }> = []
+    let nested = 0
+    for (const group of groups) {
+      const topics = group.ids
+        .map((id) => findTopic(root, id))
+        .filter((topic): topic is Topic => topic !== null)
+      // 组内存在祖先/后代关系时合并会搬出一个环：跳过并如实说明
+      const hasNesting = topics.some((left) =>
+        topics.some((right) => left.id !== right.id && isSelfOrDescendant(root, left.id, right.id))
+      )
+      if (hasNesting) {
+        nested += 1
+        continue
+      }
+      // 保留"内容最全"的那个；同分时保留层级更浅的（信息更容易被找到）
+      const ranked = [...topics].sort(
+        (left, right) =>
+          contentScore(right) - contentScore(left) ||
+          ancestorsOf(root, left.id).length - ancestorsOf(root, right.id).length
+      )
+      const keeper = ranked[0]
+      if (!keeper) continue
+      planned.push({ keepId: keeper.id, mergeIds: ranked.slice(1).map((topic) => topic.id) })
+    }
+    if (planned.length === 0) {
+      return fail(
+        `${groups.length} 组同名主题之间都存在父子包含关系（比如「成本」下面还有「成本」），` +
+          '合并会把子节点搬进自己的祖先里——请先手动调整结构再用它。'
+      )
+    }
+    const removed = planned.reduce((sum, item) => sum + item.mergeIds.length, 0)
+    return {
+      ok: true,
+      intent: { kind: 'dedupe', groups: planned },
+      summary:
+        `合并 ${planned.length} 组同名主题：保留内容最全的那个，删掉多余 ${removed} 个` +
+        (nested > 0 ? `（另有 ${nested} 组因存在父子包含关系被跳过）` : ''),
+      destructive: true
+    }
+  }
+
   return fail('不是可用的写工具。')
+}
+
+/** 挑「保留哪一个」用的内容量：子树越大越全；同规模时看有没有备注/代码/公式 */
+function contentScore(topic: Topic): number {
+  return (
+    countTopicTree(topic) * 100 +
+    (topic.notes && topic.notes.trim().length > 0 ? 10 : 0) +
+    (topic.code ? 5 : 0) +
+    (topic.formula ? 3 : 0)
+  )
 }
 
 /** 结构 id 的宽松解析：完整 class、中文名、或点号后缀都能认 */

@@ -271,6 +271,18 @@ export interface EditorState {
     targetId: string
   }>
   /**
+   * 同级排序（AI 的 `sortSiblings` 走这里）：按给定顺序重排某个主题的子主题。
+   * `renumber` 为真时顺便加「1. 2. 」编号（先去掉旧编号，避免「1. 1. xxx」）。
+   */
+  sortChildren(parentId: string, orderedIds: string[], renumber: boolean): void
+  /**
+   * 合并同名主题（AI 的 `mergeDuplicates` 走这里）。
+   *
+   * 每组保留 keepId，把 mergeIds 的**子主题搬过来、缺的备注/代码/公式/标签/标记补上**，
+   * 然后删掉那些多余节点。整批算**一步撤销**（`mutate` 一次）。
+   */
+  mergeTopics(groups: Array<{ keepId: string; mergeIds: string[] }>): number
+  /**
    * 用快捷键微调选中主题（与亿图脑图一致，适合结构复杂时精确挪动）：
    * - `↑` / `↓`：在同级里上移 / 下移一位
    * - `Home` / `End`：移到同级的最前 / 最后
@@ -1400,6 +1412,83 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const last = applied[applied.length - 1]
     if (last) set({ selection: [last.id] })
     return applied
+  },
+
+  sortChildren: (parentId, orderedIds, renumber) => {
+    const index = new Map(orderedIds.map((id, at) => [id, at]))
+    get().mutate(
+      (draft) => {
+        const parent = findTopic(activeRoot(draft), parentId)
+        if (!parent) return
+        // 只按给定顺序排**还在的**子主题；没给到的（模型看不到的）保持原相对顺序、排在最后
+        const ordered = [...parent.children].sort((left, right) => {
+          const leftAt = index.get(left.id) ?? Number.MAX_SAFE_INTEGER
+          const rightAt = index.get(right.id) ?? Number.MAX_SAFE_INTEGER
+          return leftAt - rightAt
+        })
+        parent.children = ordered
+        if (!renumber) return
+        ordered.forEach((child, at) => {
+          const stripped = child.title.replace(/^\s*\d+\s*[.、)]\s*/, '').trim()
+          if (stripped.length === 0) return
+          const next = `${at + 1}. ${stripped}`
+          if (child.title === next) return
+          child.title = next
+          // 与手工改名一致：局部格式（加粗/颜色）是按字符位置贴的，留着会盖在错的字上
+          child.titleRich = undefined
+        })
+      },
+      renumber ? '同级排序并编号' : '同级排序'
+    )
+  },
+
+  mergeTopics: (groups) => {
+    let merged = 0
+    get().mutate((draft) => {
+      const draftRoot = activeRoot(draft)
+      for (const group of groups) {
+        const keep = findTopic(draftRoot, group.keepId)
+        if (!keep) continue
+        for (const mergeId of group.mergeIds) {
+          const loser = findTopic(draftRoot, mergeId)
+          if (!loser || loser.id === keep.id) continue
+          // 互为祖先时跳过（规划阶段已拦一道，这里是执行侧的最后一道）
+          if (
+            isSelfOrDescendant(draftRoot, keep.id, loser.id) ||
+            isSelfOrDescendant(draftRoot, loser.id, keep.id)
+          ) {
+            continue
+          }
+          // 内容并入：保留方缺什么补什么（不覆盖它已有的内容）
+          if (!keep.notes && loser.notes) {
+            keep.notes = loser.notes
+            keep.notesHtml = notesHtmlFrom(loser.notes)
+          }
+          if (!keep.code && loser.code) keep.code = loser.code
+          if (!keep.formula && loser.formula) keep.formula = loser.formula
+          const labels = new Set([...(keep.labels ?? []), ...(loser.labels ?? [])])
+          if (labels.size > 0) keep.labels = [...labels]
+          const markers = new Map((keep.markers ?? []).map((marker) => [marker.markerId, marker]))
+          for (const marker of loser.markers ?? []) {
+            if (!markers.has(marker.markerId)) markers.set(marker.markerId, marker)
+          }
+          if (markers.size > 0) keep.markers = [...markers.values()]
+
+          // 子主题原样搬到保留方下面
+          for (const child of [...loser.children]) {
+            if (!moveTopic(draftRoot, child.id, keep.id, keep.children.length)) continue
+            // 清掉自由摆放偏移：留着会落到"自动位置 + 偏移"的地方，看着像搬丢了
+            const placed = findTopic(draftRoot, child.id)
+            if (placed) placed.position = undefined
+          }
+          detachTopic(draftRoot, loser.id)
+          merged += 1
+        }
+      }
+      // 被删掉的主题可能挂着关系线/边界/概要：一并清掉悬空元素
+      if (merged > 0) pruneOverlays(activeSheet(draft))
+    }, '合并同名主题')
+    return merged
   },
 
   dropNode: (id, targetId, mode) => {

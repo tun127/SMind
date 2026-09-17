@@ -818,6 +818,106 @@ function testMoveMany(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* 7.3 同级排序与合并同名（AI 的 sortSiblings / mergeDuplicates 走这里） */
+/* ------------------------------------------------------------------ */
+
+function testSortAndDedupe(): void {
+  group('同级排序（sortChildren）：顺序、编号与撤销')
+
+  {
+    reset()
+    const rootId = root().id
+    const a = addChildOf(rootId, '甲')
+    const b = addChildOf(rootId, '乙')
+    const c = addChildOf(rootId, '丙')
+    /** 只看这几个节点的相对顺序：reset() 的默认文档自己还带着别的子主题 */
+    const titlesOf = (ids: string[]): string[] =>
+      root()
+        .children.filter((topic) => ids.includes(topic.id))
+        .map((topic) => topic.title)
+
+    store().sortChildren(rootId, [c, b, a], false)
+    eq('按给定顺序重排', titlesOf([a, b, c]), ['丙', '乙', '甲'])
+
+    store().sortChildren(rootId, [c, b, a], true)
+    eq('编号跟着顺序走', titlesOf([a, b, c]), ['1. 丙', '2. 乙', '3. 甲'])
+
+    // 再排一次不能叠成「1. 1. 丙」
+    store().sortChildren(rootId, [a, b, c], true)
+    eq('重复编号会先去掉旧编号', titlesOf([a, b, c]), ['1. 甲', '2. 乙', '3. 丙'])
+
+    const before = store().undoStack.length
+    store().undo()
+    eq('一次排序算一步撤销', store().undoStack.length, before - 1)
+    eq('撤销回到上一次编号', titlesOf([a, b, c]), ['1. 丙', '2. 乙', '3. 甲'])
+  }
+
+  {
+    // 没被点名的子主题不能丢（模型可能只看得到其中一部分）
+    reset()
+    const rootId = root().id
+    const x = addChildOf(rootId, 'X')
+    const y = addChildOf(rootId, 'Y')
+    const z = addChildOf(rootId, 'Z')
+    store().sortChildren(rootId, [z], false)
+    const titles = root().children.map((topic) => topic.title)
+    check('点名的排到最前', titles[0] === 'Z', titles.join(','))
+    check(
+      '没给到的都还在（一个没丢）',
+      titles.includes('X') && titles.includes('Y'),
+      titles.join(',')
+    )
+    eq(
+      '没给到的保持原有相对顺序',
+      titles.filter((title) => title === 'X' || title === 'Y'),
+      ['X', 'Y']
+    )
+    void x
+    void y
+  }
+
+  group('合并同名（mergeTopics）：内容并入、删除多余、祖先保护')
+
+  {
+    reset()
+    const rootId = root().id
+    const keep = addChildOf(rootId, '性能优化')
+    const dup = addChildOf(rootId, '性能优化（补充）')
+    const movedChild = addChildOf(dup, '减少重排')
+    store().setNotes(dup, '这段解释要留住')
+    store().addLabel(dup, '重点')
+
+    const merged = store().mergeTopics([{ keepId: keep, mergeIds: [dup] }])
+    eq('合并了一个', merged, 1)
+    check('多余的重复节点已删除', find(dup) === null)
+    eq(
+      '子主题搬到了保留方',
+      find(keep)?.children.map((topic) => topic.id),
+      [movedChild]
+    )
+    eq('备注补了过来', find(keep)?.notes, '这段解释要留住')
+    eq('标签也并了过来', find(keep)?.labels, ['重点'])
+    check(
+      '整批算一步撤销',
+      (() => {
+        store().undo()
+        return find(dup) !== null && find(keep)?.notes === undefined
+      })()
+    )
+  }
+
+  {
+    // 互为祖先时不能动手：把子节点搬进自己的祖先会成环
+    reset()
+    const rootId = root().id
+    const parent = addChildOf(rootId, 'A')
+    const nested = addChildOf(parent, 'A')
+    eq('组内存在父子关系时跳过', store().mergeTopics([{ keepId: parent, mergeIds: [nested] }]), 0)
+    check('原样保留（什么都没改）', find(nested) !== null)
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* 7.5 拖拽落点：拖到兄弟上排序、拖到其它节点上成为子主题（Xmind 同款）  */
 /* ------------------------------------------------------------------ */
 
@@ -2718,6 +2818,136 @@ function testAgentTools(): void {
     check('没有漏的就说清楚', clean.content.includes('没有漏的'), clean.content)
   }
 
+  group('Agent：读会话文档（readDocument）')
+
+  {
+    const sheetOf = (rootTopic: typeof root): ToolContext['sheet'] => ({
+      id: 'sheet-doc',
+      title: '画布',
+      rootTopic,
+      relationships: [],
+      boundaries: [],
+      summaries: []
+    })
+    const docContext: ToolContext = {
+      root,
+      selectedId: null,
+      sheetCount: 1,
+      sheet: sheetOf(root),
+      documents: [
+        {
+          name: '报告.md',
+          text: '第一行：背景\n第二行：性能优化是关键\n第三行：结论如下\n第四行：性能优化要分批'
+        },
+        { name: '笔记.txt', text: '只有一句话' }
+      ]
+    }
+
+    const noDocs = runReadTool('readDocument', '{}', {
+      root,
+      selectedId: null,
+      sheetCount: 1,
+      sheet: sheetOf(root)
+    })
+    eq('没有挂文档时如实说', noDocs.ok, false)
+    check('并告诉用户怎么挂', noDocs.content.includes('拖进聊天面板'), noDocs.content)
+
+    const ambiguous = runReadTool('readDocument', '{}', docContext)
+    eq('有多份文档时不猜', ambiguous.ok, false)
+    check(
+      '把可选的文档列出来',
+      ambiguous.content.includes('报告.md') && ambiguous.content.includes('笔记.txt'),
+      ambiguous.content
+    )
+
+    const byName = runReadTool('readDocument', JSON.stringify({ name: '报告' }), docContext)
+    check(
+      '可以按名字读（支持只写一部分）',
+      byName.ok && byName.content.includes('报告.md'),
+      byName.content
+    )
+
+    const byQuery = runReadTool(
+      'readDocument',
+      JSON.stringify({ name: '报告.md', query: '性能优化' }),
+      docContext
+    )
+    check(
+      '按关键词查带行号',
+      byQuery.content.includes('2|') && byQuery.content.includes('4|'),
+      byQuery.content
+    )
+    check('命中处的上下文行一起给', byQuery.content.includes('背景'), byQuery.content)
+
+    const missQuery = runReadTool(
+      'readDocument',
+      JSON.stringify({ name: '报告.md', query: '根本不存在的东西' }),
+      docContext
+    )
+    check(
+      '查不到就说查不到（并给下一步）',
+      missQuery.content.includes('没有找到'),
+      missQuery.content
+    )
+
+    const slice = runReadTool('readDocument', JSON.stringify({ name: '报告.md' }), docContext)
+    check('不填 query 时按区间给一段', slice.content.includes('第 0~'), slice.content)
+    check('结尾如实说明（这一份短）', slice.content.includes('已到末尾'), slice.content)
+
+    // 长文档：默认只给一段，并提示后面还有（否则模型以为看到的就是全部）
+    const longContext: ToolContext = {
+      ...docContext,
+      // 比默认的 6000 字一段更长：应当只给一段、并说还有更多
+      documents: [{ name: '长文.txt', text: '段'.repeat(7000) }]
+    }
+    const longSlice = runReadTool('readDocument', '{}', longContext)
+    check(
+      '长文档默认只给一段（6000 字）',
+      longSlice.content.includes('第 0~6000 字'),
+      longSlice.content.slice(0, 80)
+    )
+    check(
+      '并提示后面还有更多',
+      longSlice.content.includes('还有更多'),
+      longSlice.content.slice(0, 120)
+    )
+  }
+
+  group('Agent：查重（findDuplicates）')
+
+  {
+    const dup = createTopic('中心')
+    dup.children.push(
+      createTopic('性能优化'),
+      createTopic('性能优化！'),
+      createTopic('性能优化（补充）'),
+      createTopic('缓存策略')
+    )
+    const dupContext: ToolContext = {
+      root: dup,
+      selectedId: null,
+      sheetCount: 1,
+      sheet: {
+        id: 'sheet-dup',
+        title: '画布',
+        rootTopic: dup,
+        relationships: [],
+        boundaries: [],
+        summaries: []
+      }
+    }
+    const report = runReadTool('findDuplicates', '{}', dupContext)
+    check('标点与「（补充）」差异也算同名', report.content.includes('×3'), report.content)
+    check('每个成员都给句柄', (report.content.match(/\[#/g) ?? []).length >= 3, report.content)
+    check('提示下一步可以合并', report.content.includes('mergeDuplicates'), report.content)
+
+    const clean = runReadTool('findDuplicates', '{}', {
+      ...dupContext,
+      root: createTopic('孤零零')
+    })
+    check('没有重复就说清楚', clean.content.includes('没有发现同名'), clean.content)
+  }
+
   const stats = runReadTool('getDocStats', '{}', context)
   check('文档概况含节点总数', stats.content.includes('节点总数：5'))
   check('文档概况含画布数', stats.content.includes('画布数：2'))
@@ -2842,12 +3072,21 @@ function testWriteToolsAndTurn(): void {
 
   // 工具数量是**纪律**：太多模型会选错（规划里定的「单批 ≤ 12 个」）。
   // 改这个数字必须是有意的——所以用等值断言钉死，而不是 `>=`。
-  eq('写工具一共 19 个（第一批 10 + 第二批 8 + setStructure）', AGENT_WRITE_TOOLS.length, 19)
-  eq('全部工具 = 读 7 + 写 19', AGENT_ALL_TOOLS.length, 26)
+  eq(
+    '写工具一共 21 个（+setStructure / sortSiblings / mergeDuplicates）',
+    AGENT_WRITE_TOOLS.length,
+    21
+  )
+  eq('全部工具 = 读 10 + 写 21', AGENT_ALL_TOOLS.length, 31)
 
   // 计划工具与覆盖度自检是**只读**的：不碰画布、也不该消耗试用回合
   check('updatePlan 是只读工具', isReadToolName('updatePlan'))
   check('findIncompleteNodes 是只读工具', isReadToolName('findIncompleteNodes'))
+  check('findDuplicates 是只读工具（只看不改）', isReadToolName('findDuplicates'))
+  check('readDocument 是只读工具', isReadToolName('readDocument'))
+  check('exportOutline 是只读工具（导出不改画布）', isReadToolName('exportOutline'))
+  check('sortSiblings 是写工具', !isReadToolName('sortSiblings'))
+  check('mergeDuplicates 是写工具', !isReadToolName('mergeDuplicates'))
   check('setStructure 是写工具', !isReadToolName('setStructure'))
   check(
     '「真正改画布」的工具名里没有 askUser（只提问不该消耗试用回合）',
@@ -2868,6 +3107,67 @@ function testWriteToolsAndTurn(): void {
   /** 取「是不是破坏性操作」；规划失败时按 false 处理（失败的断言在别处） */
   const destructiveOf = (p: ReturnType<typeof planWriteTool>): boolean =>
     p.ok ? p.destructive : false
+
+  group('Agent：同级排序（sortSiblings）')
+
+  {
+    // tree = 中心主题 → 成本 →（人力 / 物料）
+    const sorted = plan('sortSiblings', { address: '成本', renumber: true })
+    check('排序规划成功', sorted.ok, sorted.ok ? '' : sorted.error)
+    check(
+      '给出排好的子主题顺序',
+      sorted.ok && sorted.intent.kind === 'sortChildren'
+        ? sorted.intent.orderedIds.length === 2
+        : false
+    )
+    check(
+      '编号标记传下去了',
+      sorted.ok && sorted.intent.kind === 'sortChildren' && sorted.intent.renumber === true
+    )
+    eq('不算破坏性操作', destructiveOf(sorted), false)
+
+    const noKids = plan('sortSiblings', { address: '人力' })
+    eq('子主题不足两个时拒绝', noKids.ok, false)
+    check(
+      '并说明原因',
+      !noKids.ok && noKids.error.includes('不需要排序'),
+      noKids.ok ? '' : noKids.error
+    )
+  }
+
+  group('Agent：合并同名（mergeDuplicates）')
+
+  {
+    const dupRoot = createTopic('中心主题')
+    const rich = createTopic('性能优化')
+    rich.notes = '有解释'
+    rich.children.push(createTopic('减少重排'))
+    const poor = createTopic('性能优化！')
+    const nestedParent = createTopic('缓存')
+    nestedParent.children.push(createTopic('缓存'))
+    dupRoot.children.push(rich, poor, nestedParent)
+
+    const merged = planWriteTool('mergeDuplicates', '{}', dupRoot)
+    check('合并规划成功', merged.ok, merged.ok ? '' : merged.error)
+    check('标成破坏性（会删节点，界面先问用户）', merged.ok && merged.destructive === true)
+    check(
+      '保留内容最全的那个',
+      merged.ok && merged.intent.kind === 'dedupe'
+        ? merged.intent.groups[0]?.keepId === rich.id
+        : false
+    )
+    check(
+      '父子同名那组被跳过并如实说明',
+      merged.ok && merged.summary.includes('跳过'),
+      merged.ok ? merged.summary : ''
+    )
+    const filtered = planWriteTool(
+      'mergeDuplicates',
+      JSON.stringify({ titles: ['根本没有这个标题'] }),
+      dupRoot
+    )
+    eq('titles 过滤后没得合并就报错', filtered.ok, false)
+  }
 
   group('Agent：切换结构（setStructure）')
 
@@ -9086,6 +9386,7 @@ async function main(): Promise<void> {
   testDelete()
   testMove()
   testMoveMany()
+  testSortAndDedupe()
   testNodeDrag()
   testUndoGranularity()
   testCollapseSelection()

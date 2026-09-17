@@ -2325,6 +2325,41 @@ textarea {
   color: var(--text);
 }
 
+/* 已挂上的文档：显示在输入框上方，可单独移除 */
+.chat-panel__docs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px 0;
+}
+
+.chat-panel__doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(47, 107, 255, 0.06);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.chat-panel__doc-remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.chat-panel__doc-remove:hover {
+  color: var(--text);
+}
+
 /* 执行计划卡片（updatePlan 工具的产物）：一张常驻的清单，一眼看出走到第几步 */
 .chat-plan {
   margin-bottom: 8px;
