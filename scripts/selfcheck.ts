@@ -62,6 +62,7 @@ import {
 } from '../src/shared/ai'
 import {
   AGENT_ALL_TOOLS,
+  AGENT_CANVAS_TOOL_NAMES,
   AGENT_MAX_ROUNDS,
   AGENT_MAX_TOOL_CALLS,
   AGENT_TOOLS,
@@ -69,6 +70,7 @@ import {
   buildTitleIndex,
   canContinueAgentLoop,
   isMutatingIntent,
+  isReadToolName,
   planAvailableTools,
   planWriteTool,
   resolveTopicAddress,
@@ -2590,6 +2592,132 @@ function testAgentTools(): void {
     planAvailableTools(false).some((tool) => tool.name === 'listAttachments')
   )
 
+  group('Agent：计划工具（updatePlan，只读）')
+
+  {
+    const planned = runReadTool(
+      'updatePlan',
+      JSON.stringify({ steps: ['读结构', '建分支', '补解释', '自检'], done: 1 }),
+      context
+    )
+    eq('计划工具执行成功', planned.ok, true)
+    check('回显已完成 / 总步数', planned.content.includes('完成 1/4'), planned.content)
+    check('已完成的打勾', planned.content.includes('✓ 1. 读结构'), planned.content)
+    check('当前这一步标出来', planned.content.includes('▶ 2. 建分支'), planned.content)
+    check('未开始的留白', planned.content.includes('· 3. 补解释'), planned.content)
+    check('告诉它当前该做哪一步', planned.content.includes('当前这一步：建分支'), planned.content)
+    check('摘要带上进度', planned.summary.includes('1/4'), planned.summary)
+
+    const finished = runReadTool(
+      'updatePlan',
+      JSON.stringify({ steps: ['A', 'B'], done: 2 }),
+      context
+    )
+    check('全部完成时提示去做最后自检', finished.content.includes('最后自检'), finished.content)
+    const overDone = runReadTool(
+      'updatePlan',
+      JSON.stringify({ steps: ['A', 'B'], done: 99 }),
+      context
+    )
+    check('done 超出步数会被夹住（不出现 2/2 之外的怪数字）', overDone.content.includes('完成 2/2'))
+
+    const emptyPlan = runReadTool('updatePlan', JSON.stringify({ steps: [] }), context)
+    eq('空计划被拒绝', emptyPlan.ok, false)
+    check('并给出正确用法', emptyPlan.content.includes('2~6 步'), emptyPlan.content)
+  }
+
+  group('Agent：覆盖度自检（findIncompleteNodes）')
+
+  {
+    /** 一棵「有备注的 / 没备注的 / 带代码的 / 叶子」都有的小树，覆盖四种命中情况 */
+    const root = createTopic('中心主题')
+    const branchA = createTopic('分支甲')
+    const withNotes = createTopic('有解释的')
+    withNotes.notes = '这里是解释'
+    const withoutNotes = createTopic('缺解释的')
+    const withCode = createTopic('有代码的')
+    withCode.notes = '也有解释'
+    withCode.code = { language: 'ts', text: 'const a = 1' }
+    branchA.children.push(withNotes, withoutNotes, withCode)
+    const branchB = createTopic('分支乙')
+    const lonelyLeaf = createTopic('光杆节点')
+    branchB.children.push(lonelyLeaf)
+    root.children.push(branchA, branchB)
+    const treeContext: ToolContext = {
+      root,
+      selectedId: null,
+      sheetCount: 1,
+      sheet: {
+        id: 'sheet-notes',
+        title: '画布',
+        rootTopic: root,
+        relationships: [],
+        boundaries: [],
+        summaries: []
+      }
+    }
+
+    const missingNotes = runReadTool('findIncompleteNodes', '{}', treeContext)
+    eq('默认查缺备注', missingNotes.ok, true)
+    // 7 个节点里，有备注的只有「有解释的」「有代码的」两个 → 命中 5 个
+    check('报出命中数与总数', missingNotes.content.includes('命中 5 个'), missingNotes.content)
+    check('总节点数也报出来', missingNotes.content.includes('共 7 个节点'), missingNotes.content)
+    check('命中项带句柄（可直接拿去补）', missingNotes.content.includes('[#'), missingNotes.content)
+    check(
+      '带路径（知道在哪一支）',
+      missingNotes.content.includes('路径：中心主题 → 分支甲'),
+      missingNotes.content
+    )
+    check(
+      '按分支汇总（先补漏得最多的那一支）',
+      missingNotes.content.includes('按分支汇总'),
+      missingNotes.content
+    )
+
+    const scoped = runReadTool(
+      'findIncompleteNodes',
+      JSON.stringify({ missing: 'notes', scope: '分支甲' }),
+      treeContext
+    )
+    check('scope 能限定某一支', scoped.content.includes('「分支甲」这一支'), scoped.content)
+    check('限定后只算这一支的节点', scoped.content.includes('共 4 个节点'), scoped.content)
+
+    const leaves = runReadTool(
+      'findIncompleteNodes',
+      JSON.stringify({ missing: 'children' }),
+      treeContext
+    )
+    check('查叶子节点', leaves.content.includes('是叶子'), leaves.content)
+
+    const codes = runReadTool(
+      'findIncompleteNodes',
+      JSON.stringify({ missing: 'code' }),
+      treeContext
+    )
+    check('查缺代码块', codes.content.includes('缺代码块'), codes.content)
+
+    // 全都有解释时要说"没漏"，而不是给一份空清单让模型自己猜
+    const allNoted = createTopic('中心')
+    allNoted.notes = '中心主题的说明'
+    const noted = createTopic('都有解释')
+    noted.notes = '解释'
+    allNoted.children.push(noted)
+    const clean = runReadTool('findIncompleteNodes', '{}', {
+      root: allNoted,
+      selectedId: null,
+      sheetCount: 1,
+      sheet: {
+        id: 'sheet-clean',
+        title: '画布',
+        rootTopic: allNoted,
+        relationships: [],
+        boundaries: [],
+        summaries: []
+      }
+    })
+    check('没有漏的就说清楚', clean.content.includes('没有漏的'), clean.content)
+  }
+
   const stats = runReadTool('getDocStats', '{}', context)
   check('文档概况含节点总数', stats.content.includes('节点总数：5'))
   check('文档概况含画布数', stats.content.includes('画布数：2'))
@@ -2714,8 +2842,18 @@ function testWriteToolsAndTurn(): void {
 
   // 工具数量是**纪律**：太多模型会选错（规划里定的「单批 ≤ 12 个」）。
   // 改这个数字必须是有意的——所以用等值断言钉死，而不是 `>=`。
-  eq('写工具一共 18 个（第一批 10 + 第二批 8）', AGENT_WRITE_TOOLS.length, 18)
-  eq('全部工具 = 读 5 + 写 18', AGENT_ALL_TOOLS.length, 23)
+  eq('写工具一共 19 个（第一批 10 + 第二批 8 + setStructure）', AGENT_WRITE_TOOLS.length, 19)
+  eq('全部工具 = 读 7 + 写 19', AGENT_ALL_TOOLS.length, 26)
+
+  // 计划工具与覆盖度自检是**只读**的：不碰画布、也不该消耗试用回合
+  check('updatePlan 是只读工具', isReadToolName('updatePlan'))
+  check('findIncompleteNodes 是只读工具', isReadToolName('findIncompleteNodes'))
+  check('setStructure 是写工具', !isReadToolName('setStructure'))
+  check(
+    '「真正改画布」的工具名里没有 askUser（只提问不该消耗试用回合）',
+    !AGENT_CANVAS_TOOL_NAMES.includes('askUser')
+  )
+  check('但包含 setStructure', AGENT_CANVAS_TOOL_NAMES.includes('setStructure'))
 
   // 注意别把这个变量叫 root：会遮蔽上面那个 root() 助手
   const tree = createTopic('中心主题')
@@ -2730,6 +2868,46 @@ function testWriteToolsAndTurn(): void {
   /** 取「是不是破坏性操作」；规划失败时按 false 处理（失败的断言在别处） */
   const destructiveOf = (p: ReturnType<typeof planWriteTool>): boolean =>
     p.ok ? p.destructive : false
+
+  group('Agent：切换结构（setStructure）')
+
+  {
+    const structPlan = plan('setStructure', { structure: 'org.xmind.ui.fishbone.leftHeaded' })
+    eq('结构规划成功', structPlan.ok, true)
+    check(
+      '意图带着结构 id',
+      structPlan.ok &&
+        structPlan.intent.kind === 'structure' &&
+        structPlan.intent.structureClass === 'org.xmind.ui.fishbone.leftHeaded',
+      structPlan.ok ? structPlan.summary : structPlan.error
+    )
+    check('摘要写清改成了什么结构', structPlan.ok && structPlan.summary.includes('结构改成'))
+    eq('不算破坏性操作（不该弹确认）', destructiveOf(structPlan), false)
+
+    check('中文名也能认（用户说的是「鱼骨图」）', plan('setStructure', { structure: '鱼骨图' }).ok)
+    check('点号后缀也能认', plan('setStructure', { structure: 'timeline' }).ok === false)
+    const bad = plan('setStructure', { structure: '不存在的结构' })
+    eq('不认识的结构被拒', bad.ok, false)
+    check('并列出可选值', !bad.ok && bad.error.includes('可选'), bad.ok ? '' : bad.error)
+
+    // 不填 address = 改中心主题（整张图）；填了则只改那一支
+    check(
+      '不填 address 时改的是中心主题',
+      structPlan.ok && structPlan.intent.kind === 'structure'
+        ? structPlan.intent.id === tree.id
+        : false
+    )
+    const scopedStruct = plan('setStructure', {
+      structure: 'org.xmind.ui.logic.right',
+      address: '成本'
+    })
+    check(
+      '填了 address 时只改那一支',
+      scopedStruct.ok && scopedStruct.intent.kind === 'structure'
+        ? scopedStruct.intent.id === cost.id
+        : false
+    )
+  }
 
   const rename = plan('renameTopic', { address: '中心主题/成本/人力', title: '人力成本' })
   eq('改名规划成功', rename.ok, true)

@@ -58,7 +58,7 @@ import {
   type ToolCall
 } from '@shared/ai'
 import {
-  AGENT_WRITE_TOOLS,
+  AGENT_CANVAS_TOOL_NAMES,
   planAvailableTools,
   toWireTools,
   type AgentToolDef
@@ -467,8 +467,13 @@ async function migrateAiConfigKey(): Promise<void> {
   }
 }
 
-/** 写工具的名字：主进程据此判断「这次对话真的动了画布吗」（试用计数只认它） */
-const WRITE_TOOL_NAMES = AGENT_WRITE_TOOLS.map((tool) => tool.name)
+/**
+ * 写工具的名字：主进程据此判断「这次对话真的动了画布吗」（试用计数只认它）。
+ *
+ * 用 AGENT_CANVAS_TOOL_NAMES 而不是全部写工具：askUser 只是提问、什么都不改，
+ * 算进去就变成"只问一句也消耗一个试用回合"。
+ */
+const WRITE_TOOL_NAMES = AGENT_CANVAS_TOOL_NAMES
 
 /** 进行中的流式请求（requestId → 控制器）：「停止生成」与窗口关闭时中止用 */
 const streamAborters = new Map<string, AbortController>()

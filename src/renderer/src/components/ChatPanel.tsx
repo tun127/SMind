@@ -156,6 +156,13 @@ export default function ChatPanel({
    * 主进程用它做试用计数去重——一条命令跑十几二十轮也只算一个写回合。
    */
   const turnIdRef = useRef('')
+  /**
+   * 当前的执行计划（模型用 updatePlan 工具写的）。
+   *
+   * 摆在界面上而不是藏在工具痕迹里：长任务（生成上百节点的详细图）最需要的就是
+   * "现在走到第几步、还剩什么"——这是用户能一眼看出"它有没有跑偏"的唯一地方。
+   */
+  const [plan, setPlan] = useState<{ steps: string[]; done: number } | null>(null)
   const filePath = useEditor((s) => s.filePath)
   const workbook = useEditor((s) => s.workbook)
   /** 标题索引：把回复里提到的节点变成可点击引用（按首字分桶，大文档也不卡） */
@@ -465,6 +472,11 @@ export default function ChatPanel({
         store.setCollapsed(intent.id, intent.collapsed)
         touched([intent.id])
         return { ok: true, note: '' }
+      case 'structure':
+        // 结构切换是主题上的一个属性：整张图就改中心主题，某一支就改那一支
+        store.setStructure(intent.structureClass, intent.id)
+        touched([intent.id])
+        return { ok: true, note: '' }
       case 'notes':
         store.setNotes(intent.id, intent.text)
         touched([intent.id])
@@ -664,6 +676,30 @@ export default function ChatPanel({
           sheet: activeSheet(state.workbook)
         }
         setActivity(`正在翻看导图…（${queue.index + 1}/${queue.calls.length}）`)
+        /**
+         * 计划工具：把它的产物**显示出来**。
+         * 解析参数（steps / done）而不是去猜回显文字——参数才是模型的原始意图。
+         */
+        if (call.name === 'updatePlan') {
+          try {
+            const parsed = JSON.parse(call.argumentsText) as { steps?: unknown; done?: unknown }
+            const steps = Array.isArray(parsed.steps)
+              ? parsed.steps.filter(
+                  (step): step is string => typeof step === 'string' && step.trim().length > 0
+                )
+              : []
+            if (steps.length > 0) {
+              const rawDone =
+                typeof parsed.done === 'number' && Number.isFinite(parsed.done) ? parsed.done : 0
+              setPlan({
+                steps,
+                done: Math.max(0, Math.min(steps.length, Math.round(rawDone)))
+              })
+            }
+          } catch {
+            /* 参数不是合法 JSON：工具会把错误回喂给模型，这里不额外处理 */
+          }
+        }
         const result = runReadTool(call.name, call.argumentsText, context)
         pushToolResult(call, result.content)
         noteAction(result.summary, false)
@@ -956,6 +992,24 @@ export default function ChatPanel({
         return
       }
 
+      /**
+       * 把这一轮的解说（计划 / 每步反馈）**移进步骤时间线**：正文只保留最后一轮的
+       * （= 最终自检与总结）。阅读顺序因此是用户要的样子：
+       * **计划 → 工具步骤 → 每步反馈 → … → 最终自检**，
+       * 而不是"一堆工具痕迹在上、一段不知道属于哪一步的正文在下"。
+       * （wire 不受影响：协议里的 assistant.content 照旧，这里只动界面展示。）
+       */
+      update((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant') return prev
+        const narration = last.content.trim()
+        if (narration.length === 0) return prev
+        return [
+          ...prev.slice(0, -1),
+          { ...last, content: '', toolNotes: [...(last.toolNotes ?? []), `💬 ${narration}`] }
+        ]
+      })
+
       // 有工具调用：把助手这一轮记进消息线（协议要求带上 tool_calls），然后逐个处理
       wireRef.current = [
         ...wireRef.current,
@@ -1085,6 +1139,7 @@ export default function ChatPanel({
       // 新的一次用户命令 = 新的 turnId：主进程靠它做试用计数去重
       // （一条命令跑多少轮都只算一个写回合，见 markTrialTurnSeen）
       turnIdRef.current = createId()
+      setPlan(null)
       roundRef.current = 0
       toolCallsUsedRef.current = 0
       writeLogRef.current = []
@@ -1290,7 +1345,7 @@ export default function ChatPanel({
                 </p>
               </div>
             )}
-            {messages.map((msg) => (
+            {messages.map((msg, index) => (
               <div
                 key={msg.id}
                 className={msg.role === 'user' ? 'chat-msg chat-msg--user' : 'chat-msg'}
@@ -1300,12 +1355,44 @@ export default function ChatPanel({
                     msg.content
                   ) : (
                     <>
+                      {/* 执行计划：挂在最后一条助手消息上（一个回合一份，回合结束仍留着可回看） */}
+                      {plan && index === messages.length - 1 && (
+                        <div className="chat-plan">
+                          <div className="chat-plan__head">
+                            执行计划（{plan.done}/{plan.steps.length}）
+                          </div>
+                          <ol className="chat-plan__list">
+                            {plan.steps.map((step, stepIndex) => (
+                              <li
+                                key={`${stepIndex}-${step}`}
+                                className={
+                                  stepIndex < plan.done
+                                    ? 'chat-plan__item chat-plan__item--done'
+                                    : stepIndex === plan.done
+                                      ? 'chat-plan__item chat-plan__item--current'
+                                      : 'chat-plan__item'
+                                }
+                              >
+                                {stepIndex < plan.done ? '✓' : stepIndex === plan.done ? '▶' : '·'}{' '}
+                                {step}
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
                       {/* 过程在上、结论在下：先看见它干了什么，AI 的回答压轴——
                           以前回答在最上面、被工具条目和上限提示压在下面，用户根本找不到「回复」在哪儿 */}
                       {msg.toolNotes && msg.toolNotes.length > 0 && (
                         <div className="chat-msg__tools">
                           {msg.toolNotes.map((note, index) => (
-                            <span key={`${note}-${index}`} className="chat-msg__tool">
+                            <span
+                              key={`${note}-${index}`}
+                              className={
+                                note.startsWith('💬')
+                                  ? 'chat-msg__tool chat-msg__tool--note'
+                                  : 'chat-msg__tool'
+                              }
+                            >
                               {note}
                             </span>
                           ))}

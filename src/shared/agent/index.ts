@@ -9,9 +9,9 @@
 import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { isRecord } from '../guards'
 import { parseRange } from '../layout'
-import { ancestorsOf, findTopic } from '../model/tree'
+import { ancestorsOf, findTopic, walk } from '../model/tree'
 import type { Sheet, Topic, TopicCode } from '../model/types'
-import { MARKER_LABELS } from '../xmind/constants'
+import { DEFAULT_STRUCTURE, MARKER_LABELS, STRUCTURES } from '../xmind/constants'
 
 /* ------------------------------------------------------------------ */
 /* 节点标题的识别与切分                                                */
@@ -226,6 +226,42 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     description:
       '读取当前文档的规模与构成：画布数、节点总数、一级分支数、最大层级、带备注/代码块/公式的节点数。',
     parameters: schema({})
+  },
+  {
+    name: 'updatePlan',
+    description:
+      '写下**执行计划**，并在每完成一步后更新进度（**不改画布**）。' +
+      '动手前先调用它：steps 给 2~6 步的清单，一步一件事、每步能对应到具体操作；' +
+      '之后**每完成一步再调用一次**，steps 传同一份清单、done 传已完成的数量（1、2、3…）。' +
+      '用户会在聊天里看到这份清单与进度。大任务（新建整张图、批量补内容、重构结构）先写计划，' +
+      '比直接开干更容易做全，也更容易被发现有遗漏。小改动（改个标题、搬一个节点）不需要计划。',
+    parameters: schema(
+      {
+        steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '计划步骤（2~6 条，按执行顺序）'
+        },
+        done: { type: 'integer', description: '已完成几步（0 = 刚开始；做到第 k 步就传 k）' }
+      },
+      ['steps']
+    )
+  },
+  {
+    name: 'findIncompleteNodes',
+    description:
+      '按「完整性」筛查节点，用来**自检有没有漏**：哪些节点缺备注（解释）、缺子节点（叶子）、缺代码块。' +
+      '写完一大片内容后调用它核对覆盖度，再针对性补齐——比凭印象说"都写好了"可靠得多。' +
+      'missing 选一种：notes（缺备注，默认）/ children（叶子节点）/ code（缺代码块）；' +
+      'scope 可限定某一支（标题路径或句柄），不填就是整篇。返回带**句柄**，可以直接拿去继续写。',
+    parameters: schema(
+      {
+        missing: { type: 'string', description: 'notes / children / code，默认 notes' },
+        scope: { type: 'string', description: '限定在哪一支下面查，不填 = 整篇' },
+        limit: { type: 'integer', description: '最多列出几个（默认 20，最多 50）' }
+      },
+      []
+    )
   }
 ]
 
@@ -682,6 +718,122 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     return { ok: true, content: lines.join('\n'), summary: `文档概况：${counts.total} 个节点` }
   }
 
+  /**
+   * 执行计划：**不改画布**，只是把计划与进度回显给模型和用户。
+   *
+   * 为什么做成工具而不是"让它先说一段计划"：说一段话没有任何约束力，下一步它就可能跑偏；
+   * 而一份显式清单会出现在界面上、也留在消息线里，模型每轮都能看到自己走到哪一步——
+   * 这是"生成上百节点的详细图"这类长任务最容易缺的东西。
+   */
+  if (name === 'updatePlan') {
+    const rawSteps = Array.isArray(args.steps) ? args.steps : []
+    const steps = rawSteps
+      .filter((step): step is string => typeof step === 'string' && step.trim().length > 0)
+      .slice(0, 8)
+      .map((step) => step.trim())
+    if (steps.length === 0) {
+      return {
+        ok: false,
+        content: 'steps 不能为空：给 2~6 步的执行计划（字符串数组，按执行顺序）。',
+        summary: '更新计划：steps 为空'
+      }
+    }
+    const done = intArg(args, 'done', 0, 0, steps.length)
+    const lines = steps.map((step, index) => {
+      const mark = index < done ? '✓' : index === done ? '▶' : '·'
+      return `${mark} ${index + 1}. ${step}`
+    })
+    const next = steps[done]
+    return {
+      ok: true,
+      content:
+        `计划已记录（完成 ${done}/${steps.length}）：\n${lines.join('\n')}\n` +
+        (next
+          ? `当前这一步：${next}`
+          : '全部步骤已完成——接下来做最后自检（复查改动区域、核对数量）再总结。'),
+      summary: `计划 ${done}/${steps.length}：${steps[done] ?? '已完成'}`
+    }
+  }
+
+  /**
+   * 覆盖度自检：哪些节点缺备注 / 是叶子 / 缺代码块。
+   *
+   * 「用户要详细、模型说"都写好了"」之间的差距，靠印象是查不出来的——
+   * 这个工具把"漏在哪"变成一份带句柄的清单，模型可以直接照着补。
+   */
+  if (name === 'findIncompleteNodes') {
+    const raw = stringArg(args, 'missing')
+    const missing = raw === 'children' || raw === 'code' ? raw : 'notes'
+    const label =
+      missing === 'notes' ? '缺备注（解释）' : missing === 'children' ? '是叶子' : '缺代码块'
+    const scope = stringArg(args, 'scope')
+    let base = context.root
+    let scopeNote = '整篇'
+    if (scope.length > 0) {
+      const resolved = resolveTopicAddress(context.root, scope)
+      if (!resolved.ok) return { ok: false, content: resolved.error, summary: `自检失败：${scope}` }
+      base = resolved.resolved.topic
+      scopeNote = `「${base.title}」这一支`
+    }
+    const limit = intArg(args, 'limit', 20, 1, 50)
+
+    const titleOf = (id: string): string => findTopic(context.root, id)?.title ?? ''
+    /** 祖先路径（含中心主题，不含自己） */
+    const pathOf = (id: string): string[] =>
+      ancestorsOf(context.root, id)
+        .map(titleOf)
+        .filter((title) => title.length > 0)
+
+    const hits: Array<{ topic: Topic; path: string[] }> = []
+    let total = 0
+    walk(base, (topic) => {
+      total += 1
+      const lacks =
+        missing === 'notes'
+          ? !(topic.notes && topic.notes.trim().length > 0)
+          : missing === 'children'
+            ? topic.children.length === 0
+            : !topic.code
+      if (lacks) hits.push({ topic, path: pathOf(topic.id) })
+    })
+
+    const lines: string[] = [
+      `按「${label}」筛查（范围：${scopeNote}，共 ${total} 个节点）：`,
+      `- 命中 ${hits.length} 个（${total > 0 ? Math.round((hits.length / total) * 100) : 0}%）`
+    ]
+    if (hits.length === 0) {
+      lines.push('- 没有漏的：这一项全部达标 ✅')
+    } else {
+      const shown = hits.slice(0, limit)
+      for (const hit of shown) {
+        const where = hit.path.length > 0 ? hit.path.join(' → ') : hit.topic.title
+        lines.push(
+          `- [#${shortHandleOf(hit.topic.id)}] ${hit.topic.title || '（未命名）'}（路径：${where}）`
+        )
+      }
+      if (hits.length > shown.length) {
+        lines.push(
+          `…（还有 ${hits.length - shown.length} 个没列出；需要就缩小 scope 或调大 limit）`
+        )
+      }
+      // 按一级分支汇总：先补"漏得最多"的那一支，比平均用力有效
+      const byBranch = new Map<string, number>()
+      for (const hit of hits) {
+        const branch = hit.path[1] ?? hit.topic.title ?? '（中心主题）'
+        byBranch.set(branch, (byBranch.get(branch) ?? 0) + 1)
+      }
+      const ranking = [...byBranch.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+      lines.push(
+        `- 按分支汇总（从多到少）：${ranking.map(([name, count]) => `${name} ${count}`).join('、')}`
+      )
+    }
+    return {
+      ok: true,
+      content: lines.join('\n'),
+      summary: `自检「${label}」：${hits.length}/${total} 个命中`
+    }
+  }
+
   return { ok: false, content: `未知工具：${name}`, summary: `未知工具：${name}` }
 }
 
@@ -726,6 +878,8 @@ export type WriteIntent =
       requested: number
     }
   | { kind: 'collapse'; id: string; collapsed: boolean }
+  /** 切换结构（思维导图 / 鱼骨 / 时间轴 …）：整张图或某一支 */
+  | { kind: 'structure'; id: string; structureClass: string }
   | { kind: 'notes'; id: string; text: string }
   | { kind: 'code'; id: string; code: TopicCode | null }
   | { kind: 'formula'; id: string; formula: string }
@@ -1038,11 +1192,42 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
       },
       ['address', 'label']
     )
+  },
+  {
+    name: 'setStructure',
+    description:
+      '切换结构类型：把整张图（或某一支）从逻辑图改成思维导图 / 鱼骨图 / 时间轴 / 括号图 / 矩阵图等。' +
+      `可选结构：${STRUCTURES.filter((s) => s.supported)
+        .map((s) => (s.class === DEFAULT_STRUCTURE ? `${s.class}（默认）` : s.class))
+        .join('、')}。` +
+      '改整张图不填 address（用的是中心主题）；只改某支用 address 指定。' +
+      '用户说"换成鱼骨图 / 改成时间轴 / 排成矩阵"时就调它——**不要**手动搬节点去模拟结构。',
+    parameters: schema(
+      {
+        address: { type: 'string', description: '要改哪个主题，不填 = 中心主题（整张图）' },
+        structure: {
+          type: 'string',
+          description:
+            '结构 id（如 org.xmind.ui.fishbone.leftHeaded），也可以直接用中文名（如 鱼骨图）'
+        }
+      },
+      ['structure']
+    )
   }
 ]
 
 /** 一次对话可用的全部工具（读 + 写） */
 export const AGENT_ALL_TOOLS: AgentToolDef[] = [...AGENT_TOOLS, ...AGENT_WRITE_TOOLS]
+
+/**
+ * 真正会**改动画布**的写工具名（**不含 askUser**）。
+ *
+ * 用途：试用计数只认「这次对话真的动了画布吗」——askUser 只是提问、什么都没改，
+ * 把它算进去等于"只问一句就消耗一个试用回合"。
+ */
+export const AGENT_CANVAS_TOOL_NAMES: string[] = AGENT_WRITE_TOOLS.filter(
+  (tool) => tool.name !== 'askUser'
+).map((tool) => tool.name)
 
 /**
  * 这次对话**允许模型看到的工具**。
@@ -1513,7 +1698,47 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     }
   }
 
+  if (name === 'setStructure') {
+    const raw = stringArg(args, 'structure')
+    const structureClass = resolveStructureId(raw)
+    if (structureClass === null) {
+      return fail(
+        `不认识的结构「${raw}」。可选：${STRUCTURES.filter((s) => s.supported)
+          .map((s) => `${s.label}（${s.class}）`)
+          .join('、')}`
+      )
+    }
+    // 不填 address = 整张图（改中心主题的结构），与界面上点「结构」下拉的效果一致
+    const address = stringArg(args, 'address')
+    let target = root
+    if (address.length > 0) {
+      const resolved = resolveTopicAddress(root, address)
+      if (!resolved.ok) return fail(resolved.error)
+      target = resolved.resolved.topic
+    }
+    const label = STRUCTURES.find((s) => s.class === structureClass)?.label ?? structureClass
+    return {
+      ok: true,
+      intent: { kind: 'structure', id: target.id, structureClass },
+      summary: `把「${target.title}」的结构改成${label}`,
+      destructive: false
+    }
+  }
+
   return fail('不是可用的写工具。')
+}
+
+/** 结构 id 的宽松解析：完整 class、中文名、或点号后缀都能认 */
+function resolveStructureId(input: string): string | null {
+  const value = input.trim()
+  if (value.length === 0) return null
+  const supported = STRUCTURES.filter((structure) => structure.supported)
+  const lower = value.toLowerCase()
+  const hit =
+    supported.find((structure) => structure.class === value) ??
+    supported.find((structure) => structure.label === value) ??
+    supported.find((structure) => structure.class.toLowerCase().endsWith(`.${lower}`))
+  return hit ? hit.class : null
 }
 
 /** 写意图是不是「会改动画布」的那种（askUser 只提问，不改任何东西） */
