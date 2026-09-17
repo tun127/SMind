@@ -1825,46 +1825,46 @@ export default function ChatPanel({
                   ))}
                 </select>
               </label>
-              <span className="chat-panel__input-gap" />
-              <button
-                type="button"
-                className="btn"
-                title="挂一份文档（docx / xlsx / pptx / md / txt / csv …）：挂上后可以直接问它里面的内容。也可以直接把文件拖到这里"
-                disabled={streaming}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={pickDocument}
-              >
-                <Paperclip size={14} />
-              </button>
-              <button
-                type="button"
-                className="btn"
-                title="粘贴剪贴板文本（保留换行，粘到光标处）"
-                disabled={streaming}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={pasteFromClipboard}
-              >
-                <ClipboardPaste size={14} />
-              </button>
-              {/* 空白撑开：发送按钮靠右 */}
-              <span className="chat-panel__input-gap" />
-              {streaming ? (
-                <button type="button" className="btn" title="停止生成" onClick={stop}>
-                  <Square size={14} />
-                  停止
-                </button>
-              ) : (
+              {/* 右侧按钮组：窄面板装不下时整组换行，不会把「发送」挤出可视区 */}
+              <div className="chat-panel__input-right">
                 <button
                   type="button"
-                  className="btn btn--primary"
-                  title="发送"
-                  disabled={draft.trim().length === 0}
-                  onClick={() => send(draft)}
+                  className="btn"
+                  title="挂一份文档（docx / xlsx / pptx / md / txt / csv …）：挂上后可以直接问它里面的内容。也可以直接把文件拖到这里"
+                  disabled={streaming}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={pickDocument}
                 >
-                  <Send size={14} />
-                  发送
+                  <Paperclip size={14} />
                 </button>
-              )}
+                <button
+                  type="button"
+                  className="btn"
+                  title="粘贴剪贴板文本（保留换行，粘到光标处）"
+                  disabled={streaming}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={pasteFromClipboard}
+                >
+                  <ClipboardPaste size={14} />
+                </button>
+                {streaming ? (
+                  <button type="button" className="btn" title="停止生成" onClick={stop}>
+                    <Square size={14} />
+                    停止
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    title="发送"
+                    disabled={draft.trim().length === 0}
+                    onClick={() => send(draft)}
+                  >
+                    <Send size={14} />
+                    发送
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </>

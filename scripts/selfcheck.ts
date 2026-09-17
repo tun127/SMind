@@ -1934,20 +1934,22 @@ function testAiChatHelpers(): void {
     false
   )
 
-  group('AI：生成质量档位（min / high / max）')
+  group('AI：生成质量档位（min / mid / max）')
 
-  eq('三档：min / high / max', QUALITY_TIERS.map((item) => item.id).join('/'), 'min/high/max')
+  eq('三档：min / mid / max', QUALITY_TIERS.map((item) => item.id).join('/'), 'min/mid/max')
+  eq('界面标签就叫三档名', QUALITY_TIERS.map((item) => item.label).join('/'), 'min/mid/max')
   check(
-    '每档都有标签与说明',
-    QUALITY_TIERS.every((item) => item.label.length > 0 && item.hint.length > 0)
+    '每档都有说明（悬停可见）',
+    QUALITY_TIERS.every((item) => item.hint.length > 0)
   )
-  eq('默认档是 high（80 分）', DEFAULT_QUALITY_TIER, 'high')
-  eq('非法档位回退到默认', normalizeQualityTier('bogus'), 'high')
+  eq('默认档是 mid（80 分）', DEFAULT_QUALITY_TIER, 'mid')
+  eq('非法档位回退到默认', normalizeQualityTier('bogus'), 'mid')
   eq('合法档位原样保留', normalizeQualityTier('max'), 'max')
+  eq('改名兼容：旧写法 high 按 mid 认', normalizeQualityTier('high'), 'mid')
   eq('配置归一化认档位', normalizeAiConfig({ tier: 'min' }).config.tier, 'min')
-  eq('配置里的坏档位回退', normalizeAiConfig({ tier: 42 }).config.tier, 'high')
+  eq('配置里的坏档位回退', normalizeAiConfig({ tier: 42 }).config.tier, 'mid')
 
-  const promptOf = (tier: 'min' | 'high' | 'max'): string =>
+  const promptOf = (tier: 'min' | 'mid' | 'max'): string =>
     buildChatSystemPrompt({
       skeleton: digest,
       selectedTitles: [],
@@ -8454,7 +8456,7 @@ function testAi(): void {
     temperature: 0.5,
     maxTokens: 8192,
     apiKey: 'sk-abcdef123456',
-    tier: 'high'
+    tier: 'mid'
   })
   eq('掩码保留前缀与后四位', view.keyPreview, 'sk-…3456')
   check('界面上不出现完整 Key', !JSON.stringify(view).includes('sk-abcdef123456'))

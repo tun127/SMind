@@ -2545,6 +2545,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* 面板窄时整组换行，绝不把「发送」挤出可视区 */
+  flex-wrap: wrap;
 }
 
 .chat-panel__input .btn {
@@ -2552,11 +2554,15 @@ textarea {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
-/* 空白撑开：发送按钮靠右 */
-.chat-panel__input-gap {
-  flex: 1;
+/* 右侧按钮组（挂文档 / 粘贴 / 发送）：靠右，装不下时整体换到下一行 */
+.chat-panel__input-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 /* 思考强度（生成质量档位）：就地可调，省 token / 标准 / 更细 */

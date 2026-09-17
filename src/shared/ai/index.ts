@@ -18,10 +18,10 @@ import { notesHtmlFrom } from '../richtext'
 import type { RichText, Topic, TopicCode } from '../model/types'
 
 /**
- * 默认档位：high（标准 80 分）。
+ * 默认档位：mid（标准 80 分）。
  * 声明在这里（而不是档位定义区）是因为 `DEFAULT_AI_CONFIG` 要用它——单一来源，别写两遍。
  */
-export const DEFAULT_QUALITY_TIER: QualityTier = 'high'
+export const DEFAULT_QUALITY_TIER: QualityTier = 'mid'
 
 export interface AiConfig {
   /** 形如 https://api.deepseek.com/v1 或 https://api.openai.com/v1 */
@@ -201,42 +201,47 @@ const OUTLINE_SYSTEM =
 export type GenerateDetail = 'skeleton' | 'detailed'
 
 /* ------------------------------------------------------------------ */
-/* 生成质量档位：min / high / max                                       */
+/* 生成质量档位：min / mid / max                                        */
 /* ------------------------------------------------------------------ */
 
 /**
  * 三档生成规格。
  *
  * - `min`：及格档（60 分）——骨架完整、每点简短，**省 token**，复杂任务能力有限；
- * - `high`：标准档（80 分）——完整覆盖 + 具体内容 + 每板块配例子，日常推荐；
+ * - `mid`：标准档（80 分）——完整覆盖 + 具体内容 + 每板块配例子，日常推荐；
  * - `max`：更细档（90 分）——加三层深度（机制/误区/边界/对比）+ 更多例子，消耗最高。
  *
  * 档位只改**「要求的规模与深度」**，不悄悄改用户的 token 上限——
  * 「单次输出上限」是设置里单独一项，两件事不能混。
  */
-export type QualityTier = 'min' | 'high' | 'max'
+export type QualityTier = 'min' | 'mid' | 'max'
 
+/** 界面上的短标签就三档名，详细说明放 hint（悬停可见） */
 export const QUALITY_TIERS: Array<{ id: QualityTier; label: string; hint: string }> = [
   {
     id: 'min',
-    label: '省 token（及格）',
-    hint: '骨架完整、每点简短：40~80 节点；适合快速起图与简单主题'
+    label: 'min',
+    hint: '省 token（及格档）：骨架完整、每点简短，40~80 节点；适合快速起图与简单主题'
   },
   {
-    id: 'high',
-    label: '标准（80 分）',
-    hint: '完整覆盖 + 具体内容 + 每板块配例子：100+ 节点；日常推荐'
+    id: 'mid',
+    label: 'mid',
+    hint: '标准（80 分）：完整覆盖 + 具体内容 + 每板块配例子，100+ 节点；日常推荐'
   },
   {
     id: 'max',
-    label: '更细（90 分）',
-    hint: '再加机制 / 误区 / 边界 / 对比与更多例子：200+ 节点；最费 token'
+    label: 'max',
+    hint: '更细（90 分）：再加机制 / 误区 / 边界 / 对比与更多例子，200+ 节点；最费 token'
   }
 ]
 
-/** 非法值一律回到默认档（配置可能是旧版本写的，或被手工改坏） */
+/**
+ * 非法值一律回到默认档（配置可能是旧版本写的，或被手工改坏）。
+ * `high` 是改名前的旧写法，按 `mid` 认——用户刚存的档位不能因为一次改名就丢掉。
+ */
 export function normalizeQualityTier(raw: unknown): QualityTier {
-  return raw === 'min' || raw === 'high' || raw === 'max' ? raw : DEFAULT_QUALITY_TIER
+  if (raw === 'high') return 'mid'
+  return raw === 'min' || raw === 'mid' || raw === 'max' ? raw : DEFAULT_QUALITY_TIER
 }
 
 /** 一键生成导图的提示词 */
@@ -986,7 +991,7 @@ function qualityRules(tier: QualityTier): string[] {
       '不许把自编的题标成真题；' +
       '⑤ 尽量**一次 insertSubtree 写完**，不要拆成很多轮（省时间也省 token）；' +
       '⑥ 不做重点标注、不要求每个板块配例子——用户想要更细时，提示他把档位调到「标准」或「更细」。',
-    high:
+    mid:
       '13. **只要用户让你"生成 / 写一份 / 整理出一份导图"，默认就按详细规格来**' +
       '（除非他明确说"只要框架 / 先给个大纲 / 不用太细"）——**任何领域都适用**，不只是考题；' +
       '**保质保量是第一优先**，按「80 分」标准要求自己——60 分只是及格线：行家看第一层认得出' +
@@ -1033,7 +1038,7 @@ function qualityRules(tier: QualityTier): string[] {
     min:
       '③ 收尾**轻量自检**：用 getDocStats 看一眼每个板块都有内容、没有空壳板块即可，' +
       '不必逐叶子核对（这一档本来就不追求细节密度）；',
-    high:
+    mid:
       '③ 全部做完后**必须自检**：用 findIncompleteNodes 查该有的内容有没有漏' +
       '（要"详细"的图就查**叶子节点**——细到不能再细才算讲透；结构类任务也查 children）；' +
       '再用 getDocStats 核对数量——数量只是参考，**合格标准是覆盖率**：骨架里的每个板块都有实质内容、' +
