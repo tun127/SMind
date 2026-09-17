@@ -61,7 +61,7 @@ import {
   toWireTools,
   type AgentToolDef
 } from '@shared/agent'
-import { hasWriteToolCall, type LicenseView } from '@shared/license'
+import { hasWriteToolCall, markTrialTurnSeen, type LicenseView } from '@shared/license'
 import { activateLicense, consumeTrialTurn, deactivateLicense, getLicenseView } from './license'
 import type { Workbook } from '@shared/model/types'
 import { createId } from '@shared/model/factory'
@@ -471,6 +471,47 @@ const WRITE_TOOL_NAMES = AGENT_WRITE_TOOLS.map((tool) => tool.name)
 /** 进行中的流式请求（requestId → 控制器）：「停止生成」与窗口关闭时中止用 */
 const streamAborters = new Map<string, AbortController>()
 
+/** 已经计过数的用户命令（turnId）：一条命令跑多少轮都只算一个写回合 */
+const countedTrialTurns = new Set<string>()
+
+/**
+ * 带「输出上限」逐级降档的发送。
+ *
+ * 为什么需要：各服务商对单次输出上限的容忍度差别很大（2k / 4k / 8k / 32k 都有），
+ * 而我们默认给到 16384——那是「一句命令生成 100+ 节点的详细图」所需。
+ * 一旦这个值超过服务商自己的上限，请求会直接 400。**降档而不是放弃**：
+ * 能写多少是多少（写不完还有截断检测与续写兜底），总比整个请求失败强。
+ *
+ * 只有错误体**点名了输出上限相关字段**才降档；其它错误（Key 无效、模型不存在）
+ * 原样返回给调用方翻译——否则会把真正的错误信息藏起来。
+ */
+async function sendWithMaxTokensFallback(
+  send: (maxTokens: number) => Promise<Response>,
+  requested: number
+): Promise<{ response: Response; errorBody: string }> {
+  const ladder = requested > 0 ? [requested, 8192, 4096, 2048, 0] : [0]
+  const steps = [...new Set(ladder)].filter((value) => value <= requested || value === 0)
+  let lastResponse: Response | null = null
+  let lastBody = ''
+  for (const limit of steps) {
+    const response = await send(limit)
+    if (response.ok) {
+      if (limit !== requested) {
+        logMain(
+          'ai-max-tokens-downgraded',
+          `服务商不接受 max_tokens=${requested}，已降档到 ${limit > 0 ? limit : '不发送该字段'}`
+        )
+      }
+      return { response, errorBody: '' }
+    }
+    lastBody = await response.text()
+    lastResponse = response
+    if (limit === 0 || !/max_?(tokens|length|output|new_tokens)/i.test(lastBody)) break
+  }
+  if (!lastResponse) throw new Error('AI 请求没有发出')
+  return { response: lastResponse, errorBody: lastBody }
+}
+
 /**
  * 流式对话（三期 AI 聊天面板 1a）。
  *
@@ -513,12 +554,7 @@ async function callAiStream(
   /** token 消耗（开了 include_usage 后随最后一个分片到来；服务商不支持就没有） */
   let usage: TokenUsage | null = null
   try {
-    /**
-     * 请求体抽成函数，是为了**能去掉 max_tokens 重发一次**：
-     * 有些服务商不认这个字段（或我们的值超过它自己的上限），400 里会点名它。
-     * 那样"输出上限"这个设置就永远不会把请求搞死。
-     */
-    const buildBody = (includeMaxTokens: boolean): string =>
+    const buildBody = (maxTokens: number): string =>
       JSON.stringify({
         model: config.model,
         messages: toWireMessages(messages),
@@ -526,10 +562,10 @@ async function callAiStream(
         stream: true,
         /**
          * **显式给出输出上限**。不给的话用服务商默认值——很多默认只有 1.5k~2k token，
-         * 而「完整详细的大纲」（考点 + 解释 + 真题）动辄 4k~8k，
+         * 而「完整详细的大纲」（考点 + 解释 + 例子）动辄 8k~14k，
          * 写到一半就被服务端掐断，用户看到的就是"AI 只写了粗分"。
          */
-        ...(includeMaxTokens && config.maxTokens > 0 ? { max_tokens: config.maxTokens } : {}),
+        ...(maxTokens > 0 ? { max_tokens: maxTokens } : {}),
         // 让服务商在流末尾回报 token 消耗（面板要显示「这次花了多少」）。
         // OpenAI 兼容实现基本都支持；不认这个字段的会忽略它，无害
         stream_options: { include_usage: true },
@@ -544,35 +580,21 @@ async function callAiStream(
           : {})
       })
 
-    const send = (includeMaxTokens: boolean): Promise<Response> =>
+    const send = (maxTokens: number): Promise<Response> =>
       fetch(url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           authorization: `Bearer ${config.apiKey}`
         },
-        body: buildBody(includeMaxTokens),
+        body: buildBody(maxTokens),
         signal: controller.signal
       })
 
-    let response = await send(config.maxTokens > 0)
+    const { response, errorBody } = await sendWithMaxTokensFallback(send, config.maxTokens)
     if (!response.ok) {
-      // 错误响应不是流：整段读出来交给统一的错误翻译
-      const body = await response.text()
-      const rejectsMaxTokens =
-        config.maxTokens > 0 && /max_?(tokens|length|output|new_tokens)/i.test(body)
-      if (rejectsMaxTokens) {
-        response = await send(false)
-        if (!response.ok) {
-          throw new Error(describeAiError(response.status, await response.text()))
-        }
-        logMain(
-          'ai-max-tokens-unsupported',
-          `服务商不接受 max_tokens，已去掉该字段重发（原响应：${body.slice(0, 160)}）`
-        )
-      } else {
-        throw new Error(describeAiError(response.status, body))
-      }
+      // 错误响应不是流：errorBody 里就是整段文本，交给统一的错误翻译
+      throw new Error(describeAiError(response.status, errorBody))
     }
     if (!response.body) throw new Error('AI 服务没有返回流式内容')
 
@@ -675,37 +697,31 @@ async function callAi(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const buildBody = (includeMaxTokens: boolean): string =>
+    const buildBody = (maxTokens: number): string =>
       JSON.stringify({
         model: config.model,
         messages,
         temperature: config.temperature,
         // 与流式请求同理：不显式给上限，服务商默认值会把长输出掐断
-        ...(includeMaxTokens && config.maxTokens > 0 ? { max_tokens: config.maxTokens } : {}),
+        ...(maxTokens > 0 ? { max_tokens: maxTokens } : {}),
         stream: false
       })
 
-    const send = (includeMaxTokens: boolean): Promise<Response> =>
+    const send = (maxTokens: number): Promise<Response> =>
       fetch(url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           authorization: `Bearer ${config.apiKey}`
         },
-        body: buildBody(includeMaxTokens),
+        body: buildBody(maxTokens),
         signal: controller.signal
       })
 
-    let response = await send(config.maxTokens > 0)
-    let text = await response.text()
-    if (!response.ok) {
-      // 服务商不认 max_tokens：去掉它重发一次（见 callAiStream 的同款处理）
-      if (config.maxTokens > 0 && /max_?(tokens|length|output|new_tokens)/i.test(text)) {
-        response = await send(false)
-        text = await response.text()
-      }
-      if (!response.ok) throw new Error(describeAiError(response.status, text))
-    }
+    // 与流式路径同一套降档策略（见 sendWithMaxTokensFallback）
+    const { response, errorBody } = await sendWithMaxTokensFallback(send, config.maxTokens)
+    if (!response.ok) throw new Error(describeAiError(response.status, errorBody))
+    const text = await response.text()
 
     let payload: unknown
     try {
@@ -1782,8 +1798,17 @@ function registerIpc(): void {
         tools
       )
 
-      // 真的动了画布才算一个试用回合：只读聊天永久免费、不计数
-      if (hasWriteToolCall(usedTools, WRITE_TOOL_NAMES)) await consumeTrialTurn()
+      /**
+       * 真的动了画布才算一个试用回合：只读聊天永久免费、不计数。
+       *
+       * 计数单位是**一次用户命令**，不是「一轮模型请求」——渲染层为每个用户命令
+       * 生成一个 turnId，这里按它去重。原来每轮都计数，而一条命令可能跑十几二十轮
+       * （生成 100+ 节点的详细图正是这样），会一口气吃掉十几个回合。
+       */
+      if (hasWriteToolCall(usedTools, WRITE_TOOL_NAMES)) {
+        const turnId = isRecord(options) && typeof options.turnId === 'string' ? options.turnId : ''
+        if (markTrialTurnSeen(countedTrialTurns, turnId)) await consumeTrialTurn()
+      }
     }
   )
 

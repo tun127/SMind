@@ -85,6 +85,7 @@ import {
   hasWriteToolCall,
   licensePayloadSegment,
   licenseViewOf,
+  markTrialTurnSeen,
   normalizeLicenseKey,
   remainingTrialTurns,
   TRIAL_TURN_LIMIT,
@@ -1751,6 +1752,13 @@ function testAiChatHelpers(): void {
   check('整理任务要求直接动手（不贴大纲让用户抄）', prompt.includes('直接动手'))
   check('整理任务指名用批量工具', prompt.includes('moveTopics 批量搬'))
   check('只有工具返回「已执行」才准说改好了', prompt.includes('只有工具真的返回「已执行」'))
+  // 内容密度（第 13 条）：用户要的是"一句命令就得到 100+ 节点的详细图"，
+  // 所以这条必须是**默认**规格、且**全领域通用**（以前只为考题写，其它领域照样只给骨架）
+  check('默认就按详细规格生成', prompt.includes('默认就按详细规格来'))
+  check('详细规格是全领域通用（不限考题）', prompt.includes('任何领域都适用'))
+  check('详细规格给了规模下限', prompt.includes('至少 100 个节点'))
+  check('解释写进 `> ` 行成为备注', prompt.includes('> '))
+  check('要求分几次 insertSubtree（避免被输出上限截断）', prompt.includes('分几次 insertSubtree'))
 
   // 绝不能把「去画布上点选」推给用户（实测踩过），复述式指令要能自己定位
   check('明确禁止要求用户去画布选中', prompt.includes('绝不要反过来要求用户'))
@@ -2227,6 +2235,21 @@ function testLicenseHelpers(): void {
   eq('计数停在上限，不会越滚越大', bumpTrialUsed(30), 30)
   eq('脏数据从零起算', bumpTrialUsed(-1), 1)
 
+  // 计数单位是「一次用户命令」而不是「一轮模型请求」：
+  // 一条命令跑十几二十轮（生成 100+ 节点的详细图正是这样）只能算一个回合
+  {
+    const seen = new Set<string>()
+    eq('同一个命令的第一轮要计数', markTrialTurnSeen(seen, 'turn-A'), true)
+    eq('同一命令的第二轮不重复计数', markTrialTurnSeen(seen, 'turn-A'), false)
+    eq('同一命令的第二十轮仍不重复计数', markTrialTurnSeen(seen, 'turn-A'), false)
+    eq('下一条命令重新计数', markTrialTurnSeen(seen, 'turn-B'), true)
+    const bounded = new Set<string>()
+    for (let index = 0; index < 12; index += 1) markTrialTurnSeen(bounded, `t${index}`, 5)
+    eq('去重集合有上限（不至于无限增长）', bounded.size, 5)
+    eq('被淘汰的是最早的', bounded.has('t0'), false)
+    eq('留下的是最近的', bounded.has('t11'), true)
+  }
+
   group('许可：写回合判定')
 
   eq(
@@ -2598,8 +2621,10 @@ function testAgentTools(): void {
 
   group('Agent：循环上限')
 
-  eq('轮数上限放宽到 16（照顾一次只发一个调用的模型）', AGENT_MAX_ROUNDS, 16)
-  eq('调用次数上限 60', AGENT_MAX_TOOL_CALLS, 60)
+  // 用户要求「一句命令生成 100+ 节点的完整图」之后放的：
+  // 一次详细生成 = 读骨架 + 按分支分批 insertSubtree + 补解释 + 收尾，十几个轮次起步
+  eq('轮数上限 40（够一次详细生成走完所有分支）', AGENT_MAX_ROUNDS, 40)
+  eq('调用次数上限 200（100+ 节点的分批写入 + 补充）', AGENT_MAX_TOOL_CALLS, 200)
   eq('刚起步可以继续', canContinueAgentLoop(0, 0).ok, true)
   eq('到轮数上限就停', canContinueAgentLoop(AGENT_MAX_ROUNDS, 0).ok, false)
   check(
@@ -7495,7 +7520,8 @@ function testAi(): void {
     DEFAULT_AI_CONFIG.temperature
   )
   // 输出上限：默认必须给足（服务商默认值只有 1.5k~2k，会把"完整详细的大纲"写到一半掐断）
-  eq('默认输出上限给足', DEFAULT_AI_CONFIG.maxTokens, 8192)
+  // 100+ 节点（含每点解释备注）大约要 8k~14k 输出 token
+  eq('默认输出上限给足', DEFAULT_AI_CONFIG.maxTokens, 16384)
   eq('空配置用默认输出上限', defaults.config.maxTokens, DEFAULT_AI_CONFIG.maxTokens)
   eq('0 是合规值（表示不发送该字段）', normalizeAiConfig({ maxTokens: 0 }).config.maxTokens, 0)
   eq('负输出上限夹到 0', normalizeAiConfig({ maxTokens: -5 }).config.maxTokens, 0)
@@ -7568,17 +7594,19 @@ function testAi(): void {
     buildGenerateMessages({ topic: 'x' })[1].content.includes('最多 3 层')
   )
 
-  // 详细模式：用户要的「完整考点 + 解释 + 真题」必须写进提示词里，
+  // 详细模式：用户要的「完整结构 + 解释 + 例子」必须写进提示词里，
   // 否则模型只会给出一副骨架（这正是"只写粗分"的来源之一）
   const detailedPrompt = buildGenerateMessages({
     topic: '计算机四级',
     depth: 4,
     detail: 'detailed'
   })
-  check('详细模式：要求覆盖全部高频考点', detailedPrompt[1].content.includes('全部高频考点'))
-  check('详细模式：要求写具体知识点（不是空标题）', detailedPrompt[1].content.includes('15~40 字'))
-  check('详细模式：要求每个考点配解释', detailedPrompt[1].content.includes('> '))
-  check('详细模式：要求补真题', detailedPrompt[1].content.includes('真题'))
+  check('详细模式：要求覆盖完整结构（全领域通用）', detailedPrompt[1].content.includes('完整结构'))
+  check('详细模式：目标规模至少 100 个节点', detailedPrompt[1].content.includes('至少 100 个节点'))
+  check('详细模式：要求写具体内容（不是空标题）', detailedPrompt[1].content.includes('15~40 字'))
+  check('详细模式：要求每个节点配解释', detailedPrompt[1].content.includes('> '))
+  check('详细模式：要求补例子（考题类写真题）', detailedPrompt[1].content.includes('真题'))
+  check('详细模式：明确禁止自行删减', detailedPrompt[1].content.includes('不要因为'))
   check(
     '骨架模式仍是短标题（与历史行为一致）',
     buildGenerateMessages({ topic: 'x', detail: 'skeleton' })[1].content.includes('不超过 12 字')

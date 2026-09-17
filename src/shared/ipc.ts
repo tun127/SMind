@@ -347,7 +347,14 @@ export interface MindApi {
   aiChatStream(
     requestId: string,
     messages: AiMessage[],
-    options?: { useTools?: boolean }
+    options?: {
+      useTools?: boolean
+      /**
+       * 这次请求属于**哪一次用户命令**（一轮 = 一条命令内的一个模型往返）。
+       * 主进程用它做试用计数的去重：一条命令无论跑多少轮，只算一个写回合。
+       */
+      turnId?: string
+    }
   ): Promise<void>
   /** 中止一次进行中的流式请求（面板上的「停止生成」） */
   aiChatStreamCancel(requestId: string): void

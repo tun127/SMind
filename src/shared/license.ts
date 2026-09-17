@@ -181,6 +181,30 @@ export function bumpTrialUsed(used: number): number {
 }
 
 /**
+ * 这次请求该不该算一个新回合？（返回 true = 计数并记下它）
+ *
+ * 计数单位必须是**一次用户命令**，而不是「一轮模型请求」。
+ *
+ * 踩过的坑：主进程原来在每个流式请求结束后都调一次计数——而一条命令可能跑十几二十轮
+ * （现在「一句命令生成 100+ 节点的详细图」正是这样），于是**一条命令就吃掉十几个试用回合**，
+ * "送 30 个写回合"实际只够两三次操作。
+ *
+ * 由渲染层为每个用户命令生成一个 `turnId`，主进程按它去重：同一个 turnId 只在
+ * 第一次出现时计数。集合按插入序淘汰，避免长期运行无限增长。
+ */
+export function markTrialTurnSeen(seen: Set<string>, turnId: string, limit = 1000): boolean {
+  if (turnId.length === 0) return true
+  if (seen.has(turnId)) return false
+  seen.add(turnId)
+  while (seen.size > limit) {
+    const oldest = seen.values().next().value
+    if (oldest === undefined) break
+    seen.delete(oldest)
+  }
+  return true
+}
+
+/**
  * 这一批工具调用里有没有**写工具**（有 = 这次算一个试用回合）。
  *
  * 只读工具（看结构）不计数：免费用户随便问、随便看，这是产品的门面，

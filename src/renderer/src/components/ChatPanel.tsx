@@ -151,6 +151,11 @@ export default function ChatPanel({
   const [streaming, setStreaming] = useState(false)
   /** 需要用户点头的破坏性操作（删分支等） */
   const [pendingWrite, setPendingWrite] = useState<{ summary: string } | null>(null)
+  /**
+   * 这次「用户命令」的标识：一条命令内的每一轮请求都带同一个 id。
+   * 主进程用它做试用计数去重——一条命令跑十几二十轮也只算一个写回合。
+   */
+  const turnIdRef = useRef('')
   const filePath = useEditor((s) => s.filePath)
   const workbook = useEditor((s) => s.workbook)
   /** 标题索引：把回复里提到的节点变成可点击引用（按首字分桶，大文档也不卡） */
@@ -980,7 +985,8 @@ export default function ChatPanel({
     setStage(`AI 第 ${roundRef.current + 1} 轮`)
     void window.api
       .aiChatStream(requestId, wireRef.current, {
-        useTools: useToolsRef.current && !forceNoToolsRef.current
+        useTools: useToolsRef.current && !forceNoToolsRef.current,
+        turnId: turnIdRef.current
       })
       .catch((error: unknown) => {
         // invoke 被拒（参数无效 / 没配 Key）：同样以事件形式收尾，只有一条代码路径。
@@ -1076,6 +1082,9 @@ export default function ChatPanel({
 
       // 每轮提问重建消息线：上一轮的 tool 结果不能跨轮复用（导图可能已经变了）
       wireRef.current = [{ role: 'system', content: system }, ...history]
+      // 新的一次用户命令 = 新的 turnId：主进程靠它做试用计数去重
+      // （一条命令跑多少轮都只算一个写回合，见 markTrialTurnSeen）
+      turnIdRef.current = createId()
       roundRef.current = 0
       toolCallsUsedRef.current = 0
       writeLogRef.current = []

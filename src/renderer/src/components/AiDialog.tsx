@@ -8,6 +8,7 @@ import {
   countOutlineNodes,
   parseFlatList,
   parseOutline,
+  type AiMessage,
   type GenerateDetail,
   type OutlineNode
 } from '@shared/ai'
@@ -56,6 +57,29 @@ function countNotedNodes(node: OutlineNode | null): number {
   let total = node.notes && node.notes.trim().length > 0 ? 1 : 0
   for (const child of node.children) total += countNotedNodes(child)
   return total
+}
+
+/** 续写指令：不许重复、不许开场白，直接从中断处往下写 */
+const CONTINUE_INSTRUCTION =
+  '你上一条输出被服务商的输出上限截断了。请**从中断处继续写完剩余部分**：' +
+  '不要重复已经写过的内容，不要写任何开场白或说明，直接从下一行接着往下写（保持同样的缩进大纲格式）。'
+
+/**
+ * 拼接「被截断的前半段」与「续写的后半段」。
+ *
+ * 关键处理：截断点常常落在一行**中间**，那半行在模型眼里不算完整内容，
+ * 所以先把最后一行丢掉再拼——否则会留下半句话节点、或把一行切成两行。
+ * 另外模型经常重复上一条的最后一行，这里顺手去重。
+ */
+function joinContinuation(previous: string, next: string): string {
+  const previousLines = previous.split(/\r?\n/)
+  const droppedLine = (previousLines[previousLines.length - 1] ?? '').trim()
+  if (droppedLine.length > 0) previousLines.pop()
+  const nextLines = next.split(/\r?\n/)
+  if (droppedLine.length > 0 && (nextLines[0] ?? '').trim() === droppedLine) nextLines.shift()
+  return [previousLines.join('\n').trimEnd(), nextLines.join('\n').trim()]
+    .filter((part) => part.length > 0)
+    .join('\n')
 }
 
 export default function AiDialog({
@@ -159,24 +183,49 @@ export default function AiDialog({
         setError('请先填写要生成的主题')
         return
       }
-      const result = await window.api.aiChat(buildGenerateMessages({ topic, depth, extra, detail }))
-      setRawText(result.content)
-      const parsed = parseOutline(result.content, topic.trim())
+      /**
+       * 生成（含**自动续写**）。
+       *
+       * 一句命令要产出 100+ 节点的详细图，输出动辄 8k~14k token：
+       * 服务商的单次输出上限随时可能把它截断。截断就自动接着写（最多 3 段），
+       * 而不是把半张图丢给用户、让他自己再写一遍提示词——那正是用户抱怨的做法。
+       */
+      const base = buildGenerateMessages({ topic, depth, extra, detail })
+      let raw = ''
+      let finish: string | null = null
+      const MAX_CONTINUATIONS = 3
+      for (let attempt = 0; attempt <= MAX_CONTINUATIONS; attempt += 1) {
+        const messages: AiMessage[] =
+          attempt === 0
+            ? base
+            : [
+                ...base,
+                { role: 'assistant', content: raw },
+                { role: 'user', content: CONTINUE_INSTRUCTION }
+              ]
+        const result = await window.api.aiChat(messages)
+        raw = attempt === 0 ? result.content : joinContinuation(raw, result.content)
+        finish = result.finishReason
+        if (finish !== 'length') break
+        if (attempt < MAX_CONTINUATIONS) {
+          onNotify(`输出被上限截断，正在自动接着写（第 ${attempt + 1}/${MAX_CONTINUATIONS} 段）…`)
+        }
+      }
+      setRawText(raw)
+      const parsed = parseOutline(raw, topic.trim())
       if (!parsed.root) {
         setError('模型没有返回可解析的大纲，原文见下面')
         return
       }
       if (parsed.warnings.length > 0) onNotify(parsed.warnings.join('；'))
       /**
-       * 被服务商的输出上限截断时**必须说出来**。
-       *
-       * 这是「AI 只写了粗分」最常见的原因：内容写到一半被服务端掐断，
-       * 而 finish_reason 以前根本没人看，用户只看到一副"貌似完整"的浅图。
+       * 连续写完 3 段仍被截断 → 如实告知（否则用户拿到的是一张"看似完整"的浅图）。
+       * 这也是「AI 只写了粗分」最常见的原因，而 finish_reason 以前根本没人看。
        */
-      if (result.finishReason === 'length') {
+      if (finish === 'length') {
         onNotify(
-          '注意：本次输出被服务商的**输出上限**截断了，后面的内容没有发出（结果可能只是前一部分）。' +
-            '可以减少层级、把「详细程度」改为骨架，或到「AI 设置」把「单次输出上限」调大后重试。'
+          `注意：自动续写了 ${MAX_CONTINUATIONS} 段后仍被服务商的**输出上限**截断，结果可能只是前一部分。` +
+            '可以在「AI 设置 → 单次输出上限」调大，或把「详细程度」改为骨架后重试。'
         )
       }
       setOutline(parsed.root)
