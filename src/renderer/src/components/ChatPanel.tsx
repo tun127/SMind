@@ -55,19 +55,10 @@ import { activeRoot, activeSheet, ancestorsOf, findTopic } from '@shared/model/t
 import { viewportActions } from '../render/viewport'
 import { armDiag, beginCost, keepDiagArmed, reportCosts, setStage } from '../dev/stage'
 import { useEditor } from '../store/editor'
-import type { AiTask } from './AiDialog'
-
 interface Props {
   onClose(): void
   /** 面板自己不做配置界面，只负责把用户送去「AI 设置」 */
   onOpenSettings(): void
-  /**
-   * 打开会**写入画布**的 AI 流程（润色 / 扩写 / 生成）。
-   *
-   * 这些仍走原来的对话框（先预览、确认后才写入）——它们与聊天里的写工具互补：
-   * 对话框适合「我就想让 AI 生成一批内容」，聊天适合「你看着办」。
-   */
-  onOpenTask(task: AiTask): void
   /**
    * AI 要动**第一笔**改动之前调用。
    * App 层用它存一份盘上快照——撤销栈在内存里，崩溃就没了，这是第二层保险。
@@ -116,16 +107,6 @@ function exportFormatOf(argumentsText: string): OutlineFormat {
 const QUICK_PROMPTS = ['总结这页导图的主要内容', '指出这个导图结构上薄弱的地方']
 
 /**
- * 快捷任务：这些会**真的改画布**（走原对话框：先预览、确认后才写入）。
- * 与上面的提问分开一排，免得用户分不清哪个会改文件。
- */
-const QUICK_TASKS: Array<{ label: string; task: AiTask }> = [
-  { label: '润色选中标题', task: 'polish' },
-  { label: '扩写选中主题', task: 'expand' },
-  { label: '生成新导图', task: 'generate' }
-]
-
-/**
  * AI 聊天面板（三期）。
  *
  * 循环：用户提问 → 模型（可能要求调工具）→ 本地执行 → 结果回喂 → 模型继续，直到不再要求调工具。
@@ -140,7 +121,6 @@ const QUICK_TASKS: Array<{ label: string; task: AiTask }> = [
 export default function ChatPanel({
   onClose,
   onOpenSettings,
-  onOpenTask,
   onBeforeAiWrite
 }: Props): ReactElement {
   const [messages, setMessages] = useState<ChatMsg[]>([])
@@ -1577,22 +1557,6 @@ export default function ChatPanel({
             ))}
           </div>
 
-          {/* 会改画布的三个入口：视觉上与「只聊」的区分开 */}
-          <div className="chat-panel__quick">
-            {QUICK_TASKS.map((item) => (
-              <button
-                key={item.task}
-                type="button"
-                className="chat-panel__chip chat-panel__chip--task"
-                disabled={streaming}
-                title="会先预览、确认后才写入画布"
-                onClick={() => onOpenTask(item.task)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
           {pendingWrite && (
             <div className="chat-panel__confirm">
               <div className="chat-panel__confirm-text">
@@ -1699,7 +1663,8 @@ export default function ChatPanel({
               ref={inputRef}
               value={draft}
               rows={2}
-              placeholder={streaming ? 'AI 正在回答…' : '问点什么，Enter 发送（Shift+Enter 换行）'}
+              title="Enter 发送 · Shift+Enter 换行"
+              placeholder={streaming ? 'AI 正在回答…' : '问点什么，Enter 发送'}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={onKeyDown}
               onPaste={(event) => {

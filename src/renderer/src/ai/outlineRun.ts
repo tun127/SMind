@@ -5,8 +5,7 @@
  * 服务商的单次输出上限随时可能把它截断。截断就自动接着写，
  * 而不是把半张图丢给用户、让他自己再写一遍提示词（用户明确抱怨过这个）。
  *
- * 用它的地方：AiDialog（按主题生成）、DocumentToMapDialog（按文档生成）、
- * 以及文档分段分析里的每一段。
+ * 用它的地方：DocumentToMapDialog（按文档生成）以及文档分段分析里的每一段。
  */
 import { isTruncatedFinish, mergeContinuation, type AiMessage } from '@shared/ai'
 

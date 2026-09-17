@@ -73,12 +73,6 @@ export interface ToolbarActions {
   onImportOpml(): void
   /** 直接导出大纲（不带设置框） */
   onExportOutline(format: OutlineFormat): void
-  /** AI 相关 */
-  onAiGenerate(): void
-  onAiExpand(): void
-  onAiPolish(): void
-  /** 读一份文档（docx / md / txt …）按内容生成导图 */
-  onAiFromDocument(): void
   onAiSettings(): void
   /** 打开 / 关闭 AI 聊天面板（三期 1a） */
   onAiChat(): void
@@ -897,34 +891,6 @@ export default function Toolbar({
               hint: '用自然语言问这页导图',
               icon: <Bot size={15} />,
               onSelect: actions.onAiChat
-            },
-            {
-              key: 'ai-generate',
-              label: '一键生成导图…',
-              hint: '给个主题就出整张图',
-              icon: <Sparkles size={15} />,
-              onSelect: actions.onAiGenerate
-            },
-            {
-              key: 'ai-from-document',
-              label: '按文档生成导图…',
-              hint: '读一份 docx / md / txt，按内容出图',
-              icon: <FileText size={15} />,
-              onSelect: actions.onAiFromDocument
-            },
-            {
-              key: 'ai-expand',
-              label: '扩写子主题',
-              hint: '给选中的主题补下级',
-              icon: <ListTree size={15} />,
-              onSelect: actions.onAiExpand
-            },
-            {
-              key: 'ai-polish',
-              label: '润色标题',
-              hint: '改写选中主题的文字',
-              icon: <Wand2 size={15} />,
-              onSelect: actions.onAiPolish
             },
             {
               key: 'ai-settings',

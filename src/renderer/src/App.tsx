@@ -22,7 +22,6 @@ import StatusBar from './components/StatusBar'
 import ThemePanel from './components/ThemePanel'
 import Toolbar from './components/Toolbar'
 import { RecoveryDialog, ShortcutsDialog, UnsavedDialog } from './components/Dialogs'
-import AiDialog, { type AiTask } from './components/AiDialog'
 import DocumentToMapDialog from './components/DocumentToMapDialog'
 import ChatPanel from './components/ChatPanel'
 import AiSettingsDialog from './components/AiSettingsDialog'
@@ -129,9 +128,7 @@ export default function App(): ReactElement {
   const [showOutline, setShowOutline] = useState(false)
   /** 导出设置框 */
   const [showExport, setShowExport] = useState(false)
-  /** AI 对话框：生成 / 扩写 / 润色 */
-  const [aiTask, setAiTask] = useState<AiTask | null>(null)
-  /** 拖进来（或从菜单选）的文档：交给「按文档生成导图」对话框 */
+  /** 拖进来的文档：交给「按文档生成导图」对话框 */
   const [docToMap, setDocToMap] = useState<ExtractedDocument | null>(null)
   const [showAiSettings, setShowAiSettings] = useState(false)
   const themesRef = useRef<ThemeDefinition[]>([])
@@ -433,22 +430,6 @@ export default function App(): ReactElement {
       )
     })()
   }, [commitPending, showToast])
-
-  /**
-   * 「按文档生成导图」的菜单入口（拖放之外的入口）。
-   *
-   * 读取与解析都在主进程，渲染层只拿到文本——渲染层不碰文件系统。
-   */
-  const pickDocumentForMap = useCallback((): void => {
-    void (async () => {
-      try {
-        const extracted = await window.api.documentPick()
-        if (extracted) setDocToMap(extracted)
-      } catch (error) {
-        showToast(readableIpcError((error as Error).message))
-      }
-    })()
-  }, [showToast])
 
   /**
    * AI「生成新导图」：在**新窗口**里成为一份独立文档（副本语义）。
@@ -1165,10 +1146,6 @@ export default function App(): ReactElement {
           onImportMarkdown: () => void importOutlineFile('markdown'),
           onImportOpml: () => void importOutlineFile('opml'),
           onExportOutline: (format) => void exportOutlineAs(format),
-          onAiGenerate: () => setAiTask('generate'),
-          onAiFromDocument: pickDocumentForMap,
-          onAiExpand: () => setAiTask('expand'),
-          onAiPolish: () => setAiTask('polish'),
           onAiSettings: () => setShowAiSettings(true),
           onAiChat: () => setSidePanel((current) => (current === 'chat' ? 'none' : 'chat')),
           onHistory: () => setShowHistory(true),
@@ -1197,7 +1174,6 @@ export default function App(): ReactElement {
           <ChatPanel
             onClose={() => setSidePanel('none')}
             onOpenSettings={() => setShowAiSettings(true)}
-            onOpenTask={(task) => setAiTask(task)}
             onBeforeAiWrite={() => {
               const store = useEditor.getState()
               // 撤销栈在内存里，崩溃就没了：AI 动手前先存一份盘上的（未保存的文档不进版本快照）
@@ -1256,15 +1232,6 @@ export default function App(): ReactElement {
       {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
 
       {showExport && <ExportDialog onClose={() => setShowExport(false)} onNotify={showToast} />}
-
-      {aiTask && (
-        <AiDialog
-          task={aiTask}
-          onClose={() => setAiTask(null)}
-          onNotify={showToast}
-          onGenerateInNewWindow={openGeneratedInNewWindow}
-        />
-      )}
 
       {docToMap && (
         <DocumentToMapDialog

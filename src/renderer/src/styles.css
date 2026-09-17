@@ -2446,16 +2446,6 @@ textarea {
   cursor: default;
 }
 
-/* 「会改画布」的快捷入口：加一点强调色，和只聊的 chips 区分开 */
-.chat-panel__chip--task {
-  border-color: rgba(47, 107, 255, 0.35);
-  color: var(--accent);
-}
-
-.chat-panel__chip--task:hover:not(:disabled) {
-  background: rgba(47, 107, 255, 0.08);
-}
-
 /* 破坏性操作的确认条：AI 要删东西时先在这儿等用户点头 */
 .chat-panel__confirm {
   display: flex;
