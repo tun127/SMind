@@ -2515,16 +2515,18 @@ textarea {
 
 .chat-panel__input {
   display: flex;
-  gap: 8px;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px 12px;
   border-top: 1px solid var(--border);
 }
 
 .chat-panel__input textarea {
-  flex: 1;
+  width: 100%;
+  min-height: 84px;
+  max-height: 180px;
   resize: none;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
@@ -2538,11 +2540,63 @@ textarea {
   border-color: var(--accent);
 }
 
+/* 按钮独立成行：输入区更大，文字不再和按钮挤在一起 */
+.chat-panel__input-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .chat-panel__input .btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+}
+
+/* 空白撑开：发送按钮靠右 */
+.chat-panel__input-gap {
+  flex: 1;
+}
+
+/* 思考强度（生成质量档位）：就地可调，省 token / 标准 / 更细 */
+.chat-panel__tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chat-panel__tier select {
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* 「回到最新」：用户上滑看历史时出现，点一下回到底部并恢复跟随 */
+.chat-panel__jump {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  margin-bottom: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-panel__jump:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* 许可徽标：Pro / 试用剩余。低调但一直在，用户随时知道自己在什么状态 */

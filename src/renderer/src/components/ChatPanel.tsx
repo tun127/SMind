@@ -12,6 +12,7 @@ import {
   ClipboardPaste,
   Eraser,
   Paperclip,
+  ArrowDown,
   Send,
   Settings2,
   Sparkles,
@@ -30,6 +31,8 @@ import {
   readableIpcError,
   formatTokenCount,
   DEFAULT_QUALITY_TIER,
+  normalizeQualityTier,
+  QUALITY_TIERS,
   type AiMessage,
   type AiStreamEvent,
   type QualityTier,
@@ -277,6 +280,19 @@ export default function ChatPanel({
         setTier(view.tier)
       })
       .catch(() => setHasKey(false))
+  }, [])
+
+  /**
+   * 就地切「思考强度」（生成质量档位）。
+   *
+   * 写回主进程的 AI 配置：这样关掉面板再开、或去设置里看，都是同一个值——
+   * 只存在组件 state 里的档位会在下次挂载时被配置覆盖回去，用户会以为"改了没用"。
+   */
+  const changeTier = useCallback((next: QualityTier): void => {
+    setTier(next)
+    void window.api
+      .aiConfigSave({ tier: next })
+      .catch((error: unknown) => setHint(readableIpcError((error as Error).message)))
   }, [])
 
   /** 读许可状态；读不到就当"未知"（面板少显示一个徽标，绝不拦住用户用软件） */
@@ -1193,12 +1209,31 @@ export default function ChatPanel({
 
   useEffect(() => window.api.onAiStreamEvent(handleEvent), [handleEvent])
 
-  // 新内容到达就滚到底：聊天面板的默认预期。
-  // activity 也在依赖里：「正在思考…」那行出现/换字时同样要保证它在视野内
+  /**
+   * 是否「贴着底」。
+   *
+   * 以前是**无条件**滚到底：模型边输出边刷新，用户想上滑看历史根本拉不住——
+   * 每一片增量都把他拽回底部（真被投诉过）。现在只在用户本来就贴着底时才跟随；
+   * 上滑看历史期间不再打扰，右下角给一个「回到最新」回到底部。
+   */
+  const [atBottom, setAtBottom] = useState(true)
+
   useEffect(() => {
     const el = listRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages, activity])
+    if (!el) return
+    const onScroll = (): void => {
+      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+      setAtBottom((prev) => (prev === near ? prev : near))
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // 新内容到达就滚到底——但**只在用户贴着底时**（正在翻历史的用户不该被打断）
+  useEffect(() => {
+    const el = listRef.current
+    if (el && atBottom) el.scrollTop = el.scrollHeight
+  }, [messages, activity, atBottom])
 
   const send = useCallback(
     (raw: string): void => {
@@ -1293,6 +1328,8 @@ export default function ChatPanel({
         { id: createId(), role: 'assistant', content: '' }
       ])
       setDraft('')
+      // 自己发的消息一定要看得见：即使刚才在上滑看历史，也拉回底部并恢复跟随
+      setAtBottom(true)
       runRound()
     },
     [runRound, update, license, titleIndex, tier]
@@ -1726,11 +1763,27 @@ export default function ChatPanel({
             </div>
           )}
 
+          {!atBottom && (
+            <button
+              type="button"
+              className="chat-panel__jump"
+              title="回到最新消息（重新开始自动跟随）"
+              onClick={() => {
+                setAtBottom(true)
+                const el = listRef.current
+                if (el) el.scrollTop = el.scrollHeight
+              }}
+            >
+              <ArrowDown size={13} />
+              回到最新
+            </button>
+          )}
+
           <div className="chat-panel__input">
             <textarea
               ref={inputRef}
               value={draft}
-              rows={2}
+              rows={4}
               title="Enter 发送 · Shift+Enter 换行"
               placeholder={streaming ? 'AI 正在回答…' : '问点什么，Enter 发送'}
               onChange={(event) => setDraft(event.target.value)}
@@ -1750,43 +1803,69 @@ export default function ChatPanel({
                 }
               }}
             />
-            <button
-              type="button"
-              className="btn"
-              title="挂一份文档（docx / xlsx / pptx / md / txt / csv …）：挂上后可以直接问它里面的内容。也可以直接把文件拖到这里"
-              disabled={streaming}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={pickDocument}
-            >
-              <Paperclip size={14} />
-            </button>
-            <button
-              type="button"
-              className="btn"
-              title="粘贴剪贴板文本（保留换行，粘到光标处）"
-              disabled={streaming}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={pasteFromClipboard}
-            >
-              <ClipboardPaste size={14} />
-            </button>
-            {streaming ? (
-              <button type="button" className="btn" title="停止生成" onClick={stop}>
-                <Square size={14} />
-                停止
-              </button>
-            ) : (
+            {/* 功能按钮移到输入框**下方**独立一行：输入区更大，文字不再和按钮挤在一起 */}
+            <div className="chat-panel__input-actions">
+              <label
+                className="chat-panel__tier"
+                title={
+                  (QUALITY_TIERS.find((item) => item.id === tier)?.hint ?? '') +
+                  '。档位只改「要求的规模与深度」，不改单次输出上限；下一轮请求立即生效'
+                }
+              >
+                <span>思考强度</span>
+                <select
+                  value={tier}
+                  disabled={streaming}
+                  onChange={(event) => changeTier(normalizeQualityTier(event.target.value))}
+                >
+                  {QUALITY_TIERS.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="chat-panel__input-gap" />
               <button
                 type="button"
-                className="btn btn--primary"
-                title="发送"
-                disabled={draft.trim().length === 0}
-                onClick={() => send(draft)}
+                className="btn"
+                title="挂一份文档（docx / xlsx / pptx / md / txt / csv …）：挂上后可以直接问它里面的内容。也可以直接把文件拖到这里"
+                disabled={streaming}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={pickDocument}
               >
-                <Send size={14} />
-                发送
+                <Paperclip size={14} />
               </button>
-            )}
+              <button
+                type="button"
+                className="btn"
+                title="粘贴剪贴板文本（保留换行，粘到光标处）"
+                disabled={streaming}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={pasteFromClipboard}
+              >
+                <ClipboardPaste size={14} />
+              </button>
+              {/* 空白撑开：发送按钮靠右 */}
+              <span className="chat-panel__input-gap" />
+              {streaming ? (
+                <button type="button" className="btn" title="停止生成" onClick={stop}>
+                  <Square size={14} />
+                  停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  title="发送"
+                  disabled={draft.trim().length === 0}
+                  onClick={() => send(draft)}
+                >
+                  <Send size={14} />
+                  发送
+                </button>
+              )}
+            </div>
           </div>
         </>
       )}
