@@ -168,6 +168,9 @@ import {
 } from '../src/shared/export/types'
 import {
   DEFAULT_AI_CONFIG,
+  buildDocumentChunkMessages,
+  buildDocumentMergeMessages,
+  buildDocumentOutlineMessages,
   buildExpandMessages,
   buildGenerateMessages,
   buildPolishMessages,
@@ -181,6 +184,18 @@ import {
   parseOutline,
   toConfigView
 } from '../src/shared/ai'
+import {
+  classifyDocument,
+  documentStats,
+  extractDocumentText,
+  extractDocxText,
+  extractPptxText,
+  extractXlsxText,
+  isZipDocument,
+  normalizeDocumentText,
+  splitDocument,
+  zipEntryPrefixesFor
+} from '../src/shared/document'
 import {
   looksLikeMarkdown,
   parseInlineMarkdown,
@@ -7499,6 +7514,162 @@ function testExportFormats(): void {
 /* 12.11 AI：配置 / 提示词 / 解析 / 错误翻译                            */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* 文档 → 导图：格式识别、抽文本、分段                                  */
+/* ------------------------------------------------------------------ */
+
+function testDocument(): void {
+  group('文档：格式识别')
+
+  eq('docx 认成 Word 文档', classifyDocument('季度报告.docx').kind, 'docx')
+  eq('xlsx 认成表格', classifyDocument('成绩.xlsx').kind, 'xlsx')
+  eq('pptx 认成演示', classifyDocument('分享.pptx').kind, 'pptx')
+  eq('md 认成文本', classifyDocument('笔记.md').kind, 'text')
+  eq('代码文件也当文本', classifyDocument('main.py').kind, 'text')
+  eq('大小写不敏感', classifyDocument('REPORT.DOCX').kind, 'docx')
+  eq('路径里的扩展名也算', classifyDocument('C:\\Users\\a\\b\\说明.txt').kind, 'text')
+  eq('pdf 明确判为不支持', classifyDocument('论文.pdf').kind, 'pdf')
+  check(
+    'pdf 给的是可操作的替代方案（而不是死路）',
+    (classifyDocument('论文.pdf').note ?? '').includes('导出')
+  )
+  eq('不认识的格式也不崩', classifyDocument('x.bin').kind, 'unsupported')
+  eq('无扩展名也不崩', classifyDocument('Makefile').kind, 'unsupported')
+  eq('office 三种要先解 zip', isZipDocument('docx'), true)
+  eq('文本类不解 zip', isZipDocument('text'), false)
+  check('docx 只读正文那几个 entry', zipEntryPrefixesFor('docx').includes('word/document.xml'))
+  check('xlsx 要读共享字符串表', zipEntryPrefixesFor('xlsx').includes('xl/sharedStrings.xml'))
+  check(
+    'pptx 只读 slides',
+    zipEntryPrefixesFor('pptx').every((p) => p.startsWith('ppt/'))
+  )
+
+  group('文档：Word 抽文本')
+
+  const docxXml =
+    '<w:document><w:body>' +
+    '<w:p><w:r><w:t>第一章 概述</w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t>要点&amp;细节</w:t></w:r></w:p>' +
+    '<w:tbl><w:tr>' +
+    '<w:tc><w:p><w:r><w:t>列一</w:t></w:r></w:p></w:tc>' +
+    '<w:tc><w:p><w:r><w:t>列二</w:t></w:r></w:p></w:tc>' +
+    '</w:tr></w:tbl>' +
+    '</w:body></w:document>'
+  const docxText = normalizeDocumentText(extractDocxText({ 'word/document.xml': docxXml }))
+  check('段落文本抽得到', docxText.includes('第一章 概述'), docxText)
+  check('XML 实体被还原', docxText.includes('要点&细节'), docxText)
+  check(
+    '表格单元格也在（不会整段丢）',
+    docxText.includes('列一') && docxText.includes('列二'),
+    docxText
+  )
+  check('段落边界保留（不是糊成一坨）', docxText.split('\n').length >= 4, docxText)
+  check('标签本身没留下', !docxText.includes('<w:'), docxText)
+
+  group('文档：Excel 抽文本')
+
+  const xlsxFiles = {
+    'xl/workbook.xml': '<workbook><sheets><sheet name="成绩单"/></sheets></workbook>',
+    'xl/sharedStrings.xml': '<sst><si><t>姓名</t></si><si><t>张三</t></si></sst>',
+    'xl/worksheets/sheet1.xml':
+      '<worksheet><sheetData>' +
+      '<row r="1"><c r="A1" t="s"><v>0</v></c></row>' +
+      '<row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2"><v>95</v></c></row>' +
+      '</sheetData></worksheet>'
+  }
+  const xlsxText = normalizeDocumentText(extractXlsxText(xlsxFiles))
+  check('带上工作表名', xlsxText.includes('【成绩单】'), xlsxText)
+  check('共享字符串解析对了', xlsxText.includes('姓名') && xlsxText.includes('张三'), xlsxText)
+  check('数字单元格直接取', xlsxText.includes('95'), xlsxText)
+  check('同一行的多个单元格用制表符分隔', /张三\t95/.test(xlsxText), JSON.stringify(xlsxText))
+
+  group('文档：PPT 抽文本')
+
+  const pptxText = normalizeDocumentText(
+    extractPptxText({
+      'ppt/slides/slide1.xml': '<p:sld><a:t>封面标题</a:t><a:t>要点一</a:t></p:sld>',
+      'ppt/slides/slide2.xml': '<p:sld><a:t>第二页</a:t></p:sld>'
+    })
+  )
+  check(
+    '按页给出页码小标题',
+    pptxText.includes('【第 1 页】') && pptxText.includes('【第 2 页】'),
+    pptxText
+  )
+  check('页内文字都在', pptxText.includes('封面标题') && pptxText.includes('要点一'), pptxText)
+  check('第二页也对', pptxText.includes('第二页'), pptxText)
+
+  group('文档：入口分派')
+
+  eq('文本类走 rawText', extractDocumentText({ kind: 'text', rawText: '正文' }), '正文')
+  eq('pdf 不带内容（由上层报错）', extractDocumentText({ kind: 'pdf', rawText: 'x' }), '')
+
+  group('文档：清洗与统计')
+
+  eq('统一换行、去零宽、压空行', normalizeDocumentText('a\r\n\r\n\r\n\r\nb\u200b'), 'a\n\nb')
+  eq('去掉行尾空白', normalizeDocumentText('a   \nb\t'), 'a\nb')
+  eq('统计字数与行数', documentStats('第一行\n第二行').chars, 7)
+  eq('空文本行数为 0', documentStats('').lines, 0)
+
+  group('文档：分段（长文档细读用）')
+
+  const short = splitDocument('就一段话', 1000, 8)
+  eq('短文档不分段', short.chunks.length, 1)
+  eq('短文档没有丢弃', short.droppedChars, 0)
+
+  const many = Array.from({ length: 60 }, (_, index) => `第 ${index} 段内容`).join('\n')
+  const split = splitDocument(many, 200, 8)
+  check('长文档被切成多段', split.chunks.length > 1, String(split.chunks.length))
+  check(
+    '每段都在上限内',
+    split.chunks.every((chunk) => chunk.length <= 200)
+  )
+  check(
+    '没有丢内容（拼接后每段标记都在）',
+    many.split('\n').every((line) => split.chunks.some((chunk) => chunk.includes(line)))
+  )
+
+  const tooMany = splitDocument(
+    Array.from({ length: 200 }, () => 'x'.repeat(50)).join('\n'),
+    200,
+    3
+  )
+  eq('超过段数上限就只取前几段', tooMany.chunks.length, 3)
+  check('丢弃的字数如实报出', tooMany.droppedChars > 0, String(tooMany.droppedChars))
+
+  const noNewline = splitDocument('y'.repeat(5000), 1000, 3)
+  eq('没有换行的巨型文本也能硬切', noNewline.chunks.length, 3)
+  check(
+    '每一段都不超限',
+    noNewline.chunks.every((chunk) => chunk.length <= 1000)
+  )
+
+  group('文档：提示词')
+
+  const docOutline = buildDocumentOutlineMessages({ name: '报告.docx', text: '正文内容' })
+  check('带上文档正文', docOutline[1].content.includes('正文内容'))
+  check('要求覆盖全部章节与要点', docOutline[1].content.includes('全部章节与要点'))
+  check('要求引用原文（解释行）', docOutline[1].content.includes('引用原文'))
+  check('带上文件名（模型知道在读什么）', docOutline[1].content.includes('报告.docx'))
+
+  const chunkMsg = buildDocumentChunkMessages({
+    name: '报告.docx',
+    index: 2,
+    total: 5,
+    text: '本段'
+  })
+  check('分段提示词标明第几段', chunkMsg[1].content.includes('第 2/5 段'))
+  check('分段提示词只依据本段', chunkMsg[1].content.includes('只依据这一段'))
+
+  const mergeMsg = buildDocumentMergeMessages({ name: '报告.docx', parts: ['- A', '- B'] })
+  check('合并提示词要求去重', mergeMsg[1].content.includes('合并去重'))
+  check(
+    '合并提示词带上各段片段',
+    mergeMsg[1].content.includes('- A') && mergeMsg[1].content.includes('- B')
+  )
+  check('合并提示词保留顺序', mergeMsg[1].content.includes('按原文顺序'))
+}
+
 function testAi(): void {
   group('AI：配置')
 
@@ -8778,6 +8949,7 @@ async function main(): Promise<void> {
   testExportDrawing()
   testExportFormats()
   testAi()
+  testDocument()
   testImport()
   testNaming()
   testHistory()

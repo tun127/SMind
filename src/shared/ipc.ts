@@ -6,6 +6,7 @@ import type { HistoryEntry } from './history'
 import type { SnapshotItem, SnapshotReason } from './snapshot'
 import type { OutlineFormat } from './outline'
 import type { ThemeDefinition } from './theme'
+import type { ExtractedDocument } from './document'
 
 export interface OpenResult {
   path: string
@@ -159,6 +160,9 @@ export const IPC = {
   chatHistoryClear: 'chat:history-clear',
   /* ---- 卡死取证：渲染层节流落盘现场（wire / workbook），冻结后可从磁盘完整恢复 ---- */
   diagDump: 'diag:dump',
+  /* ---- 文档 → 导图（拖一份文档进来，AI 读完做成导图） ---- */
+  documentExtract: 'doc:extract',
+  documentPick: 'doc:pick',
   /* ---- 许可与试用（商业化闸门） ---- */
   licenseGet: 'license:get',
   licenseActivate: 'license:activate',
@@ -371,6 +375,16 @@ export interface MindApi {
   chatHistoryClear(key: string): Promise<void>
   /** 卡死取证：把渲染层现场（wire / workbook / 阶段）写到 userData/diag/last-state.json */
   diagDump(content: string): Promise<void>
+
+  /**
+   * 把一份**拖进来的文件**读成纯文本（docx / xlsx / pptx / md / txt / csv / json …）。
+   *
+   * 传字节而不是路径：Electron 32+ 已经拿不到 `File.path`，
+   * 而且这样渲染进程无需文件系统权限。格式不支持时抛出**人话错误**供界面直接提示。
+   */
+  documentExtract(name: string, bytes: Uint8Array): Promise<ExtractedDocument>
+  /** 「按文档生成导图」：打开文件对话框并读取（用户取消时返回 null） */
+  documentPick(): Promise<ExtractedDocument | null>
   /**
    * 当前许可状态：是否 Pro、试用还剩几个写回合。
    * **闸门判定在主进程**（由它决定下发哪些工具），这里只用于界面显示。

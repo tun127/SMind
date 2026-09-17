@@ -218,6 +218,109 @@ export function buildGenerateMessages(input: {
   ]
 }
 
+/* ------------------------------------------------------------------ */
+/* 文档 → 导图（拖一份文档进来，AI 读完做成导图）                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 文档类任务的公共规格。
+ *
+ * 与「凭主题生成」不同：**线索全在文档里**，所以第一要求是"不漏"，
+ * 并且解释要**引用原文**（原话 / 数字 / 结论）——用户看过这份文档，
+ * 只有引用得上他才会信任这张图；凭空发挥反而扣分。
+ */
+function documentSpecLines(depth: number): string[] {
+  return [
+    `1. 覆盖文档的**全部章节与要点**（文档里有的内容不要漏；宁可多列，不要只写几个大方向）；最多 ${depth} 层；`,
+    '2. 每个节点写成**具体内容**（15~40 字），不要只有两三个字的空标题；',
+    '3. 每个节点的下一行用 `> ` 写 40~100 字说明（是什么 / 为什么 / 关键数据），' +
+      '**尽量引用原文里的原话、数字或结论**；文档里的例子、数据、结论不要丢；',
+    '4. 关键处补 1~2 个具体例子 / 数据 / 结论（写成子主题，或放进 `> ` 行里）；',
+    '5. 严格用缩进大纲：每行以「- 」开头，子节点比父节点多缩进两个空格；' +
+      '不要开场白、不要代码块包裹、不要写"本文介绍了…"这类废话节点。'
+  ]
+}
+
+/** 短文档：一次读完，直接出大纲 */
+export function buildDocumentOutlineMessages(input: {
+  name: string
+  text: string
+  depth?: number
+  extra?: string
+}): AiMessage[] {
+  const depth = input.depth && input.depth > 0 ? input.depth : 4
+  const lines = [
+    `下面是一份文档（文件名：${input.name}）的全文。请**通读后**把它整理成一份详细的思维导图大纲。`,
+    '要求：',
+    ...documentSpecLines(depth)
+  ]
+  if (input.extra && input.extra.trim().length > 0) lines.push(`补充要求：${input.extra.trim()}`)
+  lines.push('', '【文档全文】', input.text)
+  return [
+    { role: 'system', content: OUTLINE_SYSTEM },
+    { role: 'user', content: lines.join('\n') }
+  ]
+}
+
+/**
+ * 长文档第一阶段：逐段提取结构与要点。
+ *
+ * 为什么要分段：一份几万字的文档（报告 / 规范 / 教材）根本塞不进一次请求的上下文，
+ * 硬塞的结果是模型只读了开头——那正是"分析得很粗"的来源。
+ * 分段后每段单独细读，第二阶段再合并。
+ */
+export function buildDocumentChunkMessages(input: {
+  name: string
+  index: number
+  total: number
+  text: string
+}): AiMessage[] {
+  return [
+    { role: 'system', content: OUTLINE_SYSTEM },
+    {
+      role: 'user',
+      content: [
+        `这是文档《${input.name}》的第 ${input.index}/${input.total} 段（全文已按段落切开，按原顺序处理）。`,
+        '请**只依据这一段**整理出**缩进大纲片段**：',
+        '1. 保留这一段自己的层级结构（小标题、编号、并列项）；',
+        '2. 具体内容写全：关键概念、步骤、数字、结论、约束条件，不要用"等内容"含糊带过；',
+        '3. 重要的地方在下一行用 `> ` 摘一句**原文关键句或数据**；',
+        '4. 只输出大纲，不要开场白、不要跨段推测后面还没读到的内容。',
+        '',
+        '【本段正文】',
+        input.text
+      ].join('\n')
+    }
+  ]
+}
+
+/** 长文档第二阶段：把各段的提取结果合并成一份完整大纲（去重、归位、补父级） */
+export function buildDocumentMergeMessages(input: {
+  name: string
+  parts: string[]
+  depth?: number
+}): AiMessage[] {
+  const depth = input.depth && input.depth > 0 ? input.depth : 4
+  return [
+    { role: 'system', content: OUTLINE_SYSTEM },
+    {
+      role: 'user',
+      content: [
+        `下面是从文档《${input.name}》各段分别提取的大纲片段（**按原文顺序**排列）。`,
+        '请把它们**合并成一份完整的详细思维导图大纲**：',
+        '1. **同一主题合并去重**（不同段重复提到的概念只留一处，把要点合并进去），',
+        '   并按照文档原有的结构归位：该是父级的当父级，该并列的并列，必要时补上缺失的父级节点；',
+        '2. 保持段落的原有顺序，不要打乱文档的叙述结构；',
+        '3. 细节不要丢：合并后仍要保留具体的概念、步骤、数字、结论；',
+        ...documentSpecLines(depth).slice(1, 4),
+        '',
+        '【各段大纲片段】',
+        input.parts.map((part, index) => `— 第 ${index + 1} 段 —\n${part}`).join('\n\n')
+      ].join('\n')
+    }
+  ]
+}
+
 /** 节点扩写（给选中节点补子主题）的提示词 */
 export function buildExpandMessages(input: {
   title: string

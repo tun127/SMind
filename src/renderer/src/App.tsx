@@ -9,7 +9,8 @@ import {
   parseInlineMarkdown,
   parseMarkdownOutline
 } from '@shared/import/markdown'
-import { outlineToTopic, type OutlineNode } from '@shared/ai'
+import { outlineToTopic, readableIpcError, type OutlineNode } from '@shared/ai'
+import type { ExtractedDocument } from '@shared/document'
 import { createWorkbookFromRoot } from '@shared/model/factory'
 import { parseOpmlOutline } from '@shared/import/opml'
 import Canvas from './components/Canvas'
@@ -22,6 +23,7 @@ import ThemePanel from './components/ThemePanel'
 import Toolbar from './components/Toolbar'
 import { RecoveryDialog, ShortcutsDialog, UnsavedDialog } from './components/Dialogs'
 import AiDialog, { type AiTask } from './components/AiDialog'
+import DocumentToMapDialog from './components/DocumentToMapDialog'
 import ChatPanel from './components/ChatPanel'
 import AiSettingsDialog from './components/AiSettingsDialog'
 import ExportDialog from './components/ExportDialog'
@@ -129,6 +131,8 @@ export default function App(): ReactElement {
   const [showExport, setShowExport] = useState(false)
   /** AI 对话框：生成 / 扩写 / 润色 */
   const [aiTask, setAiTask] = useState<AiTask | null>(null)
+  /** 拖进来（或从菜单选）的文档：交给「按文档生成导图」对话框 */
+  const [docToMap, setDocToMap] = useState<ExtractedDocument | null>(null)
   const [showAiSettings, setShowAiSettings] = useState(false)
   const themesRef = useRef<ThemeDefinition[]>([])
   /** 历史记录 / 常用 / 保存位置 */
@@ -429,6 +433,22 @@ export default function App(): ReactElement {
       )
     })()
   }, [commitPending, showToast])
+
+  /**
+   * 「按文档生成导图」的菜单入口（拖放之外的入口）。
+   *
+   * 读取与解析都在主进程，渲染层只拿到文本——渲染层不碰文件系统。
+   */
+  const pickDocumentForMap = useCallback((): void => {
+    void (async () => {
+      try {
+        const extracted = await window.api.documentPick()
+        if (extracted) setDocToMap(extracted)
+      } catch (error) {
+        showToast(readableIpcError((error as Error).message))
+      }
+    })()
+  }, [showToast])
 
   /**
    * AI「生成新导图」：在**新窗口**里成为一份独立文档（副本语义）。
@@ -1019,27 +1039,58 @@ export default function App(): ReactElement {
   /* ------------------------------------------------------------------ */
 
   useEffect(() => {
-    // 文档文件（.xmind 等）不拦：不 preventDefault，让 Chromium 的默认导航发生，
-    // 主进程的 will-navigate 拦截器才能接住并走「打开文档」流程
-    const DOCUMENT_RE = /\.(xmind|emmx|emm)$/i
-    const pickImageFile = (files: FileList | null): File | null => {
+    /**
+     * 拖文件进来有三种去处：
+     * - `.xmind / .emmx / .emm`：**不拦**，让 Chromium 的默认导航发生，
+     *   主进程的 will-navigate 拦截器接住并走「打开文档」流程（既有行为）；
+     * - 图片：贴到选中的主题（既有行为）；
+     * - 其它文档（docx / xlsx / pptx / md / txt / csv / json / 代码 …）：
+     *   读成文本交给 AI，**按文档内容生成导图**。
+     *
+     * 不支持的格式（如 PDF）也要拦下默认导航：否则整个界面会被替换成那个文件，
+     * 看起来就像"软件坏了"；这里给一句人话提示（提示文案由主进程按格式给出）。
+     */
+    const MINDMAP_RE = /\.(xmind|emmx|emm)$/i
+    const IMAGE_RE = /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i
+    /** 混着导图文件时整体交给「打开文档」流程（既有语义，保持不变） */
+    const hasMindmap = (files: FileList | null): boolean =>
+      files ? Array.from(files).some((file) => MINDMAP_RE.test(file.name)) : false
+    const firstFile = (files: FileList | null, match: (file: File) => boolean): File | null => {
       if (!files) return null
-      for (const file of Array.from(files)) {
-        if (DOCUMENT_RE.test(file.name)) return null // 混着文档时整体交给文档流程
-        if (
-          file.type.startsWith('image/') ||
-          /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i.test(file.name)
-        ) {
-          return file
-        }
-      }
+      for (const file of Array.from(files)) if (match(file)) return file
       return null
     }
+    const isImage = (file: File): boolean =>
+      file.type.startsWith('image/') || IMAGE_RE.test(file.name)
+    const pickImageFile = (files: FileList | null): File | null =>
+      hasMindmap(files) ? null : firstFile(files, isImage)
+    const pickDocumentFile = (files: FileList | null): File | null =>
+      hasMindmap(files) ? null : firstFile(files, (file) => !isImage(file))
+
     const onDragOver = (event: DragEvent): void => {
-      if (pickImageFile(event.dataTransfer?.files ?? null)) event.preventDefault()
+      const files = event.dataTransfer?.files ?? null
+      // 导图文件放行（交给主进程打开），其余一律拦下——不能让 Chromium 导航过去
+      if (files && files.length > 0 && !hasMindmap(files)) event.preventDefault()
     }
     const onDrop = (event: DragEvent): void => {
-      const file = pickImageFile(event.dataTransfer?.files ?? null)
+      const files = event.dataTransfer?.files ?? null
+      if (hasMindmap(files)) return
+      const documentFile = pickDocumentFile(files)
+      if (documentFile) {
+        event.preventDefault()
+        void (async () => {
+          try {
+            showToast(`正在读取《${documentFile.name}》…`)
+            const bytes = new Uint8Array(await documentFile.arrayBuffer())
+            const extracted = await window.api.documentExtract(documentFile.name, bytes)
+            setDocToMap(extracted)
+          } catch (error) {
+            showToast(readableIpcError((error as Error).message))
+          }
+        })()
+        return
+      }
+      const file = pickImageFile(files)
       if (!file) return
       event.preventDefault()
       void (async () => {
@@ -1115,6 +1166,7 @@ export default function App(): ReactElement {
           onImportOpml: () => void importOutlineFile('opml'),
           onExportOutline: (format) => void exportOutlineAs(format),
           onAiGenerate: () => setAiTask('generate'),
+          onAiFromDocument: pickDocumentForMap,
           onAiExpand: () => setAiTask('expand'),
           onAiPolish: () => setAiTask('polish'),
           onAiSettings: () => setShowAiSettings(true),
@@ -1209,6 +1261,15 @@ export default function App(): ReactElement {
         <AiDialog
           task={aiTask}
           onClose={() => setAiTask(null)}
+          onNotify={showToast}
+          onGenerateInNewWindow={openGeneratedInNewWindow}
+        />
+      )}
+
+      {docToMap && (
+        <DocumentToMapDialog
+          document={docToMap}
+          onClose={() => setDocToMap(null)}
           onNotify={showToast}
           onGenerateInNewWindow={openGeneratedInNewWindow}
         />

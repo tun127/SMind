@@ -23,6 +23,7 @@ import type { Workbook } from '@shared/model/types'
 import type { ImageExportFormat } from '@shared/export/types'
 import type { OutlineFormat } from '@shared/outline'
 import type { ThemeDefinition } from '@shared/theme'
+import type { ExtractedDocument } from '@shared/document'
 
 const api: MindApi = {
   openDialog: (docId: string) =>
@@ -165,6 +166,11 @@ const api: MindApi = {
   chatHistoryClear: (key: string) => ipcRenderer.invoke(IPC.chatHistoryClear, key) as Promise<void>,
 
   diagDump: (content: string) => ipcRenderer.invoke(IPC.diagDump, content) as Promise<void>,
+
+  documentExtract: (name: string, bytes: Uint8Array) =>
+    ipcRenderer.invoke(IPC.documentExtract, name, bytes) as Promise<ExtractedDocument>,
+
+  documentPick: () => ipcRenderer.invoke(IPC.documentPick) as Promise<ExtractedDocument | null>,
 
   licenseGet: () => ipcRenderer.invoke(IPC.licenseGet) as Promise<LicenseView>,
 

@@ -841,6 +841,17 @@ textarea {
   padding: 6px 0;
 }
 
+/* 模型原始输出（排查"没解析出大纲"时看）：等宽 + 保留换行，
+   否则一堆 `- ` 缩进全糊成一坨，根本看不出问题在哪 */
+.ai-preview__body--raw {
+  padding: 6px 10px;
+  font-family: Consolas, 'JetBrains Mono', Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .ai-preview__row {
   display: flex;
   align-items: center;

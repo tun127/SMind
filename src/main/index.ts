@@ -13,6 +13,8 @@ import { isInstanceAlive, isRecord, isSelfNavigation } from '../shared/guards'
 import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
 import { writeFileAtomic } from './atomic-write'
 import { logDirectory, logMain } from './log'
+import { DOCUMENT_EXTENSIONS, extractDocumentFromBytes, extractDocumentFromPath } from './document'
+import type { ExtractedDocument } from '@shared/document'
 import { createHash } from 'node:crypto'
 import { promises as fs, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -1887,6 +1889,40 @@ function registerIpc(): void {
     const dir = join(app.getPath('userData'), 'diag')
     await fs.mkdir(dir, { recursive: true })
     await writeFileAtomic(join(dir, 'last-state.json'), Buffer.from(text))
+  })
+
+  /* ---- 文档 → 导图（拖一份文档进来，AI 读完做成导图） ---- */
+
+  ipcMain.handle(
+    IPC.documentExtract,
+    async (_e, name: unknown, bytes: unknown): Promise<ExtractedDocument> => {
+      if (typeof name !== 'string' || name.length === 0 || name.length > 260) {
+        throw new Error('文件名无效')
+      }
+      // 结构化克隆过来可能是 Uint8Array，也可能是 ArrayBuffer（不同 Electron 版本有差异）
+      const data =
+        bytes instanceof Uint8Array
+          ? bytes
+          : bytes instanceof ArrayBuffer
+            ? new Uint8Array(bytes)
+            : null
+      if (!data) throw new Error('文件内容无效')
+      return extractDocumentFromBytes(name, data)
+    }
+  )
+
+  ipcMain.handle(IPC.documentPick, async (e): Promise<ExtractedDocument | null> => {
+    const result = await showOpenIn(winOf(e.sender), {
+      title: '选择要生成导图的文档',
+      filters: [
+        { name: '文档', extensions: [...DOCUMENT_EXTENSIONS] },
+        { name: '全部文件', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    })
+    const file = firstPathOf(result)
+    if (!file) return null
+    return extractDocumentFromPath(file)
   })
 
   ipcMain.handle(IPC.chatHistoryClear, async (_e, key: unknown): Promise<void> => {
