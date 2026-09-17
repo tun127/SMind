@@ -1890,7 +1890,10 @@ function testAiChatHelpers(): void {
   )
   check('列出了典型的不确定场景（含考试科目）', prompt.includes('考试科目'))
   check('同时防止另一个极端：能确定就直接做，不拿提问当拖延', prompt.includes('不要拿提问当拖延'))
-  check('生成结束要核对数量达标（不够就继续补）', prompt.includes('数量是否达到承诺'))
+  check('先铺骨架（考试类按官方考纲，一个不漏）', prompt.includes('官方考纲'))
+  check('合格线用「行家视角」表述（各领域通用，不限考试）', prompt.includes('行家'))
+  check('合格线是「60 分」', prompt.includes('60 分'))
+  check('合格标准是覆盖率而不是凑数（不搞机械配额）', prompt.includes('合格标准是覆盖率'))
   check(
     'askUser 在可用工具清单里（第 15 条的落点）',
     AGENT_ALL_TOOLS.some((t) => t.name === 'askUser')
@@ -2663,6 +2666,7 @@ function testAgentTools(): void {
   check('详细模式明确禁用备注行', detailedPrompt.includes('不要用 `> `'))
   check('详细模式不再要求写备注行', !detailedPrompt.includes('下一行用 `> `'))
   check('详细模式明确禁止空泛点题节点', detailedPrompt.includes('禁止空泛点题'))
+  check('详细模式先铺骨架（行家共识划分，不挑方向）', detailedPrompt.includes('先铺骨架'))
   // insertSubtree 是**写**工具，在 ALL 清单里（只读清单 AGENT_TOOLS 里没有它）
   const insertTool = AGENT_ALL_TOOLS.find((tool) => tool.name === 'insertSubtree')
   check(
@@ -8460,11 +8464,17 @@ function testAi(): void {
     depth: 4,
     detail: 'detailed'
   })
-  check('详细模式：要求覆盖完整结构（全领域通用）', detailedPrompt[1].content.includes('完整结构'))
+  check(
+    '详细模式：要求覆盖全部核心板块（全领域通用）',
+    detailedPrompt[1].content.includes('全部核心板块')
+  )
   check('详细模式：目标规模至少 100 个节点', detailedPrompt[1].content.includes('至少 100 个节点'))
   check('详细模式：要求写具体内容（不是空标题）', detailedPrompt[1].content.includes('15~40 字'))
-  check('详细模式：要求每个节点配解释', detailedPrompt[1].content.includes('> '))
-  check('详细模式：要求补例子（考题类写真题）', detailedPrompt[1].content.includes('真题'))
+  check('详细模式：解释直接写成子节点', detailedPrompt[1].content.includes('直接写成子节点'))
+  check(
+    '详细模式：考题须诚实标注（自编不得标「真题」）',
+    detailedPrompt[1].content.includes('不要把自编的题标成')
+  )
   check('详细模式：明确禁止自行删减', detailedPrompt[1].content.includes('不要因为'))
   check(
     '骨架模式仍是短标题（与历史行为一致）',
