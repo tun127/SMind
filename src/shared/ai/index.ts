@@ -197,9 +197,6 @@ const OUTLINE_SYSTEM =
   '不要用 `> ` 备注行——备注在画布上不显眼，用户要看的是节点本身。' +
   '只输出大纲本身，不要解释、不要客套、不要用代码块包裹。'
 
-/** 生成详细程度：骨架（快速起图）/ 详细（完整考点 + 解释 + 真题） */
-export type GenerateDetail = 'skeleton' | 'detailed'
-
 /* ------------------------------------------------------------------ */
 /* 生成质量档位：min / mid / max                                        */
 /* ------------------------------------------------------------------ */
@@ -242,55 +239,6 @@ export const QUALITY_TIERS: Array<{ id: QualityTier; label: string; hint: string
 export function normalizeQualityTier(raw: unknown): QualityTier {
   if (raw === 'high') return 'mid'
   return raw === 'min' || raw === 'mid' || raw === 'max' ? raw : DEFAULT_QUALITY_TIER
-}
-
-/** 一键生成导图的提示词 */
-export function buildGenerateMessages(input: {
-  topic: string
-  /** 期望的层级深度 */
-  depth?: number
-  /** 额外要求（用户自由填写） */
-  extra?: string
-  /** 详细程度；默认骨架（与历史行为一致） */
-  detail?: GenerateDetail
-}): AiMessage[] {
-  const depth = input.depth && input.depth > 0 ? input.depth : 3
-  const lines = [`主题：${input.topic}`]
-  if (input.detail === 'detailed') {
-    /**
-     * 详细模式：用户要的是「完整 + 有解释 + 有真题」，不是几个大方向。
-     *
-     * 以前只有一条「最多 N 层、每个节点不超过 12 字」——那正是"只写粗分"的来源：
-     * 12 字装不下任何知识点，只能写标题词；模型于是给出一副骨架。
-     */
-    lines.push(
-      `要求：最多 ${depth} 层，第一行是中心主题，下面按层级展开；用简体中文。` +
-        `**先铺骨架**：第一层列出这个主题在该领域的**全部核心板块**——按行家共识的划分走` +
-        `（考试类按官方考纲；金融 / 法律 / 软件 / 文书各有各的行家划分），一个板块都不能漏，` +
-        `不能只挑熟悉的方向；再逐板块向下展开；` +
-        `目标规模**至少 100 个节点**（数量是参考，覆盖率才是合格线）：`,
-      '1. 每个节点都是**具体知识点**（15~40 字）：定义要带关键特征，公式要带表达式与适用条件，' +
-        '对比要写出差异点，规范要写出关键条款 / 数字；',
-      '2. **禁止空泛点题**：不许出现「XX 的基础知识」「XX 的概述」「了解 / 掌握 XX」这类不含信息量的节点；',
-      '3. 解释与细节**直接写成子节点**（「要点：…」「公式：…」「易错：…」「例：…」），不要用 `> ` 备注行；',
-      '4. 考题类主题补**带答案的题目**：写清题型 / 考法 / 答案要点。确实记得的历年考题可标「真题（年份）」，' +
-        '记不准的一律标「模拟题」——**不要把自编的题标成「真题」**；',
-      '5. 严格用缩进大纲：每行以「- 」开头，子节点比父节点多缩进两个空格；',
-      '6. 内容多就直接写完，**不要因为"太长"而自行删减**；宁可写满也不要提前收尾；',
-      '7. 冲 80 分：层次有逻辑（并列 / 流程 / 对比各就各位，对比写成对节点）、' +
-        '重点有区分（核心 / 高频 / 易错单独成节点并说明原因）、叶子粒度一致（读到就能用）；' +
-        '例子每个板块都要有；术语必须准确，拿不准就写通用说法，不要编行话。'
-    )
-  } else {
-    lines.push(
-      `要求：最多 ${depth} 层，第一行是中心主题，下面按层级展开；用简体中文；每个节点尽量简短（不超过 12 字）。`
-    )
-  }
-  if (input.extra && input.extra.trim().length > 0) lines.push(`补充要求：${input.extra.trim()}`)
-  return [
-    { role: 'system', content: OUTLINE_SYSTEM },
-    { role: 'user', content: lines.join('\n') }
-  ]
 }
 
 /* ------------------------------------------------------------------ */
@@ -392,53 +340,6 @@ export function buildDocumentMergeMessages(input: {
         '【各段大纲片段】',
         input.parts.map((part, index) => `— 第 ${index + 1} 段 —\n${part}`).join('\n\n')
       ].join('\n')
-    }
-  ]
-}
-
-/** 节点扩写（给选中节点补子主题）的提示词 */
-export function buildExpandMessages(input: {
-  title: string
-  /** 已有的子主题，避免重复 */
-  existing?: string[]
-  count?: number
-  /** 该节点的备注，作为上下文 */
-  notes?: string
-  /** 从根到父节点的路径，帮助模型理解上下文 */
-  path?: string[]
-}): AiMessage[] {
-  const count = input.count && input.count > 0 ? input.count : 5
-  const lines = [`当前主题：${input.title}`]
-  if (input.path && input.path.length > 1) lines.push(`所在分支：${input.path.join(' → ')}`)
-  if (input.notes && input.notes.trim().length > 0) lines.push(`备注信息：${input.notes.trim()}`)
-  if (input.existing && input.existing.length > 0) {
-    lines.push(`已有的子主题（不要重复）：${input.existing.join('、')}`)
-  }
-  lines.push(`任务：为「${input.title}」补 ${count} 个新的子主题。`)
-  lines.push(
-    '要求：每个子主题一行，以「- 」开头且**不要缩进**，简体中文，每个不超过 12 字，只输出这些行。'
-  )
-
-  return [
-    { role: 'system', content: OUTLINE_SYSTEM },
-    { role: 'user', content: lines.join('\n') }
-  ]
-}
-
-/** 文案润色（只改这一句标题）的提示词 */
-export function buildPolishMessages(input: { title: string; style?: string }): AiMessage[] {
-  const style =
-    input.style && input.style.trim().length > 0 ? input.style.trim() : '简洁、专业、通顺'
-  return [
-    {
-      role: 'system',
-      content:
-        '你是中文文案编辑。只返回改写后的那一句文本本身：不要引号、不要编号、不要解释、不要换行。' +
-        '如果原文已经是好的，就返回原文。'
-    },
-    {
-      role: 'user',
-      content: `请把下面这条思维导图节点文字改得${style}，保持原意与长度相当：\n${input.title}`
     }
   ]
 }
@@ -684,19 +585,6 @@ export function outlineToTopic(node: OutlineNode, structureClass?: string): Topi
   return topic
 }
 
-/** 解析「一行一个」的列表（扩写结果那种） */
-export function parseFlatList(text: string): string[] {
-  const body = stripCodeFence(text ?? '')
-  const out: string[] = []
-  for (const line of body.split(/\r?\n/)) {
-    const item = parseOutlineLine(line)
-    if (!item) continue
-    // 扩写可能出现缩进、或者写成多级；这里只要文字
-    if (item.text.length > 0) out.push(item.text)
-  }
-  return out
-}
-
 /* ------------------------------------------------------------------ */
 /* 续写拼接                                                            */
 /* ------------------------------------------------------------------ */
@@ -831,41 +719,6 @@ export function mergeContinuation(previous: string, next: string): ContinuationM
 /** 只要拼好的文本（调用方不关心关系时用它） */
 export function joinContinuation(previous: string, next: string): string {
   return mergeContinuation(previous, next).text
-}
-
-/**
- * 润色结果清洗：模型常常不听话地加上引号、编号或换行。
- * 只保留第一行，去掉包裹的引号与「1. 」这类前缀。
- */
-export function cleanPolishedTitle(raw: string): string {
-  const firstLine =
-    (raw ?? '')
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0) ?? ''
-  let text = firstLine
-  text = text.replace(/^\d+[.)、]\s*/, '')
-  text = text.replace(/^[-*+•]\s+/, '')
-  if (text.length >= 2) {
-    const pairs: Array<[string, string]> = [
-      ['"', '"'],
-      ['「', '」'],
-      ['“', '”'],
-      ["'", "'"],
-      ['《', '》']
-    ]
-    for (const [open, close] of pairs) {
-      if (
-        text.startsWith(open) &&
-        text.endsWith(close) &&
-        text.length > open.length + close.length
-      ) {
-        text = text.slice(open.length, text.length - close.length)
-        break
-      }
-    }
-  }
-  return text.trim()
 }
 
 /* ------------------------------------------------------------------ */

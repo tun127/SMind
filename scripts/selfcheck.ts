@@ -182,16 +182,11 @@ import {
   buildDocumentChunkMessages,
   buildDocumentMergeMessages,
   buildDocumentOutlineMessages,
-  buildExpandMessages,
-  buildGenerateMessages,
-  buildPolishMessages,
   chatCompletionsUrl,
-  cleanPolishedTitle,
   describeAiError,
   extractContent,
   normalizeAiConfig,
   outlineToTopic,
-  parseFlatList,
   parseOutline,
   toConfigView
 } from '../src/shared/ai'
@@ -2748,16 +2743,8 @@ function testAgentTools(): void {
     false
   )
 
-  group('AI：内容成节点（不写备注）的反向约束')
+  group('AI：写工具描述的内容约束')
 
-  const detailedPrompt = buildGenerateMessages({ topic: '计算机网络', detail: 'detailed' })[1]
-    .content
-  // 注意：提示词里会「提到」`> ` 是为了**禁止**它，所以断言查的是禁止语句，不是"不提及"
-  check('详细模式明确禁用备注行', detailedPrompt.includes('不要用 `> `'))
-  check('详细模式不再要求写备注行', !detailedPrompt.includes('下一行用 `> `'))
-  check('详细模式明确禁止空泛点题节点', detailedPrompt.includes('禁止空泛点题'))
-  check('详细模式先铺骨架（行家共识划分，不挑方向）', detailedPrompt.includes('先铺骨架'))
-  check('详细模式同步 80 分要求', detailedPrompt.includes('80 分'))
   // insertSubtree 是**写**工具，在 ALL 清单里（只读清单 AGENT_TOOLS 里没有它）
   const insertTool = AGENT_ALL_TOOLS.find((tool) => tool.name === 'insertSubtree')
   check(
@@ -8535,68 +8522,32 @@ function testAi(): void {
   )
   eq('空串返回空', chatCompletionsUrl('   '), '')
 
-  group('AI：提示词')
+  group('AI：文档 → 导图提示词（唯一还在用的出图路径）')
 
-  const generate = buildGenerateMessages({ topic: '学会做菜', depth: 4, extra: '面向零基础' })
-  eq('生成提示词两条消息', generate.length, 2)
-  eq('系统消息要求缩进大纲', generate[0].role, 'system')
-  check('系统消息说明只输出大纲', generate[0].content.includes('缩进大纲'))
-  check('用户消息带主题', generate[1].content.includes('学会做菜'))
-  check('用户消息带层级', generate[1].content.includes('最多 4 层'))
-  check('用户消息带补充要求', generate[1].content.includes('面向零基础'))
-  check(
-    '没写层级时给默认值',
-    buildGenerateMessages({ topic: 'x' })[1].content.includes('最多 3 层')
-  )
+  const docPrompt = buildDocumentOutlineMessages({ name: '报告.md', text: '正文内容' })
+  eq('两条消息（system + user）', docPrompt.length, 2)
+  check('系统提示只输出大纲', docPrompt[0].content.includes('只输出大纲本身'))
+  check('要求覆盖全部章节与要点', docPrompt[1].content.includes('全部章节与要点'))
+  check('要求写具体内容（保留数字/结论/条件）', docPrompt[1].content.includes('数字'))
+  check('解释直接成子节点（不用备注行）', docPrompt[1].content.includes('不要用 `> `'))
+  check('禁止「XX 的概述」这类空节点', docPrompt[1].content.includes('概述'))
+  check('带上文档全文与文件名', docPrompt[1].content.includes('【文档全文】'))
+  check('带上文件名', docPrompt[1].content.includes('报告.md'))
 
-  // 详细模式：用户要的「完整结构 + 解释 + 例子」必须写进提示词里，
-  // 否则模型只会给出一副骨架（这正是"只写粗分"的来源之一）
-  const detailedPrompt = buildGenerateMessages({
-    topic: '计算机四级',
-    depth: 4,
-    detail: 'detailed'
+  const chunkPrompt = buildDocumentChunkMessages({
+    name: '报告.md',
+    index: 1,
+    total: 3,
+    text: '第一段'
   })
+  check('分段读：只依据这一段（防跨段瞎猜）', chunkPrompt[1].content.includes('只依据这一段'))
   check(
-    '详细模式：要求覆盖全部核心板块（全领域通用）',
-    detailedPrompt[1].content.includes('全部核心板块')
-  )
-  check('详细模式：目标规模至少 100 个节点', detailedPrompt[1].content.includes('至少 100 个节点'))
-  check('详细模式：要求写具体内容（不是空标题）', detailedPrompt[1].content.includes('15~40 字'))
-  check('详细模式：解释直接写成子节点', detailedPrompt[1].content.includes('直接写成子节点'))
-  check(
-    '详细模式：考题须诚实标注（自编不得标「真题」）',
-    detailedPrompt[1].content.includes('不要把自编的题标成')
-  )
-  check('详细模式：明确禁止自行删减', detailedPrompt[1].content.includes('不要因为'))
-  check(
-    '骨架模式仍是短标题（与历史行为一致）',
-    buildGenerateMessages({ topic: 'x', detail: 'skeleton' })[1].content.includes('不超过 12 字')
-  )
-  check(
-    '系统提示词说明 `> ` 会变成备注',
-    buildGenerateMessages({ topic: 'x' })[0].content.includes('备注')
+    '分段读：原文关键句写成子节点（与出图规格一致）',
+    chunkPrompt[1].content.includes('单独写成子节点')
   )
 
-  const expand = buildExpandMessages({
-    title: '市场分析',
-    existing: ['目标用户'],
-    count: 4,
-    notes: '看竞品',
-    path: ['规划', '市场分析']
-  })
-  check('扩写提示词带当前主题', expand[1].content.includes('市场分析'))
-  check('扩写提示词带已有子主题（避免重复）', expand[1].content.includes('目标用户'))
-  check('扩写提示词带备注', expand[1].content.includes('看竞品'))
-  check('扩写提示词带所在分支', expand[1].content.includes('规划 → 市场分析'))
-  check('扩写提示词带数量', expand[1].content.includes('补 4 个'))
-
-  const polish = buildPolishMessages({ title: '我们做了一个测试' })
-  check('润色提示词要求只返回文本', polish[0].content.includes('只返回改写后的那一句'))
-  check('润色提示词带原文', polish[1].content.includes('我们做了一个测试'))
-  check(
-    '润色可指定风格',
-    buildPolishMessages({ title: 'x', style: '口语化' })[1].content.includes('口语化')
-  )
+  const mergePrompt = buildDocumentMergeMessages({ name: '报告.md', parts: ['- 甲', '- 乙'] })
+  check('合并阶段：去重归位', mergePrompt[1].content.includes('合并去重'))
 
   group('AI：解析模型输出')
 
@@ -8727,24 +8678,6 @@ function testAi(): void {
     bare.warnings.some((w) => w.includes('一行一个主题')),
     bare.warnings.join('|')
   )
-
-  eq('平铺列表解析', parseFlatList('- 甲\n- 乙\n- 丙'), ['甲', '乙', '丙'])
-  eq('平铺列表忽略空行与解释', parseFlatList('这是结果：\n\n- 甲\n\n- 乙'), [
-    '这是结果：',
-    '甲',
-    '乙'
-  ])
-  eq('平铺列表剥掉缩进', parseFlatList('  - 甲\n    - 乙'), ['甲', '乙'])
-
-  group('AI：润色结果清洗')
-
-  eq('去掉包裹的引号', cleanPolishedTitle('"优化后的标题"'), '优化后的标题')
-  eq('去掉中文引号', cleanPolishedTitle('「优化后的标题」'), '优化后的标题')
-  eq('去掉编号前缀', cleanPolishedTitle('1. 优化后的标题'), '优化后的标题')
-  eq('只取第一行', cleanPolishedTitle('优化后的标题\n解释：我改了用词'), '优化后的标题')
-  eq('去掉列表符号', cleanPolishedTitle('- 优化后的标题'), '优化后的标题')
-  eq('空输入返回空', cleanPolishedTitle('   '), '')
-  eq('不误删内容里的引号', cleanPolishedTitle('他说"你好"'), '他说"你好"')
 
   group('AI：响应解析与错误翻译')
 
