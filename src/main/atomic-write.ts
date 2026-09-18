@@ -33,6 +33,3 @@ export async function writeFileAtomic(path: string, bytes: Uint8Array): Promise<
     throw error
   }
 }
-
-/** 临时文件后缀（供清理残留时匹配） */
-export const ATOMIC_TEMP_SUFFIX = TEMP_SUFFIX

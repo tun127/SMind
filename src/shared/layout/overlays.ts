@@ -167,26 +167,6 @@ interface Bounds {
   maxY: number
 }
 
-const EMPTY_BOUNDS: Bounds = {
-  minX: Number.POSITIVE_INFINITY,
-  minY: Number.POSITIVE_INFINITY,
-  maxX: Number.NEGATIVE_INFINITY,
-  maxY: Number.NEGATIVE_INFINITY
-}
-
-/** 主题及其所有后代的包围盒；折叠的子树不参与 */
-function accumulateBounds(topic: Topic, result: LayoutResult, acc: Bounds): void {
-  const node = result.nodeMap.get(topic.id)
-  if (node) {
-    acc.minX = Math.min(acc.minX, node.x)
-    acc.minY = Math.min(acc.minY, node.y)
-    acc.maxX = Math.max(acc.maxX, node.x + node.width)
-    acc.maxY = Math.max(acc.maxY, node.y + node.height)
-  }
-  if (topic.collapsed) return
-  for (const child of visibleChildren(topic)) accumulateBounds(child, result, acc)
-}
-
 /**
  * 全树「子树包围盒」索引：一次后序遍历 O(n) 建好（键是主题 id）。
  *
@@ -332,18 +312,6 @@ export function overlayReserves(root: Topic, sheet: Sheet): OverlayReserves {
   }
 
   return { top, bottom, left, right }
-}
-
-export function boundsOfRange(
-  result: LayoutResult,
-  index: TreeIndex,
-  range: string | undefined
-): Bounds | null {
-  const topics = resolveRange(index, range)
-  if (topics.length === 0) return null
-  const acc = { ...EMPTY_BOUNDS }
-  for (const topic of topics) accumulateBounds(topic, result, acc)
-  return Number.isFinite(acc.minX) ? acc : null
 }
 
 /* ------------------------------------------------------------------ */

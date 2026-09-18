@@ -16,13 +16,7 @@ import type { Topic, Workbook } from '@shared/model/types'
 import { activeSheet, walk } from '@shared/model/tree'
 import { defaultDocumentName } from '@shared/model/naming'
 import { buildImagePdf } from '@shared/export/pdf'
-import {
-  IMAGE_EXPORT_FORMATS,
-  IMAGE_EXPORT_SCALES,
-  imageExportFormatDef,
-  type ExportBackground,
-  type ImageExportFormat
-} from '@shared/export/types'
+import type { ExportBackground, ImageExportFormat } from '@shared/export/types'
 import { measureTopic } from '../render/measure'
 import { formulaHtml, formulaSize } from '../render/formula'
 import { resourceUrl } from '../render/resource'
@@ -31,22 +25,16 @@ import { buildDrawing, type Drawing } from './drawing'
 import { canvasToPngBytes, canvasToRgbBytes, deflateBytes, renderDrawing } from './raster'
 import { drawingToSvg } from './svg'
 
-export type ExportFormat = ImageExportFormat
+type ExportFormat = ImageExportFormat
 
-export {
-  IMAGE_EXPORT_FORMATS as EXPORT_FORMATS,
-  IMAGE_EXPORT_SCALES as EXPORT_SCALES,
-  imageExportFormatDef
-}
-
-export interface ExportOptions {
+interface ExportOptions {
   format: ExportFormat
   /** 位图倍率（SVG 忽略） */
   scale: number
   background: ExportBackground
 }
 
-export interface ExportResult {
+interface ExportResult {
   /** 文本格式（SVG）给字符串，位图给字节 */
   data: string | Uint8Array
   fileName: string

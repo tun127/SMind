@@ -246,7 +246,7 @@ function drawOp(
 
     case 'image':
     case 'formula': {
-      const href = op.kind === 'image' ? op.href : op.href
+      const href = op.href
       const image = href ? images.get(href) : undefined
       if (image) {
         ctx.drawImage(image, op.x, op.y, op.w, op.h)

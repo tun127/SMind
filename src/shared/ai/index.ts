@@ -400,21 +400,18 @@ export interface ParsedOutline {
 }
 
 /** 去掉 ```lang ... ``` 包裹；模型经常多此一举地包一层 */
-export function stripCodeFence(text: string): string {
+function stripCodeFence(text: string): string {
   const trimmed = text.trim()
   if (!trimmed.startsWith('```')) return trimmed
   const lines = trimmed.split(/\r?\n/)
-  const first = lines.shift() ?? ''
-  void first
+  lines.shift()
   const lastLine = lines[lines.length - 1]
   if (lastLine && lastLine.trim().startsWith('```')) lines.pop()
   return lines.join('\n')
 }
 
 /** 一行的解析结果：层级深度 + 文字 + 是否有列表标记；不是大纲行则返回 null */
-export function parseOutlineLine(
-  line: string
-): { depth: number; text: string; marked: boolean } | null {
+function parseOutlineLine(line: string): { depth: number; text: string; marked: boolean } | null {
   if (line.trim().length === 0) return null
 
   // 制表符按两个空格算，缩进按两格一级
@@ -438,7 +435,7 @@ export function parseOutlineLine(
 }
 
 /** 短句才可能是主题；带句号的长句通常是模型的解释文字 */
-export function looksLikeTopic(text: string): boolean {
+function looksLikeTopic(text: string): boolean {
   const trimmed = text.trim()
   if (/[。！？!?]$/.test(trimmed)) return false
   /**
@@ -462,7 +459,7 @@ export function looksLikeTopic(text: string): boolean {
  * 语法与 Markdown 引用块一致——`shared/import/markdown.ts` 的导入器也是这么认的，
  * 于是「AI 生成的详细大纲」与「Markdown 导入的详细大纲」是同一套写法。
  */
-export function parseNoteLine(line: string): string | null {
+function parseNoteLine(line: string): string | null {
   const trimmed = line.trim()
   if (!trimmed.startsWith('>')) return null
   const text = trimmed.replace(/^>\s?/, '').trim()

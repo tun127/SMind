@@ -149,10 +149,6 @@ export function getStructureDef(cls: StructureClass | undefined): StructureDef {
   return (cls && STRUCTURE_MAP.get(cls)) || STRUCTURE_MAP.get(DEFAULT_STRUCTURE)!
 }
 
-export function structureLabel(cls: StructureClass | undefined): string {
-  return getStructureDef(cls).label
-}
-
 /** 常用标记图标（P4 接入图标库，这里先提供 id -> 中文名映射） */
 export const MARKER_LABELS: Record<string, string> = {
   'priority-1': '优先级 1',

@@ -16,7 +16,7 @@ export interface DragMove {
 }
 
 /** 按树里的父子关系建立对照表（游离主题也算在内） */
-export function parentMapOf(root: Topic): Map<string, string | null> {
+function parentMapOf(root: Topic): Map<string, string | null> {
   const parentOf = new Map<string, string | null>()
   const collect = (topic: Topic, parentId: string | null): void => {
     parentOf.set(topic.id, parentId)

@@ -26,7 +26,7 @@ import { MODEL_VERSION, CREATOR } from '../model/types'
 import { childOf, childText, childrenOf, textOf, type XmlNode } from './xml'
 
 /** 旧版特有数据（原样保留用）的 provider 标识 */
-export const LEGACY_PROVIDER = 'org.xmind.content.xml'
+const LEGACY_PROVIDER = 'org.xmind.content.xml'
 
 export interface LegacyParseResult {
   workbook: Workbook

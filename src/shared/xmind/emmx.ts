@@ -33,8 +33,6 @@ import { hasFormatting } from '../richtext'
 
 /** 专有格式里存放页内容的包内路径 */
 export const EMMX_PAGE_FILE = 'mmpage/page.bin'
-/** 专有格式的文档级属性文件（只有版面设置，没有正文） */
-export const EMMX_DOCUMENT_FILE = 'document.xml'
 
 /**
  * page.bin 开头是文档属性区与格式常量表，里面混着 `Rnewmoren` 这类标记，

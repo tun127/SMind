@@ -936,7 +936,7 @@ const ALIASES: Record<string, string> = {
 }
 
 /** 归一化语言名：认别名，认不出来返回空串（＝不做高亮） */
-export function normalizeCodeLanguage(language: string | undefined): string {
+function normalizeCodeLanguage(language: string | undefined): string {
   const key = (language ?? '').trim().toLowerCase()
   if (key.length === 0) return ''
   if (key in DEFS) return key

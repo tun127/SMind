@@ -122,7 +122,7 @@ export function mark(name: string, detail = ''): void {
 }
 
 /** 清空累计（回合之间不互相污染） */
-export function clearStats(): void {
+function clearStats(): void {
   counters.clear()
   amounts.clear()
   costs.clear()
@@ -162,7 +162,7 @@ function scheduleDisarm(holdMs: number): void {
 }
 
 /** 关掉诊断输出（不再刷新窗口时；定时自动调用） */
-export function disarmDiag(): void {
+function disarmDiag(): void {
   if (disarmTimer !== null && typeof window !== 'undefined') window.clearTimeout(disarmTimer)
   disarmTimer = null
   if (!armed) return

@@ -211,5 +211,3 @@ export function deriveCustomTheme(
 ): ThemeDefinition {
   return { id, name, builtin: false, colors: cloneColors(source.colors) }
 }
-
-export { cloneColors }

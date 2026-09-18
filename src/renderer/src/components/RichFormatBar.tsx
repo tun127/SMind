@@ -257,16 +257,6 @@ function DefaultStylePanel({
   )
 }
 
-const COLORS = [
-  '#1f2328',
-  '#EB5757',
-  '#F2994A',
-  '#E2B93B',
-  '#27AE60',
-  '#2D9CDB',
-  '#2F6BFF',
-  '#9B51E0'
-]
 const SIZES = [12, 14, 16, 18, 22, 28]
 
 type Chain = ReturnType<RichEditor['chain']>
@@ -435,7 +425,7 @@ export default function RichFormatBar({ onRenderDefaultsChanged }: Props): React
 
       <div className="formatbar__group">
         <span className="formatbar__label">颜色</span>
-        {COLORS.map((color) => (
+        {DEFAULT_COLORS.map((color) => (
           <button
             key={color}
             type="button"

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import type { OpenResult, RecoveryInfo } from '@shared/ipc'
 import type { OutlineFormat } from '@shared/outline'
 import { activeRoot } from '@shared/model/tree'
-import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
+import { defaultDocumentName, defaultFileName, fileNameOf } from '@shared/model/naming'
 import {
   inlineRunsToRich,
   looksLikeMarkdown,
@@ -51,12 +51,6 @@ function applyRenderDefaults(settings: AppSettings): void {
   bumpMeasureEpoch()
   // 光让缓存失效还不够：布局自身也要重跑，否则改了设置要等别的操作才生效
   useEditor.getState().bumpRenderEpoch()
-}
-
-function fileNameOf(path: string | null): string | null {
-  if (!path) return null
-  const parts = path.split(/[\\/]/)
-  return parts[parts.length - 1] || path
 }
 
 /** 用户是否在页面里真的选中了文字（画布节点不可选中，所以有选区就是面板/输入框里的文字） */

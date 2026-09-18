@@ -42,8 +42,6 @@ import {
   activeRoot,
   activeSheet,
   cloneTopicDeep,
-  countCharacters,
-  countTopics,
   detachTopic,
   ensureExpanded,
   findParent,
@@ -2278,5 +2276,3 @@ export function snapshotForSave(state: EditorState): Workbook {
     topic.titleRich = normalized && hasFormatting(normalized) ? normalized : undefined
   })
 }
-
-export { countTopics, countCharacters }

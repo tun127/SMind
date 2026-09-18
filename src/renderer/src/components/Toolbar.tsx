@@ -139,8 +139,8 @@ function ToolMenu({
     const rect = el.getBoundingClientRect()
     const width = 236
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
-    // 下方放不下就往上弹
-    const estimatedHeight = 60 + 62 * 0 + 0
+    // 下方放不下就往上弹（菜单高度按固定值估算，条目数是动态的，不参与判断）
+    const estimatedHeight = 60
     const top =
       rect.bottom + 6 + estimatedHeight > window.innerHeight - 8 && rect.top > 240
         ? Math.max(8, rect.top - 6 - 300)

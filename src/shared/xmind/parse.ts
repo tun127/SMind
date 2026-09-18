@@ -292,16 +292,6 @@ function parseSheet(raw: unknown, index: number): Sheet | null {
 /* 主入口                                                              */
 /* ------------------------------------------------------------------ */
 
-/** 判断一个 zip 是否为 Xmind 8 旧版（content.xml）格式 */
-export async function isLegacyXmind(data: Uint8Array): Promise<boolean> {
-  try {
-    const zip = await JSZip.loadAsync(data)
-    return !!zip.file(XMIND_FILES.legacyContent) && !zip.file(XMIND_FILES.content)
-  } catch {
-    return false
-  }
-}
-
 /**
  * 打开压缩包。
  *

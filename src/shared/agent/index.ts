@@ -609,7 +609,7 @@ function countsOf(root: Topic): {
  * 去空白、全角转半角、去常见标点、去掉尾部编号与「（补充）/ 副本」这类后缀、小写。
  * **只用于查重**，不改动任何真实标题——判错了也只是多列一组候选。
  */
-export function normalizeTopicTitle(raw: string): string {
+function normalizeTopicTitle(raw: string): string {
   let text = raw.trim().toLowerCase()
   // 全角 → 半角（字母、数字与常见标点）
   text = text.replace(/[\uff01-\uff5e]/g, (ch) =>
@@ -1106,7 +1106,7 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
 }
 
 /** 回喂给模型的单条结果长度上限：工具结果再长也不能把上下文撑爆 */
-export const AGENT_TOOL_RESULT_MAX = 8000
+const AGENT_TOOL_RESULT_MAX = 8000
 
 /** 执行一次只读工具（带结果长度保护） */
 export function runReadTool(name: string, argumentsText: string, context: ToolContext): ToolResult {
@@ -1686,10 +1686,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     return {
       ok: true,
       intent: { kind: 'rename', id: target.topic.id, title },
-      summary:
-        title.length === 0
-          ? `清空「${target.topic.title}」的标题`
-          : `改名「${target.topic.title}」→「${title}」`,
+      summary: `改名「${target.topic.title}」→「${title}」`,
       destructive: false
     }
   }

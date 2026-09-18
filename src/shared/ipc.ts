@@ -135,7 +135,6 @@ export const IPC = {
   showInFolder: 'shell:show-in-folder',
   openExternal: 'shell:open-external',
   menuCommand: 'menu:command',
-  documentReset: 'document:reset',
   themesList: 'themes:list',
   themesSave: 'themes:save',
   themesDelete: 'themes:delete',

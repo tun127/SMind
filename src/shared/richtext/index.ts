@@ -10,19 +10,9 @@
  */
 import type { RichText, RichTextParagraph, RichTextRun } from '../model/types'
 
-export const DEFAULT_RICH_FONT_SIZE = 14
-
 /* ------------------------------------------------------------------ */
 /* 基础构造与纯文本互转                                                */
 /* ------------------------------------------------------------------ */
-
-export function makeRun(text: string, style: Partial<RichTextRun> = {}): RichTextRun {
-  return { text, ...style }
-}
-
-export function makeParagraph(runs: RichTextRun[] = []): RichTextParagraph {
-  return { runs }
-}
 
 /** 纯文本 -> 富文本（按 \n 切段落） */
 export function richFromPlain(text: string): RichText {
@@ -59,11 +49,6 @@ export function plainTextOf(rich: RichText | undefined): string {
   return rich.paragraphs
     .map((paragraph) => (paragraph.bullet ? '• ' : '') + paragraphText(paragraph))
     .join('\n')
-}
-
-/** 取节点的纯文本标题：优先使用富文本，保证两者不会不一致 */
-export function titleTextOf(topic: { title: string; titleRich?: RichText }): string {
-  return topic.titleRich ? plainTextOf(topic.titleRich) : topic.title
 }
 
 /**
@@ -379,16 +364,3 @@ export function tiptapToRich(doc: TipTapDoc | null | undefined): RichText {
 /* ------------------------------------------------------------------ */
 /* 展示辅助                                                            */
 /* ------------------------------------------------------------------ */
-
-/** 供节点渲染使用的字体粗细：加粗优先，否则用该层级的基础字重 */
-export function resolveWeight(run: RichTextRun, baseWeight: number): number {
-  return run.bold ? Math.max(baseWeight, 700) : baseWeight
-}
-
-/** 文本装饰合并 */
-export function textDecorationOf(run: RichTextRun): string | undefined {
-  const parts: string[] = []
-  if (run.underline) parts.push('underline')
-  if (run.strike) parts.push('line-through')
-  return parts.length > 0 ? parts.join(' ') : undefined
-}

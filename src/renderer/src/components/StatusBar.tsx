@@ -1,12 +1,7 @@
 import type { ReactElement } from 'react'
 import { activeSheet, countCharacters, countTopics } from '@shared/model/tree'
+import { fileNameOf } from '@shared/model/naming'
 import { useEditor } from '../store/editor'
-
-function fileNameOf(path: string | null): string | null {
-  if (!path) return null
-  const parts = path.split(/[\\/]/)
-  return parts[parts.length - 1] || path
-}
 
 /** 构建时间戳（构建时注入，见 electron.vite.config.ts） */
 declare const __BUILD_STAMP__: string

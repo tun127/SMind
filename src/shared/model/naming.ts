@@ -71,3 +71,14 @@ export function defaultFileName(workbook: Workbook | undefined, extension: strin
   const ext = extension.replace(/^\./, '')
   return `${defaultDocumentName(workbook)}.${ext}`
 }
+
+/**
+ * 从完整路径里取出文件名（含扩展名）；没有路径时返回 null。
+ *
+ * 以前 App 与状态栏各写了一份逐字相同的实现，这里收成唯一来源。
+ */
+export function fileNameOf(path: string | null): string | null {
+  if (!path) return null
+  const parts = path.split(/[\\/]/)
+  return parts[parts.length - 1] || path
+}

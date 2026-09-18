@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { Plus, X } from 'lucide-react'
 import { useEditor } from '../store/editor'
-import { tabTitleOf, useTabs, type DocTab } from '../store/tabs'
+import { tabTitleOf, useTabs } from '../store/tabs'
 
 interface Props {
   /** 新建一个空白文档标签 */
@@ -151,9 +151,4 @@ export default function TabBar({ onNewTab, onCloseTab }: Props): ReactElement {
       </button>
     </div>
   )
-}
-
-/** 供外部（如自检）判断标签显示名；保持与标签栏一致的取名规则 */
-export function tabDisplayName(tab: DocTab): string {
-  return tabTitleOf(tab)
 }

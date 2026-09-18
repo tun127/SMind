@@ -8,7 +8,7 @@
 import type { Topic, Workbook } from './types'
 
 /** resources/ 前缀（与 .xmind 包内路径一致） */
-export const RESOURCES_DIR = 'resources/'
+const RESOURCES_DIR = 'resources/'
 
 /** 收集工作簿里被引用的资源路径（图片 + 附件） */
 export function collectResourceRefs(workbook: Workbook): Set<string> {

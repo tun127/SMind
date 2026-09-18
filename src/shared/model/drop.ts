@@ -129,11 +129,6 @@ export function perpendicularOf(direction: DropAxis): DropAxis {
   return { axis: direction.axis === 'x' ? 'y' : 'x', forward: true }
 }
 
-/** 反向 */
-export function oppositeOf(direction: DropAxis): DropAxis {
-  return { axis: direction.axis, forward: !direction.forward }
-}
-
 /**
  * 指针落在目标节点的哪个语义区（Xmind / 亿图脑图都是这套分区）：
  * - 沿同级排列方向的**前段**（默认 28%）→ 插到它前面；
