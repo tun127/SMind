@@ -69,14 +69,15 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
           'line'
         )
       } else {
-        const above = childNode.y + childNode.height / 2 < parent.y + parent.height / 2
+        // 刻目下面的内容是**一列**：用列脊（竖脊 + 短横线），
+        // 不能用"父下→子上"，否则连到第二个的线会穿过第一个
         addEdge(
           result,
           parent.id,
           childNode.id,
-          anchorPoint(parent, above ? 'top' : 'bottom'),
-          anchorPoint(childNode, above ? 'bottom' : 'top'),
-          'elbow-v'
+          anchorPoint(parent, 'top'),
+          anchorPoint(childNode, 'bottom'),
+          'spine'
         )
       }
       connect(child)

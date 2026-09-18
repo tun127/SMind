@@ -67,20 +67,19 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
     addEdge(result, root.id, anchor.id, { x: anchor.x, y: spineY }, { x: nearX, y: nearY }, 'line')
   }
 
-  // 骨刺上的后续层级
+  // 骨刺上的后续层级：一条竖脊挂一排短横线（不能是"父下→子上"，否则会穿过上面的兄弟）
   const connect = (topic: Topic): void => {
     for (const child of builder.visibleChildren(topic)) {
       const parent = result.nodeMap.get(topic.id)
       const childNode = result.nodeMap.get(child.id)
       if (parent && childNode && parent.depth >= 1) {
-        const above = childNode.y + childNode.height / 2 < parent.y + parent.height / 2
         addEdge(
           result,
           parent.id,
           childNode.id,
-          anchorPoint(parent, above ? 'top' : 'bottom'),
-          anchorPoint(childNode, above ? 'bottom' : 'top'),
-          'elbow-v'
+          anchorPoint(parent, 'bottom'),
+          anchorPoint(childNode, 'top'),
+          'spine'
         )
       }
       connect(child)
@@ -168,7 +167,13 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
   }
 
   const result = builder.finish(root)
-  // 表头从根节点用「下-横-下」的母线连出，避免多根线互相穿过
+  /**
+   * 表头**排成一行**（彼此左右相邻）：用「下-横-下」的母线连出，避免多根线互相穿过。
+   * 表头下面的格子**排成一列**：用列脊（一条竖脊 + 一排短横线），
+   * 否则连到下面第二格的线会从第一格身上穿过去。
+   *
+   * 这两种形状在同一张图里并存（行 + 列），所以按层分开选连接方式——不能一刀切。
+   */
   const connect = (topic: Topic): void => {
     const parent = result.nodeMap.get(topic.id)
     if (!parent) return
@@ -181,7 +186,7 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
           childNode.id,
           anchorPoint(parent, 'bottom'),
           anchorPoint(childNode, 'top'),
-          'elbow-v'
+          parent.depth === 0 ? 'elbow-v' : 'spine'
         )
       }
       connect(child)
@@ -267,8 +272,16 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
     const childList = builder.visibleChildren(topic)
     if (childList.length === 0) return
 
-    const sub = sectorWidth / childList.length
-    const firstAngle = angle - sectorWidth / 2 + sub / 2
+    /**
+     * 子节点的扇区**收窄**到最多 90°。
+     *
+     * 一级分支自己占的扇区是「整圈 ÷ 分支数」：只有两个分支时每个分支有 180°，
+     * 直接把子节点摊到 180° 以上——那不像顺时针图（Xmind 里同一分支的子节点
+     * 是**贴着分支方向**挤在一起的），连线也会拉成横穿画面的长斜线。
+     */
+    const fan = Math.min(sectorWidth, Math.PI / 2)
+    const sub = fan / childList.length
+    const firstAngle = angle - fan / 2 + sub / 2
 
     let childRadius = radius + ringStep(depth)
     if (childList.length > 1) {

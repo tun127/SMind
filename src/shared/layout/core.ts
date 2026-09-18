@@ -53,7 +53,87 @@ export function anchorPoint(node: NodeLayout, anchor: Anchor): Point {
 /* 连线路径                                                            */
 /* ------------------------------------------------------------------ */
 
-export type ConnectorKind = 'bezier' | 'elbow-h' | 'elbow-v' | 'line'
+/**
+ * 连线形状。
+ *
+ * `spine` 是给**纵向列**用的：子节点在父节点的正上/正下方（时间轴的刻目、鱼骨的骨刺、
+ * 矩阵的格位、树状表格的列）。这类子节点不能用"父下 → 子上"的直线连——
+ * 兄弟排在同一列上，连到更远那个的线会从更近那个身上**穿过去**；
+ * 正确形状是「父节点 → 侧边的竖脊 → 横着进子节点侧缘」：一条脊 + 一排短横线，
+ * 读起来就是一份列表（Xmind 的时间轴 / 鱼骨也是这个形状）。
+ */
+export type ConnectorKind = 'bezier' | 'elbow-h' | 'elbow-v' | 'spine' | 'line'
+
+/** 竖脊与子节点侧缘之间留的空隙 */
+const SPINE_GAP = 8
+
+/**
+ * 列脊的折点：父节点锚点 → 先离开一小段 → 走到脊 → 沿脊走 → 横入子节点侧缘。
+ *
+ * 两个方向的列都走这一套：子节点在**正上/正下方**（时间轴刻目、鱼骨骨刺、矩阵格位）
+ * 脊是竖的；在**正左/正右**（树状表格的列头与条目）脊是横的。
+ *
+ * 脊的位置按**这一列的所有子节点**算，而不是只看当前这个：某个兄弟被手动拖偏之后，
+ * 按单个子节点算出来的脊会落在那个兄弟的范围里，连线又从它身上穿过去了。
+ * 同理，"离开父节点的一小段"走在父节点与最近那个子节点之间的空档里，
+ * 免得那条线贴着子节点的边缘蹭过去。
+ */
+function spinePoints(result: LayoutResult, parent: NodeLayout, child: NodeLayout): Point[] {
+  const boxes = (parent.topic.collapsed ? [] : parent.topic.children)
+    .map((topic) => result.nodeMap.get(topic.id))
+    .filter((node): node is NodeLayout => node !== undefined)
+  const column = boxes.length > 0 ? boxes : [child]
+
+  const pcx = parent.x + parent.width / 2
+  const pcy = parent.y + parent.height / 2
+  const ccx = child.x + child.width / 2
+  const ccy = child.y + child.height / 2
+  const vertical = Math.abs(ccy - pcy) >= Math.abs(ccx - pcx)
+
+  if (vertical) {
+    const below = ccy >= pcy
+    const anchorY = below ? round(parent.y + parent.height) : parent.y
+    const from: Point = { x: round(pcx), y: anchorY }
+    // 子节点在父节点中线的右侧 → 从它的左边进（脊总在整列的外侧）
+    const enterLeft = ccx >= pcx
+    const to: Point = { x: enterLeft ? child.x : round(child.x + child.width), y: round(ccy) }
+    const spineX = enterLeft
+      ? Math.min(from.x, Math.min(...column.map((node) => node.x)) - SPINE_GAP)
+      : Math.max(from.x, Math.max(...column.map((node) => node.x + node.width)) + SPINE_GAP)
+    const nearest = column.reduce(
+      (acc, node) => (below ? Math.min(acc, node.y) : Math.max(acc, node.y)),
+      anchorY
+    )
+    const gap = Math.abs(nearest - anchorY)
+    const departY = round(anchorY + (below ? 1 : -1) * Math.max(2, Math.min(SPINE_GAP, gap / 2)))
+    return [
+      from,
+      { x: from.x, y: departY },
+      { x: round(spineX), y: departY },
+      { x: round(spineX), y: to.y },
+      to
+    ]
+  }
+
+  /**
+   * 子节点在**另一个列**里（树状表格：父在左列，子在同一右列里上下堆叠）。
+   * 脊竖在父列与子列之间：父节点横出来接脊 → 沿脊上下 → 再逐格横进子节点侧缘。
+   * 脊落在**所有子节点的外侧**，所以不会从任何一个兄弟身上穿过去。
+   */
+  const right = ccx >= pcx
+  const near = right
+    ? Math.min(...column.map((node) => node.x)) - SPINE_GAP
+    : Math.max(...column.map((node) => node.x + node.width)) + SPINE_GAP
+  const railX = right
+    ? Math.max(near, round(parent.x + parent.width) + 4)
+    : Math.min(near, parent.x - 4)
+  const from: Point = { x: right ? round(parent.x + parent.width) : parent.x, y: round(pcy) }
+  const to: Point = {
+    x: right ? child.x : round(child.x + child.width),
+    y: round(ccy)
+  }
+  return [from, { x: round(railX), y: from.y }, { x: round(railX), y: to.y }, to]
+}
 
 export function pathFor(kind: ConnectorKind, from: Point, to: Point): string {
   const x1 = round(from.x)
@@ -395,9 +475,22 @@ export function addEdge(
   kind: ConnectorKind
 ): void {
   /**
+   * 列脊：由结构显式声明（它知道自己的子节点是不是排成一列）。
+   * 锚点由这里重算——列脊要进的是子节点的**侧缘**，而不是结构原来给的上/下缘。
+   */
+  if (kind === 'spine') {
+    const parent = result.nodeMap.get(fromId)
+    const child = result.nodeMap.get(toId)
+    if (parent && child) {
+      result.edges.push({ fromId, toId, d: polyline(spinePoints(result, parent, child)) })
+      return
+    }
+  }
+
+  /**
    * 折线连线加一层**竖井绕行**：连线不许从别的节点身上穿过去。
    *
-   * 为什么需要：各结构算锚点时只看父子两个节点，于是当兄弟**排成一列**时——
+   * 为什么需要：各结构算锚点时只看父子两个节点，于是当兄弟排成一列时——
    * 矩阵的格位、时间轴的刻目、鱼骨的骨刺、树状表格的列——连到"更远那一格"的线
    * 会从"更近那一格"身上直插过去（用户截图：一条竖线穿过中间那个框）。
    */

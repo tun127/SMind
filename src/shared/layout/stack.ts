@@ -13,6 +13,7 @@ import {
   LayoutBuilder,
   addDecoration,
   addEdge,
+  anchorPoint,
   anchorsForChild,
   bracePath,
   connectTree,
@@ -336,9 +337,28 @@ export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutRe
   )
 
   const result = builder.finish(root)
-  // 表格用直角横线连接，接近表格的行列感
-  connectTree(result, root, 'line', (parent, child) =>
-    anchorsForChild(parent, child, horizontalAnchors(parent, child))
-  )
+  /**
+   * 每一层是一列、同一层的兄弟上下堆叠 → 用**列脊**连：脊竖在父列与子列之间，
+   * 父节点横出来接脊、再逐格横进子节点侧缘。这就是表格该有的行列感；
+   * 用直斜线连会画成一束斜线（既不像表格，兄弟一多还会互相压住）。
+   */
+  const connect = (topic: Topic): void => {
+    for (const child of builder.visibleChildren(topic)) {
+      const parent = result.nodeMap.get(topic.id)
+      const childNode = result.nodeMap.get(child.id)
+      if (parent && childNode) {
+        addEdge(
+          result,
+          parent.id,
+          childNode.id,
+          anchorPoint(parent, 'right'),
+          anchorPoint(childNode, 'left'),
+          'spine'
+        )
+      }
+      connect(child)
+    }
+  }
+  connect(root)
   return result
 }

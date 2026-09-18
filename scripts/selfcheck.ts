@@ -4322,6 +4322,17 @@ const STRUCTURE_SWEEP: Array<{ name: string; root: SweepSpec }> = [
   },
   { name: '单链', root: { title: '中心主题', children: [sweepChain('分支', 2)] } },
   {
+    // 用户截图那张形状：两个分支各带两个子节点（分支数 2 时每个分支的扇区/槽位最宽）
+    name: '两分支各两子',
+    root: {
+      title: '中心主题',
+      children: [1, 2].map((i) => ({
+        title: `分支主题 ${i}`,
+        children: [{ title: `${i} 甲` }, { title: `${i} 乙` }]
+      }))
+    }
+  },
+  {
     name: '宽浅（5 分支 × 2 子）',
     root: {
       title: '中心主题',
