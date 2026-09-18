@@ -29,6 +29,7 @@ import {
   perpendicularOf,
   resolveDrop,
   stackDirection,
+  topicsInBox,
   zoneOf,
   type DropAxis,
   type DropMode,
@@ -1800,15 +1801,14 @@ export default function Canvas(): ReactElement {
         const minY = Math.min(from.y, to.y)
         const maxY = Math.max(from.y, to.y)
 
-        const hits = (layoutRef.current?.nodes ?? [])
-          .filter(
-            (node) =>
-              node.x <= maxX &&
-              node.x + node.width >= minX &&
-              node.y <= maxY &&
-              node.y + node.height >= minY
-          )
-          .map((node) => node.id)
+        // 与拖动中的高亮共用同一套判定（`topicsInBox`）：亮了就一定会选中
+        const hits = topicsInBox(
+          (layoutRef.current?.nodes ?? []).map((node) => ({
+            id: node.id,
+            rect: { x: node.x, y: node.y, width: node.width, height: node.height }
+          })),
+          { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+        )
 
         // 按住 Ctrl 拖动是「追加选择」
         const base = ev.ctrlKey || ev.metaKey ? state.selection : []
@@ -1905,6 +1905,31 @@ export default function Canvas(): ReactElement {
         : [],
     [visibleEdges, dragSet]
   )
+
+  /**
+   * 框选过程中「**将要被选中**」的节点：边拖边亮，不用等松手才知道圈到了谁。
+   *
+   * 判定与松手时**共用 `topicsInBox`**：亮了就一定选中，不会出现"亮了却没选中"。
+   * 矩形要从容器局部坐标换算到世界坐标（减平移、除缩放），否则缩放后框会错位。
+   */
+  const marqueeHits = useMemo(() => {
+    if (!marquee) return null
+    const box: DropRect = {
+      x: (Math.min(marquee.x0, marquee.x1) - pan.x) / zoom,
+      y: (Math.min(marquee.y0, marquee.y1) - pan.y) / zoom,
+      width: Math.abs(marquee.x1 - marquee.x0) / zoom,
+      height: Math.abs(marquee.y1 - marquee.y0) / zoom
+    }
+    return new Set(
+      topicsInBox(
+        layout.nodes.map((node) => ({
+          id: node.id,
+          rect: { x: node.x, y: node.y, width: node.width, height: node.height }
+        })),
+        box
+      )
+    )
+  }, [marquee, pan.x, pan.y, zoom, layout.nodes])
 
   /**
    * 拖拽时的**焦点集**：被拖子树 + 落点目标（连它的父级一起留，给点上下文）。
@@ -2245,6 +2270,7 @@ export default function Canvas(): ReactElement {
             dragged={Boolean(dragSet?.has(node.id))}
             draggable={node.depth > 0}
             searchHit={searchHits ? searchHits.has(node.id) : false}
+            marqueeHit={marqueeHits ? marqueeHits.has(node.id) : false}
             flash={flashIds.has(node.id)}
             dimmed={
               filterResult

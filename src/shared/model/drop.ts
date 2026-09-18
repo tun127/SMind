@@ -209,6 +209,24 @@ export function distanceToRect(point: DropPoint, rect: DropRect): number {
   return Math.hypot(dx, dy)
 }
 
+/** 框选：两个矩形是否相交（**接触即算命中**，与框选手感一致） */
+export function rectsIntersect(a: DropRect, b: DropRect): boolean {
+  return (
+    a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y
+  )
+}
+
+/**
+ * 框选命中了哪些节点（返回顺序与入参一致，便于"追加选择"直接拼接）。
+ *
+ * 抽成纯函数不是为了复用那几行数学，而是为了让「拖动中高亮谁」与「松手后选中谁」
+ * **必然是同一套判定**——否则会出现"亮了却没选中 / 选中了却没亮"，
+ * 那比完全没有高亮更让人不信任。抽出来之后它也能被自检钉住。
+ */
+export function topicsInBox(nodes: readonly DropNode[], box: DropRect): string[] {
+  return nodes.filter((node) => rectsIntersect(node.rect, box)).map((node) => node.id)
+}
+
 /** 点是否落在矩形内（含边界） */
 function pointInRect(point: DropPoint, rect: DropRect): boolean {
   return (

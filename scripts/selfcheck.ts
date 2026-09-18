@@ -117,8 +117,10 @@ import {
   nearestInRegion,
   nearestSiblingGap,
   perpendicularOf,
+  rectsIntersect,
   resolveDrop,
   stackDirection,
+  topicsInBox,
   zoneOf,
   type DropAxis,
   type DropNode,
@@ -1353,6 +1355,45 @@ function testNodeDrag(): void {
     '贴着矩形内也算 0 距离',
     distanceToRect({ x: 0, y: 0 }, { x: 0, y: 0, width: 10, height: 10 }),
     0
+  )
+
+  /**
+   * 框选：**拖动中的高亮**与**松手后的选中**共用这一套判定。
+   * 它坏掉的方式是"亮了却没选中 / 选中了却没亮"——比完全不高亮更让人不信任，
+   * 所以边界情形（只贴边、框比节点小）也要钉住。
+   */
+  group('框选：命中判定')
+
+  const marqueeBox = { x: 0, y: 0, width: 100, height: 100 }
+  eq('完全包含算命中', rectsIntersect({ x: 20, y: 20, width: 10, height: 10 }, marqueeBox), true)
+  eq('部分重叠算命中', rectsIntersect({ x: 90, y: 90, width: 40, height: 40 }, marqueeBox), true)
+  eq(
+    '只贴上边界也算命中（与框选手感一致）',
+    rectsIntersect({ x: 100, y: 0, width: 10, height: 10 }, marqueeBox),
+    true
+  )
+  eq('完全不相交不算', rectsIntersect({ x: 101, y: 0, width: 10, height: 10 }, marqueeBox), false)
+  eq(
+    '框比节点还小时（框在节点内部）也算命中',
+    rectsIntersect({ x: -20, y: -20, width: 200, height: 200 }, marqueeBox),
+    true
+  )
+
+  const marqueeNodes: DropNode[] = [
+    { id: 'a', rect: { x: 0, y: 0, width: 10, height: 10 } },
+    { id: 'b', rect: { x: 500, y: 500, width: 10, height: 10 } },
+    { id: 'c', rect: { x: 50, y: 50, width: 10, height: 10 } }
+  ]
+  eq('只命中圈到的节点', topicsInBox(marqueeNodes, marqueeBox).join(','), 'a,c')
+  eq(
+    '返回顺序与入参一致（追加选择要按这个顺序拼）',
+    topicsInBox([...marqueeNodes].reverse(), marqueeBox).join(','),
+    'c,a'
+  )
+  eq(
+    '零尺寸的框也不会崩',
+    topicsInBox(marqueeNodes, { x: -5, y: -5, width: 5, height: 5 }).join(','),
+    'a'
   )
 
   const otherStack: SiblingStack = {

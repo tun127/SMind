@@ -48,6 +48,11 @@ export interface TopicNodeProps {
   highlight: 'child' | 'sibling' | null
   /** 命中当前搜索关键词 */
   searchHit: boolean
+  /**
+   * 框选中「**将要**被选中」（还没松手）。
+   * 先亮起来，用户不用等松手才知道圈到了谁。
+   */
+  marqueeHit: boolean
   /** AI 刚改过这个节点：闪一下（「直接操作」的信任全靠事后看得见） */
   flash: boolean
   /**
@@ -115,6 +120,7 @@ function TopicNodeInner({
   editingRich,
   highlight,
   searchHit,
+  marqueeHit,
   flash,
   dimmed,
   dragOffset,
@@ -255,6 +261,7 @@ function TopicNodeInner({
     !dragged && highlight === 'child' ? 'topic--drop' : '',
     !dragged && highlight === 'sibling' ? 'topic--drop-sibling' : '',
     searchHit ? 'topic--hit' : '',
+    marqueeHit ? 'topic--marquee' : '',
     flash ? 'topic--ai-flash' : '',
     dimmed === 'soft' ? 'topic--dimmed-soft' : dimmed ? 'topic--dimmed' : '',
     dragOffset ? 'topic--dragging' : '',

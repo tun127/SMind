@@ -1514,6 +1514,17 @@ textarea {
   outline-offset: 2px;
 }
 
+/*
+ * 框选中「将要被选中」的节点：先用**同一圈蓝色描边 + 一层外发光**预告结果。
+ * 用和"已选中"同一套颜色是刻意的——用户看到的就是松手后的样子；
+ * 外发光只是提示"还没定"（松手后发光消失）。
+ */
+.topic--marquee {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(47, 107, 255, 0.18);
+}
+
 .topic--drop {
   /*
    * 必须**实线 + 更粗**：主题本身就可能画成虚线边框（forest 这类主题就是），
