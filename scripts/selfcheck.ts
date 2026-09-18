@@ -302,6 +302,7 @@ import {
   hitTopicIds,
   isFilterActive,
   replaceInText,
+  searchSheet,
   searchWorkbook,
   sheetStats,
   snippetOf
@@ -4127,6 +4128,13 @@ function testWriteToolsAndTurn(): void {
     plan('moveTopic', { address: '成本/物料', toAddress: '成本', index: 0 }).ok,
     true
   )
+  // `null` 也是「没指定位置」：模型常把不指定写成 null，
+  // store 的 moveNode 同样把 null 当追加到末尾——两边口径必须一致
+  eq(
+    '同父级 + index: null＝同样是空操作（不被报成已移动）',
+    plan('moveTopic', { address: '成本/物料', toAddress: '成本', index: null }).ok,
+    false
+  )
   eq('改同名＝空操作', plan('renameTopic', { address: '成本', title: '成本' }).ok, false)
   check(
     '空操作的说明写明「没有改动」',
@@ -5867,6 +5875,54 @@ function testMarkdownRoundTrip(): void {
   const importedRich = importedPlan?.children.find((child) => child.rich)
   check('往返：粗体进富文本', importedRich?.rich?.paragraphs[0]?.runs[0]?.bold === true)
   eq('往返：节点数一致', parsed.count, countTopics(root()))
+
+  /*
+   * 标题里的 Markdown 记号必须转义，否则往返一趟文字就变了：
+   * `3*4` 会被读成斜体、`[草稿]` 会被读成链接。
+   */
+  group('Markdown 导出：正文里的记号要转义')
+
+  const escapeRoot = createTopic('中心')
+  escapeRoot.children = [
+    createTopic('3*4=12'),
+    createTopic('a_b 与 [草稿]'),
+    createTopic('井号 # 与竖线 |')
+  ]
+  const escapeMd = toMarkdown(escapeRoot)
+  const back = parseMarkdownOutline(escapeMd)
+  eq(
+    '转义后往返：记号原样保留',
+    back.root?.children.map((topic) => topic.title),
+    ['3*4=12', 'a_b 与 [草稿]', '井号 # 与竖线 |']
+  )
+
+  // 富文本正文里的记号同样要转义（否则会被周围的文字当成格式标记）
+  const richEscape = createTopic('中心')
+  const starry = createTopic('x')
+  starry.titleRich = { paragraphs: [{ runs: [{ text: '2*3 星号', bold: true }] }] }
+  richEscape.children = [starry]
+  const richBack = parseMarkdownOutline(toMarkdown(richEscape))
+  eq('富文本正文里的星号不被当成标记', richBack.root?.children[0]?.title, '2*3 星号')
+  check(
+    '富文本的粗体照样往返',
+    richBack.root?.children[0]?.rich?.paragraphs[0]?.runs[0]?.bold === true
+  )
+
+  /*
+   * 删除线与下标冲突（`~~x~~` 与 `~x~` 共用同一个字符，行内扫描器是平的）：
+   * 这是**方言限制**，不是可以"两个都留"的地方——这里把取舍钉死，
+   * 免得以后有人以为漏了分支。
+   */
+  group('Markdown 导出：删除线与下标冲突时保删除线')
+
+  const conflict = createTopic('中心')
+  const both = createTopic('x')
+  both.titleRich = {
+    paragraphs: [{ runs: [{ text: '下标删除线', strike: true, script: 'sub' }] }]
+  }
+  conflict.children = [both]
+  const conflictMd = toMarkdown(conflict)
+  check('删除线优先（写成 ~~…~~）', conflictMd.includes('~~下标删除线~~'), conflictMd)
 }
 
 /* ------------------------------------------------------------------ */
@@ -9336,6 +9392,51 @@ function testSearch(): void {
   eq('单条替换：命中时返回处数', oneCount2, 1)
   eq('单条替换结果', findTopic(activeRoot(store().workbook), c)?.title, '设计草稿X')
 
+  /*
+   * 大小写不敏感的匹配**不能再靠 `text.toLowerCase()` + `indexOf`**：
+   * `toLowerCase()` 会改变字符串长度（`'İ'` → 两个码元），
+   * 小写串上的下标落回原文本就错位（`İstanbul` 里的 `stan` 会被从第 2 位切开）。
+   */
+  group('搜索：大小写不敏感的下标必须落在原文本上')
+
+  const turkish = replaceInText('İstanbul', 'stan', 'X')
+  eq('İ 不再让替换错位', turkish.text, 'İXbul')
+  eq('İ 场景的替换次数', turkish.count, 1)
+  eq('İ 场景的命中次数', countOccurrences('İstanbul', 'stan'), 1)
+  check(
+    '命中片段取自原文本（位置不偏）',
+    snippetOf('İstanbul 是城市', '城市').includes('城市'),
+    snippetOf('İstanbul 是城市', '城市')
+  )
+  check(
+    '片段截取窗口跟着命中走',
+    snippetOf('前前后后İstanbul后后后后', 'stan', false, 3).includes('stan'),
+    snippetOf('前前后后İstanbul后后后后', 'stan', false, 3)
+  )
+
+  // 关键词按**字面**匹配：`a.b` 不能命中 `axb`
+  eq('正则元字符按字面处理（计数）', countOccurrences('axb a.b', 'a.b'), 1)
+  eq('正则元字符按字面处理（替换）', replaceInText('axb a.b', 'a.b', '-').text, 'axb -')
+  eq(
+    '替换文本里的 $& 原样写入（不当占位符展开）',
+    replaceInText('ab', 'b', '$&$1').text,
+    'a$&$1'
+  )
+
+  group('搜索：关键词两端空白归一（搜索/计数/替换同一口径）')
+
+  reset()
+  const tRoot = addChildOf(root().id, '甲')
+  const spaceTitle = addChildOf(tRoot, '成本 控制')
+  store().setSearchQuery('成本 ')
+  store().setSearchReplacement('X')
+  eq('带尾随空格的搜索能命中', searchSheet(activeSheet(store().workbook), '成本 ').length, 1)
+  eq('计数与搜索同口径', countTitleMatches(store().workbook, '成本 '), 1)
+  const trimmedReplace = store().replaceAllInTitles()
+  eq('替换与搜索同口径（不再报 0 处）', trimmedReplace, 1)
+  eq('替换确实落库（关键词本身被替换）', findTopic(activeRoot(store().workbook), spaceTitle)?.title, 'X 控制')
+  eq('只有空白的关键词不算关键词', searchSheet(activeSheet(store().workbook), '   ').length, 0)
+
   group('筛选：按标记与标签')
 
   reset()
@@ -10257,6 +10358,23 @@ function testAi(): void {
 
   const mergePrompt = buildDocumentMergeMessages({ name: '报告.md', parts: ['- 甲', '- 乙'] })
   check('合并阶段：去重归位', mergePrompt[1].content.includes('合并去重'))
+
+  /*
+   * 合并场景以前用 `documentSpecLines(depth).slice(1, 4)` 拼规格：
+   * 正好切掉「覆盖文档的全部章节」并砍掉三条质量判据里的后两条。
+   * 这里逐条钉住「整份规格都在」。
+   */
+  const mergeText = mergePrompt[1].content
+  check('合并阶段：要求覆盖全部章节', mergeText.includes('覆盖文档的**全部章节与要点**'), mergeText)
+  check('合并阶段：质量判据整段都在（不只是第一条）', mergeText.includes('质量判据'), mergeText)
+  // 三条判据的字面与聊天层保持一致（与上面 docPrompt 的断言用同一份文案）
+  const mergeHints = ['有信息量：删掉它', '是事实不是评价', '可操作：读到叶子就能答题']
+  check(
+    '合并阶段：三条质量判据一条不少',
+    mergeHints.every((hint) => mergeText.includes(hint)),
+    mergeText
+  )
+  check('合并阶段：条目接着 1~3 条往下编号（不重复 2）', mergeText.includes('4.'), mergeText)
 
   group('AI：解析模型输出')
 

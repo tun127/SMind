@@ -174,7 +174,11 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     // 判定与 store 的 moveNode **完全一致**（同父级 + 无 index 就是原地不动），
     // 否则会出现「计划说执行了、实际被忽略」的错位。要重排就显式给 index。
     const chain = ancestorsOf(root, source.topic.id)
-    if (chain[chain.length - 1] === destination.topic.id && args.index === undefined) {
+    // `index` 是「显式指定位置」的意思：`undefined` 与 `null` 都算没指定
+    // （模型常把"不指定"写成 null，而 store 的 moveNode 也把 null 当追加到末尾）。
+    // 以前只判断 undefined，于是 `index: null` 的原地移动会被报成「已移动」。
+    const hasIndex = typeof args.index === 'number' && Number.isFinite(args.index)
+    if (chain[chain.length - 1] === destination.topic.id && !hasIndex) {
       return fail(
         `「${source.topic.title}」本来就在「${destination.topic.title}」下面，这次没有改动。`
       )

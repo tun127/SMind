@@ -67,6 +67,12 @@ export function resolveDrop(
     return { targetId, mode: zone, parentId: targetParent.id }
   }
 
+  // 目标是**中心主题**且落点在前/后：它没有父级，"同级插入"不存在，
+  // 于是落到下面按「成为中心主题的子主题」处理。
+  // 这是**有意**的兜底（自检「目标是根主题 → 只能成为它的子主题」钉着它）：
+  // 用户把主题拖到中心主题边上，想要的就是"进到中心主题下面"，
+  // 报一句「这里不能落」反而像卡死。别改成拒绝。
+
   // 目标是自己的父级时已经是它的子主题，等于原地不动
   if (draggedParent.id === targetId) return null
 

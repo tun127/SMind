@@ -139,7 +139,10 @@ export function buildRange(root: Topic, ids: string[]): string | null {
   if (best.length === 1) return `(${best[0]},${best[0]})`
 
   const firstBest = best[0]
-  if (!firstBest) return ''
+  // 走到这里 best.length >= 2，理论上取不到 undefined；真取不到就是「算不出区间」，
+  // 返回 null（调用方据此不画概要线）。以前返回 `''`——空区间字符串会被写进文件，
+  // 变成一个谁也解析不了的 range 字段
+  if (!firstBest) return null
   const parentId = index.parentOf.get(firstBest)
   const siblings = parentId === undefined ? [] : (index.byId.get(parentId)?.children ?? [])
   const marks = best

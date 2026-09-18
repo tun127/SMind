@@ -43,18 +43,34 @@ export interface SearchHit {
   snippet: string
 }
 
+/** 关键词里的正则元字符转义：搜索与替换都按**字面**匹配（`a.b` 不该命中 `axb`） */
+function literalPattern(query: string): string {
+  return query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * 「大小写不敏感 + 字面匹配」的全局正则。
+ *
+ * 为什么不再用 `text.toLowerCase()` 配合 `indexOf`：`toLowerCase()` **会改变字符串长度**
+ * （`'İ'.toLowerCase()` 得到两个码元的 `'i̇'`），小写串上的下标落回原文本就是错位的——
+ * 替换会从错误的位置切开、删掉不相关的字符，预览片段也会偏。
+ * 正则是对**原文本**做匹配，拿到的下标天然正确。
+ */
+function insensitivePattern(query: string): RegExp {
+  return new RegExp(literalPattern(query), 'gi')
+}
+
 /** 统计一段文本里出现关键词的次数（空关键词返回 0） */
 export function countOccurrences(text: string, query: string, caseSensitive = false): number {
   if (query.length === 0) return 0
-  const haystack = caseSensitive ? text : text.toLowerCase()
-  const needle = caseSensitive ? query : query.toLowerCase()
+  if (!caseSensitive) return [...text.matchAll(insensitivePattern(query))].length
   let count = 0
   let from = 0
   for (;;) {
-    const at = haystack.indexOf(needle, from)
+    const at = text.indexOf(query, from)
     if (at < 0) break
     count += 1
-    from = at + needle.length
+    from = at + query.length
   }
   return count
 }
@@ -71,17 +87,26 @@ export function replaceInText(
 ): { text: string; count: number } {
   if (query.length === 0) return { text, count: 0 }
 
-  const haystack = caseSensitive ? text : text.toLowerCase()
-  const needle = caseSensitive ? query : query.toLowerCase()
+  if (!caseSensitive) {
+    let count = 0
+    // 用函数形式回填：替换文本里的 `$&`、`$1` 之类必须**原样写入**，
+    // 不能用字符串形式（那会被当成替换占位符展开）
+    const out = text.replace(insensitivePattern(query), () => {
+      count += 1
+      return replacement
+    })
+    return count === 0 ? { text, count: 0 } : { text: out, count }
+  }
+
   let out = ''
   let from = 0
   let count = 0
 
   for (;;) {
-    const at = haystack.indexOf(needle, from)
+    const at = text.indexOf(query, from)
     if (at < 0) break
     out += text.slice(from, at) + replacement
-    from = at + needle.length
+    from = at + query.length
     count += 1
   }
 
@@ -92,9 +117,11 @@ export function replaceInText(
 /** 取命中处前后一小段作为预览 */
 export function snippetOf(text: string, query: string, caseSensitive = false, radius = 18): string {
   if (query.length === 0) return text.slice(0, radius * 2)
-  const haystack = caseSensitive ? text : text.toLowerCase()
-  const needle = caseSensitive ? query : query.toLowerCase()
-  const at = haystack.indexOf(needle)
+  // 命中的下标必须取自**原文本**：小写串上的下标在 `İ` 这类字符上会错位，
+  // 截出来的片段跟用户看到的命中位置对不上
+  const at = caseSensitive
+    ? text.indexOf(query)
+    : (insensitivePattern(query).exec(text)?.index ?? -1)
   if (at < 0) return text.slice(0, radius * 2)
 
   const start = Math.max(0, at - radius)
@@ -144,7 +171,12 @@ function hitsInTopic(
       out.push({
         ...base,
         field: 'label',
-        count: matched.length,
+        // 命中次数要跟标题/备注一个口径：**出现次数**，不是"命中的标签个数"。
+        // 一个标签里出现两次以前只算 1，列表里显示的次数与标题命中不可比
+        count: matched.reduce(
+          (sum, label) => sum + countOccurrences(label, query, options.caseSensitive),
+          0
+        ),
         snippet: matched.join('、')
       })
     }
@@ -157,9 +189,23 @@ function normalizeOptions(options: SearchOptions = {}): Required<SearchOptions> 
   return { ...DEFAULT_SEARCH_OPTIONS, ...options }
 }
 
+/**
+ * 关键词归一：去掉两端空白。
+ *
+ * **搜索、计数、替换三条路径必须用同一个关键词**，否则会出现自相矛盾的结果
+ * （列表明明有命中、点「全部替换」却报 0 处；或反过来替换到了列表没显示的地方）。
+ * 面板判定「有没有关键词」用的也是 `query.trim()`（见 `SearchPanel`）。
+ *
+ * 注意：`replaceInText` 这类底层原语**不做**归一——它按传入的字面量老老实实干活，
+ * 归一在入口处（这里 + `store/editor.ts` 的替换动作）完成。
+ */
+export function normalizeQuery(query: string): string {
+  return query.trim()
+}
+
 /** 在整张画布里搜索，按树的顺序返回命中 */
 export function searchSheet(sheet: Sheet, query: string, options: SearchOptions = {}): SearchHit[] {
-  const trimmed = query
+  const trimmed = normalizeQuery(query)
   if (trimmed.length === 0) return []
   const opts = normalizeOptions(options)
 
@@ -193,11 +239,12 @@ export function countTitleMatches(
   options: SearchOptions = {}
 ): number {
   const opts = normalizeOptions(options)
-  if (query.length === 0) return 0
+  const needle = normalizeQuery(query)
+  if (needle.length === 0) return 0
   let total = 0
   for (const sheet of workbook.sheets) {
     walk(sheet.rootTopic, (topic) => {
-      total += countOccurrences(topic.title, query, opts.caseSensitive)
+      total += countOccurrences(topic.title, needle, opts.caseSensitive)
     })
   }
   return total

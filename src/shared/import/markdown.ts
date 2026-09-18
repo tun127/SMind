@@ -17,6 +17,7 @@
 import type { OutlineNode, ParsedOutline } from '../ai'
 import { decodeNumericEntity } from '../entities'
 import { matchWholeLineMath } from '../formula'
+import { MARKDOWN_ESCAPABLE } from '../markdown-escape'
 import type { RichText, RichTextRun } from '../model/types'
 
 /** 行内代码在节点里用的等宽字体（与代码块一致） */
@@ -54,8 +55,6 @@ export interface ParsedInline {
   usedFootnotes?: string[]
 }
 
-/** 需要转义的字符（CommonMark 的可转义字符集） */
-const ESCAPABLE = '\\`*_{}[]()#+-.!~^=<>|'
 const ENTITIES: Record<string, string> = {
   amp: '&',
   lt: '<',
@@ -192,7 +191,7 @@ export function parseInlineMarkdown(raw: string, context: InlineContext = {}): P
 
       // 1) 反斜杠转义
       const escaped = source[i + 1] ?? ''
-      if (ch === '\\' && i + 1 < source.length && ESCAPABLE.includes(escaped)) {
+      if (ch === '\\' && i + 1 < source.length && MARKDOWN_ESCAPABLE.includes(escaped)) {
         buffer += escaped
         i += 2
         continue

@@ -13,7 +13,7 @@
  */
 import type { StructureClass, Topic } from '../model/types'
 // 别名：类里也有个同名方法（它只是转发到这个纯函数），不加别名读起来像递归
-import { visibleChildren as visibleChildrenOf } from '../model/tree'
+import { allChildrenOf, visibleChildren as visibleChildrenOf } from '../model/tree'
 import { DEFAULT_STRUCTURE, getStructureDef } from '../xmind/constants'
 import { mix, subtreeStamp } from './stamp'
 import {
@@ -533,10 +533,18 @@ export class LayoutBuilder {
       root.children.forEach((child, index) => {
         const mark = (topic: Topic): void => {
           branchIndex!.set(topic.id, index)
-          for (const grand of topic.children) mark(grand)
+          // 与 `walk` 同口径：分支里自由摆放的主题也属于这个分支
+          for (const grand of allChildrenOf(topic)) mark(grand)
         }
         mark(child)
       })
+      // 挂在中心主题上的自由摆放主题不属于任何分支 → 记 -1（与中心主题同样用默认配色）。
+      // 以前不给它们写入，表里查不到，消费方各自兜底，颜色随实现漂移
+      const markFloating = (topic: Topic): void => {
+        branchIndex!.set(topic.id, -1)
+        for (const child of allChildrenOf(topic)) markFloating(child)
+      }
+      for (const floating of root.detachedChildren) markFloating(floating)
       if (this.memo) this.memo.branchIndex = branchIndex
     }
 

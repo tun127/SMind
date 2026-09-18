@@ -5,7 +5,7 @@
  * 而不是一句「找不到」。
  */
 import type { Topic } from '../model/types'
-import { ancestorsOf, findTopic } from '../model/tree'
+import { allChildrenOf, ancestorsOf, findTopic } from '../model/tree'
 
 /* ------------------------------------------------------------------ */
 /* 寻址：模型只会给字符串，解析成具体节点是**应用的责任**               */
@@ -42,7 +42,11 @@ export function topicPathOf(root: Topic, id: string): string[] | null {
 
 /** 某节点下的子主题清单（最多 8 个）：把候选回给模型，它下一步就能自己纠正 */
 function describeChildren(topic: Topic, limit = 8): string {
-  const titles = topic.children.map((child) => child.title).filter((title) => title.length > 0)
+  // 自由摆放的主题也能被地址找到（见 model/tree.ts 的 allChildrenOf），
+  // 所以"这一层有哪些子主题"也要把它们列出来，不然纠错提示会漏掉正确答案
+  const titles = allChildrenOf(topic)
+    .map((child) => child.title)
+    .filter((title) => title.length > 0)
   if (titles.length === 0) return `（「${topic.title}」下面没有子主题）`
   const shown = titles.slice(0, limit)
   const more = titles.length > shown.length ? ` 等 ${titles.length} 个` : ''
@@ -120,7 +124,7 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
       let depth = 0
       let failed = false
       for (const step of steps) {
-        const next = cursor.children.find((child) => child.title === step)
+        const next = allChildrenOf(cursor).find((child) => child.title === step)
         if (!next) {
           // 记下「走得最深」的那次失败：它离答案最近，对模型最有指导性
           if (depth >= bestDepth) {

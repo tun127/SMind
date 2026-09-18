@@ -8,6 +8,7 @@
 
 import type { RichText, Sheet, Topic, Workbook } from '../model/types'
 import { visibleChildren } from '../model/tree'
+import { escapeMarkdownText } from '../markdown-escape'
 import { escapeXmlAttr } from '../xml-escape'
 
 export type OutlineFormat = 'txt' | 'md' | 'opml'
@@ -117,8 +118,11 @@ function richToInlineMarkdown(rich: RichText): string {
   for (const paragraph of rich.paragraphs) {
     for (const run of paragraph.runs) {
       if (run.text.length === 0) continue
-      let text = run.text
+      // 富文本的正文也要转义：里面的 `*` `_` `~` 是**内容**，
+      // 不转义的话再导入回来会被当作格式标记，把周围文字吃掉。
+      // 等宽（行内代码）除外：代码里"内部不做任何解析"，转义反而会多出反斜杠
       const mono = typeof run.fontFamily === 'string' && /mono/i.test(run.fontFamily)
+      let text = mono ? run.text : escapeMarkdownText(run.text)
       if (mono) text = `\`${text}\``
       if (run.bold) text = `**${text}**`
       else if (run.italic) text = `*${text}*`
@@ -126,6 +130,10 @@ function richToInlineMarkdown(rich: RichText): string {
       // 高亮 / 上下标：与导入器读的语法一致，往返不丢
       if (run.highlight) text = `==${text}==`
       if (run.script === 'super') text = `^${text}^`
+      // 方言限制：`~~x~~`（删除线）与 `~x~`（下标）用的是同一个字符，
+      // 行内扫描器是**平的**（匹配到闭合记号后不再扫内部），所以两者没法同时表达。
+      // 冲突时保删除线——它是用户显式选中的视觉状态，下标属于排版细节；
+      // 这条取舍由自检钉住（见「删除线与下标冲突」）。别指望能"两个都留"。
       if (run.script === 'sub' && !run.strike) text = `~${text}~`
       parts.push(text)
     }
@@ -145,9 +153,18 @@ export function toMarkdown(root: Topic): string {
     const indent = depth === 0 ? '' : '  '.repeat(depth - 1)
     const itemIndent = depth === 0 ? '' : `${indent}  `
 
-    let title = topic.titleRich ? richToInlineMarkdown(topic.titleRich) : topic.title
+    /**
+     * 纯文本标题要把 Markdown 记号转义。
+     *
+     * 标题里出现 `3*4`、`[草稿]`、`# 待办`、`a_b` 这类字符时，不转义就会被
+     * 导入器当成格式标记读回去（`3*4` 变斜体、`[草稿]` 变链接），
+     * 往返一趟文字就变了。转义表与导入器共用 `shared/markdown-escape.ts`。
+     */
+    let title = topic.titleRich
+      ? richToInlineMarkdown(topic.titleRich)
+      : escapeMarkdownText(topic.title)
     if (!topic.titleRich && topic.href && topic.title.length > 0) {
-      title = `[${topic.title}](${topic.href})`
+      title = `[${title}](${topic.href})`
     }
     out.push(depth === 0 ? `# ${title}` : `${indent}- ${title}`)
 

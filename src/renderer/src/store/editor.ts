@@ -29,6 +29,7 @@ import {
   EMPTY_FILTER,
   countOccurrences,
   countTitleMatches,
+  normalizeQuery,
   replaceInText,
   type SearchOptions,
   type TopicFilter
@@ -682,7 +683,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   replaceAllInTitles: () => {
     const { search, workbook } = get()
-    const query = search.query
+    // 与搜索用同一个归一后的关键词：否则列表有命中、替换报 0 处
+    const query = normalizeQuery(search.query)
     if (query.length === 0) return 0
 
     // 先按当前条件数出总处数（mutate 不返回值），再统一替换
@@ -710,7 +712,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   replaceInTopic: (topicId) => {
     const { search, workbook } = get()
-    const query = search.query
+    const query = normalizeQuery(search.query)
     if (query.length === 0) return 0
 
     const root = activeRoot(workbook)
