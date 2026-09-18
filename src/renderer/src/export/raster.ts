@@ -87,6 +87,19 @@ async function loadImages(hrefs: string[]): Promise<Map<string, HTMLImageElement
   return map
 }
 
+/**
+ * `stroke-dasharray` 写法（如 `'4 3'` / `'6 5'`）→ canvas 的 `setLineDash` 数组。
+ *
+ * SVG 后端直接把字符串交给 `stroke-dasharray`，位图后端得转成数字数组；
+ * 两边共用同一种写法，就不会出现「SVG 是虚线、PNG 是实线」这类后端分歧。
+ */
+function dashArrayOf(dash: string): number[] {
+  return dash
+    .split(/[\s,]+/)
+    .map((part) => Number.parseFloat(part))
+    .filter((value) => Number.isFinite(value) && value > 0)
+}
+
 function roundRectPath(ctx: CanvasRenderingContext2D, op: Extract<DrawOp, { kind: 'rect' }>): void {
   const r = Math.max(0, Math.min(op.r, op.w / 2, op.h / 2))
   ctx.beginPath()
@@ -108,40 +121,26 @@ function roundRectPath(ctx: CanvasRenderingContext2D, op: Extract<DrawOp, { kind
 }
 
 function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
-  // 构建指令时已经按字符宽度算好了每段的绝对 x/宽度（画高亮底色要用），有就直接用；
-  // 没有（老数据/兜底）再自己量一遍——Canvas 的 textAlign 对多段富文本不好用
-  let total = 0
-  for (const segment of op.segments) {
-    if (typeof segment.width === 'number') {
-      total += segment.width
-      continue
-    }
+  // 每段宽度只量一遍：构建指令时已按字符宽度算好绝对 width（画高亮底色要用），有就直接用；
+  // 没有（老数据/兜底）才自己量——以前这里先量一遍算 total、再逐段重量一遍，白做一次排版
+  const widths = op.segments.map((segment) => {
+    if (typeof segment.width === 'number') return segment.width
     ctx.font = fontOf(
       segment.fontSize,
       segment.weight ?? 400,
       Boolean(segment.italic),
       segment.fontFamily
     )
-    total += ctx.measureText(segment.text).width
-  }
+    return ctx.measureText(segment.text).width
+  })
+  const total = widths.reduce((sum, width) => sum + width, 0)
 
   let x = op.align === 'center' ? op.x - total / 2 : op.align === 'right' ? op.x - total : op.x
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
 
-  for (const segment of op.segments) {
-    const width =
-      typeof segment.width === 'number'
-        ? segment.width
-        : ((): number => {
-            ctx.font = fontOf(
-              segment.fontSize,
-              segment.weight ?? 400,
-              Boolean(segment.italic),
-              segment.fontFamily
-            )
-            return ctx.measureText(segment.text).width
-          })()
+  op.segments.forEach((segment, index) => {
+    const width = widths[index] ?? 0
 
     // 高亮底色画在文字下面
     if (segment.highlight) {
@@ -167,8 +166,25 @@ function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
     )
     ctx.fillStyle = segment.color ?? op.color
     ctx.fillText(segment.text, x, op.baseline + shift)
+
+    /**
+     * 下划线与删除线：画布上它们由 CSS 的 `text-decoration` 画，
+     * 位图后端没有对应 API，必须自己用 `fillRect` 补两条横线。
+     *
+     * 以前这里**两条都不画**——PNG 与位图 PDF 里下划线、删除线凭空消失
+     * （同一份内容导 SVG 有、导 PNG 没有）。竖直位置按字号取：
+     * 下划线在基线下 0.13em，删除线在中部 0.26em 上方；随上下标一起偏移。
+     */
+    if (segment.underline || segment.strike) {
+      const thickness = Math.max(1, Math.round(segment.fontSize / 14))
+      const base = op.baseline + shift
+      ctx.fillStyle = segment.color ?? op.color
+      if (segment.underline) ctx.fillRect(x, base + segment.fontSize * 0.13, width, thickness)
+      if (segment.strike) ctx.fillRect(x, base - segment.fontSize * 0.26, width, thickness)
+    }
+
     x += width
-  }
+  })
 }
 
 function drawOp(
@@ -195,7 +211,10 @@ function drawOp(
         roundRectPath(ctx, op)
         ctx.strokeStyle = op.stroke
         ctx.lineWidth = op.strokeWidth ?? 1
+        // 虚线框（图片缺失的占位）：笔触与 SVG 后端的 `stroke-dasharray` 同源
+        if (op.dash) ctx.setLineDash(dashArrayOf(op.dash))
         ctx.stroke()
+        if (op.dash) ctx.setLineDash([])
       }
       return
     }
@@ -213,7 +232,7 @@ function drawOp(
         ctx.lineWidth = op.strokeWidth ?? 1
         ctx.lineCap = op.cap === 'butt' ? 'butt' : 'round'
         ctx.lineJoin = 'round'
-        if (op.dash) ctx.setLineDash([6, 5])
+        if (op.dash) ctx.setLineDash(dashArrayOf(op.dash))
         ctx.stroke(new Path2D(op.d))
       }
       ctx.restore()

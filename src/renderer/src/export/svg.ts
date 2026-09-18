@@ -64,6 +64,20 @@ function attrs(pairs: Array<[string, string | number | undefined]>): string {
   return parts.length > 0 ? ` ${parts.join(' ')}` : ''
 }
 
+/**
+ * 段上的文字装饰 → `text-decoration` 的值。
+ *
+ * 下划线与删除线是**两回事**：以前这里写的是 `underline || strike ? 'underline' : …`，
+ * 于是画布上明明画着删除线，导出成 SVG / 矢量 PDF 就变成了下划线（用户能一眼看出）。
+ * SVG 的 `text-decoration` 支持空格分隔的多个值，两种装饰同时存在时按书写顺序输出。
+ */
+function decorationOf(segment: { underline?: boolean; strike?: boolean }): string | undefined {
+  const parts: string[] = []
+  if (segment.underline) parts.push('underline')
+  if (segment.strike) parts.push('line-through')
+  return parts.length > 0 ? parts.join(' ') : undefined
+}
+
 function opToSvg(op: DrawOp): string {
   switch (op.kind) {
     case 'rect': {
@@ -76,7 +90,8 @@ function opToSvg(op: DrawOp): string {
         ['rx', op.r],
         ['fill', op.fill ?? 'none'],
         ['stroke', op.stroke],
-        ['stroke-width', op.strokeWidth]
+        ['stroke-width', op.strokeWidth],
+        ['stroke-dasharray', op.dash]
       ])}${shadow}/>`
     }
 
@@ -129,7 +144,7 @@ function opToSvg(op: DrawOp): string {
                 segment.script === 'super' ? 'super' : segment.script === 'sub' ? 'sub' : undefined
               ],
               ['fill', segment.color ?? op.color],
-              ['text-decoration', segment.underline || segment.strike ? 'underline' : undefined]
+              ['text-decoration', decorationOf(segment)]
             ])}>${escapeXmlText(segment.text)}</tspan>`
         )
         .join('')

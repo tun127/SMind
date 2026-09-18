@@ -9603,6 +9603,19 @@ function testExportDrawing(): void {
     withImage.ops.some((op) => op.kind === 'image')
   )
 
+  // 资源缺失时的占位：画布上是 `.topic__image-missing`（虚线框 + 「图片缺失」），
+  // 导出必须长得一样——以前这里只有一个实心浅灰块、还没有文字
+  const placeholder = drawing.ops.find((op) => op.kind === 'rect' && op.dash === '4 3')
+  check('图片资源缺失时画的是虚线占位框', placeholder !== undefined)
+  check(
+    '占位框带「图片缺失」提示文字',
+    drawing.ops.some((op) => op.kind === 'text' && op.text === '图片缺失'),
+    drawing.ops
+      .filter((op) => op.kind === 'text')
+      .map((op) => (op.kind === 'text' ? op.text : ''))
+      .join('|')
+  )
+
   // 透明背景
   const transparent = buildDrawing({ layout, colors, background: null })
   eq('透明背景记为 null', transparent.background, null)
@@ -9680,6 +9693,46 @@ function testExportDrawing(): void {
     attrSvg.includes('href="mind-resource://local/a.png?x=1&amp;y=2"'),
     attrSvg.match(/href="[^"]*"/)?.[0] ?? ''
   )
+
+  /*
+   * 下划线与删除线是**两种**装饰。
+   *
+   * 以前这里写的是 `underline || strike ? 'underline' : undefined`：画布上明明是删除线，
+   * 导出成 SVG / 矢量 PDF 就成了下划线。三种组合各钉一条断言，防止再次被合并成一态。
+   */
+  const decoSvg = drawingToSvg({
+    ...escapeScene,
+    ops: [
+      {
+        kind: 'lineText',
+        x: 0,
+        y: 0,
+        align: 'left',
+        baseline: 20,
+        color: '#333',
+        segments: [
+          { text: '下', fontSize: 14, x: 0, width: 14, underline: true },
+          { text: '删', fontSize: 14, x: 14, width: 14, strike: true },
+          { text: '都', fontSize: 14, x: 28, width: 14, underline: true, strike: true }
+        ]
+      }
+    ]
+  })
+  const decorations = decoSvg.match(/text-decoration="[^"]*"/g) ?? []
+  eq('SVG：三种装饰组合各输出一次', decorations.length, 3)
+  eq(
+    'SVG：下划线 → underline，删除线 → line-through，同时存在则两个都给',
+    decorations,
+    [
+      'text-decoration="underline"',
+      'text-decoration="line-through"',
+      'text-decoration="underline line-through"'
+    ]
+  )
+
+  const dashSvg = svg
+  check('SVG：虚线占位框输出 stroke-dasharray', dashSvg.includes('stroke-dasharray="4 3"'))
+  check('SVG：占位框里的提示文字被画出来', dashSvg.includes('图片缺失'))
 
   const fallbackSvg = drawingToSvg({
     ...escapeScene,

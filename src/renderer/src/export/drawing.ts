@@ -62,6 +62,12 @@ export interface RectOp {
   strokeWidth?: number
   /** 是否绘制柔和投影（中心主题用） */
   shadow?: boolean
+  /**
+   * 虚线样式（`stroke-dasharray` 的写法，如 `'4 3'`）。画布上用 CSS `border: 1px dashed`
+   * 表达的「这里本该有东西但缺了」（图片资源缺失的占位框），导出要用同一种笔触，
+   * 否则同一份内容在画布与图片里长得不一样。与 `PathOp.dash` 是同一种表示法。
+   */
+  dash?: string
 }
 
 export interface PathOp {
@@ -200,6 +206,11 @@ export interface BuildDrawingInput {
 
 const LABEL_GAP = 4
 const LABEL_HEIGHT = 18
+
+/** 图片资源缺失时的占位提示：文案、字号与颜色都对齐画布 `.topic__image-missing` */
+const MISSING_IMAGE_LABEL = '图片缺失'
+const MISSING_IMAGE_FONT_SIZE = 11
+const MISSING_IMAGE_COLOR = '#6b7280'
 
 /** 文字基线：把字号换算成「垂直居中所需的基线偏移」 */
 function baselineIn(boxTop: number, boxHeight: number, fontSize: number): number {
@@ -386,7 +397,9 @@ function nodeOps(
       ? node.x - MARKER_STRIP_GAP - strip.width
       : node.x + node.width + MARKER_STRIP_GAP
     strip.markerIds.forEach((markerId, index) => {
-      const column = leftSide ? Math.floor(index / rows) : Math.floor(index / rows)
+      // 竖排是「先填满一列再换列」，所以列号只由行数决定（以前这里写成了
+      // `leftSide ? … : …`，两个分支一模一样，属残留的死三元）
+      const column = Math.floor(index / rows)
       const row = index % rows
       const x = stripLeft + column * (MARKER_SIZE + MARKER_GAP)
       const y = startY + row * (MARKER_SIZE + MARKER_GAP)
@@ -477,7 +490,11 @@ function nodeOps(
     if (href) {
       ops.push({ kind: 'image', x, y: cursorY, w: imageBox.width, h: imageBox.height, href })
     } else {
-      // 找不到图片资源时不要留空白：画一个虚线占位框
+      /**
+       * 找不到图片资源时不要留空白：画一个**虚线占位框 + 「图片缺失」**，
+       * 与画布上的 `.topic__image-missing`（`1px dashed` + 同一句提示）完全一致。
+       * 以前这里只铺了一个实心浅灰块、还没有文字，用户会以为导出坏了或图本来就那么大。
+       */
       ops.push({
         kind: 'rect',
         x,
@@ -485,7 +502,21 @@ function nodeOps(
         w: imageBox.width,
         h: imageBox.height,
         r: 4,
-        fill: 'rgba(140, 148, 160, 0.12)'
+        fill: 'rgba(140, 148, 160, 0.12)',
+        stroke: 'rgba(140, 148, 160, 0.55)',
+        strokeWidth: 1,
+        dash: '4 3'
+      })
+      ops.push({
+        kind: 'text',
+        x: x + imageBox.width / 2,
+        y: baselineIn(cursorY, imageBox.height, MISSING_IMAGE_FONT_SIZE),
+        text: MISSING_IMAGE_LABEL,
+        fontSize: MISSING_IMAGE_FONT_SIZE,
+        fontWeight: 400,
+        fill: MISSING_IMAGE_COLOR,
+        anchor: 'middle',
+        baseline: 'alphabetic'
       })
     }
     cursorY += imageBox.height
