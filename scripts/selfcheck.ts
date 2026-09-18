@@ -4257,15 +4257,43 @@ function pathSegments(d: string): Array<[number, number, number, number]> {
   return out
 }
 
-/** 轴对齐线段是否伸进了节点盒内部（贴边不算） */
+/**
+ * 线段是否伸进了节点盒内部（贴边不算）。
+ *
+ * 用**线段-矩形求交**（Liang-Barsky），不能只比包围盒：
+ * 鱼骨图的大骨/小骨是**斜线**，包围盒与盒子相交并不代表线段真的穿过去——
+ * 早先按包围盒判，斜线一律被误报成"穿框"，把排查带偏过。
+ */
 function segmentHitsBox(seg: [number, number, number, number], box: NodeLayout): boolean {
-  const x0 = Math.min(seg[0], seg[2])
-  const x1 = Math.max(seg[0], seg[2])
-  const y0 = Math.min(seg[1], seg[3])
-  const y1 = Math.max(seg[1], seg[3])
-  if (x1 <= box.x + 1 || x0 >= box.x + box.width - 1) return false
-  if (y1 <= box.y + 1 || y0 >= box.y + box.height - 1) return false
-  return true
+  const [x0, y0, x1, y1] = seg
+  const dx = x1 - x0
+  const dy = y1 - y0
+  const pad = 1
+  const xmin = box.x + pad
+  const xmax = box.x + box.width - pad
+  const ymin = box.y + pad
+  const ymax = box.y + box.height - pad
+  if (xmax <= xmin || ymax <= ymin) return false
+
+  let t0 = 0
+  let t1 = 1
+  const clip = (p: number, q: number): boolean => {
+    if (Math.abs(p) < 1e-9) return q >= 0
+    const r = q / p
+    if (p < 0) {
+      if (r > t1) return false
+      if (r > t0) t0 = r
+    } else {
+      if (r < t0) return false
+      if (r < t1) t1 = r
+    }
+    return true
+  }
+  if (!clip(-dx, x0 - xmin)) return false
+  if (!clip(dx, xmax - x0)) return false
+  if (!clip(-dy, y0 - ymin)) return false
+  if (!clip(dy, ymax - y0)) return false
+  return t1 - t0 > 1e-3
 }
 
 /** 连线穿过节点的所有情形（父子两端不算） */
@@ -4299,7 +4327,11 @@ function segmentsCross(
   if (Math.abs(den) < 1e-6) return false
   const t = ((b[0] - a[0]) * d2y - (b[1] - a[1]) * d2x) / den
   const u = ((b[0] - a[0]) * d1y - (b[1] - a[1]) * d1x) / den
-  const eps = 1e-3
+  /**
+   * 容差取 2%：小骨起点**落在大骨中段**（是"接上去"，不是"穿过去"），
+   * 坐标经过取整之后 t 会有千分之几的误差，太小会把接头误判成交叉。
+   */
+  const eps = 0.02
   return t > eps && t < 1 - eps && u > eps && u < 1 - eps
 }
 
@@ -4317,6 +4349,24 @@ function lineCrossingProblems(layout: LayoutResult): string[] {
       const second = layout.edges[j]
       if (!first || !second) continue
       if (first.fromId === second.fromId || first.toId === second.toId) continue
+      /**
+       * 两条线在**端点处相接**不算交叉——小骨挂在大骨上、父子共用锚点，
+       * 这类"接上"是正确画法（数值上会有零点几像素的偏差，所以留 2px 容差）。
+       */
+      const endsOf = (edge: (typeof layout.edges)[number]): Array<[number, number]> => {
+        const segs = pathSegments(edge.d)
+        const firstSeg = segs[0]
+        const lastSeg = segs[segs.length - 1]
+        if (!firstSeg || !lastSeg) return []
+        return [
+          [firstSeg[0], firstSeg[1]],
+          [lastSeg[2], lastSeg[3]]
+        ]
+      }
+      const touching = endsOf(first).some((a) =>
+        endsOf(second).some((b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 2)
+      )
+      if (touching) continue
       let crossed = false
       for (const a of pathSegments(first.d)) {
         for (const b of pathSegments(second.d)) {

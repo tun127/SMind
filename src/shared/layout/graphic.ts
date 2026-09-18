@@ -4,16 +4,60 @@
  */
 import type { Topic } from '../model/types'
 import type { LayoutResult } from './types'
-import { LayoutBuilder, addDecoration, addEdge, anchorPoint, round } from './core'
-import { placeVerticalColumn } from './stack'
+import { LayoutBuilder, addDecoration, addEdge, anchorPoint, round, type Point } from './core'
+import type { NodeLayout } from './types'
 
 /* ------------------------------------------------------------------ */
 /* 鱼骨图                                                              */
 /* ------------------------------------------------------------------ */
 
 /**
- * 主脊水平，一级主题作为「骨刺」左右交替斜向伸出，
- * 更深层内容沿远离主脊的方向堆成缩进列表。
+ * 沿水平方向向右堆叠（小骨上更深的层级）：同一层的兄弟在父节点右侧上下排开。
+ *
+ * 参考：「第三层及更深：继续在小骨上叠加短横线向右延伸」。
+ * 不能顺着主脊方向往上/下堆——那会和相邻小骨分到的区域撞在一起。
+ */
+function placeRightColumn(
+  builder: LayoutBuilder,
+  topic: Topic,
+  x: number,
+  y: number,
+  depth: number
+): void {
+  const size = builder.size(topic.id)
+  let cursor = y
+  for (const child of builder.visibleChildren(topic)) {
+    const childSize = builder.size(child.id)
+    const childX = x + size.width + builder.gapX
+    builder.add(child, childX, cursor, depth + 1, 'right')
+    placeRightColumn(builder, child, childX, cursor, depth + 1)
+    cursor += childSize.height + builder.gapY
+  }
+}
+
+/** 向右延伸的列一共占多宽（小骨上更深的层级沿它排开） */
+function rightColumnWidth(builder: LayoutBuilder, topic: Topic): number {
+  let widest = 0
+  for (const child of builder.visibleChildren(topic)) {
+    widest = Math.max(
+      widest,
+      builder.gapX + builder.size(child.id).width + rightColumnWidth(builder, child)
+    )
+  }
+  return widest
+}
+
+/**
+ * 鱼骨图。
+ *
+ * 参考长相（Xmind）：
+ * - 主脊＝一条**水平**直线，鱼头在末端；
+ * - 一级主题＝「大骨」，**斜向**分列主脊上下；
+ * - 第二层＝「小骨」，从大骨引出，**水平短线、与主脊平行**；
+ * - 第三层及更深：继续在小骨上叠加短横线，**向右延伸**。
+ *
+ * 小骨挂在**靠主脊的一侧**，并留一点间隙：大骨从主脊斜着上来，
+ * 贴着挂会正好擦到小骨的角（自检的"穿框"当场抓到过）。
  */
 export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResult {
   const rootSize = builder.size(root.id)
@@ -21,11 +65,27 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
   const spineCenterY = rootNode.y + rootNode.height / 2
 
   const kids = builder.visibleChildren(root)
-  const boneOffset = Math.max(rootSize.height / 2 + builder.gapY * 3, 46)
+  /**
+   * 大骨的竖向跨度必须装得下所有小骨：小骨沿大骨按比例取点排开，
+   * 相邻两根的间距 = 跨度 ÷（小骨数 + 1），要求它 ≥ 小骨高 + 行距。
+   */
+  const maxRibKids = Math.max(0, ...kids.map((child) => builder.visibleChildren(child).length))
+  const ribKidHeight = Math.max(
+    0,
+    ...kids.flatMap((child) =>
+      builder.visibleChildren(child).map((kid) => builder.size(kid.id).height)
+    )
+  )
+  const ribSpan = maxRibKids > 1 ? (maxRibKids + 1) * (ribKidHeight + builder.gapY) : 0
+  const boneOffset = Math.max(rootSize.height / 2 + builder.gapY * 3, 46, ribSpan)
   // 骨刺斜度：让骨刺看起来是斜的，而不是垂直的
   const boneSlant = Math.round(boneOffset * 0.45)
+  /** 小骨长度（大骨上的取点 → 子主题左缘） */
+  const ribGap = Math.max(16, Math.round(builder.gapX * 0.3))
 
-  const anchors: Array<{ id: string; x: number; side: -1 | 1 }> = []
+  const anchors: Array<{ id: string; side: -1 | 1 }> = []
+  /** 小骨：记下"哪根大骨的第几段"，最终坐标到 finish 之后再算 */
+  const ribs: Array<{ branchId: string; childId: string; side: -1 | 1; t: number }> = []
   let cursor = rootNode.x + rootNode.width + builder.gapX * 2
 
   kids.forEach((child, index) => {
@@ -37,10 +97,40 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
     const childY = side < 0 ? spineCenterY - boneOffset - size.height : spineCenterY + boneOffset
 
     builder.add(child, nodeCenterX - size.width / 2, childY, 1, side < 0 ? 'up' : 'down')
-    placeVerticalColumn(builder, child, nodeCenterX - size.width / 2, childY, side, 1)
 
-    anchors.push({ id: child.id, x: round(anchorX), side })
-    cursor += extent + builder.gapX + boneSlant
+    // 小骨：沿大骨（主脊上的锚点 → 这一支的近侧边缘）按比例取点
+    const nearY = side < 0 ? childY + size.height : childY
+    const ribKids = builder.visibleChildren(child)
+    ribKids.forEach((kid, ribIndex) => {
+      const t = (ribIndex + 1) / (ribKids.length + 1)
+      const ribX = anchorX + (nodeCenterX - anchorX) * t
+      const ribY = spineCenterY + (nearY - spineCenterY) * t
+      const kidSize = builder.size(kid.id)
+      /**
+       * 子主题**以取点为中心**挂在旁边：这样小骨是一条**水平**短线（与主脊平行），
+       * 完全符合参考里的"小骨"形状。
+       * 大骨从取点往上（下）走、离盒子越来越远，所以压不到它——
+       * 早先把它整体挪到取点一侧，反而让大骨擦着盒角过去。
+       */
+      const kidX = ribX + ribGap
+      const kidY = ribY - kidSize.height / 2
+      builder.add(kid, kidX, kidY, 2, side < 0 ? 'up' : 'down')
+      placeRightColumn(builder, kid, kidX, kidY, 2)
+      ribs.push({ branchId: child.id, childId: kid.id, side, t })
+    })
+
+    anchors.push({ id: child.id, side })
+    /**
+     * 推进量：一根大骨占的宽度 = 自己那一段（骨刺斜度 + 小骨长度）**加上小骨子树向右延伸的宽度**。
+     * 小骨的子树是向右长的，不算进来就会顶到隔壁大骨的地盘
+     * （自检的"节点重叠"当场抓到过：深4 ⨯ 短二2）。
+     */
+    const ribFootprint = ribKids.reduce(
+      (widest, kid) =>
+        Math.max(widest, builder.size(kid.id).width + rightColumnWidth(builder, kid)),
+      0
+    )
+    cursor += Math.max(extent, boneSlant + ribGap + ribFootprint) + builder.gapX
   })
 
   const result = builder.finish(root)
@@ -48,30 +138,63 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
   const spineY = round(rootFinal.y + rootFinal.height / 2)
 
   // 主脊
-  const lastAnchor = anchors[anchors.length - 1]
-  const spineEnd = lastAnchor
-    ? round(lastAnchor.x + 60)
+  const lastBranchNode = anchors[anchors.length - 1]
+    ? result.nodeMap.get(anchors[anchors.length - 1]!.id)
+    : undefined
+  const spineEnd = lastBranchNode
+    ? round(lastBranchNode.x + lastBranchNode.width / 2 - boneSlant + 60)
     : round(rootFinal.x + rootFinal.width + 120)
   addDecoration(result, {
     d: `M ${round(rootFinal.x + rootFinal.width)} ${spineY} L ${spineEnd} ${spineY}`,
     widthScale: 1.3
   })
 
-  // 骨刺：从主脊斜向连到一级主题
+  /**
+   * 大骨：从主脊斜向连到一级主题。
+   *
+   * **必须用最终坐标算**：早先这里把归一化之前的 x 和归一化之后的 y 混着用，
+   * 大骨的方向被拉歪、于是从子主题身上压过去（自检的"穿框"当场抓到）。
+   */
+  const boneOf = (branch: NodeLayout, side: -1 | 1): { start: Point; end: Point } => {
+    const centerX = round(branch.x + branch.width / 2)
+    return {
+      start: { x: round(centerX - boneSlant), y: spineY },
+      end: { x: centerX, y: side < 0 ? round(branch.y + branch.height) : branch.y }
+    }
+  }
+
   for (const anchor of anchors) {
     const childNode = result.nodeMap.get(anchor.id)
     if (!childNode) continue
-    const nearY = anchor.side < 0 ? round(childNode.y + childNode.height) : childNode.y
-    const nearX = round(childNode.x + childNode.width / 2)
-    addEdge(result, root.id, anchor.id, { x: anchor.x, y: spineY }, { x: nearX, y: nearY }, 'line')
+    const bone = boneOf(childNode, anchor.side)
+    addEdge(result, root.id, anchor.id, bone.start, bone.end, 'line')
   }
 
-  // 骨刺上的后续层级：一条竖脊挂一排短横线（不能是"父下→子上"，否则会穿过上面的兄弟）
+  // 小骨：从大骨上的取点**水平**拉到子主题左缘（与主脊平行）
+  for (const rib of ribs) {
+    const branch = result.nodeMap.get(rib.branchId)
+    const kid = result.nodeMap.get(rib.childId)
+    if (!branch || !kid) continue
+    const bone = boneOf(branch, rib.side)
+    addEdge(
+      result,
+      rib.branchId,
+      rib.childId,
+      {
+        x: round(bone.start.x + (bone.end.x - bone.start.x) * rib.t),
+        y: round(bone.start.y + (bone.end.y - bone.start.y) * rib.t)
+      },
+      { x: round(kid.x), y: round(kid.y + kid.height / 2) },
+      'line'
+    )
+  }
+
+  // 小骨上的更深层级：一条竖脊挂一排短横线（不能是"父下→子上"，否则会穿过上面的兄弟）
   const connect = (topic: Topic): void => {
     for (const child of builder.visibleChildren(topic)) {
       const parent = result.nodeMap.get(topic.id)
       const childNode = result.nodeMap.get(child.id)
-      if (parent && childNode && parent.depth >= 1) {
+      if (parent && childNode && parent.depth >= 2) {
         addEdge(
           result,
           parent.id,
