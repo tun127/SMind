@@ -246,7 +246,15 @@ function TopicNodeInner({
     boxShadow: dragPrimary
       ? [visual.boxShadow, '0 10px 22px rgba(16, 24, 40, 0.24)'].filter(Boolean).join(', ')
       : visual.boxShadow,
-    transform: dragOffset ? `translate(${dragOffset.dx}px, ${dragOffset.dy}px)` : undefined,
+    /**
+     * 拖拽中的位移**不在这里写**：画布在拖拽期间直接改元素的 `transform`
+     * （见 `Canvas` 的 `applyGhostTransform`）。
+     *
+     * 以前这里写 `translate(dragOffset.dx, dy)`，位置要等 React 重渲染才生效——
+     * 画布一慢（节点多、连线多，一次重渲染里全要协调），被拖的节点就跟不上指针，
+     * 快甩一下能差出几百像素（用户反馈："拖拽有些不同步"）。
+     * 交给命令式更新后，位移与 `pointermove` 同一帧落地。
+     */
     zIndex: dragOffset ? 30 : selected ? 20 : 1
   }
 

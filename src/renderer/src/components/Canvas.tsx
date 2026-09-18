@@ -277,6 +277,17 @@ export default function Canvas(): ReactElement {
   } | null>(null)
   /** 指针位置与拖拽起点，自动滚动要用 */
   const pointerRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
+  /**
+   * 被拖子树对应的 DOM 元素 + 子树内部连线的分组。
+   *
+   * 拖拽期间这两个直接用**命令式**改 `transform`（见 `applyGhostTransform`）：
+   * 位置与 `pointermove` 同帧落地，不再等 React 重渲染。放 ref 里是因为它们
+   * 只在一次拖拽的生命周期内有效，不需要参与渲染。
+   */
+  const ghostElsRef = useRef<HTMLElement[]>([])
+  const dragEdgesRef = useRef<SVGGElement | null>(null)
+  /** 最近一次命令式写入的位移（拖拽层刚挂载时用它补齐，见下面的 effect） */
+  const ghostCssRef = useRef('')
 
   /* ---- 拖拽过程中：贴住画布边缘时自动滚动 ---- */
   const dragAutoScroll = useCallback((): void => {
@@ -1127,6 +1138,31 @@ export default function Canvas(): ReactElement {
       /** 拖拽提示里的标题：拖拽期间不会变，不该每帧全树遍历去查 */
       const dragTitle = findTopic(rootRef.current, id)?.title ?? ''
 
+      /**
+       * 被拖子树对应的 DOM 元素（一次查完）。
+       *
+       * 拖拽期间**直接改它们的 transform**，不等 React：见 `applyGhostTransform`。
+       * 查一次而不是每帧查，是因为 `querySelectorAll` 本身会强制样式计算。
+       */
+      const movingIdSet = new Set(moving.ids)
+      ghostElsRef.current = Array.from(
+        containerRef.current?.querySelectorAll<HTMLElement>('.topic[data-topic-id]') ?? []
+      ).filter((el) => movingIdSet.has(el.dataset.topicId ?? ''))
+
+      /** 命令式地把被拖子树与它的内部连线移到 (worldDx, worldDy) */
+      const applyGhostTransform = (worldDx: number, worldDy: number): void => {
+        const css = `translate(${worldDx}px, ${worldDy}px)`
+        ghostCssRef.current = css
+        for (const el of ghostElsRef.current) el.style.transform = css
+        dragEdgesRef.current?.setAttribute('transform', css)
+      }
+      /** 松手 / 取消时把命令式写的位移清掉（否则会和 React 重新渲染的新位置叠加） */
+      const clearGhostTransform = (): void => {
+        for (const el of ghostElsRef.current) el.style.transform = ''
+        dragEdgesRef.current?.setAttribute('transform', '')
+        ghostElsRef.current = []
+      }
+
       /** 自动滚动的循环：只要这次拖拽还在，就持续按指针位置推动画布 */
       let scrollFrame = 0
       const tick = (): void => {
@@ -1176,6 +1212,13 @@ export default function Canvas(): ReactElement {
         // 自动滚动与松手时的落点都读这个位置，所以每帧都要更新
         pointerRef.current = { x: ev.clientX, y: ev.clientY, startX, startY }
         const z = zoomRef.current
+        /**
+         * 位移**先命令式落地**，再更新 React 状态（后者只喂预览框 / 高亮 / 淡化）。
+         *
+         * 这一步是"拖拽不同步"的解药：以前位移要等 React 把整个画布重渲染完才生效，
+         * 节点多、连线多的时候节点明显落后于指针（快甩一下差出几百像素）。
+         */
+        applyGhostTransform(dx / z, dy / z)
         setDragVisual({ anchorId: id, dx: dx / z, dy: dy / z, moving, group })
 
         const world = screenToWorld(ev.clientX, ev.clientY)
@@ -1284,6 +1327,9 @@ export default function Canvas(): ReactElement {
         if (moveFrame !== 0) window.cancelAnimationFrame(moveFrame)
         moveFrame = 0
         pendingEvent = null
+        // 命令式写的位移必须先清掉：松手后由 React 按新布局渲染，
+        // 留着它会让节点「新的自动位置 + 旧的拖拽位移」叠在一起。
+        clearGhostTransform()
         dropLatchRef.current = null
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
@@ -1945,6 +1991,19 @@ export default function Canvas(): ReactElement {
    * 一屏几百个节点、同色同亮、还夹着一堆自由摆放的，落点提示再正确也会被淹没。
    * 只淡不隐：参照还在，用户知道自己拖在图里的哪一块。
    */
+  /**
+   * 拖拽层（子树内部连线）是 React 渲染的：它**挂载那一刻**还没有位移，
+   * 慢慢拖的时候连线会在原处停到下一次 pointermove。这里在它挂载后补一次，
+   * 保证"连线和节点永远在同一位置"。
+   */
+  useEffect(() => {
+    if (!dragSet) return
+    const css = ghostCssRef.current
+    if (!css) return
+    for (const el of ghostElsRef.current) el.style.transform = css
+    dragEdgesRef.current?.setAttribute('transform', css)
+  }, [dragSet])
+
   const dragFocus = useMemo(() => {
     if (!dragSet) return null
     const keep = new Set(dragSet)
@@ -2224,9 +2283,13 @@ export default function Canvas(): ReactElement {
             renderEdge(edge, dragFocus !== null && !dragFocus.has(edge.toId))
           )}
 
-          {/* 子树内部的连线：跟着被拖的节点一起平移重画 */}
+          {/*
+            子树内部的连线：跟着被拖的节点一起平移重画。
+            位移由 `applyGhostTransform` **命令式**写（React 不管这个 transform——
+            否则它每帧会用上一帧的状态盖回来，节点反而抖）。
+          */}
           {dragSet && dragVisual ? (
-            <g transform={`translate(${dragVisual.dx} ${dragVisual.dy})`} opacity={0.9}>
+            <g ref={dragEdgesRef} opacity={0.9}>
               {dragEdges.map((edge) => renderEdge(edge))}
             </g>
           ) : null}
