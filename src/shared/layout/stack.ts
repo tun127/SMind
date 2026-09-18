@@ -13,13 +13,13 @@ import {
   LayoutBuilder,
   addDecoration,
   addEdge,
-  anchorPoint,
   anchorsForChild,
   bracePath,
   connectTree,
   horizontalAnchors,
   round
 } from './core'
+import { roundedRectPath } from './overlays'
 
 export type XResolver = (
   child: Topic,
@@ -341,27 +341,31 @@ export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutRe
 
   const result = builder.finish(root)
   /**
-   * 每一层是一列、同一层的兄弟上下堆叠 → 用**列脊**连：脊竖在父列与子列之间，
-   * 父节点横出来接脊、再逐格横进子节点侧缘。这就是表格该有的行列感；
-   * 用直斜线连会画成一束斜线（既不像表格，兄弟一多还会互相压住）。
+   * 树状表格同样是**表格**：参考「靠表格边框与缩进表达层级，**没有连线**」。
+   * 去掉父子连线，改成给**每一层**加一个竖长框（一层 = 一列表格）。
    */
-  const connect = (topic: Topic): void => {
-    for (const child of builder.visibleChildren(topic)) {
-      const parent = result.nodeMap.get(topic.id)
-      const childNode = result.nodeMap.get(child.id)
-      if (parent && childNode) {
-        addEdge(
-          result,
-          parent.id,
-          childNode.id,
-          anchorPoint(parent, 'right'),
-          anchorPoint(childNode, 'left'),
-          'spine'
-        )
-      }
-      connect(child)
-    }
+  const byDepth = new Map<number, { left: number; right: number; top: number; bottom: number }>()
+  for (const node of result.nodes) {
+    const box = byDepth.get(node.depth)
+    byDepth.set(node.depth, {
+      left: Math.min(box?.left ?? node.x, node.x),
+      right: Math.max(box?.right ?? node.x + node.width, node.x + node.width),
+      top: Math.min(box?.top ?? node.y, node.y),
+      bottom: Math.max(box?.bottom ?? node.y + node.height, node.y + node.height)
+    })
   }
-  connect(root)
+  for (const box of byDepth.values()) {
+    const pad = 12
+    addDecoration(result, {
+      d: roundedRectPath(
+        round(box.left - pad),
+        round(box.top - pad),
+        round(box.right - box.left + pad * 2),
+        round(box.bottom - box.top + pad * 2),
+        10
+      ),
+      widthScale: 1
+    })
+  }
   return result
 }

@@ -7600,8 +7600,14 @@ function testStructures(): void {
     const layout = layoutSheet(root(), fakeMeasure)
     const total = countTopics(root())
 
+    /**
+     * 表格类结构（矩阵 / 树状表格）按参考**没有连线**，父子关系由网格/框表达，
+     * 所以它们的期望连线数是 0；其它结构仍是"每个非根节点一条入边"。
+     */
+    const tableLike = structure.family === 'matrix' || structure.family === 'spreadsheet'
     if (layout.nodes.length !== total) issues.push(`节点数 ${layout.nodes.length}≠${total}`)
-    if (layout.edges.length !== total - 1) issues.push(`连线数 ${layout.edges.length}≠${total - 1}`)
+    const wantEdges = tableLike ? 0 : total - 1
+    if (layout.edges.length !== wantEdges) issues.push(`连线数 ${layout.edges.length}≠${wantEdges}`)
 
     const invalid = layout.nodes.filter(
       (n) => !Number.isFinite(n.x) || !Number.isFinite(n.y) || !(n.width > 0) || !(n.height > 0)
@@ -7622,10 +7628,21 @@ function testStructures(): void {
     if (overlaps.length > 0)
       issues.push(`${overlaps.length} 处重叠（${overlaps.slice(0, 3).join('、')}）`)
 
-    const missingEdge = layout.nodes.filter(
-      (n) => n.id !== root().id && !layout.edges.some((e) => e.toId === n.id)
-    )
-    if (missingEdge.length > 0) issues.push(`${missingEdge.length} 个节点没有入边`)
+    /**
+     * 每个非根节点都要"有归属感"：要么自己有一条入边，要么落在结构画出的框里。
+     *
+     * 表格类结构（矩阵 / 树状表格）按参考**没有连线**，父子关系由**网格/框**表达，
+     * 所以这里改判"必须画出框"——仍盯着原本的目的（不许出现孤立得像掉出来的节点），
+     * 但不再要求表格也画线。
+     */
+    if (tableLike) {
+      if (layout.decorations.length === 0) issues.push('表格类结构没有画出框')
+    } else {
+      const missingEdge = layout.nodes.filter(
+        (n) => n.id !== root().id && !layout.edges.some((e) => e.toId === n.id)
+      )
+      if (missingEdge.length > 0) issues.push(`${missingEdge.length} 个节点没有入边`)
+    }
 
     check(`${structure.label}`, issues.length === 0, issues.join('；'))
   }

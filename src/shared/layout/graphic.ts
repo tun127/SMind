@@ -5,6 +5,7 @@
 import type { Topic } from '../model/types'
 import type { LayoutResult } from './types'
 import { LayoutBuilder, addDecoration, addEdge, anchorPoint, round, type Point } from './core'
+import { roundedRectPath } from './overlays'
 import type { NodeLayout } from './types'
 
 /* ------------------------------------------------------------------ */
@@ -299,31 +300,44 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
 
   const result = builder.finish(root)
   /**
-   * 表头**排成一行**（彼此左右相邻）：用「下-横-下」的母线连出，避免多根线互相穿过。
-   * 表头下面的格子**排成一列**：用列脊（一条竖脊 + 一排短横线），
-   * 否则连到下面第二格的线会从第一格身上穿过去。
+   * 矩阵是**表格**：参考写得很明确——「子主题填入单元格；**没有连线**，靠网格线/底色分割」。
    *
-   * 这两种形状在同一张图里并存（行 + 列），所以按层分开选连接方式——不能一刀切。
+   * 所以这里**不画父子连线**，改成给每一列加一个**框**（框住表头与它下面的格子）。
+   * 行列感由"框 + 节点自己的方块"表达；节点本身就是格子，不需要再引线。
    */
-  const connect = (topic: Topic): void => {
-    const parent = result.nodeMap.get(topic.id)
-    if (!parent) return
-    for (const child of builder.visibleChildren(topic)) {
-      const childNode = result.nodeMap.get(child.id)
-      if (childNode) {
-        addEdge(
-          result,
-          parent.id,
-          childNode.id,
-          anchorPoint(parent, 'bottom'),
-          anchorPoint(childNode, 'top'),
-          parent.depth === 0 ? 'elbow-v' : 'spine'
-        )
+  for (const header of kids) {
+    const headerNode = result.nodeMap.get(header.id)
+    if (!headerNode) continue
+    let left = headerNode.x
+    let right = headerNode.x + headerNode.width
+    let top = headerNode.y
+    let bottom = headerNode.y + headerNode.height
+    const walk = (topic: Topic): void => {
+      for (const child of builder.visibleChildren(topic)) {
+        const node = result.nodeMap.get(child.id)
+        if (node) {
+          left = Math.min(left, node.x)
+          right = Math.max(right, node.x + node.width)
+          top = Math.min(top, node.y)
+          bottom = Math.max(bottom, node.y + node.height)
+        }
+        walk(child)
       }
-      connect(child)
     }
+    walk(header)
+    const pad = 10
+    addDecoration(result, {
+      d: roundedRectPath(
+        round(left - pad),
+        round(top - pad),
+        round(right - left + pad * 2),
+        round(bottom - top + pad * 2),
+        10
+      ),
+      branchId: header.id,
+      widthScale: 1
+    })
   }
-  connect(root)
 
   return result
 }
