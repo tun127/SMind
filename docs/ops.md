@@ -4,6 +4,13 @@
 > 分工：代码归重构 agent；**本总账归文书 agent 管**；需要用户本人身份的操作（注册 / 实名 /
 > 支付 / 开店 / 发布）由用户执行，agent 备好材料与步骤。
 > 规则：做完一项就更新状态；新增事项随手登记。
+>
+> **环境限制（2026-09-18 实测，影响本账能做的事）**：本会话沙箱内 **git 与 curl 建不了 TLS**
+> （curl/schannel 报 `SEC_E_NO_CREDENTIALS`，git 换 openssl 后端也连不上 github.com:443），
+> 而 **Node 的 fetch 可用**（实测 smindapp.cn 200、api.github.com 403 限流、npmmirror 200）。
+> 结论：**代码可读、可改、可本地提交；但「推送 GitHub」「用 API 管 Release」当前做不到**——
+> 需要用户提供 PAT / 由用户侧执行 push，或放行沙箱网络。另：站点仓库 `tun127/smind-site`
+> **本机没有检出**，改官网文案前需要先 clone。
 
 ## 一、发版事务
 
@@ -22,6 +29,7 @@
 | 6 | PDF 矢量人工验收 | ⬜ 用户执行 | 见 #2 | — |
 | 7 | **R2 国内镜像** | ⬜ 等用户配置 Cloudflare | 用户：迁 DNS → 建 `smind-releases` 桶 → 绑 `dl.smindapp.cn` → 拿 API Token；然后 `npm run mirror` 验证（手册：docs/release-mirror.md） | 用户 |
 | 8 | 官网下载页 | ✅ 镜像优先 + GitHub 回退（已上线） | 镜像就绪后无需改页面 | #7 |
+| 18 | 官网「结构数」口径 | 🟡 待统一（小） | 官网写「**9 种结构**」（自测：按结构**族**数），README / CHANGELOG 写「**14 种**」（按 Xmind class 数，源码 `STRUCTURES` 实测 14 项 / 9 族）。两个数都对，但对外应统一——建议官网改「14 种结构（9 大族）」；属站点仓库 `tun127/smind-site` | 站点仓库 |
 
 ## 三、商业化（Pro 侧）
 
@@ -30,7 +38,7 @@
 | 9 | **价格口径拍板** | ✅ 已定稿（2026-09-18） | **正价 ¥39 / 早鸟 ¥19（限量 200）**；phase3-plan 已回写改价记录，材料库 10 个文件全量统一，官网本就一致——三方对齐 | — |
 | 10 | 一页纸 EULA | 🔶 草稿已有 | `commercialization/04-release-0.9/eula.md` 九条完整草案——待①填占位符（发布日/主体）②法律人士过目 | #9 定价无关 |
 | 11 | 软著 | ⬜ 未办 | 用户向版权局申请（个人可办）；agent 可整理申请材料清单与 60 页源码文档 | — |
-| 12 | 面包多开店 | 🔶 文案已有 | `commercialization/04-release-0.9/mianbaoduo-page.md` 商品页 + 兑换流程——待用户开店上架（定价依 #9）；许可码用 `npm run license:issue` 签发 | #9、用户 |
+| 12 | 面包多开店 | 🔴 **已发售但无购买入口**（当前最高优先级） | **已实测**官网首页（抓取 smindapp.cn，HTTP 200）：挂牌 v0.9.0、Pro / ¥39 / 早鸟 ¥19、「Pro 买断解锁」徽标，FAQ 写明「买断 ¥39…解锁不限量写回合」——但**全页外链只有 GitHub 仓库 / Releases / Issues 三个，没有任何购买入口**（无面包多、无爱发电）→ 用户烧完 30 个写回合后无处可买。商品页文案与发货流程已于 2026-09-18 校正（许可码口径 + `license:issue` 真实命令）；只等用户开店上架即可打通闭环 | 用户 |
 | 13 | 60 秒演示视频 | 🔶 分镜已有 | `commercialization/04-release-0.9/video-60s-script.md` 完整分镜——待录制剪辑（走剪映流程） | — |
 
 ## 四、获客与运营
@@ -44,6 +52,24 @@
 
 ## 五、已完成存档
 
+- ✅ **线上状态核查（2026-09-18，实测非推测）**：官网 smindapp.cn 返回 200，首页挂牌 **v0.9.0**；
+  `/download/portable/` 与 `/download/setup/` 两页均指向 **v0.9.0** 的 GitHub Release 资产
+  （`SMind-0.9.0-x64-portable/setup.exe`）并带镜像址 `dl.smindapp.cn`——与 #5 / #8 登记一致。
+  同期实测 GitHub API 从本机 IP 返回 **403（rate limit，未配 token）**，故 Release 资产数与下载量本次未能核到。
+- ✅ **商业化材料库「许可码口径」全校正（2026-09-18）**：全库 6 个文件写着不存在的
+  `.smindkey` **许可文件**与不存在的 `scripts/sign-license.mjs`——与实机不符（**本产品只发许可码字符串**：
+  `SMIND1.<payload>.<签名>`，在「AI 设置 → 许可（Pro）」粘贴激活，离线验签、不锁机、无文件）。
+  已按实机口径改正：`eula.md`（定义/授予/退款/禁止/终止五处）、`mianbaoduo-page.md`（购买三步 +
+  发货流程真命令 `npm run license:issue -- --to 称呼 --order 单号` + 新的邮件模板——**许可码进正文**而非附件）、
+  `master-plan.md` W2、`kpi-tracker.md` 对账口径、`release-day-checklist.md` 激活链路、
+  `bilibili-calendar.md` W2 素材。风险等级高：这是**唯一直接决定买家能不能用上**的链路，
+  按旧文案发货会让每个买家都收到一份不存在的附件、并照着不存在的菜单路径去找激活入口。
+- ✅ **材料库事实核对**：`templates.md` 周报模板「往返样本 25 个」→ **21 个**（实测 21 个 `.xmind`
+  + 4 个 `.emmx` 兼容样本）；新增 **Q10 激活 FAQ**（买了 Pro 怎么激活 / 换电脑怎么办）——
+  开店后最高频的客服问题，原先弹药库里没有。
+- ✅ **许可链路预检通过**：实测 `C:\Users\s2544\SMind-keys\license-private.pem`（签发私钥）与客户端内嵌
+  `src/main/license/public-key.ts` **配套**（Ed25519 真签真验）→ 付费发放链路技术上就绪，开店即可发货。
+  （沙箱内 `npm run license:selftest` 因 esbuild 子进程 EPERM 跑不起来，改用等价的 node:crypto 直验。）
 - ✅ 全仓检查与清理（2026-09-18）：清掉 8 个散落日志、.tmp-check 诊断残留、release/ 旧产物
   （0.8.0 / beta.1 / beta.2 共 9 个文件约 650MB，保留 0.9.0 四件套 + latest.yml）；
   确认 `.dsh-meow/`（重构 agent 记忆库）与 `.tmp-split-highlight.mjs`（其迁移脚本）**不得清理**；
