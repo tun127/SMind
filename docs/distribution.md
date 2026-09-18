@@ -8,7 +8,7 @@
 
 ## 一、可以直接复制发送的一段话
 
-> **用法**：双击 `SMind-0.4.1-x64-portable.exe` 即可，免安装。
+> **用法**：双击 `SMind-<版本>-x64-portable.exe` 即可，免安装。
 >
 > 1. 首次运行若弹出**「Windows 已保护你的电脑 / 未知发布者」**（本软件没有代码签名），
 >    请点「**更多信息**」→「**仍要运行**」。
@@ -57,7 +57,7 @@
 ## 五、自己重新打包
 
 ```powershell
-cd d:/SMind
+cd d:/Mind
 npm run dist        # = electron-vite build + electron-builder --win
 ```
 

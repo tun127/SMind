@@ -6,6 +6,23 @@
 
 ## [未发布]
 
+### 文档 · 清理过时与无用文书（只动文档，不碰代码）
+
+- **删除 `docs/structure-specs.md`**：其主参考是那篇被证伪的 CSDN 文章（层级方向做反的根源），
+  结论已被官方口径的 `docs/structure-spec.md`（官方原文依据 + 我方取值）全面取代；
+  CHANGELOG 里指向它的历史引用同步改为「已被取代并删除」。
+- **删除 `docs/project-review.md`**：2026-09-13 的阶段性复查快照（1124 项自检时代），
+  文中自述「不属于产品交付物，不需要时可删除」；其全部建议（拆提交 / build 入库 /
+  drag-snap 收口 / P1-acceptance 补节等）均已落地。
+- **`docs/requirements.md` 标记为历史存档**：立项时「自用 / 内部使用、无需授权」的定位已被
+  商业化计划（PolyForm NC 开放 + Pro 买断）取代，P0–P9 计划已全部交付；
+  技术选型依据保留存档，现行有效文档在页首指明。
+- **`docs/distribution.md` 小勘误**：打包示例路径 `d:/SMind` → `d:/Mind`，分发话术示例版本号改通配。
+- 其余逐份复核判定保留：`diag-freeze.md`（活排查手册）、`drag-snap-research.md`（已改写为最终结论）、
+  `P1-acceptance.md`（验收总账）、`known-issues.md`（遗留与刻意不做记录，另一会话刚更新过，本轮不动）、
+  `phase3-plan.md`、`release-0.8/0.9.md`、`release-mirror.md`、CHANGELOG / README / LICENSE /
+  CONTRIBUTING / SECURITY / THIRD-PARTY-NOTICES 均为现行有效。
+
 ### 修复 · 边界/概要的空间预留接进全部结构
 
 - **问题**：边界与概要画在区间**外面**，但以前只有「垂直堆叠」与「组织架构」两个家族为它们留白。
@@ -322,7 +339,7 @@
 
 ### 修复 · 鱼骨图：子主题改成「小骨」（按最新参考）+ 修掉审计自身的假阳性
 
-用户反馈「大结构没问题，**子节点格式**不对」，并要求以最新参考为准。查证结论（见 `docs/structure-specs.md`）：
+用户反馈「大结构没问题，**子节点格式**不对」，并要求以最新参考为准。查证结论（当时记录于 `docs/structure-specs.md`；该文件以 CSDN 文章为主参考，后被官方口径的 `docs/structure-spec.md` 取代并删除）：
 鱼骨图第二层是**小骨**——从大骨引出、**水平短线、与主骨平行**；第三层起继续向右延伸。
 
 - **鱼骨图重做**（`layoutFishbone`）：
