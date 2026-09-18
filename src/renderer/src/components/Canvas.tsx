@@ -109,6 +109,16 @@ const SNAP_PREFILTER = Math.max(GROWTH_REACH, OUTER_REACH) + OUTER_REACH + 8
 const DROP_HYSTERESIS = 14
 
 /**
+ * **换目标**（还是同一类落点，只是换了那个节点）需要的迟滞距离。
+ *
+ * 为什么要和上面那个分开：纵向拖动会**频繁跨过同级节点**，如果换目标也要求走够 14px，
+ * 纵向就会明显"黏"——高亮和空位框慢半拍才跟过去（用户反馈：横向没问题、纵向欠缺）。
+ * 而"类型"切换（成为子主题 ↔ 插到同级 ↔ 自由摆放）才是提示乱闪的来源，那里仍旧需要 14px。
+ * 6px 已经够压住手指抖动，又不会让人觉得没反应。
+ */
+const DROP_HYSTERESIS_TARGET = 6
+
+/**
  * 空位框里显示的标题：按可用宽度粗略截断，避免文字溢出虚线框。
  * 中日韩字符按整宽算，其余按半宽算。
  */
@@ -289,6 +299,8 @@ export default function Canvas(): ReactElement {
   const dragEdgesRef = useRef<SVGGElement | null>(null)
   /** 最近一次命令式写入的位移（拖拽层刚挂载时用它补齐，见下面的 effect） */
   const ghostOffsetRef = useRef<{ dx: number; dy: number } | null>(null)
+  /** 上一次进 state 的落点目标（值形式：`id|mode`），用来避免每帧都让画布重渲染 */
+  const dropTargetKeyRef = useRef('')
 
   /* ---- 拖拽过程中：贴住画布边缘时自动滚动 ---- */
   const dragAutoScroll = useCallback((): void => {
@@ -1290,9 +1302,19 @@ export default function Canvas(): ReactElement {
         const latch = dropLatchRef.current
         // 迟滞按**屏幕像素**算：手感取决于"手走了多远"，与画布缩放无关。
         // 早先乘了缩放系数，放大时会异常黏、缩小时几乎失效。
+        /**
+         * 换**类型**（成为子主题 / 插到同级 / 自由摆放）才用完整的 14px；
+         * 只是换**目标节点**时 6px 就够——纵向拖动每几十像素就会跨过一个兄弟，
+         * 用 14px 会明显"慢半拍"。
+         */
+        const kindOf = (p: DropResult | null, s: 'left' | 'right' | null, f: boolean): string =>
+          p ? `plan:${p.mode}` : s ? `side:${s}` : f ? 'free' : ''
+        const freshKind = kindOf(plan, side, free)
+        const sameKind = latch !== null && kindOf(latch.plan, latch.side, latch.free) === freshKind
+        const needed = sameKind ? DROP_HYSTERESIS_TARGET : DROP_HYSTERESIS
         const withinHysteresis =
           Boolean(latch) &&
-          Math.hypot(ev.clientX - (latch?.px ?? 0), ev.clientY - (latch?.py ?? 0)) < DROP_HYSTERESIS
+          Math.hypot(ev.clientX - (latch?.px ?? 0), ev.clientY - (latch?.py ?? 0)) < needed
         if (latch && latch.key !== freshKey && withinHysteresis) {
           // 还在迟滞半径里：保留上一次的裁决，不让提示在分界线上乱跳。
           // 空裁决（停在父级身上＝原地不动）也一起参与，否则提示会一闪一闪。
@@ -1313,7 +1335,18 @@ export default function Canvas(): ReactElement {
         }
 
         dropPlanRef.current = plan
-        setDropTarget(plan ? { id: plan.targetId, mode: plan.mode } : null)
+        /**
+         * 落点目标先按**值**比对一次再进 state。
+         *
+         * `{ id, mode }` 每帧都是新对象，直接 setState 会让 React **每帧**重渲染整个画布
+         * （几百个节点 + 连线全部重新协调一遍）——指针在同一片落点里移动时，这些活全是白烧的。
+         * 值没变就不 set：React 连一个组件都不用重渲染。
+         */
+        const targetKey = plan ? `${plan.targetId}|${plan.mode}` : ''
+        if (targetKey !== dropTargetKeyRef.current) {
+          dropTargetKeyRef.current = targetKey
+          setDropTarget(plan ? { id: plan.targetId, mode: plan.mode } : null)
+        }
         setDropLabel(group > 1 ? `${group} 个主题` : dragTitle)
         setSideTarget(side)
         setFreeDrop(free)
@@ -1344,6 +1377,7 @@ export default function Canvas(): ReactElement {
         detach()
         dropPlanRef.current = null
         setDragVisual(null)
+        dropTargetKeyRef.current = ''
         setDropTarget(null)
         setSideTarget(null)
         setFreeDrop(false)
@@ -1374,6 +1408,7 @@ export default function Canvas(): ReactElement {
         detach()
         dropPlanRef.current = null
         setDragVisual(null)
+        dropTargetKeyRef.current = ''
         setDropTarget(null)
         setSideTarget(null)
         setFreeDrop(false)
