@@ -849,6 +849,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
       ...NO_EDITING,
       undoStack: [],
       redoStack: [],
+      // 换文档时必须把 AI 回合状态清掉：它只在 commitAiTurn 里复位，
+      // 而"AI 正在改这个文档时用户新建/打开了另一份"会让 aiTurn 一直留着，
+      // 新文档里的 undo/redo 从此被静默挡住（Ctrl+Z 完全没反应）
+      aiTurn: null,
       // 新文档：优先恢复用户上次的选择；从未动过开关才按「启动默认视角锁定」起手
       viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
       selectedOverlay: null,
@@ -868,6 +872,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
       ...NO_EDITING,
       undoStack: [],
       redoStack: [],
+      // 同 newDocument：换文档不能把上一个文档的 AI 回合带过来
+      aiTurn: null,
       // 打开文档同样恢复上次的选择（与新建一致）
       viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
       selectedOverlay: null,
@@ -885,7 +891,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
       ...NO_EDITING,
       // 恢复是一次大跨度替换，撤销栈对它没有意义（恢复前会自动存一份版本兜底）
       undoStack: [],
-      redoStack: []
+      redoStack: [],
+      // 整份文档被替换掉了，进行中的 AI 回合同样作废（否则新状态下的撤销被挡住）
+      aiTurn: null
     })),
 
   markSaved: (path) => set({ filePath: path, dirty: false }),

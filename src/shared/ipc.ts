@@ -113,6 +113,14 @@ export const IPC = {
   recoveryLoad: 'recovery:load',
   recoveryDiscard: 'recovery:discard',
   confirmClose: 'window:confirm-close',
+  /**
+   * 「取消关闭」。渲染层在未保存确认框里点了取消时**必须**回这一条。
+   *
+   * 少了它主进程会一直以为「退出流程还在进行中」（`quitRequested` 只能置真没有复位），
+   * 于是之后每次关窗都会走进退出分支：那个分支认为"还有别的窗口没确认"，
+   * 直接 return，**当前这个窗口就关不掉了**——用户点了「放弃修改」却什么都没发生。
+   */
+  closeCancel: 'window:close-cancel',
   closeRequest: 'window:close-request',
   setTitle: 'window:set-title',
   /** 渲染层报告「界面已进入错误状态」（错误边界兜底用） */
@@ -257,6 +265,8 @@ export interface MindApi {
   recoveryLoad(docId: string): Promise<OpenResult | null>
   recoveryDiscard(): Promise<void>
   confirmClose(): void
+  /** 未保存确认框里点了「取消」：告诉主进程放弃这次关闭（并复位退出流程标记） */
+  closeCancel(): void
   setTitle(title: string): void
   /** 开一个新窗口（= 新的一份文档）；每个窗口各自独立文档与撤销栈 */
   newWindow(): Promise<void>

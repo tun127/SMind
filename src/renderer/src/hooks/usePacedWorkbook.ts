@@ -20,10 +20,26 @@ const PACE_MS = 100
 export function usePacedWorkbook(workbook: Workbook, pacing: boolean): Workbook {
   const [applied, setApplied] = useState(workbook)
   const lastAppliedRef = useRef(0)
+  /**
+   * 上一次「不节流」时屏幕上显示的那一份。
+   *
+   * 用来判断**刚进入节流的那一帧**：如果此刻进来的 workbook 就是屏幕上这份，
+   * 说明 AI 还没开始写，应当立刻落地。否则会拿上一回合留下的 `applied`
+   * 画上最多 100ms——用户看到画布先"跳回旧位置"再跳回来。
+   */
+  const shownRef = useRef(workbook)
 
   useEffect(() => {
-    if (!pacing) return
-    const wait = Math.max(0, PACE_MS - (performance.now() - lastAppliedRef.current))
+    if (!pacing) {
+      // 不节流：屏幕上的就是最新值。这里**不** setState（那会让每次编辑多一次渲染），
+      // 只记下来，供下次进入节流时对齐
+      shownRef.current = workbook
+      return
+    }
+    const justEntered = shownRef.current === workbook
+    const wait = justEntered
+      ? 0
+      : Math.max(0, PACE_MS - (performance.now() - lastAppliedRef.current))
     const timer = window.setTimeout(() => {
       lastAppliedRef.current = performance.now()
       setApplied(workbook)
@@ -32,5 +48,7 @@ export function usePacedWorkbook(workbook: Workbook, pacing: boolean): Workbook 
   }, [workbook, pacing])
 
   // 不在 AI 回合里：一律用最新值（用户自己的操作必须零延迟）
-  return pacing ? applied : workbook
+  if (!pacing) return workbook
+  // 刚进入节流那一帧直接给最新值（`applied` 可能还是上一回合的旧对象）
+  return shownRef.current === workbook ? workbook : applied
 }

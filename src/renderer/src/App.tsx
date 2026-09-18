@@ -114,6 +114,8 @@ export default function App(): ReactElement {
     run: () => void
     fileName: string
     discard?: () => void
+    /** 这次询问来自主进程的关窗/退出请求：点「取消」必须回执主进程（见 closeCancel） */
+    windowClose?: boolean
   } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   /** 右侧抽屉：同一时刻只开一个 */
@@ -658,6 +660,7 @@ export default function App(): ReactElement {
     const askThis = (fileName: string): void =>
       setPending({
         fileName,
+        windowClose: true,
         run: closeWindowFlow,
         discard: () => {
           forceCloseIds.current.add(useTabs.getState().activeId)
@@ -1213,7 +1216,14 @@ export default function App(): ReactElement {
       {pending && (
         <UnsavedDialog
           fileName={pending.fileName || displayName}
-          onCancel={() => setPending(null)}
+          onCancel={() => {
+            const action = pending
+            setPending(null)
+            // 关窗/退出流程里点「取消」：必须回执主进程。
+            // 不回执的话主进程一直以为「退出流程还在进行」，之后每次关窗都走退出分支，
+            // 那个分支看到"还有窗口没确认"就直接 return —— 窗口关不掉（点了放弃修改没反应）
+            if (action.windowClose) window.api.closeCancel()
+          }}
           onDiscard={() => {
             const action = pending
             setPending(null)

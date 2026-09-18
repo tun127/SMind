@@ -1571,7 +1571,11 @@ function registerIpc(): void {
     if (!file) return null
 
     const buf = await fs.readFile(file)
-    const path = resourcePathFor(createId('att'), file)
+    // 一个附件只生成**一个** id：包内路径与返回给渲染层的 id 同源，
+    // 否则同一份附件会有两个互不相干的标识（以前这里调了两次 createId('att')），
+    // 排查"这个附件是哪来的"时对不上号
+    const id = createId('att')
+    const path = resourcePathFor(id, file)
     const state = stateOf(e.sender)
     if (state && typeof docId === 'string') {
       const doc = docOf(state, docId)
@@ -1580,7 +1584,7 @@ function registerIpc(): void {
     }
 
     return {
-      id: createId('att'),
+      id,
       path,
       name: basename(file),
       size: buf.byteLength,
@@ -1909,15 +1913,20 @@ function registerIpc(): void {
       const tools = useTools ? planAvailableTools(license.canWrite) : []
 
       const sender = e.sender
-      // 窗口销毁时中止：别留悬着的连接，也别再往已销毁的窗口发事件
-      sender.once('destroyed', () => streamAborters.get(requestId)?.abort())
+      // 窗口销毁时中止：别留悬着的连接，也别再往已销毁的窗口发事件。
+      // **用完必须摘掉**：工具循环让一条命令能跑十几二十轮，每轮挂一个 once
+      // 会一直攒着（攒到 Node 的监听器上限就会打印并发告警），而且全指向已经结束的请求
+      const onSenderDestroyed = (): void => streamAborters.get(requestId)?.abort()
+      sender.once('destroyed', onSenderDestroyed)
       const usedTools = await callAiStream(
         config,
         messages as AiMessage[],
         requestId,
         sender,
         tools
-      )
+      ).finally(() => {
+        if (!sender.isDestroyed()) sender.removeListener('destroyed', onSenderDestroyed)
+      })
 
       /**
        * 真的动了画布才算一个试用回合：只读聊天永久免费、不计数。
@@ -2215,10 +2224,28 @@ function registerIpc(): void {
       if (!blocked) {
         quitApproved = true
         app.quit()
+        return
       }
-      return
+      // 还有别的窗口没确认：这个窗口自己照样要关。
+      // 以前这里无条件 return，于是「退出 → 取消 → 再点 X → 放弃修改」时
+      // 窗口留在原地不动，用户以为程序卡死了（再点一次才关，且那次不再提示）。
     }
     if (!state.win.isDestroyed()) state.win.close()
+  })
+
+  /**
+   * 未保存确认框里点了「取消」。
+   *
+   * `quitRequested` 是"退出流程进行中"的全局标记，只能在两处复位：
+   * 真的退成（走 quitApproved），或者用户明确取消（这里）。
+   * 以前没有这条回执，标记一直是真——之后每次关窗都进退出分支，
+   * 那个分支看到"还有窗口没确认"就 return，窗口永远关不掉。
+   */
+  ipcMain.on(IPC.closeCancel, (e) => {
+    const state = stateOf(e.sender)
+    // 这个窗口并没有被允许关闭，标记也要退回去，否则下次点 X 会直接关窗、不再提示
+    if (state) state.allowClose = false
+    quitRequested = false
   })
 
   ipcMain.on(IPC.setTitle, (e, title: string) => {

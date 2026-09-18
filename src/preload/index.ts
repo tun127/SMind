@@ -61,6 +61,7 @@ const api: MindApi = {
   recoveryDiscard: () => ipcRenderer.invoke(IPC.recoveryDiscard) as Promise<void>,
 
   confirmClose: () => ipcRenderer.send(IPC.confirmClose),
+  closeCancel: () => ipcRenderer.send(IPC.closeCancel),
 
   setTitle: (title: string) => ipcRenderer.send(IPC.setTitle, title),
 
@@ -149,8 +150,11 @@ const api: MindApi = {
 
   aiTest: () => ipcRenderer.invoke(IPC.aiTest) as Promise<AiTestResult>,
 
-  aiChatStream: (requestId: string, messages: AiMessage[], options?: { useTools?: boolean }) =>
-    ipcRenderer.invoke(IPC.aiChatStream, requestId, messages, options) as Promise<void>,
+  aiChatStream: (
+    requestId: string,
+    messages: AiMessage[],
+    options?: { useTools?: boolean; turnId?: string }
+  ) => ipcRenderer.invoke(IPC.aiChatStream, requestId, messages, options) as Promise<void>,
 
   aiChatStreamCancel: (requestId: string) => ipcRenderer.send(IPC.aiChatStreamCancel, requestId),
 

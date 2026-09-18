@@ -259,6 +259,8 @@ export default function ChatPanel({
   const runRoundRef = useRef<() => void>(() => {})
   const processQueueRef = useRef<() => void>(() => {})
   const commitTurnRef = useRef<() => void>(() => {})
+  /** 卸载收尾时要用 stop()，但它定义在下面（同一个「打破循环引用」的理由） */
+  const stopRef = useRef<() => void>(() => {})
   /** 待处理的工具调用（一次处理一个：破坏性操作要在中间停下来问用户） */
   const queueRef = useRef<{ calls: ToolCall[]; index: number } | null>(null)
   /** 待确认的写操作（state 只用于渲染，判定走 ref） */
@@ -1254,9 +1256,27 @@ export default function ChatPanel({
     runRoundRef.current = runRound
     processQueueRef.current = processQueue
     commitTurnRef.current = commitTurn
+    stopRef.current = stop
   })
 
-  useEffect(() => window.api.onAiStreamEvent(handleEvent), [handleEvent])
+  /**
+   * 订阅流式事件。
+   *
+   * **卸载时必须收尾这一回合**——以前只做了「取消订阅」，
+   * 而面板是 `{sidePanel === 'chat' && <ChatPanel/>}` 挂载的（切到别的抽屉就整个卸载）：
+   * 正在跑的回合没人收尾，store 里的 `aiTurn` 永远留着，于是
+   * `undo` / `redo` 被**静默**挡住（Ctrl+Z 彻底失灵，用户看不出原因），
+   * 画布还会因为 `aiTurnActive` 一直为真而持续节流（连自己打字都慢半拍）。
+   */
+  useEffect(() => {
+    const off = window.api.onAiStreamEvent(handleEvent)
+    return () => {
+      off()
+      stopRef.current()
+      // 队列是自己"接着跑"的，不会有模型事件来收尾，这里同样要自己收干净
+      commitTurnRef.current()
+    }
+  }, [handleEvent])
 
   /**
    * 是否「贴着底」。
