@@ -412,21 +412,24 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
     baseRadius = Math.max(baseRadius, radiusForSector(sector, maxSize))
   }
 
-  const place = (
-    topic: Topic,
-    angle: number,
-    sectorWidth: number,
-    radius: number,
+  /**
+   * 第一遍：只算**角度与扇区**（跟半径无关），并记下每层"最多需要多大半径"。
+   *
+   * 为什么要分两遍：半径必须**逐层统一**。早先是每个节点各自按自己的扇区撑开半径，
+   * 结果同一层的兄弟半径差出好几百（实测 513 / 726 / 965），画出来就是
+   * "每个分支射出一根长短不一的长线"——用户说的"随便穿线"。
+   */
+  interface RingPlan {
+    topic: Topic
+    angle: number
+    sector: number
     depth: number
-  ): void => {
-    const size = builder.size(topic.id)
-    const x = centerX + Math.cos(angle) * radius - size.width / 2
-    const y = centerY + Math.sin(angle) * radius - size.height / 2
-    builder.add(topic, x, y, depth, Math.cos(angle) < 0 ? 'left' : 'right')
-
+  }
+  const plans: RingPlan[] = []
+  const collect = (topic: Topic, angle: number, sectorWidth: number, depth: number): void => {
+    plans.push({ topic, angle, sector: sectorWidth, depth })
     const childList = builder.visibleChildren(topic)
     if (childList.length === 0) return
-
     /**
      * 子节点的扇区**收窄**到最多 90°。
      *
@@ -437,27 +440,43 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
     const fan = Math.min(sectorWidth, Math.PI / 2)
     const sub = fan / childList.length
     const firstAngle = angle - fan / 2 + sub / 2
-
-    let childRadius = radius + ringStep(depth)
-    if (childList.length > 1) {
-      let maxSize = 0
-      for (const child of childList) {
-        const size = builder.size(child.id)
-        maxSize = Math.max(maxSize, Math.max(size.width, size.height))
-      }
-      const needed = radiusForSector(sub, maxSize)
-      if (needed > childRadius) childRadius = needed
-    }
-
     childList.forEach((child, index) => {
-      place(child, firstAngle + sub * index, sub, childRadius, depth + 1)
+      collect(child, firstAngle + sub * index, sub, depth + 1)
     })
   }
-
   kids.forEach((kid, index) => {
     // 从正上方开始顺时针铺开
-    place(kid, -Math.PI / 2 + sector * index, sector, baseRadius, 1)
+    collect(kid, -Math.PI / 2 + sector * index, sector, 1)
   })
+
+  // 第二遍：逐层定半径——本层取该层所有节点的最大需求，同层同半径
+  const needByDepth: number[] = []
+  for (const plan of plans) {
+    const size = builder.size(plan.topic.id)
+    const need = radiusForSector(plan.sector, Math.max(size.width, size.height))
+    needByDepth[plan.depth] = Math.max(needByDepth[plan.depth] ?? 0, need)
+  }
+  const maxDepth = plans.reduce((deepest, plan) => Math.max(deepest, plan.depth), 1)
+  const radiusByDepth: number[] = [0]
+  radiusByDepth[1] = Math.max(baseRadius, needByDepth[1] ?? 0)
+  for (let depth = 2; depth <= maxDepth; depth += 1) {
+    radiusByDepth[depth] = Math.max(
+      (radiusByDepth[depth - 1] ?? 0) + ringStep(depth - 1),
+      needByDepth[depth] ?? 0
+    )
+  }
+
+  for (const plan of plans) {
+    const size = builder.size(plan.topic.id)
+    const radius = radiusByDepth[plan.depth] ?? 0
+    builder.add(
+      plan.topic,
+      centerX + Math.cos(plan.angle) * radius - size.width / 2,
+      centerY + Math.sin(plan.angle) * radius - size.height / 2,
+      plan.depth,
+      Math.cos(plan.angle) < 0 ? 'left' : 'right'
+    )
+  }
 
   const result = builder.finish(root)
   // 放射状用「中心到中心」的连线，压在节点下方
