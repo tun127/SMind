@@ -635,6 +635,8 @@ export default function Canvas(): ReactElement {
     return { id: rootTopic.id, fromSelection: false }
   }, [selection, workbook, layout])
   const focusId = focus.id
+  /** 盯的是不是"真正的选中项"（不是则为回退目标：中心主题） */
+  const focusFromSelection = focus.fromSelection
 
   /**
    * 被盯住的主题在布局里的**位置与尺寸**（拼成字符串，方便直接当依赖）。
@@ -694,7 +696,7 @@ export default function Canvas(): ReactElement {
      * 盯的目标**不是选中项**（选择为空 / 选中项已被删掉 / 被折叠藏起来）时不动镜头。
      * 只有"刚打开锁定"那一次例外（见 `lockJustOnRef`）。
      */
-    if (!focus.fromSelection) {
+    if (!focusFromSelection) {
       if (!lockJustOnRef.current) return
       lockJustOnRef.current = false
     }
@@ -792,7 +794,18 @@ export default function Canvas(): ReactElement {
     raf = window.requestAnimationFrame(step)
     return () => window.cancelAnimationFrame(raf)
     // focusKey 里已经含了被盯主题的 id 与几何，用它做依赖即可（不写进函数体会被 lint 挑刺）
-  }, [viewLock, dragVisual, focusId, focusKey, editingId, zoom, size.width, size.height, setPan])
+  }, [
+    viewLock,
+    dragVisual,
+    focusId,
+    focusFromSelection,
+    focusKey,
+    editingId,
+    zoom,
+    size.width,
+    size.height,
+    setPan
+  ])
 
   /* ---- 折叠 / 展开：以「被折叠的那个节点」为锚点，别让视角丢失 ---- */
   /**
