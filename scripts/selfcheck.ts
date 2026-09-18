@@ -3927,18 +3927,24 @@ function testMisc(): void {
   store().undo()
   eq('撤销后偏移也回来了', find(b1)?.position, { x: 15, y: -15 })
 
-  store().clearPosition(b1)
+  store().setSelection([b1])
+  eq('选中自由摆放的主题时只恢复它', store().restoreAutoLayout(), 1)
   check('恢复自动布局清空偏移', find(b1)?.position === undefined)
 
-  // 整张画布一起恢复：自由摆放的主题多了以后，一个个恢复太慢
+  /**
+   * 范围规则：选中里只要有自由摆放的主题就只恢复这些，否则整张画布一起恢复。
+   * 这条规则是**唯一入口**的前提——三个入口（选中 / 全部 / 又一个全部）刚被合并成一个，
+   * 改坏了的表现是"想只恢复一个，结果整张画布都动了"（或者反过来，点了没反应）。
+   */
   store().offsetPosition(b1, 30, 0)
   store().offsetPosition(dropHost, -20, 10)
-  eq('统计出 2 个自由摆放的主题', store().clearAllPositions(), 2)
+  store().setSelection([])
+  eq('没有选中自由摆放的主题时恢复全部（2 个）', store().restoreAutoLayout(), 2)
   check(
     '全部放回自动布局',
     find(b1)?.position === undefined && find(dropHost)?.position === undefined
   )
-  eq('没有自由摆放时返回 0 且不写历史', store().clearAllPositions(), 0)
+  eq('没有自由摆放时返回 0 且不写历史', store().restoreAutoLayout(), 0)
   store().undo()
   check(
     '整批恢复可以一次撤销',
@@ -4061,7 +4067,7 @@ function testUndoSelectionAndRelayout(): void {
   store().offsetPositions([{ id: a, dx: 40, dy: 30 }])
   const node = findTopic(root(), a)
   check('偏移已写入', node?.position !== undefined)
-  store().clearAllPositions()
+  store().restoreAutoLayout()
   check('恢复布局后偏移清空', findTopic(root(), a)?.position === undefined)
   eq('恢复布局不动选择', store().selection, [a])
   store().undo()

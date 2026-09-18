@@ -9,7 +9,6 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlignStartVertical,
   AppWindow,
   Bot,
   Braces,
@@ -35,7 +34,6 @@ import {
   PinOff,
   Plus,
   Redo2,
-  RotateCcw,
   Save,
   SaveAll,
   Search as SearchIcon,
@@ -362,8 +360,6 @@ const MENU_PINNABLE: ReadonlySet<string> = new Set([
   'sheet-copy',
   'history',
   'default-view-lock',
-  'reset-layout',
-  'reset-all-layout',
   'shortcuts'
 ])
 
@@ -385,8 +381,6 @@ export default function Toolbar({
   const selectedId = selection[0]
   const selectedTopic = selectedId ? findTopic(root, selectedId) : null
   const currentStructure = selectedTopic?.structureClass ?? root.structureClass ?? DEFAULT_STRUCTURE
-  const hasFreePosition = Boolean(selectedTopic?.position)
-
   const store = useEditor.getState
 
   const toggleHidden = (id: string, hidden: boolean): void => {
@@ -473,7 +467,7 @@ export default function Toolbar({
     'themes-panel': { label: '主题外观', icon: <Palette size={15} />, run: actions.onThemes },
     formula: { label: '插入 / 编辑公式', icon: <Sigma size={15} />, run: actions.onFormula },
     code: { label: '插入 / 编辑代码块', icon: <Code2 size={15} />, run: actions.onCode },
-    relayout: { label: '全部恢复自动布局', icon: <Wand2 size={15} />, run: actions.onRelayout },
+    relayout: { label: '恢复自动布局', icon: <Wand2 size={15} />, run: actions.onRelayout },
     search: { label: '搜索 / 筛选 / 统计', icon: <SearchIcon size={15} />, run: actions.onSearch },
     'zoom-out': {
       label: '缩小',
@@ -504,16 +498,6 @@ export default function Toolbar({
       label: '启动默认视角锁定',
       icon: <Crosshair size={15} />,
       run: () => void patchAppSettings({ defaultViewLock: !appSettings.defaultViewLock })
-    },
-    'reset-layout': {
-      label: '恢复自动布局（选中主题）',
-      icon: <RotateCcw size={15} />,
-      run: () => selectedId && store().clearPosition(selectedId)
-    },
-    'reset-all-layout': {
-      label: '全部恢复自动布局',
-      icon: <AlignStartVertical size={15} />,
-      run: () => store().clearAllPositions()
     },
     shortcuts: { label: '快捷键说明', icon: <CircleHelp size={15} />, run: actions.onHelp }
   }
@@ -857,7 +841,7 @@ export default function Toolbar({
           <button
             type="button"
             className="tool-btn"
-            title="全部恢复自动布局：清空手动拖拽的位置偏移（含悬浮主题），可撤销"
+            title="恢复自动布局：选中了自由摆放的主题就只恢复它们，否则恢复整张画布（可撤销）"
             onClick={actions.onRelayout}
           >
             <Wand2 size={17} />
@@ -1011,29 +995,6 @@ export default function Toolbar({
           </button>
         )}
         {quick(
-          'reset-layout',
-          <button
-            type="button"
-            className="tool-btn"
-            title="恢复自动布局：把选中的自由摆放主题放回自动位置"
-            disabled={!selectedId}
-            onClick={() => selectedId && store().clearPosition(selectedId)}
-          >
-            <RotateCcw size={17} />
-          </button>
-        )}
-        {quick(
-          'reset-all-layout',
-          <button
-            type="button"
-            className="tool-btn"
-            title="全部恢复自动布局：把这张画布上所有自由摆放的主题一次性放回去"
-            onClick={() => store().clearAllPositions()}
-          >
-            <AlignStartVertical size={17} />
-          </button>
-        )}
-        {quick(
           'shortcuts',
           <button type="button" className="tool-btn" title="快捷键说明" onClick={actions.onHelp}>
             <CircleHelp size={17} />
@@ -1072,11 +1033,6 @@ export default function Toolbar({
                   'default-view-lock',
                   `只影响新开文档（当前${appSettings.defaultViewLock ? '开' : '关'}）`
                 ],
-                [
-                  'reset-layout',
-                  hasFreePosition ? '把自由摆放的主题放回自动位置' : '选中自由摆放的主题后可用'
-                ],
-                ['reset-all-layout', '把这张画布上所有自由摆放的主题一次性放回去'],
                 ['shortcuts', '全部快捷键速查']
               ] as Array<[keyof typeof quickMeta & string, string]>
             ).map(([id, hint]) => ({

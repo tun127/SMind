@@ -96,8 +96,9 @@ const SNAP_PREFILTER = Math.max(GROWTH_REACH, OUTER_REACH) + OUTER_REACH + 8
 /**
  * 落点迟滞：指针要换到**另一个**落点前，必须先移动这么远。
  *
- * 单位是**世界单位**（会乘上当次缩放再和屏幕位移比较）：
- * 画布缩到 50% 时，"走够这么远"对应的屏幕位移自然翻倍，手感才和 100% 时一致。
+ * 单位是**屏幕像素**（直接比较 `clientX/clientY` 的位移）：
+ * 手感取决于"手走了多远"，与画布缩放无关——早先乘过缩放系数，
+ * 结果放大时异常黏、缩小时几乎失效。
  *
  * 没有它，指针停在"成为子主题"与"插到同级之间"的分界线上时，
  * 落点会一帧一个样地来回跳，看起来就是"吸附乱跳、提示乱闪"。
@@ -945,12 +946,6 @@ export default function Canvas(): ReactElement {
     return { axis: 'x', forward: true }
   }, [])
 
-  /** 目标在它那一层有没有同级兄弟（中心主题在深度 0，天然没有）。 */
-  const hasSiblings = useCallback(
-    (targetId: string): boolean => dropIndex.stackOf.has(targetId),
-    [dropIndex]
-  )
-
   /**
    * 「插到它前 / 后」时，**那一层**的排列方向轴。
    *
@@ -1022,18 +1017,21 @@ export default function Canvas(): ReactElement {
   /**
    * 指针落在目标节点的哪个分区（`child` / `before` / `after`）。
    *
-   * - 目标**有同级**：沿同级排列方向分区，贴前/后段插到它前/后、中间成为它的子主题；
-   * - 目标**没有同级**（中心主题、独苗子主题）：「插到它前 / 后」用的是**它那一层**的排列
-   *   方向（见 `insertAxis`）。中心主题更极端——它没有父级，`resolveDrop` 会把 before/after
-   *   一律收敛成"成为它的子主题"，所以它身上再也不会冒出自相矛盾的落点提示。
+   * - 有同级排列方向（`pair.stack`）：沿它分区，贴前/后段插到它前/后、中间成为它的子主题；
+   * - 拿不到同级方向时退回 `insertAxis`——它是"这一层往哪边排"的正确答案
+   *   （平衡思维导图的一级主题左右分列，兄弟坐标差只是"左右"、不能当落点依据，
+   *   于是 `axesOf` 会给出 `stack = null`，此时正确的轴是竖排方向）。
+   *
+   * **这里必须和 `snapRegionOf` 用同一个答案**（它写的是 `pair.stack ?? insertAxis(...)`）：
+   * 以前这里按"有没有同级"分支，于是"有同级但同级方向被否决"的节点永远走不到 `insertAxis`，
+   * `zoneOf` 收到 null 后**恒返回 child**——表现就是有些节点怎么拖都只提示"成为子主题"。
    */
   const zoneForPointer = useCallback(
     (targetId: string, rect: DropRect, world: DropPoint): DropMode => {
       const pair = axesOf(targetId)
-      if (hasSiblings(targetId)) return zoneOf(rect, world, pair.stack)
-      return zoneOf(rect, world, insertAxis(targetId, pair))
+      return zoneOf(rect, world, pair.stack ?? insertAxis(targetId, pair))
     },
-    [axesOf, hasSiblings, insertAxis]
+    [axesOf, insertAxis]
   )
 
   /**
@@ -1113,8 +1111,20 @@ export default function Canvas(): ReactElement {
       let moved = false
       let plan: DropResult | null = null
       let side: 'left' | 'right' | null = null
-      /** 本帧的非法落点原因（空串表示没有） */
-      let blocked = ''
+
+      /**
+       * 吸附候选连各自的可吸附区域**只算一次**：区域只依赖布局，
+       * 而布局在拖拽期间是冻结的。以前每帧都要对每个候选重算一遍 `snapRegionOf`，
+       * 那是 O(节点数) 的纯几何开销，属于白烧的帧预算。
+       */
+      const snapCandidates: SnapNode[] = dropCandidates.map((node) => ({
+        id: node.id,
+        rect: node.rect,
+        region: snapRegionOf(node.id) ?? node.rect,
+        depth: node.depth
+      }))
+      /** 拖拽提示里的标题：拖拽期间不会变，不该每帧全树遍历去查 */
+      const dragTitle = findTopic(rootRef.current, id)?.title ?? ''
 
       /** 自动滚动的循环：只要这次拖拽还在，就持续按指针位置推动画布 */
       let scrollFrame = 0
@@ -1127,7 +1137,28 @@ export default function Canvas(): ReactElement {
         scrollFrame = 0
       }
 
+      /**
+       * pointermove **只记下最新位置**，真正的计算每帧最多跑一次。
+       *
+       * 节点拖拽是唯一一条没有合帧的高频路径（滚轮、平移、AI 写入都合帧了）：
+       * 高刷屏 / 手写板上 pointermove 能到 120~160 次/秒，每次都走一整遍落点裁决
+       * 并触发一次全画布重渲染——掉帧就是这么来的。合帧之后每帧最多算一次，
+       * 而且丢掉的都是同帧内的中间位置（对落点没有意义）。
+       */
+      let pendingEvent: PointerEvent | null = null
+      let moveFrame = 0
+      const flushMove = (): void => {
+        moveFrame = 0
+        const ev = pendingEvent
+        pendingEvent = null
+        if (ev) applyMove(ev)
+      }
       const onMove = (ev: PointerEvent): void => {
+        pendingEvent = ev
+        if (moveFrame === 0) moveFrame = window.requestAnimationFrame(flushMove)
+      }
+
+      const applyMove = (ev: PointerEvent): void => {
         const dx = ev.clientX - startX
         const dy = ev.clientY - startY
         if (!moved && Math.hypot(dx, dy) < 4) return
@@ -1143,6 +1174,12 @@ export default function Canvas(): ReactElement {
 
         plan = null
         side = null
+        /**
+         * 本帧的非法落点原因（空串表示没有）。
+         * **必须每帧重置**：以前只在声明处初始化，于是"先撞上非法落点、再移到合法落点"时，
+         * 底部会一直挂着过期的非法原因（用户看到的是软件在瞎报）。
+         */
+        let blocked = ''
         // 按住 Alt ＝ 明确要求「自由摆放」：不吸附，位置随手放
         let free = ev.altKey
 
@@ -1156,19 +1193,10 @@ export default function Canvas(): ReactElement {
           // ① 先按「可吸附区域」找目标。区域是**分轴**外扩的：
           //    生长方向（子节点会待的那一侧）放宽，同级方向只留一点点。
           //    命中的候选里取离本体最近的——指针压在节点身上时距离为 0，自然优先。
-          const nearby = dropCandidates.filter(
+          const nearby = snapCandidates.filter(
             (node) => !exclude.has(node.id) && distanceToRect(world, node.rect) <= SNAP_PREFILTER
           )
-          const snap: SnapNode | null = nearestInRegion(
-            nearby.map((node) => ({
-              id: node.id,
-              rect: node.rect,
-              region: snapRegionOf(node.id) ?? node.rect,
-              depth: node.depth
-            })),
-            world,
-            exclude
-          )
+          const snap: SnapNode | null = nearestInRegion(nearby, world, exclude)
           if (snap) {
             adjacent = true
             // 语义仍交给 `zoneForPointer` / `resolveDrop`：
@@ -1231,7 +1259,7 @@ export default function Canvas(): ReactElement {
 
         dropPlanRef.current = plan
         setDropTarget(plan ? { id: plan.targetId, mode: plan.mode } : null)
-        setDropLabel(group > 1 ? `${group} 个主题` : (findTopic(rootTopic, id)?.title ?? ''))
+        setDropLabel(group > 1 ? `${group} 个主题` : dragTitle)
         setSideTarget(side)
         setFreeDrop(free)
         setDropBlocked(blocked)
@@ -1243,6 +1271,9 @@ export default function Canvas(): ReactElement {
 
       const detach = (): void => {
         stopScroll()
+        if (moveFrame !== 0) window.cancelAnimationFrame(moveFrame)
+        moveFrame = 0
+        pendingEvent = null
         dropLatchRef.current = null
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
@@ -1269,6 +1300,16 @@ export default function Canvas(): ReactElement {
       }
 
       const onUp = (): void => {
+        /**
+         * 先把还没轮到的那次移动算掉。合帧之后 pointerup 可能紧跟在一个尚未执行的
+         * rAF 后面——直接读 `plan` 会让"松手前最后一格"白丢，落点就成了上一帧的（错的）。
+         */
+        if (moveFrame !== 0) window.cancelAnimationFrame(moveFrame)
+        const last = pendingEvent
+        pendingEvent = null
+        moveFrame = 0
+        if (last) applyMove(last)
+
         const active = plan
         const activeSide = side
         const startClient = pointerRef.current

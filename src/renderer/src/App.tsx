@@ -1131,8 +1131,16 @@ export default function App(): ReactElement {
           onNodes: () => setSidePanel((current) => (current === 'node' ? 'none' : 'node')),
           onOutline: () => setShowOutline((current) => !current),
           onSearch: () => setSidePanel((current) => (current === 'search' ? 'none' : 'search')),
-          // 与「更多」里的同名入口走同一个实现，避免两套语义
-          onRelayout: () => useEditor.getState().clearAllPositions(),
+          // 恢复自动布局：只恢复选中的自由摆放主题；没有这种选中就整张画布一起恢复。
+          // 结果必须**说出来**——同一个按钮两种范围，用户得知道这次到底动了多少。
+          onRelayout: () => {
+            const restored = useEditor.getState().restoreAutoLayout()
+            showToast(
+              restored === 0
+                ? '这张画布上没有自由摆放的主题'
+                : `已把 ${restored} 个主题放回自动位置（可撤销）`
+            )
+          },
           onFormula: () => {
             setSidePanel('node')
             useEditor.getState().requestFormulaFocus()

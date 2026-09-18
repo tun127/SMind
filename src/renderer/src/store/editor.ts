@@ -322,9 +322,15 @@ export interface EditorState {
    * 走一次 mutate，所以整群移动在撤销里是**一步**，而不是一堆零碎记录。
    */
   offsetPositions(moves: Array<{ id: string; dx: number; dy: number }>): void
-  clearPosition(id: string): void
-  /** 把当前画布上所有自由摆放的主题一次性放回自动布局（一步撤销） */
-  clearAllPositions(): number
+  /**
+   * 恢复自动布局：把**选中的自由摆放主题**放回自动位置；选中里没有这样的主题就整张画布一起恢复。
+   * 返回实际恢复的个数（0 = 没什么可恢复）。
+   *
+   * 为什么只留一个入口：以前「选中」「全部」各有按钮、菜单里还各有一条名字几乎一样的项
+   * （三个入口、两种实现，其中两个完全相同），用户面对的是"我该点哪个"。
+   * 现在范围交给选择决定、结果用提示条说清：想只恢复一个，先选中它。
+   */
+  restoreAutoLayout(): number
   copySelection(): void
   paste(): void
 
@@ -1547,21 +1553,31 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }, '移动位置')
   },
 
-  clearPosition: (id) => {
-    get().mutate((draft) => {
-      const topic = findTopic(activeRoot(draft), id)
-      if (topic) topic.position = undefined
-    }, '恢复自动布局')
-  },
-
-  clearAllPositions: () => {
-    const root = activeRoot(get().workbook)
+  restoreAutoLayout: () => {
+    const state = get()
+    const root = activeRoot(state.workbook)
     const floating = flatten(root).filter((topic) => topic.position !== undefined)
     if (floating.length === 0) return 0
+
+    /**
+     * 范围规则：**选中里只要有自由摆放的主题，就只恢复这些**；否则整张画布一起恢复。
+     *
+     * 宁可这样也不做两个入口——只有一个按钮时，用户不会在"选中 vs 全部"之间猜；
+     * 而"想只恢复一个"这件事本身就已经在手上有选择了，直接用它最自然。
+     */
+    const selected = state.selection.filter((id) => {
+      const topic = findTopic(root, id)
+      return topic !== null && topic.position !== undefined
+    })
+    const targets = selected.length > 0 ? selected : floating.map((topic) => topic.id)
+    const scope = new Set(targets)
+
     get().mutate((draft) => {
-      for (const topic of flatten(activeRoot(draft))) topic.position = undefined
-    }, '全部恢复自动布局')
-    return floating.length
+      for (const topic of flatten(activeRoot(draft))) {
+        if (scope.has(topic.id)) topic.position = undefined
+      }
+    }, '恢复自动布局')
+    return targets.length
   },
 
   copySelection: () => {
