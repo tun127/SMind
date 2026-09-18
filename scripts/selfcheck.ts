@@ -4734,29 +4734,80 @@ function testLayoutNoOverlap(): void {
     `${Math.round(orgA2.y)} vs ${Math.round(orgRowParent.y + orgRowParent.height)}`
   )
 
-  // 矩阵列：纵向偏移过的格子不许压到同列的下一个格位
+  // 矩阵＝**二维网格**：列＝一级主题（第一维）、行＝序号（第二维），同一行共用基线
   reset()
   const matrixRoot = root().id
-  const header = addChildOf(matrixRoot, '表头')
-  const cellA = addChildOf(header, '第一格')
-  addChildOf(header, '第二格')
-  addChildOf(header, '第三格')
+  const colA = addChildOf(matrixRoot, '表头甲')
+  const colB = addChildOf(matrixRoot, '表头乙')
+  const a1 = addChildOf(colA, '甲一')
+  const a2 = addChildOf(colA, '甲二')
+  const b1 = addChildOf(colB, '乙一')
+  const b2 = addChildOf(colB, '乙二')
   store().setStructure('org.xmind.ui.matrix')
   const matrixPlain = layoutSheet(root(), multilineMeasure)
-  store().offsetPositions([{ id: cellA, dx: 0, dy: 40 }])
+  store().offsetPositions([{ id: a1, dx: 0, dy: 60 }])
   const matrix = layoutSheet(root(), multilineMeasure)
-  const matrixHit = firstOverlap(matrix)
+  const nodeAt = (layout: typeof matrix, id: string) => {
+    const node = layout.nodeMap.get(id)
+    if (!node) throw new Error(`节点 ${id} 不在布局里`)
+    return node
+  }
   check(
-    '矩阵列：纵向偏移不会压到下一格位',
-    matrixHit === null,
-    matrixHit ? matrixHit.join(' ⨯ ') : ''
+    '矩阵：同一行共用基线（列=第一维、行=第二维）',
+    Math.abs(nodeAt(matrix, a1).y - nodeAt(matrix, b1).y) < 2 &&
+      Math.abs(nodeAt(matrix, a2).y - nodeAt(matrix, b2).y) < 2,
+    `${Math.round(nodeAt(matrix, a1).y)}/${Math.round(nodeAt(matrix, b1).y)} · ` +
+      `${Math.round(nodeAt(matrix, a2).y)}/${Math.round(nodeAt(matrix, b2).y)}`
   )
-  check('矩阵列：偏移仍然保留', Boolean(matrix.nodeMap.get(cellA)?.topic.position))
   check(
-    '矩阵列：纵向偏移真的生效（矩阵以前完全不认偏移）',
-    (matrix.nodeMap.get(cellA)?.y ?? 0) > (matrixPlain.nodeMap.get(cellA)?.y ?? 0) + 10,
-    `${Math.round(matrixPlain.nodeMap.get(cellA)?.y ?? 0)} → ${Math.round(matrix.nodeMap.get(cellA)?.y ?? 0)}`
+    '矩阵：第 2 行在第 1 行下方',
+    nodeAt(matrix, a2).y > nodeAt(matrix, a1).y + nodeAt(matrix, a1).height - 1
   )
+  /**
+   * 纵向偏移**不生效**——与「组织架构行」同一套语义（表格里一格挪出自己的行就说不通了）。
+   * 字段本身照旧保留在数据里，只是布局忽略它。横向偏移仍生效（钳在列内）。
+   */
+  check(
+    '矩阵：纵向偏移不生效（格子不许挪出自己的行）',
+    Math.abs(nodeAt(matrix, a1).y - nodeAt(matrixPlain, a1).y) < 0.01,
+    `${Math.round(nodeAt(matrixPlain, a1).y)} → ${Math.round(nodeAt(matrix, a1).y)}`
+  )
+  check('矩阵：偏移字段本身仍在（不丢数据）', Boolean(nodeAt(matrix, a1).topic.position))
+  check('矩阵：没有父子连线', matrix.edges.length === 0)
+  check('矩阵：偏移不会造成重叠', firstOverlap(matrix) === null)
+
+  const matrixSegments = matrix.decorations.flatMap((item) => pathSegments(item.d))
+  const matrixColLines = matrixSegments.filter((seg) => Math.abs(seg[0] - seg[2]) < 0.01)
+  const matrixRowLines = matrixSegments.filter((seg) => Math.abs(seg[1] - seg[3]) < 0.01)
+  check(
+    '矩阵：列线纵贯全表（上下端点一致）',
+    matrixColLines.length > 0 &&
+      new Set(matrixColLines.map((seg) => `${Math.round(seg[1])}/${Math.round(seg[3])}`)).size === 1
+  )
+  check(
+    '矩阵：行线横贯全表（左右端点一致）',
+    matrixRowLines.length > 0 &&
+      new Set(matrixRowLines.map((seg) => `${Math.round(seg[0])}/${Math.round(seg[2])}`)).size === 1
+  )
+  check(
+    '矩阵：行线＝表头上下边 + 每行一条',
+    matrixRowLines.length === 4,
+    String(matrixRowLines.length)
+  )
+
+  /**
+   * 括号图：层级**完全由大括号表达**，不画父子连线。
+   * 以前这里补了"括号 → 每个子节点"的直线，图就脏了（用户说的"括号图也不对"）。
+   */
+  reset()
+  const braceRoot = root().id
+  const braceBranch = addChildOf(braceRoot, '分支')
+  addChildOf(braceBranch, '子一')
+  addChildOf(braceBranch, '子二')
+  store().setStructure('org.xmind.ui.brace.right')
+  const braceCanvas = layoutSheet(root(), multilineMeasure)
+  check('括号图：没有父子连线', braceCanvas.edges.length === 0, String(braceCanvas.edges.length))
+  check('括号图：画出了大括号', braceCanvas.decorations.length > 0)
 }
 
 /* ------------------------------------------------------------------ */
@@ -7634,10 +7685,15 @@ function testStructures(): void {
     const total = countTopics(root())
 
     /**
-     * 表格类结构（矩阵 / 树状表格）按参考**没有连线**，父子关系由网格/框表达，
-     * 所以它们的期望连线数是 0；其它结构仍是"每个非根节点一条入边"。
+     * 「靠装饰表达层级」的结构（矩阵 / 树状表格 / 括号图）**没有连线**：
+     * 矩阵与树状表格靠网格线，括号图靠大括号（官方括号图页：「将主要主题放在左侧，
+     * 向右扩展的支架用于显示组成部分和子部分」；通行规范也是不用连线）。
+     * 其它结构仍是"每个非根节点一条入边"。
      */
-    const tableLike = structure.family === 'matrix' || structure.family === 'spreadsheet'
+    const tableLike =
+      structure.family === 'matrix' ||
+      structure.family === 'spreadsheet' ||
+      structure.family === 'brace'
     if (layout.nodes.length !== total) issues.push(`节点数 ${layout.nodes.length}≠${total}`)
     const wantEdges = tableLike ? 0 : total - 1
     if (layout.edges.length !== wantEdges) issues.push(`连线数 ${layout.edges.length}≠${wantEdges}`)
@@ -7717,6 +7773,45 @@ function testStructures(): void {
   )
   check('树状表格：同一层左边缘对齐', alignedColumns)
 
+  /**
+   * 树状表格＝**带层级的多列表格**（官方：「主题以**嵌套块**的形式显示」「靠表格的行列结构与
+   * 缩进/对齐表达层级」「没有枝干连线」）。
+   *
+   * 这组断言盯的是**网格必须贯穿**：每条行线横跨整表、每条列线纵贯整表。
+   * 上一版的病根就在这儿——线只包住"一棵子树"，于是看起来是"缩进的文字下随机划了几条线"，
+   * 完全不像表格（用户：「根本无法使用」）。
+   */
+  const tableSegments = table.decorations.flatMap((item) => pathSegments(item.d))
+  const tableRows = tableSegments.filter((seg) => Math.abs(seg[1] - seg[3]) < 0.01)
+  const tableCols = tableSegments.filter((seg) => Math.abs(seg[0] - seg[2]) < 0.01)
+  const tableDepth = table.nodes.reduce((deepest, node) => Math.max(deepest, node.depth), 0)
+  check(
+    '树状表格：行线＝每主题一行 + 顶边',
+    tableRows.length === table.nodes.length + 1,
+    `${tableRows.length} vs ${table.nodes.length + 1}`
+  )
+  check(
+    '树状表格：列线＝每个层级一条',
+    tableCols.length === tableDepth + 1,
+    `${tableCols.length} vs ${tableDepth + 1}`
+  )
+  check(
+    '树状表格：行线贯穿整表（左右端点一致）',
+    new Set(tableRows.map((seg) => `${Math.round(seg[0])}/${Math.round(seg[2])}`)).size === 1,
+    [...new Set(tableRows.map((seg) => `${Math.round(seg[0])}/${Math.round(seg[2])}`))].join(' ')
+  )
+  check(
+    '树状表格：列线贯穿整表（上下端点一致）',
+    new Set(tableCols.map((seg) => `${Math.round(seg[1])}/${Math.round(seg[3])}`)).size === 1
+  )
+  const tableRootNode = table.nodeMap.get(root().id)!
+  check(
+    '树状表格：根在左上（最左列 + 最上行）',
+    Math.abs(tableRootNode.x - Math.min(...table.nodes.map((node) => node.x))) < 0.01 &&
+      Math.abs(tableRootNode.y - Math.min(...table.nodes.map((node) => node.y))) < 0.01
+  )
+  check('树状表格：没有父子连线', table.edges.length === 0)
+
   // 水平时间轴：一级分支应在主轴上下交替
   buildStructureSample()
   store().setStructure('org.xmind.ui.timeline.horizontal')
@@ -7790,6 +7885,29 @@ function testStructures(): void {
   })
   const spread = Math.max(...angles) - Math.min(...angles)
   check('放射状：一级分支分布在不同方向', spread > Math.PI / 2, spread.toFixed(2))
+  /**
+   * 顺时针的**方向感**：起点在右上（约 1 点钟，−60°），随后按顺时针（角度递增）依次铺开。
+   *
+   * 以前从正上方（−90°）起铺：两个一级分支会落在正上／正下，"一上一下"读不出顺时针
+   * （用户就是看着截图问"顺时针是这样的？"）。官方只规定了"顺时针"这个方向，
+   * 起点角度属于**我方取值**（见 docs/structure-spec.md）。
+   */
+  const startAngle = -Math.PI / 3
+  check(
+    '顺时针：第一个分支在右上（约 1 点钟）',
+    (angles[0] ?? 0) < 0 && (angles[0] ?? 0) > -Math.PI / 2,
+    `${(((angles[0] ?? 0) * 180) / Math.PI).toFixed(0)}°`
+  )
+  const clockwiseOrder = angles.map((angle) => {
+    let value = angle - startAngle
+    while (value < 0) value += Math.PI * 2
+    return value
+  })
+  check(
+    '顺时针：分支按顺时针依次铺开',
+    clockwiseOrder.every((value, index) => index === 0 || value > (clockwiseOrder[index - 1] ?? 0)),
+    clockwiseOrder.map((value) => ((value * 180) / Math.PI).toFixed(0)).join('° ')
+  )
 }
 
 /* ------------------------------------------------------------------ */

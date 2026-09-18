@@ -12,7 +12,6 @@ import type { LayoutResult, MeasureResult, NodeLayout } from './types'
 import {
   LayoutBuilder,
   addDecoration,
-  addEdge,
   anchorsForChild,
   bracePath,
   connectTree,
@@ -221,7 +220,14 @@ export function layoutLogic(root: Topic, builder: LayoutBuilder, dir: 1 | -1): L
   return result
 }
 
-/** 树形图：与逻辑图同构，改用正交折线连接 */
+/**
+ * 树形图：与逻辑图同构，**枝干用曲线**。
+ *
+ * 官方工具页只规定了布局方向（「自上而下的树形图、左右结构或多分支层级结构」），
+ * **没有**规定连线形状；曲线枝干是**我方取值**（见 `docs/structure-spec.md`）：
+ * 树形图是"从单一根节点向外分支"的形态（官方原文），曲线分叉读起来才像树；
+ * 正交折线更像组织架构图的汇报线，两者混在一起就分不出这两个结构了。
+ */
 export function layoutTree(root: Topic, builder: LayoutBuilder, dir: 1 | -1): LayoutResult {
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
@@ -235,7 +241,7 @@ export function layoutTree(root: Topic, builder: LayoutBuilder, dir: 1 | -1): La
     root.structureClass
   )
   const result = builder.finish(root)
-  connectTree(result, root, 'elbow-h', (parent, child) =>
+  connectTree(result, root, 'bezier', (parent, child) =>
     anchorsForChild(parent, child, horizontalAnchors(parent, child))
   )
   return result
@@ -286,19 +292,17 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
         branchId,
         widthScale: 0.85
       })
-      for (const kid of kids) {
-        const kidMidY = round(kid.y + kid.height / 2)
-        // 括号到子节点的这段仍然是真实的父子关系，所以走 edge 而不是装饰，
-        // 保证「每个子节点都有一条属于自己的连线」这个不变量成立
-        addEdge(
-          result,
-          topic.id,
-          kid.id,
-          { x: braceX, y: kidMidY },
-          { x: round(kid.x), y: kidMidY },
-          'line'
-        )
-      }
+      /**
+       * **不画父子连线**。
+       *
+       * 官方（括号图制作工具页）：「将主要主题放在左侧，向右扩展的**支架（大括号）**用于显示
+       * 组成部分和子部分」——层级完全由大括号表达；括号图的通行规范也是"不用连线/箭头"，
+       * 这正是它与思维导图的根本区别。
+       *
+       * 以前这里补了"括号 → 每个子节点"的直线，理由是"每个子节点都要有一条属于自己的连线"
+       * 这个不变量——那是为别的结构立的规矩，套到括号图上就把图弄脏了。
+       * 现在括号图与矩阵/树状表格同属"靠装饰表达层级"的结构，不变量改判"必须画出括号"。
+       */
     }
 
     for (const child of builder.visibleChildren(topic)) walk(child)
@@ -308,16 +312,26 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
 }
 
 /**
- * 树状表格：**表格**形状。
+ * 树状表格：**带层级的多列表格**。
  *
- * 参考：「根在**最上方 / 左上**；一级主题作为**行**；子主题填进各行的**单元格**，
- * 按深度向右排列；靠**表格边框与缩进**表达层级，**没有连线**」。
+ * 官方原文（《树型表格上线》2021-05-10、《介绍树形表格》2021-06-06）：
+ *  - 「按**总-分-分**的树状逻辑脉络展开」→ 展开方向＝从左到右，**深度＝列**；
+ *  - 「主题以**嵌套块**的形式显示，您可以不断地在块中保持树枝的增长」→ 每个主题是一个块（格子），
+ *    层级由**缩进**表达；
+ *  - 「节点在主题中**默认右对齐**，可以用于记录数据」→ 单元格内的文本对齐（渲染层的事）；
+ *  - 「靠**表格的行列结构与缩进/对齐**表达层级」→ **画网格线，不画父子连线**。
  *
- * 所以：**每一行 = 一个一级分支及其全部后代**（按深度分列，同一深度共用同一个列 x，
- * 这才有表格的纵向对齐），行高由这一行最长的那条链决定；每行画一个框。
+ * 几何：前序遍历给每个主题一行（行高＝该主题自身高度），列号＝深度，且**同一深度共用同一个 x**
+ * （列宽取该深度最宽的节点）——同一层级的块左边缘对齐，纵向才读得出"列"。
+ *
+ * 两条踩过的坑，写在这儿免得再犯：
+ * ① **不要把"行"理解成"一个一级分支及其全部后代"**：那样一行里混着好几个层级的高度，
+ *    网格线只能按子树分组画成一条条长短不一的长横线，读起来既不像表格、也不知道在划什么
+ *    （用户：「看着乱七八糟」，后来直接说「根本无法使用」）；
+ * ② 网格线必须用**归一化之后**的坐标算，否则线和格子对不上。
  */
 export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutResult {
-  // 每一层的列宽 = 该层最宽的节点（跨行共用，保证各行的同层单元格左边缘对齐）
+  // 每一层的列宽 = 该层最宽的节点（跨行共用，保证同一深度的块左边缘对齐）
   const widthByDepth: number[] = []
   const scan = (topic: Topic, depth: number): void => {
     const size = builder.size(topic.id)
@@ -332,48 +346,56 @@ export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutRe
     colX[depth] = cursorX
     cursorX += (widthByDepth[depth] ?? 0) + builder.gapX
   }
+  const tableRight = cursorX - builder.gapX
 
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, colX[0] ?? 0, 0, 0, 'root')
 
-  const rows: Array<{ ids: string[] }> = []
-  let cursorY = rootNode.y + rootSize.height + builder.gapY * 2
-
-  for (const branch of builder.visibleChildren(root)) {
-    const ids: string[] = []
-    const place = (topic: Topic, depth: number): void => {
-      const size = builder.size(topic.id)
-      builder.add(topic, colX[depth] ?? 0, cursorY, depth, 'down')
-      ids.push(topic.id)
+  /** 每个主题占一行：前序遍历（父在子上、子树连续），与大纲的读法一致 */
+  let cursorY = rootNode.y + rootSize.height + builder.gapY
+  const rowIds: string[] = [root.id]
+  const place = (topic: Topic, depth: number): void => {
+    for (const child of builder.visibleChildren(topic)) {
+      const size = builder.size(child.id)
+      builder.add(child, colX[depth] ?? 0, cursorY, depth, 'down')
+      rowIds.push(child.id)
       cursorY += size.height + builder.gapY
-      for (const child of builder.visibleChildren(topic)) place(child, depth + 1)
+      place(child, depth + 1)
     }
-    place(branch, 1)
-    rows.push({ ids })
-    cursorY += builder.gapY * 1.6
   }
+  place(root, 1)
 
   const result = builder.finish(root)
+
+  const nodes = rowIds
+    .map((id) => result.nodeMap.get(id))
+    .filter((node): node is NodeLayout => node !== undefined)
+  if (nodes.length === 0) return result
+
   /**
-   * 表格的"行"感用**行线**表达（参考：靠表格边框表达层级，没有连线）。
+   * 网格线：**每行下方一条横线（贯穿整表宽度）+ 每个层级分界一条竖线（贯穿整表高度）**。
    *
-   * 两点教训：
-   * ① 不要每行画一个大圆角框——行一多就像一堆空盒子散在画布上（用户："看着乱七八糟"）；
-   * ② 行线必须从**最终**节点矩形算：早先用归一化之前的坐标，线跟节点对不上，
-   *    格子会跑到框外面去。
+   * 为什么必须"贯穿"：表格的读法全靠这些线把行列切出来。只画一段（比如只包住这一行、
+   * 或只包住一棵子树），行与列的对应关系就断了——上一版就是这么画的，于是看起来像
+   * "缩进的文字下随机划了几条线"。
    */
-  for (const row of rows) {
-    const nodes = row.ids
-      .map((id) => result.nodeMap.get(id))
-      .filter((node): node is NodeLayout => node !== undefined)
-    if (nodes.length === 0) continue
-    const left = Math.min(...nodes.map((node) => node.x)) - 12
-    const right = Math.max(...nodes.map((node) => node.x + node.width)) + 12
-    const bottom = Math.max(...nodes.map((node) => node.y + node.height)) + 12
-    addDecoration(result, {
-      d: `M ${round(left)} ${round(bottom)} L ${round(right)} ${round(bottom)}`,
-      widthScale: 1
-    })
+  const left = round(colX[0] ?? 0)
+  const top = round(Math.min(...nodes.map((node) => node.y)) - builder.gapY / 2)
+  const bottom = round(Math.max(...nodes.map((node) => node.y + node.height)) + builder.gapY / 2)
+  const right = round(tableRight)
+
+  // 顶边：把第一行（读起来就是表头行）封起来
+  addDecoration(result, { d: `M ${left} ${top} L ${right} ${top}`, widthScale: 1 })
+  // 行线：每个主题一行，线画在它下方（根的下一行也自然被上一条线分开）
+  for (const node of nodes) {
+    const y = round(node.y + node.height + builder.gapY / 2)
+    addDecoration(result, { d: `M ${left} ${y} L ${right} ${y}`, widthScale: 1 })
   }
+  // 列线：每个层级的分界（含最左边界）——同一深度的块靠它读成一列
+  for (let depth = 0; depth <= widthByDepth.length - 1; depth += 1) {
+    const x = round((colX[depth] ?? 0) - builder.gapX / 2)
+    addDecoration(result, { d: `M ${x} ${top} L ${x} ${bottom}`, widthScale: 1 })
+  }
+
   return result
 }
