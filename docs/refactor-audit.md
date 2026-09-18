@@ -86,14 +86,29 @@
 
 ## 四、执行顺序（每步都要过五道门槛）
 
-1. ✅ **死代码清理**（§2）——已全绿
-2. `shared` 层：`layout/core` → `overlays` → `graphic` → `agent` → `ai` → `highlight`
+1. ✅ **死代码清理**（§2）——提交 `8b7908a`
+2. **`shared` 层**（进行中）：`layout/core` ✅（提交 `6eeab2f`）→ `overlays` → `graphic` → `agent` → `ai` → `highlight`
 3. 渲染层：`measure` → `drawing` → `TopicNode` → `NodePanel` → `Toolbar` → `ChatPanel` → `App` → `Canvas`
 4. `store/editor.ts` 切片 + 纯逻辑下沉（撤销/排序/移动/派生值）
 5. `main/index.ts` 按 IPC 域拆分（注入 `ctx`，通道名不动）
 6. `selfcheck.ts` 按域拆分（harness 先落地，再逐域搬）
 7. 重复实现收敛（§2.4 剩余项）+ `styles.css` 拆分
 8. 文档与门槛收口（CHANGELOG / known-issues 状态更新）
+
+### 已完成批次
+
+| 批次 | 内容 | 结果 |
+|---|---|---|
+| 死代码清理 | 删零引用 16 类、收窄导出面 14 处、去重 2 组 | 25 文件、净 −124 行；五道门槛全绿（`8b7908a`） |
+| `layout/core.ts` | 1252 行 → `core.ts` 597（LayoutBuilder）+ `core/cache.ts` 160 + `core/geometry.ts` 32 + `core/connect.ts` 512 | 调用点**零改动**（`export *` 统一再导出），五道门槛全绿（`6eeab2f`） |
+
+### 搬迁手法（后续批次沿用）
+
+1. 先完整读目标文件，按「模块级可搬迁 / 类内必须连坐」划清边界——**只搬模块级代码**，避免为拆分去改方法体；
+2. 用一次性脚本按行区间**逐字节搬迁**（读入归一成 LF 便于匹配，写出统一还原 CRLF，避免整文件换行抖动）；
+3. 搬迁后跑**残留自检**（例：确认没有裸的 `activeRuntime` 赋值漏改），不通过就不落盘；
+4. 相对路径层级与类型来源在落盘后一次性修正（`typecheck` 逐条指出，不靠猜）；
+5. 五道门槛全绿才算完成，然后提交。
 
 ## 五、刻意不做
 
