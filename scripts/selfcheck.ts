@@ -178,6 +178,7 @@ import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument } from '../src/s
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { markerVisualOf } from '../src/renderer/src/render/markers'
+import { attrTranslate, cssTranslate } from '../src/renderer/src/render/transform'
 import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
 import { buildDrawing } from '../src/renderer/src/export/drawing'
 import { drawingToSvg } from '../src/renderer/src/export/svg'
@@ -1395,6 +1396,20 @@ function testNodeDrag(): void {
     topicsInBox(marqueeNodes, { x: -5, y: -5, width: 5, height: 5 }).join(','),
     'a'
   )
+
+  /**
+   * 位移的两套语法：**CSS 要单位、SVG 属性不要**。
+   *
+   * 真踩过：命令式拖拽把 CSS 那套写进 SVG 的 `<g transform>`，属性解析失败
+   * （控制台每帧一条 `Expected ')'`），拖拽连线层不动、还白烧帧预算。
+   * 数值算得对不对不重要，**谁带单位**才是要钉住的东西。
+   */
+  group('位移字符串：CSS 与 SVG 两套语法')
+
+  eq('CSS：带单位', cssTranslate(-2.5, -124), 'translate(-2.5px, -124px)')
+  eq('SVG：不带单位', attrTranslate(-2.5, -124), 'translate(-2.5, -124)')
+  check('SVG 的写法里绝不出现 px', !attrTranslate(10, 20).includes('px'))
+  check('CSS 的写法里必须有 px（没单位就不是有效位移）', cssTranslate(10, 20).includes('px'))
 
   const otherStack: SiblingStack = {
     parentId: 'q',

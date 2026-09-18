@@ -48,6 +48,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
 import { viewportActions } from '../render/viewport'
+import { attrTranslate, cssTranslate } from '../render/transform'
 import { themeColorsOf, useEditor } from '../store/editor'
 import TopicNode from './TopicNode'
 
@@ -287,7 +288,7 @@ export default function Canvas(): ReactElement {
   const ghostElsRef = useRef<HTMLElement[]>([])
   const dragEdgesRef = useRef<SVGGElement | null>(null)
   /** 最近一次命令式写入的位移（拖拽层刚挂载时用它补齐，见下面的 effect） */
-  const ghostCssRef = useRef('')
+  const ghostOffsetRef = useRef<{ dx: number; dy: number } | null>(null)
 
   /* ---- 拖拽过程中：贴住画布边缘时自动滚动 ---- */
   const dragAutoScroll = useCallback((): void => {
@@ -1151,13 +1152,14 @@ export default function Canvas(): ReactElement {
 
       /** 命令式地把被拖子树与它的内部连线移到 (worldDx, worldDy) */
       const applyGhostTransform = (worldDx: number, worldDy: number): void => {
-        const css = `translate(${worldDx}px, ${worldDy}px)`
-        ghostCssRef.current = css
+        ghostOffsetRef.current = { dx: worldDx, dy: worldDy }
+        const css = cssTranslate(worldDx, worldDy)
         for (const el of ghostElsRef.current) el.style.transform = css
-        dragEdgesRef.current?.setAttribute('transform', css)
+        dragEdgesRef.current?.setAttribute('transform', attrTranslate(worldDx, worldDy))
       }
       /** 松手 / 取消时把命令式写的位移清掉（否则会和 React 重新渲染的新位置叠加） */
       const clearGhostTransform = (): void => {
+        ghostOffsetRef.current = null
         for (const el of ghostElsRef.current) el.style.transform = ''
         dragEdgesRef.current?.setAttribute('transform', '')
         ghostElsRef.current = []
@@ -1998,10 +2000,10 @@ export default function Canvas(): ReactElement {
    */
   useEffect(() => {
     if (!dragSet) return
-    const css = ghostCssRef.current
-    if (!css) return
-    for (const el of ghostElsRef.current) el.style.transform = css
-    dragEdgesRef.current?.setAttribute('transform', css)
+    const offset = ghostOffsetRef.current
+    if (!offset) return
+    for (const el of ghostElsRef.current) el.style.transform = cssTranslate(offset.dx, offset.dy)
+    dragEdgesRef.current?.setAttribute('transform', attrTranslate(offset.dx, offset.dy))
   }, [dragSet])
 
   const dragFocus = useMemo(() => {
