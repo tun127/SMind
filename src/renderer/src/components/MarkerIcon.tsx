@@ -25,7 +25,7 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import type { AccessoryItem } from '@shared/layout/types'
-import { MARKER_STROKE_WIDTH } from '@shared/marker-art'
+import { INDICATOR_STROKE_WIDTH, MARKER_STROKE_WIDTH } from '@shared/marker-art'
 import { markerVisualOf, type MarkerGlyph } from '../render/markers'
 
 /** 图形名 -> 图标组件。纯映射，判断逻辑都在 markers.ts 里 */
@@ -189,7 +189,7 @@ export function IndicatorIcon({
       title={INDICATOR_TITLES[kind]}
       style={{ width: size, height: size }}
     >
-      <Icon size={size} strokeWidth={2} />
+      <Icon size={size} strokeWidth={INDICATOR_STROKE_WIDTH} />
     </span>
   )
 }

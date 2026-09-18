@@ -18,7 +18,11 @@ import prettier from 'prettier'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '..')
 
-/** 图形名 → lucide 图标文件名（与 `render/markers.ts` 的 MarkerGlyph 一一对应） */
+/**
+ * 图标名 → lucide 图标文件名。
+ * 前 17 个与 `render/markers.ts` 的 `MarkerGlyph` 一一对应；
+ * 后 3 个是节点顶部的指示图标（备注 / 链接 / 附件，见 `MarkerIcon.tsx` 的 `IndicatorIcon`）。
+ */
 const ICONS = {
   star: 'star',
   flag: 'flag',
@@ -36,8 +40,15 @@ const ICONS = {
   'light-bulb': 'lightbulb',
   crown: 'crown',
   finance: 'circle-dollar-sign',
-  award: 'award'
+  award: 'award',
+  notes: 'sticky-note',
+  link: 'link',
+  attachment: 'paperclip'
 }
+
+/** 指示图标在画布上的线宽与不透明度（与 `.topic__indicator` 的样式一致） */
+const INDICATOR_STROKE_WIDTH = 2
+const INDICATOR_OPACITY = 0.72
 
 const SUPPORTED_TAGS = new Set(['path', 'circle', 'line', 'polyline', 'polygon', 'rect'])
 const SUPPORTED_ATTRS = new Set([
@@ -85,7 +96,12 @@ function normalize(name, node) {
         if (typeof attrs.d !== 'string') throw new Error(`${where}: 缺 d`)
         return { k: 'path', d: attrs.d }
       case 'circle':
-        return { k: 'circle', cx: num(attrs.cx, where), cy: num(attrs.cy, where), r: num(attrs.r, where) }
+        return {
+          k: 'circle',
+          cx: num(attrs.cx, where),
+          cy: num(attrs.cy, where),
+          r: num(attrs.r, where)
+        }
       case 'line':
         return {
           k: 'line',
@@ -137,6 +153,11 @@ for (const [glyph, file] of Object.entries(ICONS)) {
   art[glyph] = normalize(glyph, data.node)
 }
 
+/** 类型联合：图标名逐个列出来（键顺序即图标表顺序，便于对照） */
+const nameUnion = Object.keys(art)
+  .map((key) => `  | '${key}'`)
+  .join('\n')
+
 const header = `/**
  * 标记图标的矢量数据。
  *
@@ -164,13 +185,23 @@ export const ICON_VIEWBOX = 24
  */
 export const MARKER_STROKE_WIDTH = 2.2
 
+/** 指示图标（备注 / 链接 / 附件）的线宽与不透明度：与画布上的 \`IndicatorIcon\` 一致 */
+export const INDICATOR_STROKE_WIDTH = ${INDICATOR_STROKE_WIDTH}
+export const INDICATOR_OPACITY = ${INDICATOR_OPACITY}
+
 /**
- * 图形名 → 图元列表。
- *
- * 键与 \`render/markers.ts\` 的 \`MarkerGlyph\` 一一对应；
- * 自检里有一条断言逐个核对"每个图形都有数据"，漏一个会当场失败。
+ * 可用的图标名：**标记图形**（17 个，与 \`render/markers.ts\` 的 \`MarkerGlyph\` 对应）
+ * 加上**指示图标**（备注 / 链接 / 附件）。
  */
-export const ICON_ART: Record<string, readonly IconShape[]> = ${JSON.stringify(art, null, 2)}
+export type IconName =
+${nameUnion}
+
+/**
+ * 图标名 → 图元列表。
+ *
+ * 自检里有一条断言逐个核对"画布能用到的每个图形都有数据"，漏一个会当场失败。
+ */
+export const ICON_ART: Record<IconName, readonly IconShape[]> = ${JSON.stringify(art, null, 2)}
 `
 
 const target = path.join(root, 'src/shared/marker-art.ts')

@@ -136,6 +136,9 @@ const api: MindApi = {
   saveExport: (data: Uint8Array | string, fileName: string, ext: ImageExportFormat) =>
     ipcRenderer.invoke(IPC.saveExport, data, fileName, ext) as Promise<string | null>,
 
+  svgToPdf: (svg: string, width: number, height: number) =>
+    ipcRenderer.invoke(IPC.svgToPdf, svg, width, height) as Promise<Uint8Array | null>,
+
   aiConfigGet: () => ipcRenderer.invoke(IPC.aiConfigGet) as Promise<AiConfigView>,
 
   aiConfigSave: (patch: AiConfigPatch) =>

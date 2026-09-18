@@ -111,14 +111,26 @@ export function placeVerticalColumn(
   depth: number
 ): void {
   const parentSize = builder.size(topic.id)
+  /** 游标是「下一格可用的边」：向下是上边线，向上是下边线 */
   let cursor = side < 0 ? y - builder.gapY : y + parentSize.height + builder.gapY
 
   for (const child of builder.visibleChildren(topic)) {
     const size = builder.size(child.id)
-    const childY = side < 0 ? cursor - size.height : cursor
+    /**
+     * 边界/概要在这一格上下占用的空间一起算进游标。
+     * 不算的话，「给某几格加边界」时边框与标题带会直接压到相邻那格身上
+     * （鱼骨的小骨列、时间轴的水平刻目都是这条路径）。
+     */
+    const childY =
+      side < 0
+        ? cursor - builder.reserveBottom(child) - size.height
+        : cursor + builder.reserveTop(child)
     builder.add(child, x, childY, depth + 1, side < 0 ? 'up' : 'down')
     placeVerticalColumn(builder, child, x, childY, side, depth + 1)
-    cursor = side < 0 ? childY - builder.gapY : childY + size.height + builder.gapY
+    cursor =
+      side < 0
+        ? childY - builder.reserveTop(child) - builder.gapY
+        : childY + size.height + builder.reserveBottom(child) + builder.gapY
   }
 }
 
@@ -136,17 +148,28 @@ export function placeHorizontalColumn(
   for (const child of builder.visibleChildren(topic)) {
     const size = builder.size(child.id)
     const childX = side < 0 ? outerX - indent - size.width : outerX + indent
+    /**
+     * 边界/概要在这一行上下占用的空间算进行高，否则紧邻的下一行会被压住。
+     */
+    cursor += builder.reserveTop(child)
     builder.add(child, childX, cursor, depth + 1, side < 0 ? 'left' : 'right')
+    /**
+     * 把这一格的外侧交给下一层时**让出概要占的宽度**：
+     * 概要是画在「这一层这几个格子的外缘」的，更深一层若不退到它外面，
+     * 就会正好落在括号与文字上。
+     */
     placeHorizontalColumn(
       builder,
       child,
-      side < 0 ? childX : childX + size.width,
+      side < 0
+        ? childX - builder.reserveLeft(child)
+        : childX + size.width + builder.reserveRight(child),
       cursor,
       side,
       depth + 1,
       indent
     )
-    cursor += size.height + builder.gapY
+    cursor += size.height + builder.reserveBottom(child) + builder.gapY
   }
 }
 
@@ -325,9 +348,16 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
 export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutResult {
   // 每一层的列宽 = 该层最宽的节点（跨行共用，保证同一深度的块左边缘对齐）
   const widthByDepth: number[] = []
+  /**
+   * 概要括号画在某一行的右外侧，占的宽度要比**这一行最靠右的格子**再多出来。
+   * 表格的右边界（＝网格线的右端）必须一起往右让，
+   * 否则括号与文字会落在网格线外、看着像"跑到表格外面去了"。
+   */
+  let maxReserveX = 0
   const scan = (topic: Topic, depth: number): void => {
     const size = builder.size(topic.id)
     widthByDepth[depth] = Math.max(widthByDepth[depth] ?? 0, size.width)
+    maxReserveX = Math.max(maxReserveX, builder.reserveSpanX(topic))
     for (const child of builder.visibleChildren(topic)) scan(child, depth + 1)
   }
   scan(root, 0)
@@ -338,20 +368,22 @@ export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutRe
     colX[depth] = cursorX
     cursorX += (widthByDepth[depth] ?? 0) + builder.gapX
   }
-  const tableRight = cursorX - builder.gapX
+  const tableRight = cursorX - builder.gapX + maxReserveX
 
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, colX[0] ?? 0, 0, 0, 'root')
 
   /** 每个主题占一行：前序遍历（父在子上、子树连续），与大纲的读法一致 */
-  let cursorY = rootNode.y + rootSize.height + builder.gapY
+  let cursorY = rootNode.y + rootSize.height + builder.reserveBottom(root) + builder.gapY
   const rowIds: string[] = [root.id]
   const place = (topic: Topic, depth: number): void => {
     for (const child of builder.visibleChildren(topic)) {
       const size = builder.size(child.id)
+      // 边界的标题带/边框占的是"这一行的上下"，行高必须一起让开
+      cursorY += builder.reserveTop(child)
       builder.add(child, colX[depth] ?? 0, cursorY, depth, 'down')
       rowIds.push(child.id)
-      cursorY += size.height + builder.gapY
+      cursorY += size.height + builder.reserveBottom(child) + builder.gapY
       place(child, depth + 1)
     }
   }

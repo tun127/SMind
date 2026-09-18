@@ -6,8 +6,8 @@
  */
 import type { NodeStyle, Relationship, Sheet, Topic } from '../model/types'
 import { readOverlayFontSize } from '../model/overlay-style'
-import { visibleChildren } from '../model/tree'
-import { RELATIONSHIP_CURVE_KEY } from '../xmind/constants'
+import { childFoldSides, visibleChildren, type FoldSide } from '../model/tree'
+import { getStructureDef, RELATIONSHIP_CURVE_KEY } from '../xmind/constants'
 import { round } from './core'
 import type { BoundaryLayout, LayoutResult, RelationshipLayout, SummaryLayout } from './types'
 
@@ -238,7 +238,8 @@ function sameBounds(a: Bounds, b: Bounds): Bounds {
  * Xmind 的布局引擎会预留，这里用同一套常量把「要留多少」交给布局：
  * - `top`：区间第一个主题上方 = 边框内边距 + （有标题时的）标题带；
  * - `bottom`：区间最后一个主题下方 = 边框内边距；
- * - `right`：概要括号在区间外侧，需要「间距 + 尖点 + 一点文字宽度」。
+ * - `left` / `right` / `up` / `down`：概要括号在区间外侧，需要
+ *   「间距 + 尖点 + 一点文字宽度」——**朝哪一侧由结构决定**（见 `summaryReserveSide`）。
  *
  * 与绘制共用同一批常量（`BOUNDARY_PAD` / `BOUNDARY_TITLE_H` / `SUMMARY_*`），
  * 所以「留出来的白」与「画出来的黑」不会各说各话。
@@ -246,16 +247,66 @@ function sameBounds(a: Bounds, b: Bounds): Bounds {
 export interface OverlayReserves {
   top: Map<string, number>
   bottom: Map<string, number>
+  left: Map<string, number>
   right: Map<string, number>
+}
+
+/**
+ * 概要括号朝哪一侧留白。
+ *
+ * 判据只能是**结构家族**：布局要在摆放之前就知道往哪儿让空间，
+ * 而此时还没有任何坐标（`summaryOf` 里那个「父节点 → 区间中心」的方向是摆放之后才算的）。
+ * - 向左右生长的结构（逻辑 / 树形 / 括号 / 鱼骨 / 水平时间轴 / 树状表格）→ 让在生长侧；
+ * - 多方向结构（平衡思维导图 / 放射图 / 垂直时间轴）→ 跟**这一支自己的方向**；
+ * - 上下生长的（组织架构图）与矩阵图 → 让在区间下方（向上生长的让在上方）。
+ */
+function summaryReserveSide(root: Topic, branch: FoldSide): FoldSide {
+  const def = getStructureDef(root.structureClass)
+  switch (def.family) {
+    case 'mindmap':
+      // 平衡图左右各有分支：括号画在这一支的外侧（左支往左、右支往右）
+      return branch
+    case 'timeline':
+      // 垂直时间轴的区间挂在主轴左右两侧 → 跟分支；水平时间轴是单向向右
+      return def.class === 'org.xmind.ui.timeline.vertical' ? branch : 'right'
+    case 'spreadsheet':
+      // 「深度＝列」：括号接在区间那一行的右端（`grows: 'down'` 说的是徽标方向，不是括号）
+      return 'right'
+    default:
+      // 其余单方向结构（逻辑 / 树形 / 括号 / 鱼骨 / 组织架构 / 矩阵）跟生长方向
+      return def.grows ?? 'right'
+  }
 }
 
 export function overlayReserves(root: Topic, sheet: Sheet): OverlayReserves {
   const index = indexTree(root)
   const top = new Map<string, number>()
   const bottom = new Map<string, number>()
+  const left = new Map<string, number>()
   const right = new Map<string, number>()
   const bump = (map: Map<string, number>, id: string, value: number): void => {
     map.set(id, Math.max(map.get(id) ?? 0, value))
+  }
+  const bumpSide = (side: FoldSide, id: string, value: number): void => {
+    if (side === 'left') bump(left, id, value)
+    else if (side === 'up') bump(top, id, value)
+    else if (side === 'down') bump(bottom, id, value)
+    else bump(right, id, value)
+  }
+
+  /** 一级分支的展开方向（多方向结构才有；单方向结构返回空表） */
+  const branchSides = childFoldSides(root)
+  /** 一个主题属于哪一支、那一支朝哪儿展开 */
+  const branchSideOf = (topicId: string): FoldSide => {
+    const def = getStructureDef(root.structureClass)
+    if (topicId === root.id) return def.grows ?? 'right'
+    let current = topicId
+    let parent = index.parentOf.get(current)
+    while (parent !== undefined && parent !== root.id) {
+      current = parent
+      parent = index.parentOf.get(current)
+    }
+    return branchSides.get(current) ?? def.grows ?? 'right'
   }
 
   for (const boundary of sheet.boundaries) {
@@ -273,10 +324,14 @@ export function overlayReserves(root: Topic, sheet: Sheet): OverlayReserves {
     const last = topics[topics.length - 1]
     if (!last) continue
     // 括号 → 尖点 → 文字；文字宽度不可预知，按一个保守的定值留一点
-    bump(right, last.id, SUMMARY_GAP + SUMMARY_NIB + 48)
+    bumpSide(
+      summaryReserveSide(root, branchSideOf(last.id)),
+      last.id,
+      SUMMARY_GAP + SUMMARY_NIB + 48
+    )
   }
 
-  return { top, bottom, right }
+  return { top, bottom, left, right }
 }
 
 export function boundsOfRange(

@@ -8,6 +8,20 @@ import type { LayoutResult } from './types'
 import { LayoutBuilder, addDecoration, addEdge, anchorPoint, round, type Point } from './core'
 import type { NodeLayout } from './types'
 
+/**
+ * 节点在布局里**实际**占的宽 / 高：尺寸加上边界（上下）与概要（左右）在外侧的留白。
+ *
+ * 这三种结构（鱼骨、矩阵、放射）的行列间距全部是"按占位算出来的"，
+ * 用裸 `size` 算就会把留白算丢——加一个边界之后，边框与标题带会直接压到相邻的
+ * 行 / 列 / 环上（用户之前看到的就是这类"压住"）。
+ */
+function spanX(builder: LayoutBuilder, topic: Topic): number {
+  return builder.size(topic.id).width + builder.reserveSpanX(topic)
+}
+function spanY(builder: LayoutBuilder, topic: Topic): number {
+  return builder.size(topic.id).height + builder.reserveSpanY(topic)
+}
+
 /* ------------------------------------------------------------------ */
 /* 鱼骨图                                                              */
 /* ------------------------------------------------------------------ */
@@ -30,9 +44,11 @@ function placeRightColumn(
   for (const child of builder.visibleChildren(topic)) {
     const childSize = builder.size(child.id)
     const childX = x + size.width + builder.gapX
+    // 边界标题带在这一格上方 → 先让出高度再摆
+    cursor += builder.reserveTop(child)
     builder.add(child, childX, cursor, depth + 1, 'right')
     placeRightColumn(builder, child, childX, cursor, depth + 1)
-    cursor += childSize.height + builder.gapY
+    cursor += childSize.height + builder.reserveBottom(child) + builder.gapY
   }
 }
 
@@ -61,7 +77,7 @@ function rightColumnWidth(builder: LayoutBuilder, topic: Topic): number {
   for (const child of builder.visibleChildren(topic)) {
     widest = Math.max(
       widest,
-      builder.gapX + builder.size(child.id).width + rightColumnWidth(builder, child)
+      builder.gapX + spanX(builder, child) + rightColumnWidth(builder, child)
     )
   }
   return widest
@@ -90,14 +106,39 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
    * 相邻两根的间距 = 跨度 ÷（小骨数 + 1），要求它 ≥ 小骨高 + 行距。
    */
   const maxRibKids = Math.max(0, ...kids.map((child) => builder.visibleChildren(child).length))
+  /** 小骨这一格**实际**占的高（含边界预留）：沿大骨取点时的最小间距由它决定 */
   const ribKidHeight = Math.max(
     0,
-    ...kids.flatMap((child) =>
-      builder.visibleChildren(child).map((kid) => builder.size(kid.id).height)
-    )
+    ...kids.flatMap((child) => builder.visibleChildren(child).map((kid) => spanY(builder, kid)))
   )
   const ribSpan = maxRibKids > 1 ? (maxRibKids + 1) * (ribKidHeight + builder.gapY) : 0
-  const boneOffset = Math.max(rootSize.height / 2 + builder.gapY * 3, 46, ribSpan)
+  /** 大骨在主脊的哪一侧：取 `childFoldSides`（唯一来源），与折叠无关 */
+  const sides = childFoldSides(root)
+  /** 大骨在 `side` 那一侧、离主脊半高最远需要多少（**只算靠主脊那一侧的留白**） */
+  const boneReach = (side: -1 | 1): number => {
+    let reach = rootSize.height / 2
+    for (const child of kids) {
+      if ((sides.get(child.id) === 'up' ? -1 : 1) !== side) continue
+      reach = Math.max(
+        reach,
+        builder.size(child.id).height / 2 +
+          (side < 0 ? builder.reserveBottom(child) : builder.reserveTop(child))
+      )
+    }
+    return reach
+  }
+  /**
+   * 大骨的上下偏移。
+   *
+   * 除了「装得下小骨」（`ribSpan`），还要装得下**边界**：边框与标题带画在大骨外侧，
+   * 靠近主脊的那一侧若不让位，边框就会压到主脊上（远离主脊的一侧是往外长，不用管）。
+   */
+  const boneOffset = Math.max(
+    46,
+    ribSpan,
+    boneReach(-1) + builder.gapY * 3,
+    boneReach(1) + builder.gapY * 3
+  )
   // 骨刺斜度：让骨刺看起来是斜的，而不是垂直的
   const boneSlant = Math.round(boneOffset * 0.45)
   /** 小骨长度（大骨上的取点 → 子主题左缘） */
@@ -107,11 +148,10 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
   /** 小骨：记下"哪根大骨的第几段"，最终坐标到 finish 之后再算 */
   const ribs: Array<{ branchId: string; childId: string; side: -1 | 1; t: number }> = []
   let cursor = rootNode.x + rootNode.width + builder.gapX * 2
-  /** 大骨在主脊的哪一侧：取 `childFoldSides`（唯一来源），与折叠无关 */
-  const sides = childFoldSides(root)
 
   kids.forEach((child) => {
-    const extent = builder.horizontalExtent(child)
+    // 大骨占的宽度要含概要在它右侧留出的括号位
+    const extent = builder.horizontalExtent(child) + builder.reserveSpanX(child)
     const size = builder.size(child.id)
     const nodeCenterX = cursor + boneSlant + extent / 2
     const anchorX = nodeCenterX - boneSlant
@@ -165,8 +205,7 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
      * 不算进来就会顶到隔壁大骨的地盘（自检的"节点重叠"当场抓到过：深4 ⨯ 短二2）。
      */
     const ribFootprint = ribKids.reduce(
-      (widest, kid) =>
-        Math.max(widest, builder.size(kid.id).width + rightColumnWidth(builder, kid)),
+      (widest, kid) => Math.max(widest, spanX(builder, kid) + rightColumnWidth(builder, kid)),
       0
     )
     const ownFootprint = ribKids.length > 0 ? columnX - anchorX + ribFootprint : boneSlant + ribGap
@@ -262,9 +301,9 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
 /* 矩阵图                                                              */
 /* ------------------------------------------------------------------ */
 
-/** 某一棵子树里最宽的节点，用于决定列的宽度 */
+/** 某一棵子树里最宽的节点（含概要括号留白），用于决定列的宽度 */
 function maxWidthOf(builder: LayoutBuilder, topic: Topic): number {
-  let width = builder.size(topic.id).width
+  let width = spanX(builder, topic)
   for (const child of builder.visibleChildren(topic)) {
     width = Math.max(width, maxWidthOf(builder, child))
   }
@@ -279,9 +318,11 @@ function maxWidthOf(builder: LayoutBuilder, topic: Topic): number {
  */
 function stackHeight(builder: LayoutBuilder, topic: Topic): number {
   const size = builder.size(topic.id)
+  // 格内纵向堆叠同样要算边界预留：边框与标题带都画在这一格的上下
+  const own = size.height + builder.reserveSpanY(topic)
   const kids = builder.visibleChildren(topic)
-  if (kids.length === 0) return size.height
-  let total = size.height + builder.gapY
+  if (kids.length === 0) return own
+  let total = own + builder.gapY
   for (const kid of kids) total += stackHeight(builder, kid) + builder.gapY
   return total - builder.gapY
 }
@@ -338,9 +379,20 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
 
   const plannedRootX = Math.max(0, (tableWidth - rootSize.width) / 2)
   const rootNode = builder.add(root, plannedRootX, 0, 0, 'root')
-  const headerTop = rootNode.y + rootSize.height + builder.gapY * 2
+  /**
+   * 表头行的上下都要为边界让位：上方是根与这一行之间的标题带，下方是这一行自己的边框。
+   * 以前只按 `gapY * 2` 留，给表头加边界之后边框会压到根主题或第一行格子上。
+   */
+  let headerTopReserve = 0
+  let headerBottomReserve = 0
+  for (const header of kids) {
+    headerTopReserve = Math.max(headerTopReserve, builder.reserveTop(header))
+    headerBottomReserve = Math.max(headerBottomReserve, builder.reserveBottom(header))
+  }
+  const headerTop =
+    rootNode.y + rootSize.height + builder.reserveBottom(root) + headerTopReserve + builder.gapY * 2
   const headerHeight = kids.reduce(
-    (tallest, header) => Math.max(tallest, builder.size(header.id).height),
+    (tallest, header) => Math.max(tallest, spanY(builder, header)),
     0
   )
 
@@ -371,10 +423,11 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
 
     builder.visibleChildren(header).forEach((cell, row) => {
       const size = builder.size(cell.id)
-      const y = rowTop[row] ?? headerTop
+      // 这一格的边界标题带要先让出来（行高里已经含了这份预留）
+      const y = (rowTop[row] ?? headerTop) + builder.reserveTop(cell)
       builder.add(cell, cellX(left, width, size, cell.position?.x ?? 0), y, 2, 'down')
       // 更深的层级是本格的细分：在同一格里继续往下堆
-      let below = y + size.height + builder.gapY
+      let below = y + size.height + builder.reserveBottom(cell) + builder.gapY
       const stackDeeper = (topic: Topic, depth: number): void => {
         for (const kid of builder.visibleChildren(topic)) {
           const kidSize = builder.size(kid.id)
@@ -400,7 +453,10 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
    */
   const dx = finalRoot.x - plannedRootX
   const dy = finalRoot.y
-  const gridTop = round(headerTop - builder.gapY / 2 + dy)
+  // 网格的顶边要越过表头为边界让出的那一段，否则标题带会露在表格外面
+  const gridTop = round(
+    headerTop - headerTopReserve - Math.max(headerBottomReserve, builder.gapY / 2) + dy
+  )
   const gridBottom = round(
     (rowCount > 0
       ? (rowTop[rowCount - 1] ?? headerTop) + (rowHeight[rowCount - 1] ?? 0)
@@ -451,11 +507,11 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
   const kids = builder.visibleChildren(root)
 
-  /** 每一层节点的最大边长，用于决定环间距 */
+  /** 每一层节点的最大"实际占位"（含边界/概要留白），用于决定环间距与扇区半径 */
   const maxSizeByDepth: number[] = []
   const scan = (topic: Topic, depth: number): void => {
-    const size = builder.size(topic.id)
-    maxSizeByDepth[depth] = Math.max(maxSizeByDepth[depth] ?? 0, Math.max(size.width, size.height))
+    const reach = Math.max(spanX(builder, topic), spanY(builder, topic))
+    maxSizeByDepth[depth] = Math.max(maxSizeByDepth[depth] ?? 0, reach)
     for (const child of builder.visibleChildren(topic)) scan(child, depth + 1)
   }
   scan(root, 0)
@@ -500,8 +556,7 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
   if (count > 1) {
     let maxSize = 0
     for (const kid of kids) {
-      const size = builder.size(kid.id)
-      maxSize = Math.max(maxSize, Math.max(size.width, size.height))
+      maxSize = Math.max(maxSize, Math.max(spanX(builder, kid), spanY(builder, kid)))
     }
     baseRadius = Math.max(baseRadius, radiusForSector(sector, maxSize))
   }
@@ -556,8 +611,9 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
   // 第二遍：逐层定半径——本层取该层所有节点的最大需求，同层同半径
   const needByDepth: number[] = []
   for (const plan of plans) {
-    const size = builder.size(plan.topic.id)
-    const need = radiusForSector(plan.sector, Math.max(size.width, size.height))
+    // 实际占位（含边界/概要留白）：否则紧邻的那一环会被括号压住
+    const reach = Math.max(spanX(builder, plan.topic), spanY(builder, plan.topic))
+    const need = radiusForSector(plan.sector, reach)
     needByDepth[plan.depth] = Math.max(needByDepth[plan.depth] ?? 0, need)
   }
   const maxDepth = plans.reduce((deepest, plan) => Math.max(deepest, plan.depth), 1)

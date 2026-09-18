@@ -1680,6 +1680,83 @@ function registerIpc(): void {
     }
   )
 
+  /**
+   * SVG → **矢量 PDF**。
+   *
+   * 为什么放在主进程：渲染进程没有"打印"能力，而 `webContents.printToPDF` 正是
+   * Chromium 的打印管线——文字是真字（可选中、可搜索）、图形是真矢量、中文交给系统字体。
+   * 这正是位图 PDF 缺的三样（早期版本是"把画布栅格化后塞进 PDF 当图片"）。
+   *
+   * 三条硬性约束：
+   * ① **失败一律返回 null**，由渲染层回落到位图 PDF——导出绝不能因为"想要矢量"而失败；
+   * ② 内容先落到临时文件再 `loadFile`：导出的 SVG 里内嵌着图片与公式的 data URL，
+   *    大文档下几百 KB 起步，走 `data:` URL 不稳；
+   * ③ 页面尺寸按 CSS px 交给 `@page`，`preferCSSPageSize` 让它 1:1 对上导出坐标系
+   *    （1px = 1/96 英寸），不需要再折算缩放。
+   */
+  async function svgToPdf(svg: string, width: number, height: number): Promise<Uint8Array | null> {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0)
+      return null
+    /**
+     * Chromium 的页面尺寸上限是 200 英寸。超出就直接放弃（回落到位图），
+     * 免得让用户等一次注定失败的转换。
+     */
+    const MAX_INCH = 190
+    if (width / 96 > MAX_INCH || height / 96 > MAX_INCH) return null
+
+    const pageWidth = Math.ceil(width)
+    const pageHeight = Math.ceil(height)
+    const html = `<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  /* 页面比内容多留 1px：正好相等时 Chromium 偶尔会多生成一张空白页 */
+  @page { size: ${pageWidth + 1}px ${pageHeight + 1}px; margin: 0 }
+  html, body { margin: 0; padding: 0; background: #ffffff; overflow: hidden }
+  svg { display: block }
+</style></head><body>${svg}</body></html>`
+
+    const tempPath = join(app.getPath('temp'), `smind-export-${Date.now()}.html`)
+    let win: BrowserWindow | null = null
+    try {
+      await fs.writeFile(tempPath, html, 'utf8')
+      win = new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: {
+          // 这份内容完全由我们自己生成（SVG 字符串），关掉一切用不上的能力
+          javascript: false,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true
+        }
+      })
+      await win.loadFile(tempPath)
+      const buffer = await win.webContents.printToPDF({
+        printBackground: true,
+        preferCSSPageSize: true,
+        margins: { top: 0, bottom: 0, left: 0, right: 0 }
+      })
+      return new Uint8Array(buffer)
+    } catch (error) {
+      logMain('导出矢量 PDF 失败，回落到位图', error)
+      return null
+    } finally {
+      if (win && !win.isDestroyed()) win.destroy()
+      void fs.rm(tempPath, { force: true }).catch(() => undefined)
+    }
+  }
+
+  ipcMain.handle(
+    IPC.svgToPdf,
+    async (_e, svg: string, width: number, height: number): Promise<Uint8Array | null> => {
+      // 入参来自渲染进程：只做"是不是字符串/有限数字"这一层形状校验，
+      // 真正的安全边界是"内容只被当成 SVG 渲染、且窗口没有任何权限"
+      if (typeof svg !== 'string' || svg.length === 0 || svg.length > 64 * 1024 * 1024) return null
+      return svgToPdf(svg, Number(width), Number(height))
+    }
+  )
+
   /* ---- AI（P8） ---- */
 
   ipcMain.handle(IPC.aiConfigGet, async (): Promise<AiConfigView> =>

@@ -12,9 +12,9 @@ import type { StructureClass, Topic } from '../model/types'
 // 别名：类里也有个同名方法（它只是转发到这个纯函数），不加别名读起来像递归
 import { visibleChildren as visibleChildrenOf } from '../model/tree'
 import { DEFAULT_STRUCTURE, getStructureDef } from '../xmind/constants'
+import { mix, subtreeStamp } from './stamp'
 import type {
   Decoration,
-  EdgeLayout,
   LayoutBounds,
   LayoutResult,
   MeasureFn,
@@ -24,6 +24,149 @@ import type {
 } from './types'
 
 export const LAYOUT_DEFAULTS = { gapX: 56, gapY: 18, padding: 60 }
+
+/* ------------------------------------------------------------------ */
+/* 增量布局的持久缓存                                                  */
+/* ------------------------------------------------------------------ */
+
+/** 带版本号的缓存条目：戳一致才敢用 */
+export interface MemoEntry<T> {
+  stamp: number
+  value: T
+}
+
+/** 复用计数：自检靠它证明"确实省掉了活"，而不是只有结果对 */
+export interface LayoutStats {
+  /** 真的调用了测量函数的次数（其余都命中了缓存） */
+  measureCalls: number
+  measuresReused: number
+  extentsComputed: number
+  extentsReused: number
+  nodesReused: number
+  edgesReused: number
+  decorationsReused: number
+}
+
+export function emptyLayoutStats(): LayoutStats {
+  return {
+    measureCalls: 0,
+    measuresReused: 0,
+    extentsComputed: 0,
+    extentsReused: 0,
+    nodesReused: 0,
+    edgesReused: 0,
+    decorationsReused: 0
+  }
+}
+
+/**
+ * 跨轮次保留的缓存。
+ *
+ * 存在的理由：编辑一个节点时，绝大多数子树与它无关，但布局过去每轮都要
+ * 重新测量、重新算子树占用、重新拼每一条连线的 path。这里把这几样按
+ * 「子树戳」留着，下一轮只对**真的变了的那条路径**重算。
+ *
+ * 只有 `layoutSheetCached`（incremental.ts）会创建并持有它；
+ * 每次内容都要与它比对的输入签名也在那边维护。
+ */
+export interface LayoutMemo {
+  gapX: number
+  gapY: number
+  padding: number
+  /** 每个节点的测量结果：连主题对象与层数一起记，别把别的节点的尺寸用错了 */
+  measures: Map<string, { topic: Topic; depth: number; value: MeasureResult }>
+  /** 每棵子树的戳（见 stamp.ts） */
+  stamps: Map<string, number>
+  /** 上一轮每个节点的最终几何（主题对象没换、坐标也没换时直接复用同一个对象） */
+  nodes: Map<string, NodeLayout>
+  /** 子树占用 / 纵向占用 / 横向占用 / 层数的结果缓存 */
+  extents: Map<string, MemoEntry<{ width: number; height: number }>>
+  verticals: Map<string, MemoEntry<number>>
+  horizontals: Map<string, MemoEntry<number>>
+  depths: Map<string, MemoEntry<number>>
+  /** 连线 path：键是「父|子|形状」，签名是这条线依赖到的几何版本 */
+  edgePaths: Map<string, { sig: string; d: string }>
+  /** 上一轮的装饰线（整表按几何哈希复用） */
+  decorations: { hash: number; items: Decoration[] }
+  /** 上一轮的分支配色索引（只取决于树的形状与顺序） */
+  branchIndex?: Map<string, number>
+  stats: LayoutStats
+}
+
+export function createLayoutMemo(gapX: number, gapY: number, padding: number): LayoutMemo {
+  return {
+    gapX,
+    gapY,
+    padding,
+    measures: new Map(),
+    stamps: new Map(),
+    nodes: new Map(),
+    extents: new Map(),
+    verticals: new Map(),
+    horizontals: new Map(),
+    depths: new Map(),
+    edgePaths: new Map(),
+    decorations: { hash: -1, items: [] },
+    branchIndex: undefined,
+    stats: emptyLayoutStats()
+  }
+}
+
+/** 布局参数（间距/留白）变了：几何类的缓存全部作废（测量结果还能留着） */
+export function resetLayoutGeometry(memo: LayoutMemo): void {
+  memo.extents.clear()
+  memo.verticals.clear()
+  memo.horizontals.clear()
+  memo.depths.clear()
+  memo.edgePaths.clear()
+  memo.decorations = { hash: -1, items: [] }
+  memo.branchIndex = undefined
+}
+
+/** 排版环境变了（字体就绪、默认字号/对齐改变）：连测量结果一起作废 */
+export function resetLayoutMemo(
+  memo: LayoutMemo,
+  gapX: number,
+  gapY: number,
+  padding: number
+): void {
+  resetLayoutGeometry(memo)
+  memo.measures.clear()
+  memo.stamps.clear()
+  memo.nodes.clear()
+  memo.gapX = gapX
+  memo.gapY = gapY
+  memo.padding = padding
+  memo.stats = emptyLayoutStats()
+}
+
+/**
+ * 当前这一轮的运行时（模块级单例）。
+ *
+ * 为什么用单例而不是把缓存一路传参：`addEdge` / `addDecoration` 是各结构算法
+ * 直接调用的**自由函数**（它们的签名是稳定的、被 9 个家族共用），
+ * 为复用把缓存当第 7 个参数传下去会污染所有调用点。
+ * 布局是**同步且单线程**的（`finish` 里挂上、`commit` 里摘掉），
+ * 所以这里用一个显式生命周期管理的运行时是安全的。
+ */
+interface LayoutRuntime {
+  memo: LayoutMemo
+  /** 全图几何的混合值：正交折线要绕开挡路的节点，所以它依赖全图 */
+  geometryHash: number
+  /** 每个节点的几何版本，用于连线的精确复用判据 */
+  versions: Map<string, number>
+  /** 本轮的结果（`spine` 复用要顺着它找回整列） */
+  result: LayoutResult | null
+  /**
+   * 本轮树的形状没变（增量路径才成立）。
+   *
+   * 装饰线是**按顺序**整批复用的，而条数由形状决定（矩阵的列数、表格的行数），
+   * 所以只有形状稳定时才敢整批沿用——形状变了就必须重画。
+   */
+  shapeStable: boolean
+}
+
+let activeRuntime: LayoutRuntime | null = null
 
 export function round(n: number): number {
   return Math.round(n * 10) / 10
@@ -184,31 +327,108 @@ export function pathFor(kind: ConnectorKind, from: Point, to: Point): string {
 export class LayoutBuilder {
   readonly nodes: NodeLayout[] = []
   readonly nodeMap = new Map<string, NodeLayout>()
+  /** 复用计数：不给 memo 时也照样统计（自检与诊断用） */
+  readonly stats: LayoutStats
+  /** 本轮所有节点最终几何的混合值（连线与装饰的复用判据之一） */
+  geometryHash = 0
 
   private readonly sizes = new Map<string, MeasureResult>()
-  private readonly verticalCache = new Map<string, number>()
-  private readonly horizontalCache = new Map<string, number>()
-  private readonly subtreeExtentCache = new Map<string, { width: number; height: number }>()
-  private readonly depthCache = new Map<string, number>()
   private readonly finishHooks: Array<(result: LayoutResult) => void> = []
 
   constructor(
     private readonly measure: MeasureFn,
     readonly gapX: number = LAYOUT_DEFAULTS.gapX,
     readonly gapY: number = LAYOUT_DEFAULTS.gapY,
-    readonly padding: number = LAYOUT_DEFAULTS.padding
-  ) {}
+    readonly padding: number = LAYOUT_DEFAULTS.padding,
+    /** 增量布局的跨轮缓存；不传就是纯全量布局（行为与以前完全一致） */
+    readonly memo?: LayoutMemo,
+    /**
+     * 本轮「可能有变化」的子树根（见 `incremental.ts`）。
+     *
+     * 不在这个集合里的子树**整棵都没动**：测量结果、子树占用现在就能从
+     * `memo` 里直接取，不必再递归一遍。全量布局不传它 → 每棵子树都走一遍。
+     */
+    private readonly touched?: ReadonlySet<string>
+  ) {
+    /**
+     * 复用计数**每轮清零**：它回答的是"这一轮省了多少活"，
+     * 累加的话"第一轮全量 + 第二轮增量"会读起来像"增量也把整棵树跑了一遍"。
+     */
+    if (memo) memo.stats = emptyLayoutStats()
+    this.stats = memo?.stats ?? emptyLayoutStats()
+  }
 
+  /** 这一棵子树本轮是不是可以整体沿用上一轮的结果 */
+  private isClean(topic: Topic): boolean {
+    return this.touched !== undefined && !this.touched.has(topic.id)
+  }
+
+  private stampOf(topic: Topic): number {
+    return this.memo?.stamps.get(topic.id) ?? 0
+  }
+
+  /**
+   * 测量全树（增量时只走"可能有变化"的那部分）。
+   *
+   * 顺带把子树戳算出来：戳是后面所有复用（子树占用、连线、节点对象）的凭据，
+   * 而它必须**自底向上**算（子节点戳参与了父节点戳），所以放在这里最省一趟遍历。
+   */
   measureAll(root: Topic): void {
     const walk = (topic: Topic, depth: number): void => {
-      this.sizes.set(topic.id, this.measure(topic, depth))
-      for (const child of topic.children) walk(child, depth + 1)
+      // 整棵子树没动：尺寸与戳都还是上一轮的，直接返回
+      if (this.isClean(topic)) {
+        this.stats.measuresReused += 1
+        return
+      }
+      const seeded = this.sizes.get(topic.id)
+      if (seeded) {
+        // 增量层已经量过它了：顺手把测量缓存也刷新，下一轮还能命中
+        this.memo?.measures.set(topic.id, { topic, depth, value: seeded })
+      } else {
+        const memoized = this.memo?.measures.get(topic.id)
+        if (memoized && memoized.topic === topic && memoized.depth === depth) {
+          this.sizes.set(topic.id, memoized.value)
+          this.stats.measuresReused += 1
+        } else {
+          this.stats.measureCalls += 1
+          const value = this.measure(topic, depth)
+          this.sizes.set(topic.id, value)
+          this.memo?.measures.set(topic.id, { topic, depth, value })
+        }
+      }
+      const childStamps: number[] = []
+      for (const child of topic.children) {
+        walk(child, depth + 1)
+        childStamps.push(this.stampOf(child))
+      }
+      const own = this.sizes.get(topic.id) ?? this.memo?.measures.get(topic.id)?.value
+      this.memo?.stamps.set(
+        topic.id,
+        subtreeStamp({
+          topic,
+          width: own?.width ?? 0,
+          height: own?.height ?? 0,
+          childStamps,
+          reserves: [
+            this.reserveTop(topic),
+            this.reserveBottom(topic),
+            this.reserveLeft(topic),
+            this.reserveRight(topic)
+          ],
+          cls: topic.structureClass
+        })
+      )
     }
     walk(root, 0)
   }
 
+  /** 直接塞进已经算好的测量结果（增量层在变更检测阶段已经量过一遍了） */
+  seedMeasures(sizes: ReadonlyMap<string, MeasureResult>): void {
+    for (const [id, size] of sizes) this.sizes.set(id, size)
+  }
+
   size(id: string): MeasureResult {
-    const size = this.sizes.get(id)
+    const size = this.sizes.get(id) ?? this.memo?.measures.get(id)?.value
     if (!size) throw new Error(`布局：节点 ${id} 尚未测量`)
     return size
   }
@@ -242,10 +462,41 @@ export class LayoutBuilder {
     return node
   }
 
+  /**
+   * 读跨轮缓存：子树戳一致就说明这棵子树和上一轮一模一样，占用不必重算。
+   *
+   * 返回里带着 `stamp` 与 `ok`，是为了让"未命中"的那条路径能把同一个戳写回去
+   * （写回时再取一次戳会拿到同样的值，但多一次 Map 查询没有意义）。
+   */
+  private memoRead<T>(
+    store: Map<string, MemoEntry<T>> | undefined,
+    key: string,
+    topic: Topic
+  ): { hit: boolean; value?: T; stamp: number; ok: boolean } {
+    if (!store) return { hit: false, stamp: 0, ok: false }
+    const stamp = this.memo?.stamps.get(topic.id)
+    if (stamp === undefined) return { hit: false, stamp: 0, ok: false }
+    const entry = store.get(key)
+    if (entry && entry.stamp === stamp) return { hit: true, value: entry.value, stamp, ok: true }
+    return { hit: false, stamp, ok: true }
+  }
+
+  private memoWrite<T>(
+    store: Map<string, MemoEntry<T>> | undefined,
+    key: string,
+    read: { stamp: number; ok: boolean },
+    value: T
+  ): void {
+    if (store && read.ok) store.set(key, { stamp: read.stamp, value })
+  }
+
   /** 子树垂直占用的高度（含自身与间距、以及边界/概要的预留） */
   verticalExtent(topic: Topic): number {
-    const cached = this.verticalCache.get(topic.id)
-    if (cached !== undefined) return cached
+    const read = this.memoRead(this.memo?.verticals, topic.id, topic)
+    if (read.hit) {
+      this.stats.extentsReused += 1
+      return read.value as number
+    }
     const size = this.size(topic.id)
     const kids = visibleChildrenOf(topic)
     let total = 0
@@ -259,15 +510,21 @@ export class LayoutBuilder {
         this.reserveBottom(kid) +
         (i > 0 ? this.gapY : 0)
     }
-    const value = Math.max(size.height, kids.length > 0 ? total : 0)
-    this.verticalCache.set(topic.id, value)
+    // 自己身上的边界留白也要算进来（纵向列按它排前后两格）
+    const own = size.height + this.reserveSpanY(topic)
+    const value = Math.max(own, kids.length > 0 ? total : 0)
+    this.stats.extentsComputed += 1
+    this.memoWrite(this.memo?.verticals, topic.id, read, value)
     return value
   }
 
   /** 子树水平占用的宽度（含自身与间距） */
   horizontalExtent(topic: Topic): number {
-    const cached = this.horizontalCache.get(topic.id)
-    if (cached !== undefined) return cached
+    const read = this.memoRead(this.memo?.horizontals, topic.id, topic)
+    if (read.hit) {
+      this.stats.extentsReused += 1
+      return read.value as number
+    }
     const size = this.size(topic.id)
     const kids = visibleChildrenOf(topic)
     let total = 0
@@ -277,7 +534,8 @@ export class LayoutBuilder {
       total += this.horizontalExtent(kid) + (i > 0 ? this.gapX : 0)
     }
     const value = Math.max(size.width, kids.length > 0 ? total : 0)
-    this.horizontalCache.set(topic.id, value)
+    this.stats.extentsComputed += 1
+    this.memoWrite(this.memo?.horizontals, topic.id, read, value)
     return value
   }
 
@@ -290,28 +548,42 @@ export class LayoutBuilder {
    *
    * 按 id 缓存：鱼骨图与时间轴会对**每个一级分支**问一次（用来定主脊长度），
    * 分支自己又声明同类结构时会层层再问——不缓存就退化成 O(节点数 × 深度)。
-   * 只依赖树的形状（`collapsed` 只在跑布局前定好），一次布局里结果恒定。
+   * 只依赖树的形状（`collapsed` 只在跑布局前定好），一次布局里结果恒定；
+   * 跨轮也一样（戳里含折叠与子节点戳），所以它能进跨轮缓存。
    */
   maxDepth(topic: Topic): number {
-    const cached = this.depthCache.get(topic.id)
-    if (cached !== undefined) return cached
+    const read = this.memoRead(this.memo?.depths, topic.id, topic)
+    if (read.hit) {
+      this.stats.extentsReused += 1
+      return read.value as number
+    }
     let depth = 0
     for (const child of this.visibleChildren(topic)) {
       depth = Math.max(depth, this.maxDepth(child))
     }
     const value = depth + 1
-    this.depthCache.set(topic.id, value)
+    this.stats.extentsComputed += 1
+    this.memoWrite(this.memo?.depths, topic.id, read, value)
     return value
   }
 
-  /** 直接子节点纵向排列所需的总高度（不含自身） */
+  /**
+   * 直接子节点纵向排列所需的总高度（不含自身）。
+   *
+   * 含边界/概要在子节点上占用的外侧空间：时间轴（垂直）用它把整列**居中**，
+   * 不算预留就会把整列往上偏，留白全堆在下面。
+   */
   childrenColumnHeight(topic: Topic): number {
     const kids = this.visibleChildren(topic)
     let total = 0
     for (let i = 0; i < kids.length; i += 1) {
       const kid = kids[i]
       if (!kid) continue
-      total += this.size(kid.id).height + (i > 0 ? this.gapY : 0)
+      total +=
+        this.size(kid.id).height +
+        this.reserveTop(kid) +
+        this.reserveBottom(kid) +
+        (i > 0 ? this.gapY : 0)
     }
     return total
   }
@@ -319,6 +591,7 @@ export class LayoutBuilder {
   /* ---- 边界 / 概要用掉的外侧空间（见 overlays.overlayReserves） ---- */
   private overlayTop = new Map<string, number>()
   private overlayBottom = new Map<string, number>()
+  private overlayLeft = new Map<string, number>()
   private overlayRight = new Map<string, number>()
 
   /**
@@ -330,10 +603,12 @@ export class LayoutBuilder {
   applyOverlayReserves(reserves: {
     top: Map<string, number>
     bottom: Map<string, number>
+    left: Map<string, number>
     right: Map<string, number>
   }): void {
     this.overlayTop = reserves.top
     this.overlayBottom = reserves.bottom
+    this.overlayLeft = reserves.left
     this.overlayRight = reserves.right
   }
 
@@ -347,9 +622,29 @@ export class LayoutBuilder {
     return this.overlayBottom.get(topic.id) ?? 0
   }
 
+  /** 这个主题左侧要为概要括号留出的宽度 */
+  reserveLeft(topic: Topic): number {
+    return this.overlayLeft.get(topic.id) ?? 0
+  }
+
   /** 这个主题右侧要为概要括号留出的宽度 */
   reserveRight(topic: Topic): number {
     return this.overlayRight.get(topic.id) ?? 0
+  }
+
+  /**
+   * 这个主题在**横向**上为概要让出的总宽度（左 + 右）。
+   *
+   * 单方向结构只有一侧非零；平衡思维导图的两侧分支各自让自己那一侧，
+   * 但布局按「这一支占多宽」记账，所以取和不会重复计算（同一主题只会有一侧非零）。
+   */
+  reserveSpanX(topic: Topic): number {
+    return this.reserveLeft(topic) + this.reserveRight(topic)
+  }
+
+  /** 这个主题在**纵向**上为边界让出的总高度（上 + 下） */
+  reserveSpanY(topic: Topic): number {
+    return this.reserveTop(topic) + this.reserveBottom(topic)
   }
 
   /** 注册一个「坐标归一化之后」执行的钩子：嵌套结构的装饰与连线要在最终坐标上补画 */
@@ -367,9 +662,13 @@ export class LayoutBuilder {
    * @param cls 画布级结构，递归时原样传下去（**不再看子主题自己的 structureClass**）
    */
   subtreeExtent(topic: Topic, cls: StructureClass | undefined): { width: number; height: number } {
+    // 键里带上结构：同一棵子树在不同家族下的占用完全不同
     const key = topic.id + '\u0000' + (cls ?? '')
-    const cached = this.subtreeExtentCache.get(key)
-    if (cached) return cached
+    const read = this.memoRead(this.memo?.extents, key, topic)
+    if (read.hit) {
+      this.stats.extentsReused += 1
+      return read.value as { width: number; height: number }
+    }
 
     const effective = cls ?? DEFAULT_STRUCTURE
     const family = getStructureDef(effective).family
@@ -411,12 +710,29 @@ export class LayoutBuilder {
       // 垂直堆叠家族（以及暂不支持的家族按逻辑图回落）
       let height = 0
       kids.forEach((child, index) => {
-        height += this.subtreeExtent(child, effective).height + (index > 0 ? this.gapY : 0)
+        /**
+         * 边界/概要在子节点上下占的空间必须一起算进槽位。
+         *
+         * `placeVerticalChildren` 摆放时是按「子树占用 + 上下预留」消费槽位的，
+         * 这里少算了它，父节点那一层就会按"没有留白"分配高度：
+         * 子树整体比槽位高，居中之后多出来的部分顶到下一个兄弟身上
+         * （自检当场抓到过：平衡图里 A 支的边界压到 C 支）。
+         */
+        height +=
+          this.subtreeExtent(child, effective).height +
+          this.reserveTop(child) +
+          this.reserveBottom(child) +
+          (index > 0 ? this.gapY : 0)
       })
-      extent = { width: size.width, height: Math.max(size.height, height) }
+      // 宽度带上概要留白：树状表格/矩阵这类「按列排布」的嵌套结构靠它把列拉开
+      extent = {
+        width: size.width + this.reserveSpanX(topic),
+        height: Math.max(size.height, height)
+      }
     }
 
-    this.subtreeExtentCache.set(key, extent)
+    this.stats.extentsComputed += 1
+    this.memoWrite(this.memo?.extents, key, read, extent)
     return extent
   }
 
@@ -441,9 +757,41 @@ export class LayoutBuilder {
 
     const dx = this.padding - minX
     const dy = this.padding - minY
-    for (const node of this.nodes) {
-      node.x = round(node.x + dx)
-      node.y = round(node.y + dy)
+    /**
+     * 平移坐标，并在这里做**节点对象复用**。
+     *
+     * 为什么复用放在这一步：缓存里存的是上一轮**归一化之后**的最终坐标，
+     * 而摆放阶段的坐标是"归一化之前"的——两者只有在平移量已知时才能比。
+     * （第一版把复用写在 `add()` 里，拿摆放坐标去比最终坐标，于是永远不命中。）
+     *
+     * 复用必须**同时**看主题对象：内容变了但尺寸没变时坐标是对的，
+     * 可 `lines` 已经旧了，那种情况走"只换文字"那条路径（见 incremental.ts）。
+     * 也不允许原地改复用的对象——它同时挂在上一轮的结果里，渲染层正拿着它，
+     * 原地改会让 `TopicNode` 的 memo 认为"没变化"而停在旧位置。
+     */
+    for (let index = 0; index < this.nodes.length; index += 1) {
+      const node = this.nodes[index]
+      if (!node) continue
+      const movedX = round(node.x + dx)
+      const movedY = round(node.y + dy)
+      const previous = this.memo?.nodes.get(node.id)
+      if (
+        previous &&
+        previous.topic === node.topic &&
+        previous.x === movedX &&
+        previous.y === movedY &&
+        previous.depth === node.depth &&
+        previous.side === node.side
+      ) {
+        this.nodes[index] = previous
+        this.nodeMap.set(previous.id, previous)
+        this.stats.nodesReused += 1
+        continue
+      }
+      if (movedX === node.x && movedY === node.y) continue
+      const moved: NodeLayout = { ...node, x: movedX, y: movedY }
+      this.nodes[index] = moved
+      this.nodeMap.set(moved.id, moved)
     }
 
     const bounds: LayoutBounds = {
@@ -453,15 +801,42 @@ export class LayoutBuilder {
       height: round(maxY - minY + this.padding * 2)
     }
 
-    const branchIndex = new Map<string, number>()
-    branchIndex.set(root.id, -1)
-    root.children.forEach((child, index) => {
-      const mark = (topic: Topic): void => {
-        branchIndex.set(topic.id, index)
-        for (const grand of topic.children) mark(grand)
+    /**
+     * 分支配色索引只取决于树的形状与顺序（不看尺寸），
+     * 增量路径下形状保证没变 → 直接沿用上一轮那张表。
+     */
+    let branchIndex = this.touched ? this.memo?.branchIndex : undefined
+    if (!branchIndex) {
+      branchIndex = new Map<string, number>()
+      branchIndex.set(root.id, -1)
+      root.children.forEach((child, index) => {
+        const mark = (topic: Topic): void => {
+          branchIndex!.set(topic.id, index)
+          for (const grand of topic.children) mark(grand)
+        }
+        mark(child)
+      })
+      if (this.memo) this.memo.branchIndex = branchIndex
+    }
+
+    // 几何版本：给连线的精确复用当判据（`elbow-*` 要绕开全图的挡路节点，用得上整体哈希）
+    const versions = new Map<string, number>()
+    const hashes: number[] = []
+    for (const node of this.nodes) {
+      const version = mix([node.x * 10, node.y * 10, node.width, node.height])
+      versions.set(node.id, version)
+      hashes.push(version)
+    }
+    this.geometryHash = mix(hashes)
+    if (this.memo) {
+      activeRuntime = {
+        memo: this.memo,
+        geometryHash: this.geometryHash,
+        versions,
+        result: null,
+        shapeStable: this.touched !== undefined
       }
-      mark(child)
-    })
+    }
 
     const result: LayoutResult = {
       nodes: this.nodes,
@@ -474,15 +849,63 @@ export class LayoutBuilder {
       boundaries: [],
       summaries: []
     }
+    if (activeRuntime) activeRuntime.result = result
     // 嵌套结构（如分支上的鱼骨图）的主脊、骨刺要在最终坐标上补画
     for (const hook of this.finishHooks) hook(result)
     return result
+  }
+
+  /**
+   * 一轮布局收了尾：把本轮的节点几何与装饰线留给下一轮复用，并摘掉运行时。
+   *
+   * 必须在 `runLayout` 的最后调用——装饰线是在归一化之后才画上的，
+   * 提前收尾就会把"这一轮的装饰线"漏掉。
+   */
+  commit(result: LayoutResult): void {
+    if (!this.memo) {
+      activeRuntime = null
+      return
+    }
+    this.memo.nodes.clear()
+    for (const node of result.nodes) this.memo.nodes.set(node.id, node)
+    this.memo.decorations = { hash: this.geometryHash, items: result.decorations.slice() }
+    activeRuntime = null
   }
 }
 
 /* ------------------------------------------------------------------ */
 /* 连线与装饰的收集                                                    */
 /* ------------------------------------------------------------------ */
+
+/**
+ * 连线的复用键与依赖签名。
+ *
+ * 一条线的 path 依赖哪些几何，各形状不一样，这里必须一个个说清楚——
+ * 判据放宽就会画出一条**指向旧位置**的线（比不缓存更糟）：
+ * - `line` / `bezier`：只依赖两个端点，端点版本一致就能沿用；
+ * - `spine`（列脊）：脊的位置按**父节点 + 它这一列的全部可见子节点**算，都要进签名；
+ * - `elbow-*`（正交折线）：要看全图有没有节点挡路（`crossedNodes`），
+ *   所以它依赖**整图**几何哈希——全图一点没动才敢复用。
+ */
+function edgeMemoKey(
+  result: LayoutResult,
+  fromId: string,
+  toId: string,
+  kind: ConnectorKind
+): { key: string; sig: string } | null {
+  const runtime = activeRuntime
+  if (!runtime) return null
+  const version = (id: string): number => runtime.versions.get(id) ?? -1
+  const parts = [String(version(fromId)), String(version(toId))]
+  if (kind === 'elbow-h' || kind === 'elbow-v') parts.push(String(runtime.geometryHash))
+  if (kind === 'spine') {
+    const parent = result.nodeMap.get(fromId)
+    if (parent) {
+      for (const sibling of visibleChildrenOf(parent.topic)) parts.push(String(version(sibling.id)))
+    }
+  }
+  return { key: `${fromId}|${toId}|${kind}`, sig: parts.join(',') }
+}
 
 export function addEdge(
   result: LayoutResult,
@@ -492,6 +915,17 @@ export function addEdge(
   to: Point,
   kind: ConnectorKind
 ): void {
+  const memo = activeRuntime?.memo
+  const reuse = edgeMemoKey(result, fromId, toId, kind)
+  if (memo && reuse) {
+    const cached = memo.edgePaths.get(reuse.key)
+    if (cached && cached.sig === reuse.sig) {
+      result.edges.push({ fromId, toId, d: cached.d })
+      memo.stats.edgesReused += 1
+      return
+    }
+  }
+
   /**
    * 列脊：由结构显式声明（它知道自己的子节点是不是排成一列）。
    * 锚点由这里重算——列脊要进的是子节点的**侧缘**，而不是结构原来给的上/下缘。
@@ -500,7 +934,7 @@ export function addEdge(
     const parent = result.nodeMap.get(fromId)
     const child = result.nodeMap.get(toId)
     if (parent && child) {
-      result.edges.push({ fromId, toId, d: polyline(spinePoints(result, parent, child)) })
+      storeEdge(memo, reuse, polyline(spinePoints(result, parent, child)), result, fromId, toId)
       return
     }
   }
@@ -516,8 +950,19 @@ export function addEdge(
     kind === 'elbow-v' || kind === 'elbow-h'
       ? orthogonalPath(result, fromId, toId, from, to, kind)
       : pathFor(kind, from, to)
-  const edge: EdgeLayout = { fromId, toId, d }
-  result.edges.push(edge)
+  storeEdge(memo, reuse, d, result, fromId, toId)
+}
+
+function storeEdge(
+  memo: LayoutMemo | undefined,
+  reuse: { key: string; sig: string } | null,
+  d: string,
+  result: LayoutResult,
+  fromId: string,
+  toId: string
+): void {
+  if (memo && reuse) memo.edgePaths.set(reuse.key, { sig: reuse.sig, d })
+  result.edges.push({ fromId, toId, d })
 }
 
 /** 离开锚点的小段：太短会贴着节点边框看不出转折 */
@@ -643,6 +1088,21 @@ function orthogonalPath(
 }
 
 export function addDecoration(result: LayoutResult, decoration: Decoration): void {
+  /**
+   * 装饰线（主脊、网格线、大括号）每条都要按最终坐标拼字符串。
+   * 条数由形状决定、坐标由节点决定，所以「形状没变 + 全图几何没变」时
+   * 整批沿用上一轮的结果，连字符串都不必再拼。
+   */
+  const runtime = activeRuntime
+  const memo = runtime?.memo
+  if (runtime && memo && runtime.shapeStable && memo.decorations.hash === runtime.geometryHash) {
+    const cached = memo.decorations.items[result.decorations.length]
+    if (cached) {
+      result.decorations.push(cached)
+      memo.stats.decorationsReused += 1
+      return
+    }
+  }
   result.decorations.push(decoration)
 }
 

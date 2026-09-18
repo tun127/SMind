@@ -4,7 +4,8 @@
  * 思路：把布局结果（node 坐标/尺寸/断行/分段样式/图片框/公式框 + 连线/边界/概要）
  * 翻译成一串与具体输出格式无关的绘制指令，然后由两个后端分别消费：
  *   - svg.ts：生成矢量 SVG
- *   - raster.ts：用 Canvas 2D 画成位图（供 PNG 与 PDF 用）
+ *   - raster.ts：用 Canvas 2D 画成位图（供 PNG 用，以及 PDF 的回落路径）
+ * SVG 还有第二个去处：主进程用它转**矢量 PDF**（`svgToPdf`），所以 PDF 默认是矢量的。
  * 这样「画布上看到的」与「导出的」用的是同一份布局数据，不会出现两套排版。
  *
  * 本文件是纯函数（不碰 DOM），可以在自检里直接断言生成的指令。
@@ -13,6 +14,8 @@
 import type { AccessoryItem, LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
 import {
   BLOCK_GAP,
+  ACCESSORY_ICON_GAP,
+  ACCESSORY_ICON_SIZE,
   CODE_CHAR_RATIO,
   CODE_FONT_FAMILY,
   MARKER_GAP,
@@ -28,10 +31,11 @@ import type { ThemeColors, Topic } from '@shared/model/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import { readOverlayTextStyle } from '@shared/model/overlay-style'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
-import { measureTextWidth } from '../render/measure'
+import { measureTextWidth, TEXT_MAX } from '../render/measure'
 import { HIGHLIGHT_BG } from '@shared/richtext'
 import { formulaSize } from '../render/formula'
-import { markerVisualOf, type MarkerGlyph } from '../render/markers'
+import { markerVisualOf } from '../render/markers'
+import { INDICATOR_OPACITY, INDICATOR_STROKE_WIDTH, type IconName } from '@shared/marker-art'
 import { branchColorOf, visualFor } from '../render/theme'
 
 /* ------------------------------------------------------------------ */
@@ -159,7 +163,11 @@ export interface GlyphOp {
   y: number
   size: number
   color: string
-  glyph: MarkerGlyph
+  glyph: IconName
+  /** 线宽；缺省用标记图标的线宽（指示图标细一档） */
+  strokeWidth?: number
+  /** 整体不透明度；指示图标比正文浅一档 */
+  opacity?: number
 }
 
 export type DrawOp =
@@ -227,6 +235,72 @@ function arrowPath(x: number, y: number, angle: number): string {
   return `M ${a[0].toFixed(2)} ${a[1].toFixed(2)} L ${b[0].toFixed(2)} ${b[1].toFixed(2)} L ${c[0].toFixed(2)} ${c[1].toFixed(2)} Z`
 }
 
+/** 指示图标（备注 / 链接 / 附件）对应的矢量图形名 */
+const INDICATOR_GLYPHS: Partial<Record<AccessoryItem['kind'], IconName>> = {
+  notes: 'notes',
+  link: 'link',
+  attachment: 'attachment'
+}
+
+/**
+ * 顶部指示图标行：备注 / 链接 / 附件。
+ *
+ * 画布上它是一行 `display:flex; flex-wrap:wrap; justify-content:center` 的 16px 图标；
+ * 这里按**同一套常量**重算每一行的位置（尺寸与间距来自 `shared/layout/accessory.ts`，
+ * 换行上限与测量用的 `TEXT_MAX` 相同）——否则会出现"测量按两行留了高度、导出只画一行"。
+ *
+ * 注意：以前这一整行**根本没画**，而且 `cursorY` 也没让出它的高度，
+ * 于是有备注/链接/附件的节点在导出里正文偏上、底部空一块。
+ */
+function accessoryOps(node: NodeLayout, top: number, color: string): DrawOp[] {
+  const items = node.accessory.items
+  if (items.length === 0) return []
+
+  // 先按换行上限分行（与 measure.ts 的 rowCount 同一口径）
+  const rows: AccessoryItem[][] = []
+  let row: AccessoryItem[] = []
+  let rowWidth = 0
+  for (const item of items) {
+    const width = ACCESSORY_ICON_SIZE
+    if (row.length > 0 && rowWidth + ACCESSORY_ICON_GAP + width > TEXT_MAX) {
+      rows.push(row)
+      row = []
+      rowWidth = 0
+    }
+    rowWidth += row.length > 0 ? ACCESSORY_ICON_GAP + width : width
+    row.push(item)
+  }
+  if (row.length > 0) rows.push(row)
+
+  const step = ACCESSORY_ICON_SIZE + ACCESSORY_ICON_GAP
+  /** 图标行的可用宽度＝节点内容宽（画布上它就在带内边距的 body 里、整行居中） */
+  const contentWidth = Math.max(0, node.width - node.paddingX * 2)
+
+  const ops: DrawOp[] = []
+  rows.forEach((line, rowIndex) => {
+    const lineWidth = line.length * ACCESSORY_ICON_SIZE + (line.length - 1) * ACCESSORY_ICON_GAP
+    let x = node.x + node.paddingX + Math.max(0, (contentWidth - lineWidth) / 2)
+    const y = top + rowIndex * step
+    for (const item of line) {
+      const glyph = INDICATOR_GLYPHS[item.kind]
+      if (glyph) {
+        ops.push({
+          kind: 'glyph',
+          x,
+          y,
+          size: ACCESSORY_ICON_SIZE,
+          color,
+          glyph,
+          strokeWidth: INDICATOR_STROKE_WIDTH,
+          opacity: INDICATOR_OPACITY
+        })
+      }
+      x += step
+    }
+  })
+  return ops
+}
+
 /** 图标行里的标记图标：优先/进度/图形三种画法 */
 function markerOps(item: AccessoryItem, x: number, y: number, size: number): DrawOp[] {
   const markerId = item.markerId ?? ''
@@ -289,6 +363,16 @@ function nodeOps(
 
   // 内容自上而下：图标行 → 文字 → 图片 → 公式 → 标签
   let cursorY = node.y + node.paddingY
+
+  /**
+   * 顶部指示图标行先画、并把它的高度让出来。
+   * 这一行的高度本来就计在节点尺寸里（见 measure 的 `accessoryOf`），
+   * 不让出来就会把正文顶上去、底部空一块。
+   */
+  if (node.accessory.items.length > 0) {
+    ops.push(...accessoryOps(node, cursorY, visual.color))
+    cursorY += node.accessory.height
+  }
 
   // 标记条挂在节点**外侧**竖排（与画布一致）：默认左侧，左向分支放右侧
   const includeMarkers = input.includeMarkers !== false

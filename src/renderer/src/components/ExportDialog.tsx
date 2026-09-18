@@ -132,9 +132,9 @@ export default function ExportDialog({ onClose, onNotify }: Props): ReactElement
         </div>
 
         <div className="export-note">
-          导出的是<b>当前画布</b>的全部内容（不受折叠与筛选影响）。 PNG 与 PDF
-          是位图：倍率越高越清晰、文件越大；SVG 是矢量，文字与连线可以再编辑。 PDF 目前是
-          <b>单页位图 PDF</b>（不是矢量 PDF）。
+          导出的是<b>当前画布</b>的全部内容（不受折叠与筛选影响）。 PNG
+          是位图：倍率越高越清晰、文件越大；SVG 与 PDF 都是<b>矢量</b>——文字可以选中、放大不发虚。
+          PDF 是单页，尺寸与画布一致；画布大到超过打印管线上限时会自动回落成位图 PDF。
         </div>
       </div>
     </Modal>

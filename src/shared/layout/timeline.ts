@@ -24,14 +24,29 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
    * 会当场跳到收起来的那一侧去。
    */
   const sides = childFoldSides(root)
+  /**
+   * 靠主轴那一侧的边界留白要额外让开。
+   * 边界标题带画在刻目的「近轴侧」，主轴若不让位就会被标题带压住。
+   */
+  const nearReserve = (side: -1 | 1): number => {
+    let worst = 0
+    for (const child of kids) {
+      if ((sides.get(child.id) === 'up' ? -1 : 1) !== side) continue
+      worst = Math.max(worst, side < 0 ? builder.reserveBottom(child) : builder.reserveTop(child))
+    }
+    return worst
+  }
+  const upGap = spineGap + nearReserve(-1)
+  const downGap = spineGap + nearReserve(1)
 
   let cursor = rootNode.x + rootNode.width + builder.gapX * 1.6
   kids.forEach((child) => {
-    const extent = builder.horizontalExtent(child)
+    // 这一列占的宽度要含概要在它右侧留出的括号位
+    const extent = builder.horizontalExtent(child) + builder.reserveSpanX(child)
     const size = builder.size(child.id)
     const centerX = cursor + extent / 2
     const side: -1 | 1 = sides.get(child.id) === 'up' ? -1 : 1
-    const childY = side < 0 ? spineCenterY - spineGap - size.height : spineCenterY + spineGap
+    const childY = side < 0 ? spineCenterY - upGap - size.height : spineCenterY + downGap
 
     builder.add(child, centerX - size.width / 2, childY, 1, side < 0 ? 'up' : 'down')
     placeVerticalColumn(builder, child, centerX - size.width / 2, childY, side, 1)
@@ -104,6 +119,20 @@ export function layoutTimelineVertical(root: Topic, builder: LayoutBuilder): Lay
   const spineCenterX = rootNode.x + rootNode.width / 2
   /** 事件在轴的哪一侧：与折叠无关的稳定归属（见 `childFoldSides`） */
   const sides = childFoldSides(root)
+  /**
+   * 靠主轴那一侧的留白要额外让开：左支的边界向右长（冲向主轴）、右支的向左长，
+   * 主轴不让位就会被边框压住。
+   */
+  const nearReserve = (side: -1 | 1): number => {
+    let worst = 0
+    for (const child of kids) {
+      if ((sides.get(child.id) === 'left' ? -1 : 1) !== side) continue
+      worst = Math.max(worst, side < 0 ? builder.reserveRight(child) : builder.reserveLeft(child))
+    }
+    return worst
+  }
+  const leftGap = spineGap + nearReserve(-1)
+  const rightGap = spineGap + nearReserve(1)
 
   let cursor = rootNode.y + rootNode.height + builder.gapY * 2
   kids.forEach((child) => {
@@ -111,7 +140,7 @@ export function layoutTimelineVertical(root: Topic, builder: LayoutBuilder): Lay
     const size = builder.size(child.id)
     const centerY = cursor + extent / 2
     const side: -1 | 1 = sides.get(child.id) === 'left' ? -1 : 1
-    const childX = side < 0 ? spineCenterX - spineGap - size.width : spineCenterX + spineGap
+    const childX = side < 0 ? spineCenterX - leftGap - size.width : spineCenterX + rightGap
 
     builder.add(child, childX, centerY - size.height / 2, 1, side < 0 ? 'left' : 'right')
     const outerX = side < 0 ? childX : childX + size.width

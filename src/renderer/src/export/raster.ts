@@ -329,7 +329,8 @@ function drawOp(
         return
       }
       ctx.strokeStyle = op.color
-      ctx.lineWidth = MARKER_STROKE_WIDTH
+      ctx.lineWidth = op.strokeWidth ?? MARKER_STROKE_WIDTH
+      ctx.globalAlpha = op.opacity ?? 1
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       for (const shape of art) traceIconShape(ctx, shape)

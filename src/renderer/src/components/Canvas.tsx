@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactElement
 } from 'react'
-import { layoutSheet, LAYOUT_DEFAULTS } from '@shared/layout'
+import { createLayoutCache, layoutSheetCached, LAYOUT_DEFAULTS } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import { readOverlayTextStyle } from '@shared/model/overlay-style'
@@ -367,6 +367,15 @@ export default function Canvas(): ReactElement {
 
   const renderEpoch = useEditor((s) => s.renderEpoch)
 
+  /**
+   * 布局缓存（跨渲染保留）。
+   *
+   * 有了它，这一格的代价就从「每次击键整图重排」变成「只重算真的变了的那一支」
+   * （见 `@shared/layout/incremental.ts`）：输入没变时直接还上一轮的对象，
+   * 只有编辑中的节点换了文字、尺寸没变时就只换那一个节点。
+   */
+  const layoutCacheRef = useRef(createLayoutCache())
+
   const layout: LayoutResult = useMemo(() => {
     // 注意用 layoutWorkbook（节流后）：AI 一挥而就的几十次写入不必次次整图重排
     const root = activeRoot(layoutWorkbook)
@@ -382,12 +391,22 @@ export default function Canvas(): ReactElement {
     // 进这一阶段先落一行：布局是「写完之后的提交/排版」里最重的一步，
     // 真卡死时最后一条就是它，且带上节点数（内容依赖型问题一眼能看出来）
     const endLayout = beginCost('画布布局', isDiagArmed() ? `节点 ${countTopics(root)}` : '')
-    const computed = layoutSheet(root, measure, {}, sheet)
+    /**
+     * 编辑态的节点要显式当"脏"传进去：它的文字还没提交，工作簿里的对象没变，
+     * 靠引用比较看不出来（宽度却在每个键上都变）。
+     */
+    const computed = layoutSheetCached(
+      root,
+      measure,
+      {},
+      sheet,
+      layoutCacheRef.current,
+      `${fontEpoch}:${renderEpoch}`,
+      editingId ? [editingId] : []
+    )
     endLayout()
     setStage('画布布局完成')
     return computed
-    // fontEpoch / renderEpoch 只用于「强制重新布局」，不是布局的输入
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutWorkbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
 
   /**

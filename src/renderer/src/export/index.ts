@@ -3,9 +3,11 @@
  *
  * 流程：布局（与画布同一份 measureTopic + layoutSheet）
  *   → 绘图指令（drawing.ts）
- *   → 三种后端的其中之一（SVG 字符串 / Canvas 位图 / PDF）。
+ *   → 后端之一（SVG 字符串 / Canvas 位图 / PDF）。
  *
- * 三者的排版来自同一份布局数据，所以导出的图与屏幕上的画布一致。
+ * 排版都来自同一份布局数据，所以导出的图与屏幕上的画布一致。
+ * PDF 默认走**矢量**：把同一份 SVG 交给主进程的 Chromium 打印管线；
+ * 那条路走不通时（超大画布 / 打印管线不可用）自动回落到位图 PDF。
  */
 
 import { layoutSheet } from '@shared/layout'
@@ -25,7 +27,7 @@ import { measureTopic } from '../render/measure'
 import { formulaHtml, formulaSize } from '../render/formula'
 import { resourceUrl } from '../render/resource'
 import { themeColorsOf } from '../store/editor'
-import { buildDrawing } from './drawing'
+import { buildDrawing, type Drawing } from './drawing'
 import { canvasToPngBytes, canvasToRgbBytes, deflateBytes, renderDrawing } from './raster'
 import { drawingToSvg } from './svg'
 
@@ -163,6 +165,23 @@ async function collectFormulas(layout: LayoutResult, scale: number): Promise<Map
   return map
 }
 
+/**
+ * 矢量 PDF：把同一份绘图指令生成的 SVG 交给主进程的 Chromium 打印管线。
+ *
+ * 返回 `null` 表示这条路走不通，调用方**回落到位图 PDF**：
+ * 画布超过了 Chromium 的页面上限、打印管线异常、或根本不在 Electron 里跑
+ * （浏览器预览、自检）。也就是说"想要矢量"永远不会让导出失败。
+ */
+async function vectorPdf(drawing: Drawing): Promise<Uint8Array | null> {
+  const convert = window.api?.svgToPdf
+  if (typeof convert !== 'function') return null
+  try {
+    return await convert(drawingToSvg(drawing), drawing.width, drawing.height)
+  } catch {
+    return null
+  }
+}
+
 /** 导出当前画布 */
 export async function exportActiveSheet(
   workbook: Workbook,
@@ -197,6 +216,15 @@ export async function exportActiveSheet(
 
   if (options.format === 'svg') {
     return { data: drawingToSvg(drawing), fileName: `${safeName}.svg`, ext: 'svg' }
+  }
+
+  /**
+   * PDF 优先走**矢量**（文字可选中、图形是真矢量、中文交给系统字体），
+   * 失败再回落到位图 PDF——所以这一步的 `await` 是"试一下"，不是"必须成功"。
+   */
+  if (options.format === 'pdf') {
+    const vector = await vectorPdf(drawing)
+    if (vector) return { data: vector, fileName: `${safeName}.pdf`, ext: 'pdf' }
   }
 
   const canvas = await renderDrawing(drawing, effectiveScale)

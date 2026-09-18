@@ -11,6 +11,10 @@ import type {
 import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/model/types'
 import {
   BLOCK_GAP,
+  // 指示图标行的尺寸/间距：测量、画布、导出三处共用一份（见 accessory.ts）
+  ACCESSORY_ICON_GAP as ICON_GAP,
+  ACCESSORY_ICON_SIZE as ICON_SIZE,
+  ACCESSORY_ROW_GAP as ROW_GAP,
   codeBlockMetrics,
   imageBoxSize,
   markerStripSize,
@@ -43,9 +47,6 @@ const LINE_HEIGHT_RATIO = 1.5
 const BULLET_PREFIX = '•  '
 
 /* ---- 图标行与标签行的排版常量（与 styles.css 保持一致） ---- */
-const ICON_SIZE = 16
-const ICON_GAP = 3
-const ROW_GAP = 5
 const LABEL_FONT_SIZE = 11
 const LABEL_HEIGHT = 18
 const LABEL_PADDING_X = 7

@@ -25,13 +25,42 @@ export const ICON_VIEWBOX = 24
  */
 export const MARKER_STROKE_WIDTH = 2.2
 
+/** 指示图标（备注 / 链接 / 附件）的线宽与不透明度：与画布上的 `IndicatorIcon` 一致 */
+export const INDICATOR_STROKE_WIDTH = 2
+export const INDICATOR_OPACITY = 0.72
+
 /**
- * 图形名 → 图元列表。
- *
- * 键与 `render/markers.ts` 的 `MarkerGlyph` 一一对应；
- * 自检里有一条断言逐个核对"每个图形都有数据"，漏一个会当场失败。
+ * 可用的图标名：**标记图形**（17 个，与 `render/markers.ts` 的 `MarkerGlyph` 对应）
+ * 加上**指示图标**（备注 / 链接 / 附件）。
  */
-export const ICON_ART: Record<string, readonly IconShape[]> = {
+export type IconName =
+  | 'star'
+  | 'flag'
+  | 'smile'
+  | 'laugh'
+  | 'angry'
+  | 'frown'
+  | 'plus'
+  | 'minus'
+  | 'question'
+  | 'exclam'
+  | 'arrow-up'
+  | 'arrow-down'
+  | 'people'
+  | 'light-bulb'
+  | 'crown'
+  | 'finance'
+  | 'award'
+  | 'notes'
+  | 'link'
+  | 'attachment'
+
+/**
+ * 图标名 → 图元列表。
+ *
+ * 自检里有一条断言逐个核对"画布能用到的每个图形都有数据"，漏一个会当场失败。
+ */
+export const ICON_ART: Record<IconName, readonly IconShape[]> = {
   star: [
     {
       k: 'path',
@@ -268,6 +297,32 @@ export const ICON_ART: Record<string, readonly IconShape[]> = {
       cx: 12,
       cy: 8,
       r: 6
+    }
+  ],
+  notes: [
+    {
+      k: 'path',
+      d: 'M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z'
+    },
+    {
+      k: 'path',
+      d: 'M15 3v5a1 1 0 0 0 1 1h5'
+    }
+  ],
+  link: [
+    {
+      k: 'path',
+      d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'
+    },
+    {
+      k: 'path',
+      d: 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'
+    }
+  ],
+  attachment: [
+    {
+      k: 'path',
+      d: 'm16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551'
     }
   ]
 }

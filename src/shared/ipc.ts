@@ -154,6 +154,8 @@ export const IPC = {
   exportOutline: 'outline:export',
   /* ---- 图片导出（P6） ---- */
   saveExport: 'export:save',
+  /** SVG → 矢量 PDF（走 Chromium 的打印管线，见主进程的实现与注释） */
+  svgToPdf: 'export:svg-to-pdf',
   /* ---- AI（P8） ---- */
   aiConfigGet: 'ai:config-get',
   aiConfigSave: 'ai:config-save',
@@ -342,6 +344,16 @@ export interface MindApi {
     fileName: string,
     ext: ImageExportFormat
   ): Promise<string | null>
+
+  /**
+   * 把导出的 SVG 换成**矢量 PDF**（Chromium 的打印管线：文字是真字、图形是真矢量、
+   * 中文用系统字体），返回 PDF 字节。
+   *
+   * 返回 `null` 表示这条路走不通（画布超过了 Chromium 的页面上限、打印管线异常、
+   * 或不在 Electron 里跑），调用方必须**回落到位图 PDF**——
+   * 导出不该因为"想要矢量"而失败。
+   */
+  svgToPdf(svg: string, width: number, height: number): Promise<Uint8Array | null>
 
   /* ---- AI（P8） ---- */
   /** 读取 AI 配置（Key 只回掩码，完整 Key 不进渲染进程） */

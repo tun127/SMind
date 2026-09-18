@@ -165,8 +165,11 @@ import {
 import {
   buildRange,
   collapseBadgeSide,
+  createLayoutCache,
   indexTree,
   layoutSheet,
+  layoutSheetCached,
+  overlayReserves,
   parseRange,
   readCurveOffset,
   resolveRange,
@@ -186,7 +189,14 @@ import {
 import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument } from '../src/shared/xmind/emmx'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { markerVisualOf } from '../src/renderer/src/render/markers'
+import { markerVisualOf, type MarkerGlyph } from '../src/renderer/src/render/markers'
+import {
+  ICON_ART,
+  INDICATOR_OPACITY,
+  INDICATOR_STROKE_WIDTH,
+  MARKER_STROKE_WIDTH,
+  type IconName
+} from '../src/shared/marker-art'
 import { attrTranslate, cssTranslate } from '../src/renderer/src/render/transform'
 import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
 import { buildDrawing } from '../src/renderer/src/export/drawing'
@@ -5090,6 +5100,290 @@ function testOverlayReserve(): void {
     reservedMidY > plainMidY,
     `${Math.round(plainMidY)} → ${Math.round(reservedMidY)}`
   )
+
+  /**
+   * 概要让在**哪一侧**由结构家族决定（多方向结构跟这一支自己的方向，单方向跟 `grows`）。
+   * 这里把方向逐个钉住：错了的话「向左的图、括号画在右边」会当场复现。
+   */
+  const summarySideOf = (structure: string): string => {
+    reset()
+    addChildOf(root().id, '一')
+    const second = addChildOf(root().id, '二')
+    store().setStructure(structure)
+    store().addSummaryFor([second], '概要')
+    const reserves = overlayReserves(root(), store().workbook.sheets[0])
+    if ((reserves.left.get(second) ?? 0) > 0) return 'left'
+    if ((reserves.right.get(second) ?? 0) > 0) return 'right'
+    if ((reserves.top.get(second) ?? 0) > 0) return 'up'
+    if ((reserves.bottom.get(second) ?? 0) > 0) return 'down'
+    return 'none'
+  }
+
+  eq('逻辑图（向右）：概要让在右侧', summarySideOf('org.xmind.ui.logic.right'), 'right')
+  eq('逻辑图（向左）：概要让在左侧', summarySideOf('org.xmind.ui.logic.left'), 'left')
+  eq('树形图（向左）：概要让在左侧', summarySideOf('org.xmind.ui.tree.left'), 'left')
+  eq('组织架构图（向下）：概要让在下方', summarySideOf('org.xmind.ui.org-chart.down'), 'down')
+  eq('组织架构图（向上）：概要让在上方', summarySideOf('org.xmind.ui.org-chart.up'), 'up')
+  eq('矩阵图：概要让在下方', summarySideOf('org.xmind.ui.matrix'), 'down')
+  eq('树状表格：概要让在右侧', summarySideOf('org.xmind.ui.spreadsheet'), 'right')
+  // 平衡思维导图的第二个分支落在左侧，括号就该往左让
+  eq('平衡思维导图（左支）：概要让在左侧', summarySideOf('org.xmind.ui.map.unbalanced'), 'left')
+  eq('顺时针思维导图（左支）：概要让在左侧', summarySideOf('org.xmind.ui.map.clockwise'), 'left')
+
+  /**
+   * 全结构验收：给「A 支的两个子节点」加边界、给「B 支的子节点」加概要，
+   * 覆盖层不许压到任何**非成员**节点上。
+   *
+   * 以前预留只接进了「垂直堆叠」与「组织架构」两个家族，鱼骨 / 时间轴 / 放射 /
+   * 矩阵 / 树状表格这五种结构根本不为边界与概要留白——加一个边界就会压住
+   * 相邻的大骨 / 刻目 / 格子（`known-issues.md` 记的那条遗留）。
+   */
+  for (const def of STRUCTURES) {
+    if (!def.supported) continue
+    reset()
+    const top = root().id
+    const branchA = addChildOf(top, 'A 支')
+    const a1 = addChildOf(branchA, 'A 一')
+    const a2 = addChildOf(branchA, 'A 二')
+    addChildOf(a1, 'A 一甲')
+    const branchB = addChildOf(top, 'B 支')
+    const b1 = addChildOf(branchB, 'B 一')
+    addChildOf(b1, 'B 一甲')
+    const branchC = addChildOf(top, 'C 支')
+    addChildOf(branchC, 'C 一')
+
+    store().setStructure(def.class)
+    store().addBoundaryFor([a1, a2], '边界标题')
+    store().addSummaryFor([b1], '概要文字')
+    const layered = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+    // 区间成员**连它们的子树**都算"里面"：边界与概要把整棵子树都框住才是对的
+    const members = new Set([
+      ...subtreeIds(root(), a1),
+      ...subtreeIds(root(), a2),
+      ...subtreeIds(root(), b1)
+    ])
+    const intruder = overlayIntruder(layered, members)
+    check(
+      `结构「${def.label}」：边界/概要不侵入相邻分支`,
+      intruder === null,
+      intruder ? intruder.join(' ⨯ ') : ''
+    )
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 增量布局                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 布局结果的**逐字段摘要**。
+ *
+ * 「增量 == 全量」必须比到每一个数字上：坐标、尺寸、层数、左右归属、换行后的文字、
+ * 每一条连线的 path、每一根装饰线、边界/概要/关系线的几何、画布尺寸、分支配色。
+ * 只比"节点数一样"是抓不出"某一支停在上一次的位置"这类问题的。
+ */
+function layoutDigest(layout: LayoutResult): string {
+  const parts: string[] = []
+  for (const node of layout.nodes) {
+    parts.push(
+      [
+        'N',
+        node.id,
+        node.x,
+        node.y,
+        node.width,
+        node.height,
+        node.depth,
+        node.side,
+        node.lines.map((line) => line.segments.map((seg) => seg.text).join('')).join('/')
+      ].join('|')
+    )
+  }
+  for (const edge of layout.edges) parts.push(['E', edge.fromId, edge.toId, edge.d].join('|'))
+  for (const deco of layout.decorations) {
+    parts.push(
+      ['D', deco.d, deco.widthScale ?? '', deco.branchId ?? '', deco.dashed ? 1 : 0].join('|')
+    )
+  }
+  for (const boundary of layout.boundaries) {
+    parts.push(
+      ['B', boundary.id, boundary.x, boundary.y, boundary.width, boundary.height, boundary.d].join(
+        '|'
+      )
+    )
+  }
+  for (const summary of layout.summaries) {
+    parts.push(['S', summary.id, summary.d, summary.label.x, summary.label.y].join('|'))
+  }
+  for (const rel of layout.relationships) {
+    parts.push(['R', rel.id, rel.d, rel.label.x, rel.label.y].join('|'))
+  }
+  parts.push(
+    [
+      'F',
+      layout.bounds.width,
+      layout.bounds.height,
+      [...layout.branchIndex.entries()]
+        .sort()
+        .map(([key, value]) => `${key}:${value}`)
+        .join(',')
+    ].join('|')
+  )
+  return parts.join('\n')
+}
+
+/** 尺寸与标题无关的测量：用来单独验「只有文字变了」那条路径 */
+const fixedSizeMeasure = (topic: Topic, depth: number): MeasureResult => ({
+  ...fakeMeasure(topic, depth),
+  width: 130,
+  height: 32
+})
+
+function testIncrementalLayout(): void {
+  group('增量布局：结果必须逐个字段等于全量')
+
+  reset()
+  const rootId = root().id
+  const branchA = addChildOf(rootId, '甲支')
+  const leafA = addChildOf(branchA, '甲一')
+  addChildOf(leafA, '甲一甲')
+  addChildOf(branchA, '甲二')
+  const branchB = addChildOf(rootId, '乙支')
+  addChildOf(branchB, '乙一')
+  addChildOf(branchB, '乙二')
+  const branchC = addChildOf(rootId, '丙支')
+  addChildOf(branchC, '丙一')
+
+  /**
+   * 逐结构跑：改一个叶子的标题（宽度随之变化，逐轮递增但都远低于折行阈值），
+   * 走的必须是增量、而且结果要逐个字段等于全量。
+   */
+  let round = 0
+  for (const def of STRUCTURES) {
+    if (!def.supported) continue
+    round += 1
+    store().setStructure(def.class)
+    const cache = createLayoutCache()
+    layoutSheetCached(root(), fakeMeasure, {}, sheet(), cache)
+    eq(`结构「${def.label}」：首轮走全量`, cache.pass, 'full')
+
+    // 标题每轮都不一样：`setTitle` 在内容没变时不产生补丁，那就退化成"零变更"了
+    const shorter = round % 2 === 0
+    store().setTitle(leafA, shorter ? '甲一' : '甲一一一一一一一一')
+    const incremental = layoutSheetCached(root(), fakeMeasure, {}, sheet(), cache)
+    eq(`结构「${def.label}」：尺寸变化走增量`, cache.pass, 'incremental')
+    eq(
+      `结构「${def.label}」：增量结果 == 全量结果`,
+      layoutDigest(incremental),
+      layoutDigest(layoutSheet(root(), fakeMeasure, {}, sheet()))
+    )
+    check(
+      `结构「${def.label}」：没有把整棵树重新测量一遍`,
+      cache.stats.measureCalls <= 4,
+      String(cache.stats.measureCalls)
+    )
+  }
+
+  group('增量布局：只有文字变了（尺寸不变）时连摆放都不跑')
+
+  reset()
+  const textRoot = root().id
+  const textBranch = addChildOf(textRoot, '甲支')
+  const textLeaf = addChildOf(textBranch, 'aaaa')
+  addChildOf(textBranch, '甲二')
+  const textBranchB = addChildOf(textRoot, '乙支')
+  addChildOf(textBranchB, '乙一')
+  const textCache = createLayoutCache()
+  const before = layoutSheetCached(root(), fixedSizeMeasure, {}, sheet(), textCache)
+  store().setTitle(textLeaf, 'bbbb')
+  const refreshed = layoutSheetCached(root(), fixedSizeMeasure, {}, sheet(), textCache)
+  eq('走的是「只换文字」那条路径', textCache.pass, 'refresh')
+  eq(
+    '结果仍然等于全量',
+    layoutDigest(refreshed),
+    layoutDigest(layoutSheet(root(), fixedSizeMeasure, {}, sheet()))
+  )
+  // 没被碰到的那一支必须整块是同一批对象（渲染层的 memo 才能跳过重画）
+  const untouched = new Set(subtreeIds(root(), textBranchB))
+  let reused = 0
+  for (const node of refreshed.nodes) {
+    if (untouched.has(node.id) && before.nodeMap.get(node.id) === node) reused += 1
+  }
+  eq('未受影响的整支整块复用', reused, untouched.size)
+  const textNode = refreshed.nodes.find((node) => node.id === textLeaf)
+  check('被改的那个换成了新对象', textNode !== before.nodeMap.get(textLeaf))
+  eq('换成新对象后文字也跟着更新', textNode?.lines[0]?.segments[0]?.text, 'bbbb')
+  check(
+    '没被改的节点没有被改动内容',
+    refreshed.nodes.some(
+      (node) => node.id === textBranchB && node === before.nodeMap.get(textBranchB)
+    )
+  )
+
+  const again = layoutSheetCached(root(), fixedSizeMeasure, {}, sheet(), textCache)
+  eq('同一份输入再来一次是零变更短路', textCache.pass, 'fit')
+  eq('零变更时原样还回上一轮的结果对象', again, refreshed)
+
+  group('增量布局：结构变了整棵重排，缓存照样生效')
+
+  store().setCollapsed(textBranch, true)
+  const collapsed = layoutSheetCached(root(), fixedSizeMeasure, {}, sheet(), textCache)
+  eq('折叠改变了形状 → 全量', textCache.pass, 'full')
+  eq(
+    '折叠后的结果等于全量',
+    layoutDigest(collapsed),
+    layoutDigest(layoutSheet(root(), fixedSizeMeasure, {}, sheet()))
+  )
+  store().setCollapsed(textBranch, false)
+  addChildOf(textLeaf, 'cccc')
+  const grown = layoutSheetCached(root(), fixedSizeMeasure, {}, sheet(), textCache)
+  eq(
+    '增删节点后仍然等于全量',
+    layoutDigest(grown),
+    layoutDigest(layoutSheet(root(), fixedSizeMeasure, {}, sheet()))
+  )
+
+  group('增量布局：大文档下只碰脏路径')
+
+  reset()
+  const bigRoot = root().id
+  const leafIds: string[] = []
+  for (let i = 0; i < 12; i += 1) {
+    const branch = addChildOf(bigRoot, `分支 ${i}`)
+    for (let j = 0; j < 12; j += 1) {
+      const node = addChildOf(branch, `子 ${i}-${j}`)
+      const grand = addChildOf(node, `孙 ${i}-${j}`)
+      if (i === 5 && j === 5) leafIds.push(node, grand)
+    }
+  }
+  const total = countTopics(root())
+  const bigCache = createLayoutCache()
+  layoutSheetCached(root(), fakeMeasure, {}, sheet(), bigCache)
+  // 把中间某个分支里的一个节点改短：宽度变了 → 走增量，但不至于改变整张画布的包围盒
+  store().setTitle(leafIds[0] ?? '', '子')
+  const bigIncremental = layoutSheetCached(root(), fakeMeasure, {}, sheet(), bigCache)
+  eq('走增量', bigCache.pass, 'incremental')
+  eq(
+    '增量结果 == 全量结果',
+    layoutDigest(bigIncremental),
+    layoutDigest(layoutSheet(root(), fakeMeasure, {}, sheet()))
+  )
+  check(
+    '测量只做了脏路径上那几个节点',
+    bigCache.stats.measureCalls <= 8,
+    `${bigCache.stats.measureCalls} / ${total} 个节点`
+  )
+  check(
+    '子树占用没有整树重算',
+    bigCache.stats.extentsComputed <= 40,
+    `${bigCache.stats.extentsComputed} 次`
+  )
+  check(
+    '未受影响的节点整块复用',
+    bigCache.stats.nodesReused > total * 0.4,
+    `复用 ${bigCache.stats.nodesReused} / ${total}`
+  )
+  check('复用计数不会超过节点总数', bigCache.stats.nodesReused <= total, String(total))
 }
 
 function testLayoutNoOverlap(): void {
@@ -9150,6 +9444,132 @@ function testExportDrawing(): void {
   eq('徽标文字是优先级数字', badges[0]?.kind === 'badge' ? badges[0].text : '', '1')
   check('进度标记画成饼形', pies.length >= 1)
   check('星标画成图形', glyphs.length >= 1)
+
+  group('导出：标记图标是真实图形（不再是同色圆点）')
+
+  /**
+   * 画布上能用到的每个图形都必须在矢量数据里；缺一个，导出就会退回一个圆点——
+   * 而"退回"是静默的（图还在、只是形状没了），只有断言能钉住。
+   */
+  const usedGlyphs = new Set<MarkerGlyph>()
+  for (const markerId of Object.keys(MARKER_LABELS)) {
+    const visual = markerVisualOf(markerId)
+    if (visual.kind === 'glyph') usedGlyphs.add(visual.glyph)
+  }
+  const missingArt = [...usedGlyphs].filter((glyph) => (ICON_ART[glyph]?.length ?? 0) === 0)
+  eq('内置标记用到的图形都有矢量数据', missingArt.join(','), '')
+  check(
+    '矢量数据覆盖全部图形',
+    Object.keys(ICON_ART).length >= usedGlyphs.size,
+    `${Object.keys(ICON_ART).length} vs ${usedGlyphs.size}`
+  )
+  check(
+    '图标表 = 17 个标记图形 + 3 个指示图标',
+    Object.keys(ICON_ART).length === 20,
+    `${Object.keys(ICON_ART).length} 个（标记表用到的 ${usedGlyphs.size} + 兜底的 award + 3 个指示图标）`
+  )
+  check('兜底图形（award）也有数据', (ICON_ART.award?.length ?? 0) > 0)
+
+  const svgOfGlyph = (glyph: MarkerGlyph): string =>
+    drawingToSvg({
+      width: 32,
+      height: 32,
+      background: null,
+      ops: [{ kind: 'glyph', x: 4, y: 4, size: 24, color: '#123456', glyph }]
+    })
+  const shapePattern = /<(path|circle|line|polyline|polygon|rect)\b/
+  const shapeless = [...usedGlyphs].filter((glyph) => !shapePattern.test(svgOfGlyph(glyph)))
+  eq('每个图形的 SVG 里都有真实图元', shapeless.join(','), '')
+
+  const plusSvg = svgOfGlyph('plus')
+  check(
+    '按 24×24 视图盒缩放并平移到目标位置',
+    plusSvg.includes('translate(4 4)') && plusSvg.includes('scale(1)'),
+    plusSvg.slice(0, 160)
+  )
+  check(
+    '线宽与画布上的标记图标一致（不会粗一圈）',
+    plusSvg.includes(`stroke-width="${MARKER_STROKE_WIDTH}"`)
+  )
+  check('只描边、不填充（lucide 的默认画法）', plusSvg.includes('fill="none"'))
+  check('图形之间不重样', svgOfGlyph('plus') !== svgOfGlyph('minus'))
+  check(
+    '完全没有数据的图形仍然有兜底（不会画成空白）',
+    svgOfGlyph('made-up-glyph' as MarkerGlyph).includes('<circle')
+  )
+
+  group('导出：节点顶部的指示图标（备注 / 链接 / 附件）')
+
+  /**
+   * 一个"有备注 + 有超链接"的节点：画布上它顶部会有一排小图标。
+   *
+   * 这一行以前导出层**完全没有画**，而且正文也没为它让出高度——
+   * 于是有备注/链接/附件的节点在导出图里正文偏上、底部空一块（用户看不出来是"少画了图标"，
+   * 只看到"文字没对齐"）。这里把两件事都钉住。
+   */
+  const indicatorId = addChildOf(root().id, '带指示图标的节点')
+  store().setNotes(indicatorId, '一段备注')
+  store().setHref(indicatorId, 'https://example.com')
+
+  const indicatorLayout = layoutSheet(root(), fakeMeasure, {}, sheet())
+  const indicatorDrawing = buildDrawing({
+    layout: indicatorLayout,
+    colors: themeColorsOf(store().workbook),
+    background: null
+  })
+  const indicatorNode = indicatorLayout.nodeMap.get(indicatorId)
+  /** 只看**这个节点**框内画出来的图标（场景里还有别的带备注的节点） */
+  const insideIndicatorNode = (op: { x: number; y: number }): boolean =>
+    Boolean(
+      indicatorNode &&
+      op.x >= indicatorNode.x &&
+      op.x <= indicatorNode.x + indicatorNode.width &&
+      op.y >= indicatorNode.y &&
+      op.y <= indicatorNode.y + indicatorNode.accessory.height + 4
+    )
+  const indicatorGlyphOps = indicatorDrawing.ops.filter(
+    (op) =>
+      op.kind === 'glyph' &&
+      (op.glyph === 'notes' || op.glyph === 'link') &&
+      insideIndicatorNode(op)
+  )
+  eq('备注与链接各画出一个图标', indicatorGlyphOps.length, 2)
+  check(
+    '指示图标的线宽比标记图标细一档',
+    indicatorGlyphOps.every(
+      (op) => op.kind === 'glyph' && op.strokeWidth === INDICATOR_STROKE_WIDTH
+    )
+  )
+  check(
+    '指示图标带 0.72 的透明度（与画布一致）',
+    indicatorGlyphOps.every((op) => op.kind === 'glyph' && op.opacity === INDICATOR_OPACITY)
+  )
+  check(
+    '三种指示图标都有矢量数据',
+    (['notes', 'link', 'attachment'] as IconName[]).every(
+      (kind) => (ICON_ART[kind]?.length ?? 0) > 0
+    )
+  )
+
+  const indicatorText = indicatorDrawing.ops.find(
+    (op) => op.kind === 'lineText' && op.segments.some((seg) => seg.text.includes('带指示图标'))
+  )
+  check(
+    '正文被让到图标行下方（不再与图标重叠）',
+    Boolean(
+      indicatorNode &&
+      indicatorText &&
+      indicatorText.kind === 'lineText' &&
+      indicatorText.y >= indicatorNode.y + indicatorNode.paddingY + indicatorNode.accessory.height
+    )
+  )
+
+  const indicatorSvg = drawingToSvg({ ...indicatorDrawing, ops: indicatorGlyphOps })
+  check(
+    '指示图标在 SVG 里也是真实图形',
+    indicatorSvg.includes('<path') || indicatorSvg.includes('<circle')
+  )
+  check('指示图标在 SVG 里带透明度', indicatorSvg.includes(`opacity="${INDICATOR_OPACITY}"`))
   check(
     '标签画成底部胶囊',
     labels.some((op) => op.kind === 'text' && op.text === '标签甲')
@@ -10854,6 +11274,7 @@ async function main(): Promise<void> {
   testDefaultTheme()
   testLayout()
   testOverlayReserve()
+  testIncrementalLayout()
   testRecovery()
   await testNodeElements()
   await testMediaElements()

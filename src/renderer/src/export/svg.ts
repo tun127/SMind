@@ -265,9 +265,10 @@ function opToSvg(op: DrawOp): string {
         ['transform', `translate(${num(op.x)} ${num(op.y)}) scale(${num(scale)})`],
         ['fill', 'none'],
         ['stroke', op.color],
-        ['stroke-width', MARKER_STROKE_WIDTH],
+        ['stroke-width', op.strokeWidth ?? MARKER_STROKE_WIDTH],
         ['stroke-linecap', 'round'],
-        ['stroke-linejoin', 'round']
+        ['stroke-linejoin', 'round'],
+        ['opacity', op.opacity]
       ])}>${art.map(iconShapeSvg).join('')}</g>`
     }
 
