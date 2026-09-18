@@ -50,8 +50,11 @@ export interface TopicNodeProps {
   searchHit: boolean
   /** AI 刚改过这个节点：闪一下（「直接操作」的信任全靠事后看得见） */
   flash: boolean
-  /** 被筛选条件排除（淡出显示） */
-  dimmed: boolean
+  /**
+   * 淡出显示：`true` = 被筛选排除（很淡）；`'soft'` = 拖拽时的无关枝叶（轻淡，
+   * 仍看得见用来定位）。两者共用一条通路，避免再开一套状态。
+   */
+  dimmed: boolean | 'soft'
   dragOffset: { dx: number; dy: number } | null
   /** 是否是「手里正抓着的那一个」（它随之移动的后代不算），用于区分抬起的手感 */
   dragPrimary: boolean
@@ -253,7 +256,7 @@ function TopicNodeInner({
     !dragged && highlight === 'sibling' ? 'topic--drop-sibling' : '',
     searchHit ? 'topic--hit' : '',
     flash ? 'topic--ai-flash' : '',
-    dimmed ? 'topic--dimmed' : '',
+    dimmed === 'soft' ? 'topic--dimmed-soft' : dimmed ? 'topic--dimmed' : '',
     dragOffset ? 'topic--dragging' : '',
     dragPrimary ? 'topic--drag-primary' : '',
     editing ? 'topic--editing' : ''

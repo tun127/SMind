@@ -1153,9 +1153,18 @@ export default function Canvas(): ReactElement {
         pendingEvent = null
         if (ev) applyMove(ev)
       }
+      /**
+       * 每次 pointermove 都**重新排一帧**——不要用 `if (moveFrame === 0)` 防重复。
+       *
+       * `requestAnimationFrame` 在窗口被遮住 / 切到后台时不会派发；一旦那一帧没来，
+       * 「已排队」这个标记就永远是 true，后续移动全被跳过，**拖拽就冻死在原地**。
+       * （这正是我用调试端口在后台窗口里扫描时"整片无反应"的原因——不是产品缺陷，
+       * 但它确实是个能冻住拖拽的隐患。）多排一个空回调的代价可以忽略：
+       * 同一帧里的重复回调只是多跑几次空操作。
+       */
       const onMove = (ev: PointerEvent): void => {
         pendingEvent = ev
-        if (moveFrame === 0) moveFrame = window.requestAnimationFrame(flushMove)
+        moveFrame = window.requestAnimationFrame(flushMove)
       }
 
       const applyMove = (ev: PointerEvent): void => {
@@ -1897,8 +1906,26 @@ export default function Canvas(): ReactElement {
     [visibleEdges, dragSet]
   )
 
+  /**
+   * 拖拽时的**焦点集**：被拖子树 + 落点目标（连它的父级一起留，给点上下文）。
+   *
+   * 其余节点与连线在拖拽期间**轻淡**下去。理由是用户的一句原话——"画面真的非常乱"：
+   * 一屏几百个节点、同色同亮、还夹着一堆自由摆放的，落点提示再正确也会被淹没。
+   * 只淡不隐：参照还在，用户知道自己拖在图里的哪一块。
+   */
+  const dragFocus = useMemo(() => {
+    if (!dragSet) return null
+    const keep = new Set(dragSet)
+    if (dropTarget) {
+      keep.add(dropTarget.id)
+      const parentId = dropIndex.parentOf.get(dropTarget.id)
+      if (parentId) keep.add(parentId)
+    }
+    return keep
+  }, [dragSet, dropTarget, dropIndex])
+
   /** 画一条树上的连线。静态层与拖拽层共用，避免样式写两遍。 */
-  const renderEdge = (edge: (typeof layout.edges)[number]): ReactElement => {
+  const renderEdge = (edge: (typeof layout.edges)[number], dim = false): ReactElement => {
     const target = layout.nodeMap.get(edge.toId)
     const isFirstLevel = Boolean(target && target.depth === 1)
     return (
@@ -1910,7 +1937,7 @@ export default function Canvas(): ReactElement {
         strokeWidth={isFirstLevel ? colors.edgeWidth * 1.5 : colors.edgeWidth}
         strokeLinecap="round"
         strokeLinejoin="round"
-        opacity={colors.edgeOpacity}
+        opacity={colors.edgeOpacity * (dim ? 0.3 : 1)}
       />
     )
   }
@@ -2161,12 +2188,14 @@ export default function Canvas(): ReactElement {
             )
           })}
 
-          {staticEdges.map(renderEdge)}
+          {staticEdges.map((edge) =>
+            renderEdge(edge, dragFocus !== null && !dragFocus.has(edge.toId))
+          )}
 
           {/* 子树内部的连线：跟着被拖的节点一起平移重画 */}
           {dragSet && dragVisual ? (
             <g transform={`translate(${dragVisual.dx} ${dragVisual.dy})`} opacity={0.9}>
-              {dragEdges.map(renderEdge)}
+              {dragEdges.map((edge) => renderEdge(edge))}
             </g>
           ) : null}
         </svg>
@@ -2217,7 +2246,13 @@ export default function Canvas(): ReactElement {
             draggable={node.depth > 0}
             searchHit={searchHits ? searchHits.has(node.id) : false}
             flash={flashIds.has(node.id)}
-            dimmed={filterResult ? !filterResult.keep.has(node.id) : false}
+            dimmed={
+              filterResult
+                ? !filterResult.keep.has(node.id)
+                : dragFocus && !dragFocus.has(node.id)
+                  ? 'soft'
+                  : false
+            }
             dragOffset={
               dragVisual && dragSet?.has(node.id) ? { dx: dragVisual.dx, dy: dragVisual.dy } : null
             }
@@ -2585,7 +2620,7 @@ export default function Canvas(): ReactElement {
       {/* 常驻图例：拖拽的三种结果提前讲清楚，不用用户去试 */}
       <div className="canvas__drag-legend">
         <span className={dragVisual && dropTarget?.mode === 'child' ? 'is-active' : undefined}>
-          拖到主题上＝成为子主题
+          拖到主题上＝成为它的子主题
         </span>
         <span className="canvas__drag-legend-sep">·</span>
         <span
