@@ -45,12 +45,18 @@ import {
   countCharacters,
   countTopics,
   detachTopic,
+  ensureExpanded,
   findParent,
   findTopic,
   flatten,
+  childFoldSides,
+  foldedSidesOf,
   isSelfOrDescendant,
   moveTopic,
-  walk
+  splitFoldSidesOf,
+  walk,
+  withFoldedSides,
+  type FoldSide
 } from '@shared/model/tree'
 import { buildRange, parseRange, readCurveOffset, sameRange, withCurveOffset } from '@shared/layout'
 import {
@@ -251,6 +257,18 @@ export interface EditorState {
    * 不展开就看不见新子主题会落在哪，落点预览成了空谈。
    */
   setCollapsed(id: string, collapsed: boolean): void
+  /**
+   * 平衡思维导图的中心主题：**按侧收起 / 展开**（左右分开收）。
+   *
+   * 只在「中心主题 + 平衡结构 + 该侧确实挂着分支」时生效；
+   * 一般主题的收起走 `toggleCollapse`（那里是整体收起）。
+   *
+   * 刻意做成**设置值**而不是开关（与 `setCollapsed` 同一口径）：AI 重试一次
+   * 不会把刚收起来的那一侧又翻回去。
+   */
+  setFoldSide(id: string, side: FoldSide, folded: boolean): void
+  /** 界面上点徽标用：切换某一侧的收起状态（转发到 `setFoldSide`） */
+  toggleFoldSide(id: string, side: FoldSide): void
   /** 渲染默认值变更后调用：让布局与画布重算 */
   bumpRenderEpoch(): void
   /**
@@ -756,7 +774,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
         parent.children.push(node)
         created.push(node.id)
       }
-      if (parent.collapsed) parent.collapsed = false
+      ensureExpanded(parent)
     }, 'AI 扩写子主题')
 
     if (created.length > 0) set({ selection: created })
@@ -782,7 +800,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
         parent.children.push(node)
         created.push(node.id)
       }
-      if (parent.collapsed) parent.collapsed = false
+      ensureExpanded(parent)
     }, '粘贴 Markdown')
 
     if (created.length > 0) set({ selection: created, ...NO_EDITING })
@@ -800,7 +818,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       const parent = findTopic(activeRoot(draft), parentId)
       if (!parent) return
       parent.children.push(childTopic)
-      if (parent.collapsed) parent.collapsed = false
+      ensureExpanded(parent)
     }, 'AI 生成子主题')
     set({ selection: [childTopic.id] })
     return count
@@ -1093,9 +1111,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
     get().mutate((draft) => {
       const target = findTopic(activeRoot(draft), parent.id) ?? activeRoot(draft)
       target.children.push(node)
-      // 只在确实处于折叠态时才改：避免写入多余的 collapsed: false，
+      // 只在确实折叠着时才改：避免写入多余的 collapsed: false，
       // 否则「打开 → 另存」会因为默认值产生结构性差异
-      if (target.collapsed) target.collapsed = false
+      ensureExpanded(target)
     }, '新建子主题')
     set({ selection: [node.id], editingId: node.id, ...editingContent(richFromPlain('')) })
     return node.id
@@ -1219,6 +1237,17 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const topic = findTopic(activeRoot(get().workbook), id)
     if (!topic || topic.children.length === 0) return
     /**
+     * 「**按侧收起**」也算折叠着：大纲那一行会显示成「展开」按钮（`outlineRows` 的
+     * `collapsed` 判据是"有子节点但不是全部可见"），画布上 `Ctrl+/` 也是同一个入口。
+     * 此时按一下必须**展开**（把按侧标记清掉），否则就是"提示写展开、点下去把两侧都收起来"——
+     * 动作与提示相反，比不做还糟（真踩过）。
+     */
+    const folded = foldedSidesOf(topic)
+    if (folded.length > 0 && !topic.collapsed) {
+      get().setCollapsed(id, false)
+      return
+    }
+    /**
      * 只有「**超过 1 个子主题**」才允许折叠（与 `TopicNode` 的徽标显示同一条规则）：
      * 只有一个子节点时折叠没有信息量，而且界面上已经不显示折叠徽标——
      * 这里不守卫的话，键盘（Ctrl + /）或 AI 仍能把折叠状态写进去，
@@ -1237,8 +1266,15 @@ export const useEditor = create<EditorState>()((set, get) => ({
         if (!topic || topic.children.length === 0) return
         // 用 undefined 表示展开，让模型中只存在「折叠 / 未设置」两种状态
         const next = collapsed ? true : undefined
-        if (topic.collapsed === next) return
+        const hadFolded = foldedSidesOf(topic).length > 0
+        // 按侧收起也算「折叠着」：只有它存在时，展开同样要落一步（否则点了没反应）
+        if (topic.collapsed === next && !hadFolded) return
         topic.collapsed = next
+        /**
+         * 「整体折叠」与「按侧收起」互斥：两者的模型标记各存一处，
+         * 不同时清掉就会出现「整体展开了、某一侧却还收着」这种读不懂的状态。
+         */
+        if (hadFolded) withFoldedSides(topic, [])
       },
       '折叠/展开',
       // 同一个主题、同一个方向的连续折叠（例如连按空格）合并成一步；
@@ -1257,14 +1293,81 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }
   },
 
+  setFoldSide: (id, side, folded) => {
+    const before = get()
+    get().mutate(
+      (draft) => {
+        const root = activeRoot(draft)
+        const topic = findTopic(root, id)
+        if (!topic) return
+        // 只对「中心主题 + 两个方向都真的挂着分支」的结构生效（与 TopicNode 的多根徽标同一判据）
+        if (splitFoldSidesOf(topic, topic.id === root.id).length < 2) return
+        if (![...childFoldSides(topic).values()].includes(side)) return
+        const current = foldedSidesOf(topic)
+        // 已经是这个状态就什么都不写：AI 重试 / 重复点击不该产生撤销记录
+        if (current.includes(side) === folded) return
+        // 切到按侧收起模式：整体折叠标记要先清掉，否则整体折叠优先、这一侧点了没反应
+        if (topic.collapsed) topic.collapsed = undefined
+        const next: FoldSide[] = folded
+          ? [...current, side]
+          : current.filter((item) => item !== side)
+        withFoldedSides(topic, next)
+      },
+      '折叠/展开',
+      // 同一侧同一方向连续操作合并成一步；**方向或侧别一变就是新的一步**——
+      // 否则「收起又展开」会被并成一次空操作，撤销看起来没反应（与 setCollapsed 同一套口径）
+      `fold:${id}:${side}:${folded ? 'fold' : 'unfold'}`
+    )
+
+    /**
+     * 收起后，落在这一侧的选中主题已经从布局里消失——视角锁定再也盯不到它。
+     * 与整体折叠同一处理：把选择挪到中心主题身上（它一定看得见）。
+     */
+    const after = findTopic(activeRoot(get().workbook), id)
+    if (!after || !foldedSidesOf(after).includes(side)) return
+    const sides = childFoldSides(after)
+    const hidden = after.children.filter((child) => sides.get(child.id) === side)
+    const root = activeRoot(before.workbook)
+    if (
+      before.selection.some((sel) =>
+        hidden.some((child) => isSelfOrDescendant(root, child.id, sel))
+      )
+    ) {
+      get().select(id)
+    }
+  },
+
+  toggleFoldSide: (id, side) => {
+    const topic = findTopic(activeRoot(get().workbook), id)
+    if (!topic) return
+    get().setFoldSide(id, side, !foldedSidesOf(topic).includes(side))
+  },
+
   setTopicSide: (id, side) => {
     get().mutate((draft) => {
-      const topic = findTopic(activeRoot(draft), id)
+      const root = activeRoot(draft)
+      const topic = findTopic(root, id)
       if (!topic) return
       const properties: Record<string, string> = { ...(topic.style?.properties ?? {}) }
-      if (properties[TOPIC_SIDE_KEY] === side) return
-      properties[TOPIC_SIDE_KEY] = side
-      topic.style = { ...(topic.style ?? {}), properties }
+      const moved = properties[TOPIC_SIDE_KEY] !== side
+      if (moved) {
+        properties[TOPIC_SIDE_KEY] = side
+        topic.style = { ...(topic.style ?? {}), properties }
+      }
+      /**
+       * 拖到的那一侧如果正**收起着**，这个分支会当场消失（看着像把数据弄丢了）——
+       * 刚挪过去的东西必须看得见，所以顺手把那一侧展开。
+       * 与「新建子主题时自动展开」是同一条规矩。
+       */
+      if (!moved) return
+      const parent = findParent(root, id)
+      if (!parent) return
+      const folded = foldedSidesOf(parent)
+      if (folded.includes(side))
+        withFoldedSides(
+          parent,
+          folded.filter((item) => item !== side)
+        )
     }, '调整分支左右')
   },
 
@@ -1538,7 +1641,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       // 否则新加的子主题被藏起来看不见，而分成两笔又会让撤销要按两次。
       const ok = get().mutate((draft) => {
         const target = findTopic(activeRoot(draft), plan.targetId)
-        if (target?.collapsed) target.collapsed = false
+        if (target) ensureExpanded(target)
         moveTopic(activeRoot(draft), id, plan.targetId)
         settleAfterMove(draft, id)
       }, '移动主题')
@@ -1625,7 +1728,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     get().mutate((draft) => {
       const target = findTopic(activeRoot(draft), targetId) ?? activeRoot(draft)
       target.children.push(copy)
-      if (target.collapsed) target.collapsed = false
+      ensureExpanded(target)
     }, '粘贴主题')
     set({ selection: [copy.id] })
   },

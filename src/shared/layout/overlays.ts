@@ -6,6 +6,7 @@
  */
 import type { NodeStyle, Relationship, Sheet, Topic } from '../model/types'
 import { readOverlayFontSize } from '../model/overlay-style'
+import { visibleChildren } from '../model/tree'
 import { RELATIONSHIP_CURVE_KEY } from '../xmind/constants'
 import { round } from './core'
 import type { BoundaryLayout, LayoutResult, RelationshipLayout, SummaryLayout } from './types'
@@ -183,7 +184,7 @@ function accumulateBounds(topic: Topic, result: LayoutResult, acc: Bounds): void
     acc.maxY = Math.max(acc.maxY, node.y + node.height)
   }
   if (topic.collapsed) return
-  for (const child of topic.children) accumulateBounds(child, result, acc)
+  for (const child of visibleChildren(topic)) accumulateBounds(child, result, acc)
 }
 
 /**
@@ -200,11 +201,9 @@ function indexSubtreeBounds(root: Topic, result: LayoutResult): Map<string, Boun
     let acc: Bounds | null = node
       ? { minX: node.x, minY: node.y, maxX: node.x + node.width, maxY: node.y + node.height }
       : null
-    if (!topic.collapsed) {
-      for (const child of topic.children) {
-        const childBounds = visit(child)
-        if (childBounds) acc = acc ? sameBounds(acc, childBounds) : childBounds
-      }
+    for (const child of visibleChildren(topic)) {
+      const childBounds = visit(child)
+      if (childBounds) acc = acc ? sameBounds(acc, childBounds) : childBounds
     }
     map.set(topic.id, acc)
     return acc

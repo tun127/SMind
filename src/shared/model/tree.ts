@@ -1,5 +1,21 @@
-import type { Sheet, Topic, Workbook } from './types'
+import type { NodeStyle, Sheet, Topic, Workbook } from './types'
 import { createId } from './factory'
+import { getStructureDef, TOPIC_FOLD_KEY, TOPIC_SIDE_KEY } from '../xmind/constants'
+
+/** 子主题的展开方向：按侧收起就收「落在这一侧」的那些分支 */
+export type FoldSide = 'left' | 'right' | 'up' | 'down'
+
+/** 画布上依次摆放徽标的顺序（左右上下），保证同一份数据每次都渲染成同一个样子 */
+const FOLD_SIDE_ORDER: FoldSide[] = ['left', 'right', 'up', 'down']
+
+/**
+ * 顺时针（放射）结构的起点角度：**右上**（约 1 点钟），随后顺时针递增。
+ *
+ * 官方只规定"顺时针"这个方向，起点角度属于**我方取值**（见 `docs/structure-spec.md`）。
+ * 布局（`layoutRadial`）与「左右半圈」判定（`childFoldSides`）必须用同一个值，
+ * 否则收起一侧之后剩下的分支会被重新判定到另一侧去——所以这里只写一份。
+ */
+export const RADIAL_START_ANGLE = -Math.PI / 3
 
 /** 深度优先遍历（含根） */
 export function walk(
@@ -116,6 +132,180 @@ export function moveTopic(root: Topic, id: string, newParentId: string, index?: 
   }
   attachChild(parent, node, index)
   return true
+}
+
+/* ------------------------------------------------------------------ */
+/* 折叠（整体折叠 + 平衡思维导图的「左右分别收起」）                     */
+/* ------------------------------------------------------------------ */
+
+/** 这个主题已收起的方向（写在 style.properties 的私有键里，见 TOPIC_FOLD_KEY） */
+export function foldedSidesOf(topic: Topic): FoldSide[] {
+  const raw = topic.style?.properties?.[TOPIC_FOLD_KEY]
+  if (!raw) return []
+  const out: FoldSide[] = []
+  for (const part of raw.split(',')) {
+    const value = part.trim()
+    if (FOLD_SIDE_ORDER.includes(value as FoldSide) && !out.includes(value as FoldSide)) {
+      out.push(value as FoldSide)
+    }
+  }
+  return out
+}
+
+/** 写回已收起的方向；空数组 = 删掉该键，让模型里只留「有折叠」这一种状态 */
+export function withFoldedSides(topic: Topic, sides: FoldSide[]): void {
+  const properties: Record<string, string> = { ...(topic.style?.properties ?? {}) }
+  if (sides.length === 0) delete properties[TOPIC_FOLD_KEY]
+  else properties[TOPIC_FOLD_KEY] = sides.join(',')
+  const next: NodeStyle = { ...(topic.style ?? {}), properties }
+  // 没有别的属性、也没有 style.id 时整个丢掉，避免写出一堆空对象（另存产生结构性差异）
+  topic.style = Object.keys(properties).length === 0 && next.id === undefined ? undefined : next
+}
+
+/**
+ * 这个主题的子主题各自朝哪个方向展开——**布局与「按侧收起」共用的唯一来源**。
+ *
+ * 关键性质有两条：
+ * ① **按全部子主题算，与折叠无关**：否则收起一侧后剩下的会重新编号、
+ *    被判定到另一边去，收起一侧等于收起全部；
+ * ② 单方向的结构返回**空表**（子主题都在同一个方向，没有分组可言）。
+ *
+ * 各结构的方向：
+ * - 平衡思维导图：显式指定优先，其余按序号交替（1 右 2 左 3 右…）。
+ *   不能按子树高度配平：那样挪一个子节点就会让归属整体翻转（历史缺陷）；
+ * - 顺时针思维导图：按角度分左右半圈（起点右上、顺时针均分，与 `layoutRadial` 同一取值）；
+ * - 时间轴（水平）/ 鱼骨图：沿主轴**上下交替**（序号 0 在上）——
+ *   注意这只是**布局方向**：这两种结构不提供按侧收起，见 `splitFoldSidesOf`；
+ * - 时间轴（垂直）：**左右交替**（序号 0 在左），同样只在布局层面有意义；
+ * - 逻辑图 / 树形图 / 括号图 / 树状表格 / 矩阵图 / 组织架构图：子主题都在同一个方向。
+ *
+ * 结构是画布级属性、只写在中心主题上，所以这张表实际只在中心主题上有意义
+ * （见 `splitFoldSidesOf` 的 `isRoot` 门）。
+ */
+export function childFoldSides(topic: Topic): Map<string, FoldSide> {
+  const map = new Map<string, FoldSide>()
+  const def = getStructureDef(topic.structureClass)
+
+  switch (def.family) {
+    case 'mindmap': {
+      if (def.class === 'org.xmind.ui.map.clockwise') {
+        const count = topic.children.length
+        if (count <= 1) return map
+        const sector = (Math.PI * 2) / count
+        topic.children.forEach((child, index) => {
+          const angle = RADIAL_START_ANGLE + sector * index
+          map.set(child.id, Math.cos(angle) < 0 ? 'left' : 'right')
+        })
+        return map
+      }
+      topic.children.forEach((child, index) => {
+        const manual = child.style?.properties?.[TOPIC_SIDE_KEY]
+        if (manual === 'left') map.set(child.id, 'left')
+        else if (manual === 'right') map.set(child.id, 'right')
+        else map.set(child.id, index % 2 === 0 ? 'right' : 'left')
+      })
+      return map
+    }
+    case 'timeline': {
+      const vertical = def.class === 'org.xmind.ui.timeline.vertical'
+      topic.children.forEach((child, index) => {
+        const first: FoldSide = vertical ? 'left' : 'up'
+        const second: FoldSide = vertical ? 'right' : 'down'
+        map.set(child.id, index % 2 === 0 ? first : second)
+      })
+      return map
+    }
+    case 'fishbone':
+      topic.children.forEach((child, index) => {
+        map.set(child.id, index % 2 === 0 ? 'up' : 'down')
+      })
+      return map
+    default:
+      return map
+  }
+}
+
+/**
+ * 主题当前**可见**的子主题：考虑整体折叠（`collapsed`）与按方向折叠（`foldedSides`）。
+ *
+ * 布局、大纲、包围盒三处都从这里取，口径只有一个——以前各自写
+ * `topic.collapsed ? [] : topic.children`，加一种折叠方式就得改三处、漏一处就出现
+ * 「画布收起了、大纲还列着」这种不一致。
+ */
+export function visibleChildren(topic: Topic): Topic[] {
+  if (topic.collapsed) return []
+  const folded = foldedSidesOf(topic)
+  if (folded.length === 0) return topic.children
+  const sides = childFoldSides(topic)
+  // 单侧结构没有分组可言：收起状态在这里不该生效（守卫在 store 里，这里只兜底）
+  if (sides.size === 0) return topic.children
+  return topic.children.filter((child) => !folded.includes(sides.get(child.id) ?? 'right'))
+}
+
+/**
+ * 要不要按侧显示**多根徽标**（分别收起）。
+ *
+ * 只有**思维导图（平衡 / 顺时针）**的中心主题提供：
+ * - 时间轴与鱼骨图**刻意不提供**——它们的上下两侧是"沿主轴的交替摆放"，
+ *   把一侧收起来只会让图变得难读（用户明确要求这两种保持「一个折叠点」）；
+ * - 其余结构是单方向的（逻辑图 / 树形图 / 括号图 / 树状表格 / 矩阵图 / 组织架构图）。
+ *
+ * 还要**两个方向都真的挂着分支**才算（只有一侧有分支时，单徽标就够）。
+ * 返回顺序固定为 左 → 右 → 上 → 下，徽标每次都渲染在同一个位置。
+ */
+export function splitFoldSidesOf(topic: Topic, isRoot: boolean): FoldSide[] {
+  if (!isRoot) return []
+  if (getStructureDef(topic.structureClass).family !== 'mindmap') return []
+  const present = new Set(childFoldSides(topic).values())
+  if (present.size < 2) return []
+  return FOLD_SIDE_ORDER.filter((side) => present.has(side))
+}
+
+/** 让这个主题展开（整体折叠与按方向折叠一起清掉） */
+export function ensureExpanded(topic: Topic): void {
+  if (topic.collapsed) topic.collapsed = undefined
+  if (foldedSidesOf(topic).length > 0) withFoldedSides(topic, [])
+}
+
+/**
+ * 某一侧被收起时**藏起来**的节点数（该侧每个分支连同它的子树）。
+ * 折叠徽标上的数字与 tooltip 用它。
+ */
+export function hiddenCountOfSide(topic: Topic, side: FoldSide): number {
+  if (topic.collapsed) return 0
+  const sides = childFoldSides(topic)
+  let total = 0
+  for (const child of topic.children) {
+    if (sides.get(child.id) !== side) continue
+    total += 1 + countDescendants(child)
+  }
+  return total
+}
+
+/**
+ * 整张画布上**当前不显示**的节点数（整体折叠 + 按侧收起，不重复计入被祖先收起的部分）。
+ *
+ * 统计与骨架摘要用它告诉模型「你数到的不等于画布上显示的」——
+ * 否则模型会以为被收起的那些节点正摆在画布上（或反过来，以为文档里没有它们）。
+ */
+export function countHiddenNodes(root: Topic): number {
+  let total = 0
+  const visit = (topic: Topic): void => {
+    if (topic.collapsed) {
+      total += countDescendants(topic)
+      return
+    }
+    const visible = visibleChildren(topic)
+    if (visible.length < topic.children.length) {
+      const shown = new Set(visible.map((item) => item.id))
+      for (const child of topic.children) {
+        if (!shown.has(child.id)) total += 1 + countDescendants(child)
+      }
+    }
+    for (const child of visible) visit(child)
+  }
+  visit(root)
+  return total
 }
 
 /**

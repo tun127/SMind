@@ -16,7 +16,8 @@ import { layoutTimelineHorizontal, layoutTimelineVertical } from './timeline'
 import type { LayoutOptions, LayoutResult, MeasureFn } from './types'
 
 export * from './types'
-export { LAYOUT_DEFAULTS } from './core'
+export { LAYOUT_DEFAULTS, collapseBadgeSide } from './core'
+export type { CollapseSide } from './core'
 export {
   buildRange,
   indexTree,

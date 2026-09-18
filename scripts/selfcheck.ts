@@ -31,9 +31,16 @@ import {
   countCharacters,
   countDescendants,
   countTopics,
+  childFoldSides,
+  countHiddenNodes,
   findParent,
   findTopic,
-  subtreeIds
+  foldedSidesOf,
+  hiddenCountOfSide,
+  splitFoldSidesOf,
+  subtreeIds,
+  visibleChildren,
+  withFoldedSides
 } from '../src/shared/model/tree'
 import { createSheet, createTopic, createWorkbook } from '../src/shared/model/factory'
 import { coerceCode, coerceRichText } from '../src/shared/model/coerce'
@@ -46,6 +53,7 @@ import {
   accumulateToolCalls,
   addUsage,
   claimsAppliedChange,
+  classifyTaskIntent,
   compressHistory,
   CONTINUATION_MIN_OVERLAP,
   DEFAULT_QUALITY_TIER,
@@ -156,6 +164,7 @@ import {
 } from '../src/shared/snapshot'
 import {
   buildRange,
+  collapseBadgeSide,
   indexTree,
   layoutSheet,
   parseRange,
@@ -1563,6 +1572,314 @@ function testNodeDrag(): void {
   store().undo()
   eq('左右对调可以撤销', sideOf(sideA), 'right')
 
+  group('折叠徽标跟随分支方向（中心主题的 side 恒为 root）')
+
+  reset()
+  const badgeRoot = root()
+  const badgeA = addChildOf(badgeRoot.id, '一')
+  addChildOf(badgeRoot.id, '二')
+  const badgeSideOf = (id: string): string => {
+    const lay = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+    const node = lay.nodeMap.get(id)
+    return node ? collapseBadgeSide(node, lay.nodeMap) : '?'
+  }
+
+  store().setStructure('org.xmind.ui.logic.right')
+  eq('逻辑图（向右）：中心主题徽标在右', badgeSideOf(badgeRoot.id), 'right')
+  eq('逻辑图（向右）：子主题徽标在右', badgeSideOf(badgeA), 'right')
+
+  store().setStructure('org.xmind.ui.logic.left')
+  eq('逻辑图（向左）：中心主题徽标在左', badgeSideOf(badgeRoot.id), 'left')
+  eq('逻辑图（向左）：子主题徽标在左', badgeSideOf(badgeA), 'left')
+
+  store().setStructure('org.xmind.ui.tree.left')
+  eq('树形图（向左）：中心主题徽标在左', badgeSideOf(badgeRoot.id), 'left')
+
+  /**
+   * 平衡思维导图两侧都有分支：徽标保持右侧，不随分支增删来回跳。
+   */
+  store().setStructure('org.xmind.ui.map.unbalanced')
+  eq('平衡思维导图：两侧都有分支时中心徽标保持右侧', badgeSideOf(badgeRoot.id), 'right')
+
+  /**
+   * 折叠后子节点从布局里消失，必须退回**结构方向**——
+   * 否则「向左的图」一折叠，徽标就跳到右边、点不到也读不懂。
+   */
+  store().setStructure('org.xmind.ui.logic.left')
+  store().setCollapsed(badgeRoot.id, true)
+  eq('逻辑图（向左）折叠中心主题后徽标仍在左', badgeSideOf(badgeRoot.id), 'left')
+
+  /**
+   * 上下展开同样要跟（用户截图：组织架构图（向下）的徽标挂在了右边）：
+   * 子节点全在下方 → 贴下缘；全在上方 → 贴上缘。
+   */
+  reset()
+  const orgRoot = root()
+  const orgA = addChildOf(orgRoot.id, '甲')
+  addChildOf(orgRoot.id, '乙')
+  addChildOf(orgA, '甲一')
+
+  store().setStructure('org.xmind.ui.org-chart.down')
+  eq('组织架构图（向下）：中心主题徽标在下', badgeSideOf(orgRoot.id), 'down')
+  eq('组织架构图（向下）：分支主题徽标在下', badgeSideOf(orgA), 'down')
+
+  store().setStructure('org.xmind.ui.org-chart.up')
+  eq('组织架构图（向上）：中心主题徽标在上', badgeSideOf(orgRoot.id), 'up')
+  eq('组织架构图（向上）：分支主题徽标在上', badgeSideOf(orgA), 'up')
+
+  store().setStructure('org.xmind.ui.org-chart.down')
+  store().setCollapsed(orgRoot.id, true)
+  eq('组织架构图（向下）折叠中心主题后徽标仍在下', badgeSideOf(orgRoot.id), 'down')
+
+  /**
+   * 每个支持的结构都要声明展开方向：中心主题折叠后没有可见子节点，
+   * 全靠它定位徽标——漏一个就会退回默认的「向右」。
+   */
+  const missingGrow = STRUCTURES.filter((item) => item.supported && !item.grows)
+  eq('全部结构都声明了展开方向', missingGrow.map((item) => item.label).join(','), '')
+
+  group('平衡思维导图：左右分别收起')
+
+  // 新建文档自带若干种子分支，正好够验证左右两侧（归属按全部子节点的序号交替，不用写死 id）
+  reset()
+  const foldRootId = root().id
+  store().setStructure('org.xmind.ui.map.unbalanced')
+
+  const sideIds = (side: 'left' | 'right'): string[] => {
+    const sides = childFoldSides(root())
+    return root()
+      .children.filter((topic) => sides.get(topic.id) === side)
+      .map((topic) => topic.id)
+  }
+  const leftIds = sideIds('left')
+  const rightIds = sideIds('right')
+  const allIds = root().children.map((topic) => topic.id)
+  check('默认文档两侧都有分支', leftIds.length > 0 && rightIds.length > 0)
+
+  eq('平衡图中心主题提供左右分别收起', splitFoldSidesOf(root(), true).join(','), 'left,right')
+  eq('非中心主题不提供（收起就是全收起）', splitFoldSidesOf(root(), false).join(','), '')
+  store().setStructure('org.xmind.ui.logic.right')
+  eq('单侧结构不提供', splitFoldSidesOf(root(), true).join(','), '')
+  store().setStructure('org.xmind.ui.map.unbalanced')
+
+  const visibleIds = (): string =>
+    visibleChildren(root())
+      .map((topic) => topic.id)
+      .join(',')
+  eq('默认两侧都可见', visibleIds(), allIds.join(','))
+
+  store().toggleFoldSide(foldRootId, 'left')
+  eq('收起左侧后只剩右侧', visibleIds(), rightIds.join(','))
+  eq('收起标记写进模型', foldedSidesOf(root()).join(','), 'left')
+
+  // setFoldSide 是**设置值**：AI 重试同一个设置不该再记一步，更不该把刚收起来的翻回去
+  const stepsAtFolded = store().undoStack.length
+  store().setFoldSide(foldRootId, 'left', true)
+  eq('重复设置同一侧同一状态不记步（幂等）', store().undoStack.length, stepsAtFolded)
+  eq('幂等设置不改变收起状态', foldedSidesOf(root()).join(','), 'left')
+
+  const foldedLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+  check(
+    '收起后左侧分支不参与布局',
+    leftIds.every((id) => !foldedLayout.nodeMap.has(id))
+  )
+  check(
+    '收起后右侧分支仍在布局里',
+    rightIds.every((id) => foldedLayout.nodeMap.has(id))
+  )
+  /**
+   * 关键回归：左右归属必须按**全部**子节点算。若按可见子节点重排序号，
+   * 收起左侧后右侧那些会前移、被重新判成左侧，跟着一起消失（收起一侧 = 收起全部）。
+   */
+  eq(
+    '收起一侧不会连带收掉另一侧',
+    rightIds.map((id) => foldedLayout.nodeMap.get(id)?.side ?? '?').join(','),
+    rightIds.map(() => 'right').join(',')
+  )
+
+  store().toggleFoldSide(foldRootId, 'right')
+  eq('两侧都收起后没有可见子节点', visibleIds(), '')
+  store().toggleFoldSide(foldRootId, 'left')
+  eq('展开左侧后只剩左侧可见', visibleIds(), leftIds.join(','))
+
+  store().undo()
+  store().undo()
+  eq('撤销两步后回到「只收起左侧」', foldedSidesOf(root()).join(','), 'left')
+
+  store().setCollapsed(foldRootId, false)
+  eq('整体展开会清掉按侧收起（两种标记互斥）', foldedSidesOf(root()).join(','), '')
+
+  /**
+   * 大纲那一行与画布 `Ctrl+/` 走的是 `toggleCollapse`。按侧收起时大纲显示成「展开」
+   * （`outlineRows` 的判据是"有子节点但不是全部可见"），所以**按一下必须真的展开**——
+   * 不能"提示写展开、动作却是把两侧都收起来"。
+   */
+  store().setFoldSide(foldRootId, 'left', true)
+  const stepsBeforeToggle = store().undoStack.length
+  store().toggleCollapse(foldRootId)
+  eq('按侧收起时按「折叠/展开」= 展开', foldedSidesOf(root()).join(','), '')
+  check('并且没有顺手打开整体折叠（不是折上加折）', !findTopic(root(), foldRootId)?.collapsed)
+  eq('这一下记一步', store().undoStack.length, stepsBeforeToggle + 1)
+  store().toggleCollapse(foldRootId)
+  check('再按一次才是整体折叠', findTopic(root(), foldRootId)?.collapsed === true)
+  store().setCollapsed(foldRootId, false)
+
+  store().toggleFoldSide(foldRootId, 'left')
+  addChildOf(foldRootId, '新节点')
+  eq('新建子主题时自动展开（新节点不会落在收起的侧）', foldedSidesOf(root()).join(','), '')
+
+  /**
+   * 「把某个一级分支拖到中心主题另一侧」（`setTopicSide`）不能把它**送进收起的那一侧**——
+   * 那样分支会当场消失，用户以为把数据弄丢了。
+   */
+  store().setFoldSide(foldRootId, 'left', true)
+  const movedBranch = root().children.find((topic) => rightIds.includes(topic.id))
+  check('找得到待搬的右侧分支', Boolean(movedBranch))
+  if (movedBranch) store().setTopicSide(movedBranch.id, 'left')
+  eq('拖到收起的一侧会顺手展开那一侧（分支不会当场消失）', foldedSidesOf(root()).join(','), '')
+
+  group('按侧收起：方向分组与布局逐结构一致')
+
+  /**
+   * **单一来源的守门断言**（全部 14 个结构铺一遍）：
+   * ① `childFoldSides` 声明的方向，必须与布局真正摆出来的方向完全一致——
+   *    两边各写一份规则时，这条会立刻变红；
+   * ② 收起某一侧之后，**剩下的仍在各自原来那一侧**——按可见子节点重新编号的话，
+   *    它们会漂到收起来的那一侧去（收起一侧等于没生效）；
+   * ③ 只有**思维导图（平衡 / 顺时针）**提供按侧收起：
+   *    单方向的结构与**时间轴 / 鱼骨图**（上下交替只是布局方向）都保持「一个折叠点」。
+   */
+  for (const def of STRUCTURES.filter((item) => item.supported)) {
+    reset()
+    const sweepRootId = root().id
+    store().setStructure(def.class)
+    while (root().children.length < 6) addChildOf(sweepRootId, `补${root().children.length}`)
+
+    const declared = childFoldSides(root())
+    const sides = splitFoldSidesOf(root(), true)
+    const layout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+
+    if (declared.size === 0) {
+      eq(`结构「${def.label}」：单方向结构不提供按侧收起`, sides.join(','), '')
+      continue
+    }
+
+    const drifted = root().children.filter((child) => {
+      const node = layout.nodeMap.get(child.id)
+      return node !== undefined && declared.get(child.id) !== node.side
+    })
+    eq(
+      `结构「${def.label}」：方向分组与布局一致`,
+      drifted
+        .map(
+          (topic) =>
+            `${topic.title}=${declared.get(topic.id)}/${layout.nodeMap.get(topic.id)?.side}`
+        )
+        .join(','),
+      ''
+    )
+
+    // 时间轴 / 鱼骨图：方向只服务于布局，收起仍是「一个折叠点」（整体折叠）
+    if (sides.length < 2) {
+      eq(`结构「${def.label}」：不提供按侧收起（保持一个折叠点）`, sides.join(','), '')
+      continue
+    }
+    eq(`结构「${def.label}」：两个方向都能收起`, sides.length, 2)
+
+    const first = sides[0] ?? 'left'
+    store().setFoldSide(sweepRootId, first, true)
+    const afterFold = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
+    const hidden = root().children.filter((child) => declared.get(child.id) === first)
+    check(
+      `结构「${def.label}」：收起的那一侧确实不参与布局`,
+      hidden.every((topic) => !afterFold.nodeMap.has(topic.id))
+    )
+    const afterDrift = root()
+      .children.filter((child) => declared.get(child.id) !== first)
+      .filter((child) => {
+        const node = afterFold.nodeMap.get(child.id)
+        return node !== undefined && declared.get(child.id) !== node.side
+      })
+    eq(
+      `结构「${def.label}」：收起「${first}」后其余不漂移`,
+      afterDrift.map((topic) => topic.title).join(','),
+      ''
+    )
+  }
+
+  group('AI 读取：统计与骨架会标出「已收起」')
+
+  /**
+   * 折叠是**显示**状态：文档里的内容一个没少，但画布上看不到。
+   * 模型必须同时拿到这两个数，否则会把收起的分支当成不存在
+   * （或反过来，以为它们正显示着，于是去"移动"一个看不见的节点）。
+   */
+  reset()
+  const statRootId = root().id
+  store().setStructure('org.xmind.ui.map.unbalanced')
+  const statSides = childFoldSides(root())
+  const statLeftIds = root()
+    .children.filter((topic) => statSides.get(topic.id) === 'left')
+    .map((topic) => topic.id)
+  const statLeftTotal = statLeftIds.reduce(
+    (sum, id) => sum + 1 + countDescendants(findTopic(root(), id)!),
+    0
+  )
+  check('种子文档左右两侧都有分支', statLeftIds.length > 0)
+
+  const statContext = (): ToolContext => ({
+    root: root(),
+    selectedId: null,
+    sheetCount: 1,
+    sheet: {
+      id: 'sheet-stats',
+      title: '画布',
+      rootTopic: root(),
+      relationships: [],
+      boundaries: [],
+      summaries: []
+    }
+  })
+
+  eq('没有折叠时藏着 0 个', countHiddenNodes(root()), 0)
+  check('没有折叠时骨架不出现「已收起」', !buildSkeletonDigest(root()).includes('已收起'))
+  check(
+    '没有折叠时统计不报这一行',
+    !runReadTool('getDocStats', '{}', statContext()).content.includes('看不到的节点')
+  )
+
+  store().setFoldSide(statRootId, 'left', true)
+  eq('按侧收起：藏起来的是这一侧（含子树）', countHiddenNodes(root()), statLeftTotal)
+  eq('徽标用的单侧计数与统计口径一致', hiddenCountOfSide(root(), 'left'), statLeftTotal)
+  check(
+    'getDocStats 报出画布上看不到多少个',
+    runReadTool('getDocStats', '{}', statContext()).content.includes(
+      `画布上当前看不到的节点：${statLeftTotal}`
+    )
+  )
+  const foldedDigest = buildSkeletonDigest(root())
+  check('骨架把收起的分支标出来', foldedDigest.includes('，已收起'), foldedDigest)
+  check('骨架给出已收起总数', foldedDigest.includes('已收起、当前不显示'), foldedDigest)
+
+  store().setFoldSide(statRootId, 'left', false)
+  eq('展开后回到 0', countHiddenNodes(root()), 0)
+
+  // 嵌套折叠同样要算进去（且只算一次，不能把被祖先收起的部分重复计入）
+  const nestedParent = findTopic(root(), statLeftIds[0]!)
+  check('找得到用于嵌套折叠的分支', Boolean(nestedParent))
+  if (nestedParent) {
+    addChildOf(nestedParent.id, '再折一层')
+    const beforeNested = countHiddenNodes(root())
+    store().setCollapsed(nestedParent.id, true)
+    eq(
+      '嵌套整体折叠会算进去（且不重复计入）',
+      countHiddenNodes(root()),
+      countDescendants(findTopic(root(), nestedParent.id)!)
+    )
+    store().setCollapsed(nestedParent.id, false)
+    eq('展开后回到原值', countHiddenNodes(root()), beforeNested)
+  }
+
   group('平衡结构：左右归属不受内容变化影响（回归）')
 
   reset()
@@ -1943,6 +2260,49 @@ function testAiChatHelpers(): void {
   check('明确禁止要求用户去画布选中', prompt.includes('反过来要求用户'))
   check('工具协议：并行调用 + 合并同类操作', prompt.includes('一次回复可以并行多个工具调用'))
   check('工具协议：已有内容用 moveTopics，不用 insertSubtree 重写', prompt.includes('真正的新内容'))
+  check(
+    '工具协议：说明折叠可按侧收起（左右分开收）',
+    prompt.includes('左右分开收') && prompt.includes('只影响显示')
+  )
+
+  /**
+   * **三档原则的守门断言**：档位（min / mid / max）只分「生成规模与深度 + 本档自检强度」。
+   * 折叠是**显示操作**，与生成无关——它必须待在静态层，三档一字不差；
+   * 一旦有人把它写进档位规格，这里会立刻变红。
+   */
+  group('AI 聊天：折叠说明与档位无关（三档一字不差）')
+
+  const ALL_TIERS: Array<'min' | 'mid' | 'max'> = ['min', 'mid', 'max']
+  const tierPrompt = (tier: 'min' | 'mid' | 'max'): string =>
+    buildChatSystemPrompt({
+      skeleton: digest,
+      selectedTitles: [],
+      totalNodes: 5,
+      sheetCount: 1,
+      canWrite: true,
+      // 生成类请求才会注入档位规格：正好用它验证「折叠说明不受档位影响」
+      latestRequest: '生成一份导图',
+      tier
+    })
+  const foldLine = (text: string): string =>
+    text.split('\n').find((line) => line.includes('左右分开收')) ?? ''
+  check(
+    '三档都带折叠说明',
+    ALL_TIERS.every((tier) => foldLine(tierPrompt(tier)) !== '')
+  )
+  eq(
+    '三档的折叠说明完全相同（说明它没被塞进档位规格）',
+    new Set(ALL_TIERS.map((tier) => foldLine(tierPrompt(tier)))).size,
+    1
+  )
+  check(
+    '生成类请求确实注入了档位规格（否则上一条断言等于没测）',
+    tierPrompt('max').length > tierPrompt('min').length
+  )
+  check(
+    '「收起」算编辑类任务（好注入编辑模块，而不是生成规格）',
+    classifyTaskIntent('把左边收起来').editing && !classifyTaskIntent('把左边收起来').generation
+  )
   check(
     'askUser 在可用工具清单里（「不确定就问」的落点）',
     AGENT_ALL_TOOLS.some((t) => t.name === 'askUser')
@@ -3890,6 +4250,110 @@ function testWriteToolsAndTurn(): void {
     plan('setNotes', { address: '成本', text: '  ' }).summary.includes('清空')
   )
   check('代码块为空即移除', plan('setCode', { address: '成本', text: '' }).summary.includes('移除'))
+
+  group('Agent：按侧收起（setCollapsed 的 side）')
+
+  {
+    check(
+      '工具描述讲清了 side 的适用范围',
+      (AGENT_WRITE_TOOLS.find((tool) => tool.name === 'setCollapsed')?.description ?? '').includes(
+        '按侧收起'
+      )
+    )
+
+    // 平衡结构 + 左右都有分支的中心主题
+    const balanced = createTopic('中心主题')
+    balanced.structureClass = 'org.xmind.ui.map.unbalanced'
+    balanced.children.push(createTopic('右一'), createTopic('左一'))
+    const sidePlan = (args: Record<string, unknown>): ReturnType<typeof planWriteTool> =>
+      planWriteTool('setCollapsed', JSON.stringify(args), balanced)
+
+    const folded = sidePlan({ address: '中心主题', collapsed: true, side: 'left' })
+    check('按侧收起能规划', folded.ok, folded.ok ? '' : folded.error)
+    check(
+      '意图带着 side（渲染层据此走 setFoldSide）',
+      folded.ok && folded.intent.kind === 'collapse' && folded.intent.side === 'left'
+    )
+    check('摘要写清收了哪一侧', folded.summary.includes('左'))
+
+    eq(
+      'side 只认 left / right',
+      sidePlan({ address: '中心主题', collapsed: true, side: 'north' }).ok,
+      false
+    )
+    eq(
+      '非中心主题带 side 被拒绝（含可读出下一步的提示）',
+      sidePlan({ address: '左一', collapsed: true, side: 'left' }).ok,
+      false
+    )
+    check(
+      '拒绝理由指向正确用法',
+      (() => {
+        const r = sidePlan({ address: '左一', collapsed: true, side: 'left' })
+        return !r.ok && r.error.includes('去掉 side')
+      })()
+    )
+    eq(
+      '单侧结构（逻辑图）同样被拒绝',
+      plan('setCollapsed', { address: '成本', collapsed: true, side: 'left' }).ok,
+      false
+    )
+
+    /**
+     * 时间轴 / 鱼骨图**不提供**按侧收起（用户要求保持「一个折叠点」）：
+     * 它们的上下只是沿主轴的交替摆放，收一侧只会让图更难读。
+     */
+    const fish = createTopic('中心主题')
+    fish.structureClass = 'org.xmind.ui.fishbone.leftHeaded'
+    fish.children.push(createTopic('甲'), createTopic('乙'))
+    const upPlan = planWriteTool(
+      'setCollapsed',
+      JSON.stringify({ address: '中心主题', collapsed: true, side: 'left' }),
+      fish
+    )
+    eq('鱼骨图不提供按侧收起', upPlan.ok, false)
+    check('并说明该结构该用整体折叠', !upPlan.ok && upPlan.error.includes('去掉 side'))
+
+    // 顺时针思维导图属于思维导图，按角度分左右半圈，同样支持
+    const radial = createTopic('中心主题')
+    radial.structureClass = 'org.xmind.ui.map.clockwise'
+    radial.children.push(createTopic('一'), createTopic('二'))
+    const radialPlan = planWriteTool(
+      'setCollapsed',
+      JSON.stringify({ address: '中心主题', collapsed: true, side: 'left' }),
+      radial
+    )
+    check(
+      '顺时针思维导图支持按侧收起',
+      radialPlan.ok && radialPlan.intent.kind === 'collapse' && radialPlan.intent.side === 'left'
+    )
+
+    const plain = sidePlan({ address: '中心主题', collapsed: true })
+    check(
+      '不传 side 仍是整体折叠（行为不变）',
+      plain.ok && plain.intent.kind === 'collapse' && plain.intent.side === undefined
+    )
+
+    /**
+     * 读取工具要能读出「哪一侧被收起了」：模型看到的树必须与画布一致，
+     * 否则它不知道右边为什么只剩一根线，还会把已经收起的一侧再收一遍。
+     */
+    withFoldedSides(balanced, ['left'])
+    const read = runReadTool('getSubtree', JSON.stringify({ address: '中心主题' }), {
+      root: balanced,
+      selectedId: null,
+      sheetCount: 1,
+      sheet: {
+        id: 'sheet-balanced',
+        title: '画布',
+        rootTopic: balanced,
+        relationships: [],
+        boundaries: [],
+        summaries: []
+      }
+    })
+    check('getSubtree 标出已收起的一侧', read.content.includes('已收起左侧'), read.content)
+  }
 
   const formula = plan('setFormula', { address: '成本', formula: '$$E=mc^2$$' })
   check(
@@ -6054,6 +6518,49 @@ async function testRoundTrip(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* 10b. 平衡图「左右分别收起」的 .xmind 往返                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 收起标记存在 `topic.style.properties` 的私有键里（与 `TOPIC_SIDE_KEY` 同一套做法：
+ * Xmind 忽略不认识的键、我们原样往返），所以它必须跟着 style 一起保存/打开——
+ * 这里真跑一遍，确认收起状态不丢、被收起的节点数据也还在。
+ */
+async function testFoldSidesRoundTrip(): Promise<void> {
+  group('平衡图「左右分别收起」：.xmind 往返')
+
+  reset()
+  const rootId = root().id
+  store().setStructure('org.xmind.ui.map.unbalanced')
+  const sides = childFoldSides(root())
+  const rightIds = root()
+    .children.filter((topic) => sides.get(topic.id) === 'right')
+    .map((topic) => topic.id)
+  const leftIds = root()
+    .children.filter((topic) => sides.get(topic.id) === 'left')
+    .map((topic) => topic.id)
+  check('默认文档两侧都有分支', leftIds.length > 0 && rightIds.length > 0)
+  store().toggleFoldSide(rootId, 'left')
+
+  const pkg = await parseXmind(await serializeXmind({ workbook: store().workbook, resources: {} }))
+  const back = pkg.workbook.sheets[0]?.rootTopic
+  check('打开后有根主题', Boolean(back))
+  if (!back) return
+  eq('收起标记随文件往返', foldedSidesOf(back).join(','), 'left')
+  eq(
+    '打开后左侧仍然收着',
+    visibleChildren(back)
+      .map((topic) => topic.id)
+      .join(','),
+    rightIds.join(',')
+  )
+  check(
+    '被收起的左侧分支数据没丢（只是收起）',
+    leftIds.every((id) => back.children.some((topic) => topic.id === id))
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* 11. 未知字段透传                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -7872,6 +8379,18 @@ function testStructures(): void {
     boneSides.join(',')
   )
   check('鱼骨图：绘制了主脊', bone.decorations.length > 0)
+
+  /**
+   * 折叠之后**不许留下孤线**（用户截图：中心主题右边挂着一截没有任何东西的线）。
+   * 主脊的兜底终点以前是"中心主题右缘 + 120"，没有可见分支时照样画出来。
+   */
+  const bareRootId = root().id
+  store().setCollapsed(bareRootId, true)
+  const bareBone = layoutSheet(root(), fakeMeasure)
+  eq('鱼骨图：整体折叠后不画主脊（没有可见分支就不留孤线）', bareBone.decorations.length, 0)
+  store().setCollapsed(bareRootId, false)
+  const restoredBone = layoutSheet(root(), fakeMeasure)
+  check('展开后主脊回来', restoredBone.decorations.length > 0)
 
   // 括号图：每组子节点都配了括号装饰
   buildStructureSample()
@@ -10357,6 +10876,7 @@ async function main(): Promise<void> {
   await testLegacyPackage()
   await testRoundTrip()
   await testThemeRoundTrip()
+  await testFoldSidesRoundTrip()
   await testUnknownPassthrough()
 
   console.log('\n' + '='.repeat(56))

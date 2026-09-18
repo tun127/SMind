@@ -18,7 +18,8 @@ import {
   countTopics,
   findParent,
   findTopic,
-  isSelfOrDescendant
+  isSelfOrDescendant,
+  type FoldSide
 } from '@shared/model/tree'
 import { alsoDraggedOf, moveRootsOf, resolveDragMove, type DragMove } from '@shared/model/dragmove'
 import {
@@ -1835,6 +1836,26 @@ export default function Canvas(): ReactElement {
     })
   }, [])
 
+  const handleNodeToggleFoldSide = useCallback((id: string, side: FoldSide): void => {
+    /**
+     * 平衡思维导图的中心主题：收起/展开某一侧。
+     * 与整体折叠同一处理——重排后把被点的中心主题**按在屏幕原处**，
+     * 否则用户正看着左侧收起来，画面却整体跳走。
+     */
+    const lay = layoutRef.current
+    const z = zoomRef.current
+    const p = panRef.current
+    const before = lay?.nodeMap.get(id)
+    const screen = before ? { x: before.x * z + p.x, y: before.y * z + p.y } : null
+    useEditor.getState().toggleFoldSide(id, side)
+    if (!screen || !containerRef.current) return
+    window.requestAnimationFrame(() => {
+      const after = layoutRef.current?.nodeMap.get(id)
+      if (!after) return
+      useEditor.getState().setPan({ x: screen.x - after.x * z, y: screen.y - after.y * z })
+    })
+  }, [])
+
   /* ---- 空白处：右键/中键拖动平移；左键拖动框选 ---- */
   const handleBackgroundPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>): void => {
@@ -2435,6 +2456,7 @@ export default function Canvas(): ReactElement {
             onCommitAndAddSibling={handleNodeCommitAndAddSibling}
             onNavigateEdit={handleNodeNavigateEdit}
             onToggleCollapse={handleNodeToggleCollapse}
+            onToggleFoldSide={handleNodeToggleFoldSide}
           />
         ))}
 

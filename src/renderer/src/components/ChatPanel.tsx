@@ -556,7 +556,9 @@ export default function ChatPanel({
         }
       }
       case 'collapse':
-        store.setCollapsed(intent.id, intent.collapsed)
+        // 带 side = 平衡图中心主题的「按侧收起」（幂等设置值，重试不会来回翻）
+        if (intent.side) store.setFoldSide(intent.id, intent.side, intent.collapsed)
+        else store.setCollapsed(intent.id, intent.collapsed)
         touched([intent.id])
         return { ok: true, note: '' }
       case 'structure':

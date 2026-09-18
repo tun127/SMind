@@ -5,6 +5,9 @@
 
 import type { StructureClass } from '../model/types'
 
+/** 分支整体展开的方向（中心主题折叠后看不见子节点，靠它给徽标定位） */
+export type StructureGrowth = 'left' | 'right' | 'up' | 'down'
+
 export interface StructureDef {
   class: StructureClass
   /** 界面显示名 */
@@ -22,6 +25,15 @@ export interface StructureDef {
     | 'brace'
     | 'spreadsheet'
     | 'matrix'
+  /**
+   * 分支整体展开的方向。
+   *
+   * 只用于「中心主题折叠后，折叠徽标该挂哪一边」：中心主题没有方向属性
+   * （布局给它的 `side` 恒为 `'root'`），而它一旦折叠就看不见子节点了，
+   * 只能靠结构方向判断——否则会出现「向左（向上/向下）的图、徽标却挂在右边」。
+   * 未声明时按默认结构方向（向右）处理。
+   */
+  grows?: StructureGrowth
 }
 
 export const STRUCTURES: StructureDef[] = [
@@ -29,51 +41,100 @@ export const STRUCTURES: StructureDef[] = [
     class: 'org.xmind.ui.map.unbalanced',
     label: '思维导图（平衡）',
     supported: true,
-    family: 'mindmap'
+    family: 'mindmap',
+    grows: 'right'
   },
   {
     class: 'org.xmind.ui.map.clockwise',
     label: '思维导图（顺时针）',
     supported: true,
-    family: 'mindmap'
+    family: 'mindmap',
+    grows: 'right'
   },
-  { class: 'org.xmind.ui.logic.right', label: '逻辑图（向右）', supported: true, family: 'logic' },
-  { class: 'org.xmind.ui.logic.left', label: '逻辑图（向左）', supported: true, family: 'logic' },
-  { class: 'org.xmind.ui.tree.right', label: '树形图（向右）', supported: true, family: 'tree' },
-  { class: 'org.xmind.ui.tree.left', label: '树形图（向左）', supported: true, family: 'tree' },
+  {
+    class: 'org.xmind.ui.logic.right',
+    label: '逻辑图（向右）',
+    supported: true,
+    family: 'logic',
+    grows: 'right'
+  },
+  {
+    class: 'org.xmind.ui.logic.left',
+    label: '逻辑图（向左）',
+    supported: true,
+    family: 'logic',
+    grows: 'left'
+  },
+  {
+    class: 'org.xmind.ui.tree.right',
+    label: '树形图（向右）',
+    supported: true,
+    family: 'tree',
+    grows: 'right'
+  },
+  {
+    class: 'org.xmind.ui.tree.left',
+    label: '树形图（向左）',
+    supported: true,
+    family: 'tree',
+    grows: 'left'
+  },
   {
     class: 'org.xmind.ui.org-chart.down',
     label: '组织架构图（向下）',
     supported: true,
-    family: 'orgchart'
+    family: 'orgchart',
+    grows: 'down'
   },
   {
     class: 'org.xmind.ui.org-chart.up',
     label: '组织架构图（向上）',
     supported: true,
-    family: 'orgchart'
+    family: 'orgchart',
+    grows: 'up'
   },
   {
     class: 'org.xmind.ui.fishbone.leftHeaded',
     label: '鱼骨图',
     supported: true,
-    family: 'fishbone'
+    family: 'fishbone',
+    grows: 'right'
   },
   {
     class: 'org.xmind.ui.timeline.horizontal',
     label: '时间轴（水平）',
     supported: true,
-    family: 'timeline'
+    family: 'timeline',
+    grows: 'right'
   },
   {
     class: 'org.xmind.ui.timeline.vertical',
     label: '时间轴（垂直）',
     supported: true,
-    family: 'timeline'
+    family: 'timeline',
+    grows: 'down'
   },
-  { class: 'org.xmind.ui.brace.right', label: '括号图', supported: true, family: 'brace' },
-  { class: 'org.xmind.ui.spreadsheet', label: '树状表格', supported: true, family: 'spreadsheet' },
-  { class: 'org.xmind.ui.matrix', label: '矩阵图', supported: true, family: 'matrix' }
+  {
+    class: 'org.xmind.ui.brace.right',
+    label: '括号图',
+    supported: true,
+    family: 'brace',
+    grows: 'right'
+  },
+  {
+    class: 'org.xmind.ui.spreadsheet',
+    label: '树状表格',
+    supported: true,
+    family: 'spreadsheet',
+    grows: 'down'
+  },
+  {
+    class: 'org.xmind.ui.matrix',
+    label: '矩阵图',
+    supported: true,
+    family: 'matrix',
+    grows: 'down'
+  }
 ]
 
 /**
@@ -233,6 +294,16 @@ export const RELATIONSHIP_CURVE_KEY = 'com.mindmap.local.curve'
  * 不认识的键 Xmind 会忽略，往返不丢。
  */
 export const TOPIC_SIDE_KEY = 'com.mindmap.local.side'
+
+/**
+ * 平衡思维导图里「中心主题哪些方向的子主题被收起」。
+ * 存在 topic.style.properties 下，取值 `left` / `right` / `left,right`。
+ *
+ * 为什么单开一个私有键而不是用 Xmind 的 `branch: "folded"`：那个字段只有
+ * 「整体折叠 / 展开」两态，表达不了「只收起左边」；而 `style.properties` 会被
+ * 原样往返保存，Xmind 也会忽略不认识的键（与 `TOPIC_SIDE_KEY` 同一套做法）。
+ */
+export const TOPIC_FOLD_KEY = 'com.mindmap.local.fold'
 
 /** .xmind 包内固定文件名 */
 export const XMIND_FILES = {

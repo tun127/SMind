@@ -7,7 +7,7 @@
  *  - x 坐标是相对父节点还是按层级对齐（树状表格）
  */
 import type { StructureClass, Topic } from '../model/types'
-import { TOPIC_SIDE_KEY } from '../xmind/constants'
+import { childFoldSides } from '../model/tree'
 import type { LayoutResult, MeasureResult, NodeLayout } from './types'
 import {
   LayoutBuilder,
@@ -161,32 +161,23 @@ export function layoutMindmap(root: Topic, builder: LayoutBuilder): LayoutResult
    * 左右分配：**优先用主题上记录的显式侧**（用户把分支拖到中心主题另一侧时写入），
    * 其余按**顺序交替**——第 1 个在右、第 2 个在左、第 3 个在右……（与 Xmind 平衡图一致）。
    *
+   * 规则本身抽在 `childFoldSides` 里（唯一来源）：它按**全部**子节点的序号定侧，
+   * 与折叠无关——否则「收起左侧」之后剩下的子节点序号前移，右侧的分支会被重新判成左侧、
+   * 连带一起消失（收起一侧等于收起全部）。
+   *
    * 这里绝不能按"子树高度"去配平：那样只要挪动一个子节点，
    * 各分支的高度就变了，左右归属会整体翻转，
    * 表现成「分支主题 1 和分支主题 2 莫名其妙换位」——与内容无关的稳定排布才有可预期性。
    */
-  const rightSet = new Set<string>()
-  entries.forEach((topic, index) => {
-    const manual = topic.style?.properties?.[TOPIC_SIDE_KEY]
-    if (manual === 'right') rightSet.add(topic.id)
-    else if (manual === 'left') return
-    else if (index % 2 === 0) rightSet.add(topic.id)
-  })
+  const sides = childFoldSides(root)
+  const onRight = entries.filter((topic) => sides.get(topic.id) !== 'left')
 
   const inherited = root.structureClass
+  placeVerticalChildren(builder, rootNode, onRight, 1, 1, undefined, inherited)
   placeVerticalChildren(
     builder,
     rootNode,
-    entries.filter((topic) => rightSet.has(topic.id)),
-    1,
-    1,
-    undefined,
-    inherited
-  )
-  placeVerticalChildren(
-    builder,
-    rootNode,
-    entries.filter((topic) => !rightSet.has(topic.id)),
+    entries.filter((topic) => !onRight.includes(topic)),
     -1,
     1,
     undefined,

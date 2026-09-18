@@ -1649,7 +1649,6 @@ textarea {
    单个数字正好是正圆；两位数起变成小胶囊（min-width + padding 兜住） */
 .topic__collapse {
   position: absolute;
-  top: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1659,7 +1658,6 @@ textarea {
   width: max-content;
   min-width: 16px;
   height: 16px;
-  margin-top: -8px;
   padding: 0 3px;
   border-radius: 999px;
   color: #ffffff;
@@ -1673,13 +1671,32 @@ textarea {
 }
 
 /* 与节点**部分重叠**：一半压在节点边缘上，看起来是"长在节点上"的，
-   而不是悬在旁边（悬空在小图上会显得很突兀）。 */
+   而不是悬在旁边（悬空在小图上会显得很突兀）。
+
+   贴哪条边由「子节点往哪展开」决定（见 shared/layout/core.ts 的 collapseBadgeSide）：
+   向右/左展开贴左右缘（垂直居中），向下/上展开贴下/上缘（水平居中）。 */
 .topic__collapse--right {
+  top: 50%;
+  margin-top: -8px;
   left: calc(100% - 8px);
 }
 
 .topic__collapse--left {
+  top: 50%;
+  margin-top: -8px;
   right: calc(100% - 8px);
+}
+
+.topic__collapse--down {
+  top: calc(100% - 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.topic__collapse--up {
+  bottom: calc(100% - 8px);
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 /* ------------------------------------------------------------------ */

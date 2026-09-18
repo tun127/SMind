@@ -5,6 +5,7 @@
  *  - 主轴本身作为装饰线绘制，一级主题的连线直接从主轴上连出
  */
 import type { Topic } from '../model/types'
+import { childFoldSides } from '../model/tree'
 import type { LayoutResult } from './types'
 import { LayoutBuilder, addDecoration, addEdge, anchorPoint, round } from './core'
 import { placeHorizontalColumn, placeVerticalColumn } from './stack'
@@ -17,13 +18,19 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
   const kids = builder.visibleChildren(root)
   const spineGap = Math.max(rootSize.height / 2 + builder.gapY, 26)
   const spineCenterY = rootNode.y + rootNode.height / 2
+  /**
+   * 事件在轴的哪一侧，取 `childFoldSides`（唯一来源）：
+   * 按**全部**事件算，与折叠无关——收起一侧后剩下的若按新序号重新交替，
+   * 会当场跳到收起来的那一侧去。
+   */
+  const sides = childFoldSides(root)
 
   let cursor = rootNode.x + rootNode.width + builder.gapX * 1.6
-  kids.forEach((child, index) => {
+  kids.forEach((child) => {
     const extent = builder.horizontalExtent(child)
     const size = builder.size(child.id)
     const centerX = cursor + extent / 2
-    const side: -1 | 1 = index % 2 === 0 ? -1 : 1
+    const side: -1 | 1 = sides.get(child.id) === 'up' ? -1 : 1
     const childY = side < 0 ? spineCenterY - spineGap - size.height : spineCenterY + spineGap
 
     builder.add(child, centerX - size.width / 2, childY, 1, side < 0 ? 'up' : 'down')
@@ -95,13 +102,15 @@ export function layoutTimelineVertical(root: Topic, builder: LayoutBuilder): Lay
   const indent = Math.max(16, builder.gapY * 1.4)
   const spineGap = Math.max(rootSize.width / 2 + builder.gapX * 0.7, 72)
   const spineCenterX = rootNode.x + rootNode.width / 2
+  /** 事件在轴的哪一侧：与折叠无关的稳定归属（见 `childFoldSides`） */
+  const sides = childFoldSides(root)
 
   let cursor = rootNode.y + rootNode.height + builder.gapY * 2
-  kids.forEach((child, index) => {
+  kids.forEach((child) => {
     const extent = builder.verticalExtent(child)
     const size = builder.size(child.id)
     const centerY = cursor + extent / 2
-    const side: -1 | 1 = index % 2 === 0 ? -1 : 1
+    const side: -1 | 1 = sides.get(child.id) === 'left' ? -1 : 1
     const childX = side < 0 ? spineCenterX - spineGap - size.width : spineCenterX + spineGap
 
     builder.add(child, childX, centerY - size.height / 2, 1, side < 0 ? 'left' : 'right')

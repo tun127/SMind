@@ -7,6 +7,7 @@
  */
 
 import type { RichText, Sheet, Topic, Workbook } from '../model/types'
+import { visibleChildren } from '../model/tree'
 import { escapeXmlAttr } from '../xml-escape'
 
 export type OutlineFormat = 'txt' | 'md' | 'opml'
@@ -63,12 +64,14 @@ export function outlineRows(root: Topic, options: OutlineRowsOptions = {}): Outl
   const skipCollapsed = options.skipCollapsed ?? false
 
   const walk = (topic: Topic, depth: number): void => {
+    const visible = visibleChildren(topic)
     rows.push({
       id: topic.id,
       title: topic.title,
       depth,
       hasChildren: topic.children.length > 0,
-      collapsed: Boolean(topic.collapsed),
+      // 有子节点、但不是全部可见 = 收起了（整体收起或只是收起某一侧）
+      collapsed: topic.children.length > 0 && visible.length < topic.children.length,
       markerCount: topic.markers?.length ?? 0,
       labelCount: topic.labels?.length ?? 0,
       hasNotes: Boolean(topic.notes && topic.notes.length > 0),
@@ -77,8 +80,8 @@ export function outlineRows(root: Topic, options: OutlineRowsOptions = {}): Outl
       hasImage: Boolean(topic.image),
       hasFormula: Boolean(topic.formula)
     })
-    if (skipCollapsed && topic.collapsed) return
-    for (const child of topic.children) walk(child, depth + 1)
+    // 面板（skipCollapsed）只列**可见**的分支；导出不受折叠影响，仍走全部子节点
+    for (const child of skipCollapsed ? visible : topic.children) walk(child, depth + 1)
     // 浮动主题没有固定的树位置，但也不该在大纲里消失，排在最后
     for (const floating of topic.detachedChildren) walk(floating, depth + 1)
   }

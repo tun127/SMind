@@ -9,7 +9,16 @@
 import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { isRecord } from '../guards'
 import { parseRange } from '../layout'
-import { ancestorsOf, findTopic, isSelfOrDescendant, walk } from '../model/tree'
+import {
+  ancestorsOf,
+  countHiddenNodes,
+  findTopic,
+  foldedSidesOf,
+  isSelfOrDescendant,
+  splitFoldSidesOf,
+  walk,
+  type FoldSide
+} from '../model/tree'
 import type { Sheet, Topic, TopicCode } from '../model/types'
 import { DEFAULT_STRUCTURE, MARKER_LABELS, markerGroupOf, STRUCTURES } from '../xmind/constants'
 
@@ -541,7 +550,18 @@ function outlineOf(
       return
     }
     const title = node.title.length > 0 ? node.title : '（未命名）'
-    const suffix = node.children.length > 0 ? `（${node.children.length} 个子节点）` : ''
+    /**
+     * 折起状态要**读得出来**：模型看到的树必须与画布一致，否则它不知道
+     * 「右边为什么只有一条线」，还会把已经收起的一侧再收一遍。
+     * 只在真的折起时才附注（正常文档一个字都不多花）。
+     */
+    const folded = foldedSidesOf(node)
+    const foldNote = node.collapsed
+      ? '，已整体折叠'
+      : folded.length > 0
+        ? `，已收起${folded.map((item) => FOLD_SIDE_LABELS[item]).join('/')}侧`
+        : ''
+    const suffix = node.children.length > 0 ? `（${node.children.length} 个子节点${foldNote}）` : ''
     // 每行带上短句柄：模型可以直接用它当 address（重名、超长、带斜杠的标题都因此变得可寻址）
     lines.push(`${'  '.repeat(level)}- [#${shortHandleOf(node.id)}] ${title}${suffix}`)
     if (level >= depth) {
@@ -578,6 +598,8 @@ function countsOf(root: Topic): {
     for (const child of topic.children) visit(child, level + 1)
   }
   visit(root, 1)
+  // 上面数的是**文档里的全部内容**；`countHiddenNodes` 另算「画布上当前看不到的」，
+  // 两件事分开报，模型才不会把"收起来的节点"当成"不存在"
   return { total, branches: root.children.length, maxLevel, notes, codes, formulas }
 }
 
@@ -811,6 +833,7 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
 
   if (name === 'getDocStats') {
     const counts = countsOf(context.root)
+    const hidden = countHiddenNodes(context.root)
     const lines = [
       '当前文档概况：',
       `- 画布数：${context.sheetCount}`,
@@ -819,7 +842,14 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
       `- 最大层级：${counts.maxLevel} 层`,
       `- 带备注的节点：${counts.notes}`,
       `- 带代码块的节点：${counts.codes}`,
-      `- 带公式的节点：${counts.formulas}`
+      `- 带公式的节点：${counts.formulas}`,
+      /**
+       * 折叠是**显示**状态：节点总数把它算在内，但模型必须知道"有多少不在画布上"，
+       * 否则会把收起来的分支当成不存在（或反过来，以为它正显示着）。
+       */
+      ...(hidden > 0
+        ? [`- 画布上当前看不到的节点：${hidden}（被折叠收起；内容仍在文档里，展开或导出即可看到）`]
+        : [])
     ]
     return { ok: true, content: lines.join('\n'), summary: `文档概况：${counts.total} 个节点` }
   }
@@ -1115,7 +1145,12 @@ export type WriteIntent =
       moves: Array<{ id: string; targetId: string; index: number | null }>
       requested: number
     }
-  | { kind: 'collapse'; id: string; collapsed: boolean }
+  /**
+   * 折叠 / 展开。
+   * `side` 只在**思维导图（平衡 / 顺时针）的中心主题**上有效：只收起 / 展开那一侧，
+   * 不传就是整体折叠（与以前一致）。时间轴 / 鱼骨图刻意不在支持范围内。
+   */
+  | { kind: 'collapse'; id: string; collapsed: boolean; side?: FoldSide }
   /** 切换结构（思维导图 / 鱼骨 / 时间轴 …）：整张图或某一支 */
   | { kind: 'structure'; id: string; structureClass: string }
   /** 同级排序（+ 可选自动编号）：orderedIds 是排好的子主题顺序 */
@@ -1134,6 +1169,19 @@ export type WriteIntent =
   | { kind: 'attachmentRemove'; target: AttachmentKind; id: string; label: string }
   | { kind: 'markers'; id: string; markerIds: string[] }
   | { kind: 'label'; id: string; label: string; add: boolean }
+
+/**
+ * 方向的中文名：工具摘要与 `getSubtree` 的读取标注共用。
+ *
+ * up / down 目前**不对外提供**（时间轴 / 鱼骨图不按侧收起，见 `splitFoldSidesOf`），
+ * 留在这里是为了读出旧文件里可能带着的方向标记时不至于显示成空白。
+ */
+const FOLD_SIDE_LABELS: Record<FoldSide, string> = {
+  left: '左',
+  right: '右',
+  up: '上',
+  down: '下'
+}
 
 /**
  * 「执行前必须先问用户一次」的破坏性操作种类（**唯一来源**）。
@@ -1296,11 +1344,22 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
   },
   {
     name: 'setCollapsed',
-    description: '折叠或展开一个主题（只影响显示，不改内容）。',
+    description:
+      '折叠或展开一个主题（**只影响显示，不改任何内容**）。' +
+      '**思维导图（平衡 / 顺时针）的中心主题**还支持**按侧收起**：' +
+      '带上 side 只收起或展开那一侧，左右互不影响' +
+      '（用户说「先把左边收起来」「左右分别收起」就是它）；不传 side 就是整体折叠 / 展开。',
     parameters: schema(
       {
         address: { type: 'string', description: '目标主题' },
-        collapsed: { type: 'boolean', description: 'true = 折叠，false = 展开' }
+        collapsed: { type: 'boolean', description: 'true = 折叠 / 收起，false = 展开' },
+        side: {
+          type: 'string',
+          enum: ['left', 'right'],
+          description:
+            '只对「思维导图（平衡 / 顺时针）的中心主题」有效：只收起 / 展开这一侧。' +
+            '其余结构（逻辑图 / 时间轴 / 鱼骨图 / 矩阵图…）不要传（传了会被拒绝）。'
+        }
       },
       ['address', 'collapsed']
     )
@@ -1824,10 +1883,34 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     const target = resolve('address')
     if ('problem' in target) return target.problem
     if (typeof args.collapsed !== 'boolean') return fail('collapsed 必须是 true 或 false。')
+    const rawSide = args.side
+    if (rawSide === undefined) {
+      return {
+        ok: true,
+        intent: { kind: 'collapse', id: target.topic.id, collapsed: args.collapsed },
+        summary: `${args.collapsed ? '折叠' : '展开'}「${target.topic.title}」`,
+        destructive: false
+      }
+    }
+    if (rawSide !== 'left' && rawSide !== 'right') {
+      return fail('side 只能是 left 或 right（不传就是整体折叠 / 展开）。')
+    }
+    /**
+     * 按侧收起只对「思维导图（平衡 / 顺时针）的中心主题」成立。
+     * 这里如实拒绝并给出下一步，而不是悄悄退化成整体折叠——后者会让模型以为
+     * 「只收了左边」，而用户看到整张图都塌了。
+     */
+    if (splitFoldSidesOf(root, target.topic.id === root.id).length < 2) {
+      return fail(
+        'side 只对「思维导图（平衡 / 顺时针）的中心主题」有效（该结构下左右两边都挂着分支）。' +
+          '逻辑图 / 时间轴 / 鱼骨图 / 矩阵图等请去掉 side 做整体折叠。'
+      )
+    }
+    const label = FOLD_SIDE_LABELS[rawSide]
     return {
       ok: true,
-      intent: { kind: 'collapse', id: target.topic.id, collapsed: args.collapsed },
-      summary: `${args.collapsed ? '折叠' : '展开'}「${target.topic.title}」`,
+      intent: { kind: 'collapse', id: target.topic.id, collapsed: args.collapsed, side: rawSide },
+      summary: `${args.collapsed ? '收起' : '展开'}「${target.topic.title}」的${label}侧分支`,
       destructive: false
     }
   }

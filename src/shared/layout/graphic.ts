@@ -3,6 +3,7 @@
  * 这三种的排布规则差异较大，不适合归入堆叠家族。
  */
 import type { Topic } from '../model/types'
+import { childFoldSides, RADIAL_START_ANGLE } from '../model/tree'
 import type { LayoutResult } from './types'
 import { LayoutBuilder, addDecoration, addEdge, anchorPoint, round, type Point } from './core'
 import type { NodeLayout } from './types'
@@ -106,13 +107,15 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
   /** 小骨：记下"哪根大骨的第几段"，最终坐标到 finish 之后再算 */
   const ribs: Array<{ branchId: string; childId: string; side: -1 | 1; t: number }> = []
   let cursor = rootNode.x + rootNode.width + builder.gapX * 2
+  /** 大骨在主脊的哪一侧：取 `childFoldSides`（唯一来源），与折叠无关 */
+  const sides = childFoldSides(root)
 
-  kids.forEach((child, index) => {
+  kids.forEach((child) => {
     const extent = builder.horizontalExtent(child)
     const size = builder.size(child.id)
     const nodeCenterX = cursor + boneSlant + extent / 2
     const anchorX = nodeCenterX - boneSlant
-    const side: -1 | 1 = index % 2 === 0 ? -1 : 1
+    const side: -1 | 1 = sides.get(child.id) === 'up' ? -1 : 1
     const childY = side < 0 ? spineCenterY - boneOffset - size.height : spineCenterY + boneOffset
 
     builder.add(child, nodeCenterX - size.width / 2, childY, 1, side < 0 ? 'up' : 'down')
@@ -174,17 +177,23 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
   const rootFinal = result.nodeMap.get(root.id)!
   const spineY = round(rootFinal.y + rootFinal.height / 2)
 
-  // 主脊
-  const lastBranchNode = anchors[anchors.length - 1]
-    ? result.nodeMap.get(anchors[anchors.length - 1]!.id)
-    : undefined
-  const spineEnd = lastBranchNode
-    ? round(lastBranchNode.x + lastBranchNode.width / 2 - boneSlant + 60)
-    : round(rootFinal.x + rootFinal.width + 120)
-  addDecoration(result, {
-    d: `M ${round(rootFinal.x + rootFinal.width)} ${spineY} L ${spineEnd} ${spineY}`,
-    widthScale: 1.3
-  })
+  /**
+   * 主脊。
+   *
+   * **没有可见分支时整条不画**：折叠之后（整体折叠，或收起全部方向）
+   * 主脊仍会从中心主题往右画一截 120px 的兜底短线——一条什么也没挂着的孤线，
+   * 看着就是「凭空多了一根线」（用户截图）。鱼骨没有分支时，图里只该剩中心主题。
+   */
+  if (anchors.length > 0) {
+    const lastBranchNode = result.nodeMap.get(anchors[anchors.length - 1]!.id)
+    const spineEnd = lastBranchNode
+      ? round(lastBranchNode.x + lastBranchNode.width / 2 - boneSlant + 60)
+      : round(rootFinal.x + rootFinal.width + 120)
+    addDecoration(result, {
+      d: `M ${round(rootFinal.x + rootFinal.width)} ${spineY} L ${spineEnd} ${spineY}`,
+      widthScale: 1.3
+    })
+  }
 
   /**
    * 大骨：从主脊斜向连到一级主题。
@@ -469,7 +478,15 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
 
   const centerX = rootNode.x + rootNode.width / 2
   const centerY = rootNode.y + rootNode.height / 2
-  const count = kids.length
+  /**
+   * 扇区按**全部**一级分支算（`childFoldSides` 的「左右半圈」判定用的是同一份角度），
+   * 只摆放当前可见的那些。
+   *
+   * 为什么不用可见数量：收起左侧之后，剩下的一支若按新数量重新均分整圈，
+   * 会被铺到左边去——用户看到的还是"左右都有"，像没收起来一样。
+   */
+  const allKids = root.children
+  const count = allKids.length
   /**
    * 每个一级分支分到的扇区角度。
    *
@@ -522,16 +539,18 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
     })
   }
   /**
-   * 起点：**右上**（约 1 点钟，−60°），随后按**顺时针**递增。
+   * 起点角度与「左右半圈」判定**共用同一个常量**（`RADIAL_START_ANGLE`）：
+   * 两边各写一份的话，收起一侧后剩下的分支会被判到另一侧去。
    *
    * 官方只规定了"顺时针"这个方向（《如何在 Xmind 中结合不同的结构以及为什么》把顺时针
    * 列为思维导图的一个方向），起点的具体角度属于**我方取值**（见 `docs/structure-spec.md`）。
-   * 为什么要改：从正上方（−90°）起铺时，两个一级分支会落在正上／正下，画出来是"一上一下"
-   * 的纵向排布，读不出"顺时针"；从右上起，两个分支落在右上与左下，方向感才对。
+   * 从正上方（−90°）起铺时，两个一级分支会落在正上／正下，画出来是"一上一下"的
+   * 纵向排布，读不出"顺时针"；从右上起，两个分支落在右上与左下，方向感才对。
    */
-  const START_ANGLE = -Math.PI / 3
-  kids.forEach((kid, index) => {
-    collect(kid, START_ANGLE + sector * index, sector, 1)
+  const visibleIds = new Set(kids.map((kid) => kid.id))
+  allKids.forEach((kid, index) => {
+    if (!visibleIds.has(kid.id)) return
+    collect(kid, RADIAL_START_ANGLE + sector * index, sector, 1)
   })
 
   // 第二遍：逐层定半径——本层取该层所有节点的最大需求，同层同半径

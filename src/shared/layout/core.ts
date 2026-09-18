@@ -9,6 +9,8 @@
  * 必须在最终坐标确定后再生成，才能避免反复换算偏移量。
  */
 import type { StructureClass, Topic } from '../model/types'
+// 别名：类里也有个同名方法（它只是转发到这个纯函数），不加别名读起来像递归
+import { visibleChildren as visibleChildrenOf } from '../model/tree'
 import { DEFAULT_STRUCTURE, getStructureDef } from '../xmind/constants'
 import type {
   Decoration,
@@ -79,7 +81,7 @@ const SPINE_GAP = 8
  * 免得那条线贴着子节点的边缘蹭过去。
  */
 function spinePoints(result: LayoutResult, parent: NodeLayout, child: NodeLayout): Point[] {
-  const boxes = (parent.topic.collapsed ? [] : parent.topic.children)
+  const boxes = visibleChildrenOf(parent.topic)
     .map((topic) => result.nodeMap.get(topic.id))
     .filter((node): node is NodeLayout => node !== undefined)
   const column = boxes.length > 0 ? boxes : [child]
@@ -245,7 +247,7 @@ export class LayoutBuilder {
     const cached = this.verticalCache.get(topic.id)
     if (cached !== undefined) return cached
     const size = this.size(topic.id)
-    const kids = topic.collapsed ? [] : topic.children
+    const kids = visibleChildrenOf(topic)
     let total = 0
     for (let i = 0; i < kids.length; i += 1) {
       const kid = kids[i]
@@ -267,7 +269,7 @@ export class LayoutBuilder {
     const cached = this.horizontalCache.get(topic.id)
     if (cached !== undefined) return cached
     const size = this.size(topic.id)
-    const kids = topic.collapsed ? [] : topic.children
+    const kids = visibleChildrenOf(topic)
     let total = 0
     for (let i = 0; i < kids.length; i += 1) {
       const kid = kids[i]
@@ -280,7 +282,7 @@ export class LayoutBuilder {
   }
 
   visibleChildren(topic: Topic): Topic[] {
-    return topic.collapsed ? [] : topic.children
+    return visibleChildrenOf(topic)
   }
 
   /**
@@ -664,7 +666,7 @@ export function connectTree(
   const walk = (topic: Topic): void => {
     const parent = result.nodeMap.get(topic.id)
     if (!parent) return
-    for (const child of topic.collapsed ? [] : topic.children) {
+    for (const child of visibleChildrenOf(topic)) {
       const childNode = result.nodeMap.get(child.id)
       if (!childNode) continue
       if (braceCanvas) {
@@ -692,6 +694,59 @@ export function horizontalAnchors(
   child: NodeLayout
 ): { from: Anchor; to: Anchor } {
   return child.side === 'left' ? { from: 'left', to: 'right' } : { from: 'right', to: 'left' }
+}
+
+/** 折叠徽标贴在节点的哪条边上（与子节点的展开方向一致） */
+export type CollapseSide = 'left' | 'right' | 'up' | 'down'
+
+/** 中心主题之外的节点：布局给的 `side` 就是它的展开方向 */
+function sideToCollapseSide(side: Side): CollapseSide {
+  if (side === 'left') return 'left'
+  if (side === 'up') return 'up'
+  if (side === 'down') return 'down'
+  return 'right'
+}
+
+/**
+ * 折叠徽标贴在节点的哪条边上：**跟着分支的展开方向走**（左右 / 上下都跟）。
+ *
+ * 判定用**可见子节点的实际位置**——它们全部落在哪一边，徽标就贴哪一边：
+ * - 全部在下方（组织架构图：向下、矩阵、树状表格、垂直时间轴）→ 贴下缘；
+ * - 全部在上方（组织架构图：向上）→ 贴上缘；
+ * - 全部在左侧（逻辑图/树形图：向左）→ 贴左缘；
+ * - 其余（右侧，或左右都有分支的平衡思维导图）→ 贴右缘。
+ *
+ * 为什么用几何而不是子节点的 `side`：`side` 表达的是"这个节点相对父节点的位置"，
+ * 不是"它的子节点往哪长"——鱼骨图里子节点排在一列却带 `up`/`down`，按 `side`
+ * 判断会把徽标挂到上方。用最终坐标则各种结构都成立。
+ *
+ * 中心主题折叠后（以及无可见子节点时）退回自身方向；中心主题自己没有方向
+ * （`side` 恒为 `'root'`），退回**结构方向** `grows`，否则「向下的图、徽标挂在右边」。
+ */
+export function collapseBadgeSide(
+  node: NodeLayout,
+  nodeMap: ReadonlyMap<string, NodeLayout>
+): CollapseSide {
+  const centerX = node.x + node.width / 2
+  const centerY = node.y + node.height / 2
+  /** 半个像素的容差：恰好居中（如父节点只有一个居中的子节点）不算"在上下" */
+  const EPS = 0.5
+
+  const kids: NodeLayout[] = []
+  for (const child of node.topic.children) {
+    const childNode = nodeMap.get(child.id)
+    if (childNode) kids.push(childNode)
+  }
+
+  if (kids.length > 0) {
+    if (kids.every((kid) => kid.y + kid.height / 2 > centerY + EPS)) return 'down'
+    if (kids.every((kid) => kid.y + kid.height / 2 < centerY - EPS)) return 'up'
+    if (kids.every((kid) => kid.x + kid.width / 2 < centerX - EPS)) return 'left'
+    return 'right'
+  }
+
+  if (node.side !== 'root') return sideToCollapseSide(node.side)
+  return getStructureDef(node.topic.structureClass).grows ?? 'right'
 }
 
 /**

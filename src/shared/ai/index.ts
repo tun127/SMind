@@ -13,6 +13,7 @@
 /* ------------------------------------------------------------------ */
 
 import { createTopic } from '../model/factory'
+import { countHiddenNodes, visibleChildren } from '../model/tree'
 import { isRecord } from '../guards'
 import { notesHtmlFrom } from '../richtext'
 import type { RichText, Topic, TopicCode } from '../model/types'
@@ -829,13 +830,23 @@ export function buildSkeletonDigest(root: Topic, maxBranches = 20): string {
     return lines.join('\n')
   }
 
+  /**
+   * 被折叠收起的分支要**标出来**：骨架是模型判断「图里有什么」的第一手材料，
+   * 不标它就会以为那些分支不存在（或反过来，以为它们正显示在画布上）。
+   */
+  const visible = new Set(visibleChildren(root).map((topic) => topic.id))
   const shown = children.slice(0, maxBranches)
   for (const child of shown) {
     const title = child.title.length > 0 ? child.title : '（未命名）'
-    lines.push(`- ${title}（${countTopicTree(child)} 个节点）`)
+    const folded = visible.has(child.id) ? '' : '，已收起'
+    lines.push(`- ${title}（${countTopicTree(child)} 个节点${folded}）`)
   }
   if (children.length > shown.length) {
     lines.push(`- …另有 ${children.length - shown.length} 个一级分支未列出`)
+  }
+  const hidden = countHiddenNodes(root)
+  if (hidden > 0) {
+    lines.push(`（提示：画布上共有 ${hidden} 个节点已收起、当前不显示）`)
   }
   return lines.join('\n')
 }
@@ -900,6 +911,7 @@ const EDITING_HINTS = [
   '排序',
   '编号',
   '折叠',
+  '收起',
   '展开',
   '加个',
   '加上',
@@ -968,6 +980,15 @@ const PROMPT_TOOL_PROTOCOL = [
     '（用它重写已有节点会在画布上复制出一份重复内容）。',
   '- 需要句柄时用工具返回的 [#xxxxxx]；引用节点用标题原文，方便用户在画布上定位。',
   '- 删除是破坏性操作：界面会请用户确认，说明要删什么即可，不要反复重试。',
+  /**
+   * 折叠 / 收起。放在**静态层**是有意的：它是显示操作，跟「生成规模与深度」无关，
+   * 三档一字不差（见 `qualityRules` 的注释）——档位只分生成规格，不掺显示操作。
+   */
+  '- 折叠 / 收起**只影响显示，不改内容**：普通主题用 setCollapsed 整体折叠；' +
+    '**思维导图（平衡 / 顺时针）的中心主题**还能按侧收起——setCollapsed 带 side（left / right）' +
+    '只收 / 展开那一侧，另一侧不受影响。' +
+    '用户说「先把左边收起来」「左右分开收」「左右分别收起」就是指它，' +
+    '不要用整体折叠代替，也不要顺手改内容。',
   '- 一轮改动在用户那边算**一步撤销**，尽管动手；做完用一两句话说明改了什么，' +
     '不要长篇解说、不要整段复述画布内容。'
 ]

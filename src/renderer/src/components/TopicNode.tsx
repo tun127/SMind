@@ -7,6 +7,7 @@ import {
   type ReactElement
 } from 'react'
 import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
+import { collapseBadgeSide } from '@shared/layout/core'
 import {
   BLOCK_GAP,
   MARKER_MAX_COLUMNS,
@@ -21,7 +22,13 @@ import { nodePaddingOf } from '../render/measure'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
 import { HIGHLIGHT_BG } from '@shared/richtext'
-import { countDescendants } from '@shared/model/tree'
+import {
+  countDescendants,
+  foldedSidesOf,
+  hiddenCountOfSide,
+  splitFoldSidesOf,
+  type FoldSide
+} from '@shared/model/tree'
 import { useEditor } from '../store/editor'
 import { count, isDiagArmed, noteAmount } from '../dev/stage'
 import type { RichText, ThemeColors } from '@shared/model/types'
@@ -84,6 +91,19 @@ export interface TopicNodeProps {
    */
   onNavigateEdit: (key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight') => void
   onToggleCollapse: (id: string) => void
+  /**
+   * 平衡思维导图的中心主题：按侧收起 / 展开（左右各一根徽标）。
+   * 其余节点走 `onToggleCollapse`（整体收起）。
+   */
+  onToggleFoldSide: (id: string, side: FoldSide) => void
+}
+
+/** 按侧收起时的方向名（徽标文案与提示用） */
+const FOLD_SIDE_LABELS: Record<FoldSide, string> = {
+  left: '左',
+  right: '右',
+  up: '上',
+  down: '下'
 }
 
 function segmentStyle(segment: StyledSegment): CSSProperties {
@@ -135,7 +155,8 @@ function TopicNodeInner({
   onCommitAndAddChild,
   onCommitAndAddSibling,
   onNavigateEdit,
-  onToggleCollapse
+  onToggleCollapse,
+  onToggleFoldSide
 }: TopicNodeProps): ReactElement {
   const visual = visualFor(colors, node, layout)
   const color = branchColorOf(colors, layout, node.id)
@@ -148,6 +169,21 @@ function TopicNodeInner({
    * 键盘（Ctrl + /）和 AI 的 collapse 与这里的口径一致。
    */
   const canCollapse = node.topic.children.length > 1 || node.topic.collapsed
+  /**
+   * 徽标挂哪一侧：跟着分支的展开方向走。
+   * 中心主题自己没有左右属性（`side` 恒为 `'root'`），必须按子节点实际落在哪边定——
+   * 否则「逻辑图（向左）」那种整张图往左长的结构，徽标会挂在右边（与分支相反）。
+   */
+  const collapseSide = collapseBadgeSide(node, layout.nodeMap)
+  /**
+   * 会**双向展开**的结构（平衡 / 顺时针思维导图、水平时间轴、鱼骨图、垂直时间轴），
+   * 中心主题上每个方向各一根徽标，**分别收起**——一根徽标只能"全收/全开"，
+   * 用户要的是「先只把左边收起来」。
+   * 单侧结构（逻辑图 / 树形图 / 括号图 / 树状表格 / 矩阵图 / 组织架构图）与其余层级
+   * 仍走单徽标（收起就是全收起）。
+   */
+  const splitSides = splitFoldSidesOf(node.topic, node.depth === 0)
+  const foldedSides = new Set(foldedSidesOf(node.topic))
 
   /** 图片读不出来（资源缺失）时改显示占位，避免只留一个空白框 */
   const [failedImagePath, setFailedImagePath] = useState<string | null>(null)
@@ -528,10 +564,34 @@ function TopicNodeInner({
         />
       )}
 
-      {canCollapse && (
+      {/* 双向展开的结构：每个方向一根徽标，分别收起（各贴自己那一侧的边） */}
+      {splitSides.map((side) => (
+        <button
+          key={side}
+          type="button"
+          className={`topic__collapse topic__collapse--${side}`}
+          title={
+            foldedSides.has(side)
+              ? `已收起${FOLD_SIDE_LABELS[side]}侧 ${hiddenCountOfSide(node.topic, side)} 个子主题，点击展开`
+              : `收起${FOLD_SIDE_LABELS[side]}侧分支`
+          }
+          style={{ background: color }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggleFoldSide(node.id, side)
+          }}
+        >
+          {/* 收起时显示这一侧藏了多少个节点，展开时是 −（与整体折叠的徽标同一套样式） */}
+          {foldedSides.has(side) ? hiddenCountOfSide(node.topic, side) : '−'}
+        </button>
+      ))}
+
+      {splitSides.length === 0 && canCollapse && (
         <button
           type="button"
-          className={`topic__collapse topic__collapse--${node.side === 'left' ? 'left' : 'right'}`}
+          className={`topic__collapse topic__collapse--${collapseSide}`}
           title={
             node.topic.collapsed
               ? `折叠了 ${countDescendants(node.topic)} 个子主题，点击展开`
