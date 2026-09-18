@@ -150,25 +150,7 @@ export function markerVisualOf(markerId: string): MarkerVisual {
   return { kind: 'glyph', glyph: 'award', color: NEUTRAL, label: labelOf(markerId) }
 }
 
-/** 面板里可选的标记分组（按用途归类，便于挑选） */
-export interface MarkerGroup {
-  title: string
-  markers: string[]
-}
-
-export const MARKER_GROUPS: MarkerGroup[] = [
-  {
-    title: '优先级',
-    markers: ['priority-1', 'priority-2', 'priority-3', 'priority-4', 'priority-5']
-  },
-  { title: '进度', markers: ['task-start', 'task-oct', 'task-quarter', 'task-3quar', 'task-done'] },
-  { title: '星标', markers: ['star-red', 'star-orange', 'star-yellow'] },
-  { title: '旗帜', markers: ['flag-red', 'flag-green', 'flag-blue'] },
-  { title: '表情', markers: ['smiley-smile', 'smiley-laugh', 'smiley-angry', 'smiley-cry'] },
-  { title: '符号', markers: ['symbol-plus', 'symbol-minus', 'symbol-question', 'symbol-exclam'] },
-  { title: '趋势', markers: ['arrow-up', 'arrow-down'] },
-  { title: '其他', markers: ['people', 'light-bulb', 'crown', 'finance'] }
-]
-
-/** 面板里全部可选标记的 id（供自检校验覆盖面） */
-export const ALL_PICKABLE_MARKERS: string[] = MARKER_GROUPS.flatMap((group) => group.markers)
+/**
+ * 分组表在 `@shared/xmind/constants`：**互斥规则**（一行一个）与它同源，
+ * 所以它不能只住在渲染层——渲染层的东西跑不进 node 自检，规则也就没法被钉住。
+ */

@@ -53,7 +53,12 @@ import {
   walk
 } from '@shared/model/tree'
 import { buildRange, parseRange, readCurveOffset, sameRange, withCurveOffset } from '@shared/layout'
-import { RELATIONSHIP_CURVE_KEY, TOPIC_SIDE_KEY } from '@shared/xmind/constants'
+import {
+  reconcileMarkers,
+  RELATIONSHIP_CURVE_KEY,
+  TOPIC_SIDE_KEY,
+  withMarkerToggled
+} from '@shared/xmind/constants'
 import { notesHtmlFrom } from '@shared/richtext'
 import { resolveDrop, type DropMode } from '@shared/model/drop'
 
@@ -1612,9 +1617,15 @@ export const useEditor = create<EditorState>()((set, get) => ({
     get().mutate((draft) => {
       const topic = findTopic(activeRoot(draft), id)
       if (!topic) return
-      const index = topic.markers.findIndex((marker) => marker.markerId === markerId)
-      if (index >= 0) topic.markers.splice(index, 1)
-      else topic.markers.push({ markerId })
+      /**
+       * 同一**行**只能有一个（与 Xmind 一致）：点同组的另一个是**替换**，不是叠加。
+       * 规则本身在 `shared/xmind/constants` 里，渲染层和自检共用同一份。
+       */
+      const next = withMarkerToggled(
+        topic.markers.map((marker) => marker.markerId),
+        markerId
+      )
+      topic.markers = next.map((markerId) => ({ markerId }))
     }, '切换标记')
   },
 
@@ -1860,9 +1871,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   setMarkers: (id, markerIds) => {
-    const wanted = [
-      ...new Set(markerIds.map((item) => item.trim()).filter((item) => item.length > 0))
-    ]
+    // 整体替换也按「每行一个」收敛：输入可能带着同一行的多个标记
+    const wanted = reconcileMarkers(markerIds)
     get().mutate((draft) => {
       const topic = findTopic(activeRoot(draft), id)
       if (!topic) return

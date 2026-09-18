@@ -162,15 +162,20 @@ import {
   sameRange
 } from '../src/shared/layout'
 import {
+  ALL_PICKABLE_MARKERS,
   DEFAULT_STRUCTURE,
+  MARKER_GROUPS,
   MARKER_LABELS,
+  markerGroupOf,
+  reconcileMarkers,
   RELATIONSHIP_CURVE_KEY,
-  STRUCTURES
+  STRUCTURES,
+  withMarkerToggled
 } from '../src/shared/xmind/constants'
 import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument } from '../src/shared/xmind/emmx'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { ALL_PICKABLE_MARKERS, markerVisualOf } from '../src/renderer/src/render/markers'
+import { markerVisualOf } from '../src/renderer/src/render/markers'
 import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
 import { buildDrawing } from '../src/renderer/src/export/drawing'
 import { drawingToSvg } from '../src/renderer/src/export/svg'
@@ -2911,6 +2916,16 @@ function testAgentTools(): void {
     '标记是「整体替换」语义（数量与传入一致）',
     markers.ok && markers.intent.kind === 'markers' && markers.intent.markerIds.length === 2
   )
+  const sameGroup = plan('setMarkers', {
+    address: '成本/人力',
+    markers: ['priority-1', 'priority-3']
+  })
+  check('同一类别给多个 → 明确拒绝（不是替模型挑一个）', sameGroup.ok === false)
+  check(
+    '拒绝时说清原因（模型才能改对）',
+    !sameGroup.ok && sameGroup.error.includes('只能有一个'),
+    sameGroup.ok ? '' : sameGroup.error
+  )
   const bogusMarker = plan('setMarkers', { address: '成本/人力', markers: ['不存在的标记'] })
   check('乱编的 markerId 被拒绝', bogusMarker.ok === false)
   check(
@@ -3357,6 +3372,12 @@ function testAttachmentTools(): void {
   store().setMarkers(first, ['priority-2'])
   eq('再设置是**整体替换**（不是 toggle 追加）', find(first)?.markers.length, 1)
   eq('替换后的 id 正确', find(first)?.markers[0]?.markerId, 'priority-2')
+  store().setMarkers(first, ['priority-1', 'priority-3', 'star-red'])
+  eq(
+    '整体替换也按「每行一个」收敛（同组只留第一个）',
+    find(first)?.markers.map((marker) => marker.markerId),
+    ['priority-1', 'star-red']
+  )
   store().setMarkers(first, [])
   eq('传空数组就是清空', find(first)?.markers.length, 0)
 
@@ -5799,6 +5820,40 @@ async function testNodeElements(): Promise<void> {
     ALL_PICKABLE_MARKERS.every((id) => /^#[0-9a-fA-F]{6}$/.test(markerVisualOf(id).color))
   )
 
+  group('标记：同一行（同一类别）只能有一个')
+
+  check(
+    '分组表里的标记都有中文名',
+    ALL_PICKABLE_MARKERS.every((id) => typeof MARKER_LABELS[id] === 'string'),
+    ALL_PICKABLE_MARKERS.filter((id) => typeof MARKER_LABELS[id] !== 'string').join(',')
+  )
+  eq('同一个标记不会出现在两行里', ALL_PICKABLE_MARKERS.length, new Set(ALL_PICKABLE_MARKERS).size)
+  check(
+    '分组表每一行都不空',
+    MARKER_GROUPS.every((item) => item.title.length > 0 && item.markers.length > 0)
+  )
+  eq('优先级属于「优先级」这一行', markerGroupOf('priority-3'), '优先级')
+  eq('表外的标记自成一族（不误伤，也不会被抹掉）', markerGroupOf('自定义标记'), null)
+
+  eq('同组互斥：选了 3，之前选的 1 就该消失', withMarkerToggled(['priority-1'], 'priority-3'), [
+    'priority-3'
+  ])
+  eq('再点一次是取消', withMarkerToggled(['priority-3'], 'priority-3'), [])
+  eq(
+    '不同类别互相独立（优先级 + 进度 + 星标可以并存）',
+    withMarkerToggled(withMarkerToggled(['priority-1'], 'task-done'), 'star-red'),
+    ['priority-1', 'task-done', 'star-red']
+  )
+  eq('自定义标记不会顶掉表里的标记', withMarkerToggled(['priority-1', '自定义'], '自定义'), [
+    'priority-1'
+  ])
+  eq(
+    '整体替换时同组只留第一个',
+    reconcileMarkers(['priority-1', 'task-done', 'priority-3', 'priority-1']),
+    ['priority-1', 'task-done']
+  )
+  eq('空白 id 被丢掉', reconcileMarkers([' ', 'crown']), ['crown'])
+
   group('节点元素：编辑操作')
 
   reset()
@@ -5815,6 +5870,19 @@ async function testNodeElements(): Promise<void> {
   store().toggleMarker(id, 'priority-1')
   eq(
     '再次点击移除标记',
+    find(id)?.markers.map((marker) => marker.markerId),
+    ['star-red']
+  )
+  // 同一行只能有一个：点同组的另一个是**替换**
+  store().toggleMarker(id, 'priority-3')
+  eq(
+    '点同组的另一个 = 替换（优先级不会同时亮两个）',
+    find(id)?.markers.map((marker) => marker.markerId),
+    ['star-red', 'priority-3']
+  )
+  store().toggleMarker(id, 'priority-3')
+  eq(
+    '再点一次取消，状态回到原样',
     find(id)?.markers.map((marker) => marker.markerId),
     ['star-red']
   )

@@ -9,7 +9,7 @@ import {
   sheetStats,
   type SearchField
 } from '@shared/search'
-import { MARKER_GROUPS } from '../render/markers'
+import { MARKER_GROUPS } from '@shared/xmind/constants'
 import { viewportActions } from '../render/viewport'
 import { useEditor } from '../store/editor'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'

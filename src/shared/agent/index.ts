@@ -11,7 +11,7 @@ import { isRecord } from '../guards'
 import { parseRange } from '../layout'
 import { ancestorsOf, findTopic, isSelfOrDescendant, walk } from '../model/tree'
 import type { Sheet, Topic, TopicCode } from '../model/types'
-import { DEFAULT_STRUCTURE, MARKER_LABELS, STRUCTURES } from '../xmind/constants'
+import { DEFAULT_STRUCTURE, MARKER_LABELS, markerGroupOf, STRUCTURES } from '../xmind/constants'
 
 /* ------------------------------------------------------------------ */
 /* 节点标题的识别与切分                                                */
@@ -796,7 +796,8 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     }
     // 标记 id 清单：模型不查这份清单就会自己编一个不存在的 markerId
     lines.push(
-      '可用标记 id（给 setMarkers 用，格式 markerId=含义）：' +
+      '可用标记 id（给 setMarkers 用，格式 markerId=含义）。' +
+        '**同一类别只能给一个**（优先级 / 进度 / 星标 / 旗帜 / 表情 / 符号 / 趋势 / 其他）：' +
         Object.entries(MARKER_LABELS)
           .map(([id, label]) => `${id}=${label}`)
           .join('、')
@@ -1444,6 +1445,8 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
     name: 'setMarkers',
     description:
       '设置主题的标记图标（**整体替换**，不是追加；传空数组就是清空）。' +
+      '**同一类别只能有一个**（优先级 / 进度 / 星标 / 旗帜 / 表情 / 符号 / 趋势 / 其他），' +
+      '同一类别里给多个会被拒绝。' +
       'markerId 必须来自 listAttachments 返回的清单，**不要自己编**（编出来的 id 会被拒绝）。',
     parameters: schema(
       {
@@ -1994,6 +1997,23 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     if (unknown.length > 0) {
       return fail(
         `不认识的标记 id：${unknown.join('、')}。可用 id 见 listAttachments 返回的清单，不要自己编。`
+      )
+    }
+    /**
+     * 同一行（同一类别）只能有一个。这里**明确拒绝并说明**，而不是替它挑一个：
+     * 悄悄丢掉一个的话，模型会以为"两个都设上了"，下一轮还会这么给——
+     * 而它在界面上看到的结果和它的意图不一致，只会越改越乱。
+     */
+    const byGroup = new Map<string, string[]>()
+    for (const markerId of list) {
+      const group = markerGroupOf(markerId)
+      if (group === null) continue
+      byGroup.set(group, [...(byGroup.get(group) ?? []), markerId])
+    }
+    const conflict = [...byGroup.entries()].find(([, ids]) => ids.length > 1)
+    if (conflict) {
+      return fail(
+        `同一类别的标记只能有一个：「${conflict[0]}」里给了 ${conflict[1].join('、')}，请只保留一个再调用。`
       )
     }
     const title = resolved.resolved.topic.title
