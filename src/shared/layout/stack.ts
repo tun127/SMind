@@ -308,60 +308,65 @@ export function layoutBrace(root: Topic, builder: LayoutBuilder): LayoutResult {
   return result
 }
 
-/** 树状表格：每一层固定一列，行按子树高度堆叠 */
+/**
+ * 树状表格：**表格**形状。
+ *
+ * 参考：「根在**最上方 / 左上**；一级主题作为**行**；子主题填进各行的**单元格**，
+ * 按深度向右排列；靠**表格边框与缩进**表达层级，**没有连线**」。
+ *
+ * 所以：**每一行 = 一个一级分支及其全部后代**（按深度分列，同一深度共用同一个列 x，
+ * 这才有表格的纵向对齐），行高由这一行最长的那条链决定；每行画一个框。
+ */
 export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutResult {
-  const maxWidthByDepth: number[] = []
+  // 每一层的列宽 = 该层最宽的节点（跨行共用，保证各行的同层单元格左边缘对齐）
+  const widthByDepth: number[] = []
   const scan = (topic: Topic, depth: number): void => {
     const size = builder.size(topic.id)
-    maxWidthByDepth[depth] = Math.max(maxWidthByDepth[depth] ?? 0, size.width)
+    widthByDepth[depth] = Math.max(widthByDepth[depth] ?? 0, size.width)
     for (const child of builder.visibleChildren(topic)) scan(child, depth + 1)
   }
   scan(root, 0)
 
   const colX: number[] = []
-  let cursor = 0
-  for (let depth = 0; depth < maxWidthByDepth.length; depth += 1) {
-    colX[depth] = cursor
-    cursor += (maxWidthByDepth[depth] ?? 0) + builder.gapX
+  let cursorX = 0
+  for (let depth = 0; depth < widthByDepth.length; depth += 1) {
+    colX[depth] = cursorX
+    cursorX += (widthByDepth[depth] ?? 0) + builder.gapX
   }
 
   const rootSize = builder.size(root.id)
-  const rootNode = builder.add(root, colX[0] ?? 0, -rootSize.height / 2, 0, 'root')
+  const rootNode = builder.add(root, colX[0] ?? 0, 0, 0, 'root')
 
-  const resolver: XResolver = (_child, _size, _parent, _dir, depth) => colX[depth] ?? 0
-  placeVerticalChildren(
-    builder,
-    rootNode,
-    builder.visibleChildren(root),
-    1,
-    1,
-    resolver,
-    root.structureClass
-  )
+  const rows: Array<{ top: number; left: number; right: number; bottom: number }> = []
+  let cursorY = rootNode.y + rootSize.height + builder.gapY * 2
+
+  for (const branch of builder.visibleChildren(root)) {
+    const rowTop = cursorY
+    let rowBottom = cursorY
+    let rowRight = colX[1] ?? 0
+    const place = (topic: Topic, depth: number): void => {
+      const size = builder.size(topic.id)
+      const node = builder.add(topic, colX[depth] ?? 0, cursorY, depth, 'down')
+      rowBottom = Math.max(rowBottom, node.y + node.height)
+      rowRight = Math.max(rowRight, node.x + node.width)
+      cursorY += size.height + builder.gapY
+      for (const child of builder.visibleChildren(topic)) place(child, depth + 1)
+    }
+    place(branch, 1)
+    rows.push({ top: rowTop, left: colX[1] ?? 0, right: rowRight, bottom: rowBottom })
+    cursorY += builder.gapY * 1.6
+  }
 
   const result = builder.finish(root)
-  /**
-   * 树状表格同样是**表格**：参考「靠表格边框与缩进表达层级，**没有连线**」。
-   * 去掉父子连线，改成给**每一层**加一个竖长框（一层 = 一列表格）。
-   */
-  const byDepth = new Map<number, { left: number; right: number; top: number; bottom: number }>()
-  for (const node of result.nodes) {
-    const box = byDepth.get(node.depth)
-    byDepth.set(node.depth, {
-      left: Math.min(box?.left ?? node.x, node.x),
-      right: Math.max(box?.right ?? node.x + node.width, node.x + node.width),
-      top: Math.min(box?.top ?? node.y, node.y),
-      bottom: Math.max(box?.bottom ?? node.y + node.height, node.y + node.height)
-    })
-  }
-  for (const box of byDepth.values()) {
-    const pad = 12
+  /** 每行一个框：表格的"行"感由框 + 列对齐表达（参考：没有连线） */
+  for (const row of rows) {
+    const pad = 10
     addDecoration(result, {
       d: roundedRectPath(
-        round(box.left - pad),
-        round(box.top - pad),
-        round(box.right - box.left + pad * 2),
-        round(box.bottom - box.top + pad * 2),
+        round(row.left - pad),
+        round(row.top - pad),
+        round(row.right - row.left + pad * 2),
+        round(row.bottom - row.top + pad * 2),
         10
       ),
       widthScale: 1

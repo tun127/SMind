@@ -337,6 +337,16 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
       branchId: header.id,
       widthScale: 1
     })
+    /**
+     * 表头与格子之间补一条横线：参考要求「单元格之间靠网格线分割」，
+     * 只有一个外框的话整列看着像一张竖卡片，不像表格。
+     */
+    const headerBottom = round(headerNode.y + headerNode.height + pad / 2)
+    addDecoration(result, {
+      d: `M ${round(left - pad)} ${headerBottom} L ${round(right + pad)} ${headerBottom}`,
+      branchId: header.id,
+      widthScale: 1
+    })
   }
 
   return result
