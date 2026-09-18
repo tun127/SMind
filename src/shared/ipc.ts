@@ -52,6 +52,14 @@ export interface AppSettings {
   defaultCodeLanguage: string | null
   /** 收进「更多 ▾」的工具栏功能 id 列表（其余都在快捷栏） */
   toolbarHidden: string[]
+  /**
+   * 已记住「不再询问」的破坏性 AI 操作种类（取值见 `DESTRUCTIVE_WRITE_KINDS`）。
+   *
+   * 放在这里而不是 AI 配置里：它是**界面偏好**，与模型 / Key 无关；
+   * 而且 AI 设置里能撤销——不允许出现「问了也白问、还改不回来」的状态。
+   * 默认**空**：确认框的存在意义就是第一次要问。
+   */
+  aiConfirmSkip: string[]
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -63,7 +71,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultColor: null,
   defaultCodeFontSize: null,
   defaultCodeLanguage: null,
-  toolbarHidden: []
+  toolbarHidden: [],
+  aiConfirmSkip: []
 }
 
 export interface PickedImage {

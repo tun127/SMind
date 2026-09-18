@@ -44,6 +44,8 @@ import type { ExtractedDocument } from '@shared/document'
 import {
   buildTitleIndex,
   canContinueAgentLoop,
+  DESTRUCTIVE_WRITE_LABELS,
+  isDestructiveWriteKind,
   isMutatingIntent,
   isReadToolName,
   planWriteTool,
@@ -59,7 +61,7 @@ import { createId } from '@shared/model/factory'
 import { activeRoot, activeSheet, ancestorsOf, findTopic } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
 import { armDiag, beginCost, keepDiagArmed, reportCosts, setStage } from '../dev/stage'
-import { useEditor } from '../store/editor'
+import { patchAppSettings, useEditor } from '../store/editor'
 interface Props {
   onClose(): void
   /** 面板自己不做配置界面，只负责把用户送去「AI 设置」 */
@@ -162,7 +164,15 @@ export default function ChatPanel({
   const [activity, setActivity] = useState('')
   const [streaming, setStreaming] = useState(false)
   /** 需要用户点头的破坏性操作（删分支等） */
-  const [pendingWrite, setPendingWrite] = useState<{ summary: string } | null>(null)
+  const [pendingWrite, setPendingWrite] = useState<{
+    summary: string
+    /** 这次操作的种类：决定「不再询问」记住什么 */
+    kind: WriteIntent['kind']
+    /** 给人看的种类名（清单见 DESTRUCTIVE_WRITE_LABELS） */
+    label: string
+  } | null>(null)
+  /** 确认框里的「以后不再询问这类操作」 */
+  const [rememberSkip, setRememberSkip] = useState(false)
   /**
    * 这次「用户命令」的标识：一条命令内的每一轮请求都带同一个 id。
    * 主进程用它做试用计数去重——一条命令跑十几二十轮也只算一个写回合。
@@ -627,8 +637,29 @@ export default function ChatPanel({
     value: { call: ToolCall; intent: WriteIntent; summary: string } | null
   ): void => {
     pendingRef.current = value
-    setPendingWrite(value ? { summary: value.summary } : null)
+    setPendingWrite(
+      value
+        ? {
+            summary: value.summary,
+            kind: value.intent.kind,
+            label: isDestructiveWriteKind(value.intent.kind)
+              ? DESTRUCTIVE_WRITE_LABELS[value.intent.kind]
+              : '这类操作'
+          }
+        : null
+    )
+    // 每次新确认框都从「不记住」开始：上次勾过不该顺延到下一次
+    setRememberSkip(false)
   }
+
+  /**
+   * 这次破坏性操作是否已被用户「不再询问」？
+   *
+   * 从 store **现读**，不用组件里的值：一个回合里的写操作是在同一次回调里连续跑完的，
+   * 用闭包里的旧值会让「刚勾过不再询问」在本回合内不生效。
+   */
+  const skipConfirmFor = (kind: WriteIntent['kind']): boolean =>
+    useEditor.getState().appSettings.aiConfirmSkip.includes(kind)
 
   /** 结束本轮：把 AI 的改动并成一步撤销，并把「改了什么」留在气泡里 */
   const commitTurn = (): void => {
@@ -863,8 +894,9 @@ export default function ChatPanel({
         return
       }
 
-      if (plan.destructive) {
+      if (plan.destructive && !skipConfirmFor(plan.intent.kind)) {
         // 破坏性操作：停下来等用户点头（这一步就是「确认分级」）
+        // 用户勾过「不再询问这类操作」时直接执行——但**第一次一定要问**
         setPending({ call, intent: plan.intent, summary: plan.summary })
         return
       }
@@ -905,10 +937,25 @@ export default function ChatPanel({
   }
 
   /** 用户对破坏性操作表态后继续（从断点接着处理剩下的调用） */
-  const resolvePending = useCallback((approve: boolean): void => {
+  const resolvePending = useCallback((approve: boolean, remember = false): void => {
     const pending = pendingRef.current
     setPending(null)
     if (!pending) return
+
+    if (approve && remember) {
+      /**
+       * 记住「这类操作以后不再询问」。
+       *
+       * 落进 settings.json（`patchAppSettings` 同时更新内存与磁盘）——
+       * 只记在组件 state 里的话，下次开窗口又会问一遍，用户会以为"勾了没用"。
+       * 写入失败不影响这次执行：确认框已经点过了。
+       */
+      void patchAppSettings({
+        aiConfirmSkip: Array.from(
+          new Set([...useEditor.getState().appSettings.aiConfirmSkip, pending.intent.kind])
+        )
+      })
+    }
 
     if (approve) {
       const endWrite = beginCost('应用写意图', pending.intent.kind)
@@ -1670,6 +1717,14 @@ export default function ChatPanel({
                 <TriangleAlert size={14} />
                 <span>{pendingWrite.summary}</span>
               </div>
+              <label className="chat-panel__confirm-remember">
+                <input
+                  type="checkbox"
+                  checked={rememberSkip}
+                  onChange={(event) => setRememberSkip(event.target.checked)}
+                />
+                <span>以后「{pendingWrite.label}」不再询问（可在 AI 设置里恢复）</span>
+              </label>
               <div className="chat-panel__confirm-actions">
                 <button type="button" className="btn" onClick={() => resolvePending(false)}>
                   跳过
@@ -1677,7 +1732,7 @@ export default function ChatPanel({
                 <button
                   type="button"
                   className="btn btn--primary"
-                  onClick={() => resolvePending(true)}
+                  onClick={() => resolvePending(true, rememberSkip)}
                 >
                   执行
                 </button>

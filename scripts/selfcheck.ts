@@ -78,8 +78,12 @@ import {
   AGENT_WRITE_TOOLS,
   buildTitleIndex,
   canContinueAgentLoop,
+  DESTRUCTIVE_WRITE_KINDS,
+  DESTRUCTIVE_WRITE_LABELS,
+  isDestructiveWriteKind,
   isMutatingIntent,
   isReadToolName,
+  normalizeConfirmSkip,
   planAvailableTools,
   planWriteTool,
   resolveTopicAddress,
@@ -88,6 +92,7 @@ import {
   shortHandleOf,
   type ToolContext
 } from '../src/shared/agent'
+import { DEFAULT_APP_SETTINGS } from '../src/shared/ipc'
 import {
   bytesToBase64Url,
   bumpTrialUsed,
@@ -3582,6 +3587,28 @@ function testWriteToolsAndTurn(): void {
   const del = plan('deleteTopic', { address: '成本' })
   eq('删除是破坏性操作（要确认）', destructiveOf(del), true)
   check('删除摘要带上影响范围', del.summary.includes('3 个节点'))
+
+  /**
+   * 破坏性操作清单是**唯一来源**：规划层的 destructive 标记、渲染层确认框、
+   * 「不再询问」记住的范围、设置界面里可撤销的清单，全都从它取。
+   *
+   * 它掉链子的方式是**静默**的：清单漏一种 → 那种操作不问就执行；
+   * 标签漏一种 → 确认框里显示 "undefined"；脏数据没清 → 确认框被永久关掉。
+   */
+  eq('破坏性种类共三种（删主题 / 删元素 / 合并同名）', DESTRUCTIVE_WRITE_KINDS.length, 3)
+  check(
+    '每种破坏性操作都有中文名（确认框与设置里要用）',
+    DESTRUCTIVE_WRITE_KINDS.every((kind) => DESTRUCTIVE_WRITE_LABELS[kind].trim().length > 0)
+  )
+  eq('删主题在清单里', isDestructiveWriteKind('delete'), true)
+  eq('改名不在清单里（不该弹确认）', isDestructiveWriteKind('rename'), false)
+  eq(
+    '脏数据被清掉：只认清单里的种类，并去重',
+    normalizeConfirmSkip(['delete', '不存在的种类', 3, null, 'delete']).join(','),
+    'delete'
+  )
+  eq('不是数组时当空清单处理', normalizeConfirmSkip('delete').length, 0)
+  eq('默认配置不跳过任何确认（第一次必须问）', DEFAULT_APP_SETTINGS.aiConfirmSkip.length, 0)
 
   const move = plan('moveTopic', { address: '成本/物料', toAddress: '中心主题' })
   eq('移动规划成功', move.ok, true)

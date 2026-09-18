@@ -61,6 +61,7 @@ import {
 } from '@shared/ai'
 import {
   AGENT_CANVAS_TOOL_NAMES,
+  normalizeConfirmSkip,
   planAvailableTools,
   toWireTools,
   type AgentToolDef
@@ -1374,7 +1375,9 @@ function registerIpc(): void {
           : null,
         toolbarHidden: Array.isArray(parsed.toolbarHidden)
           ? parsed.toolbarHidden.filter((item): item is string => typeof item === 'string')
-          : []
+          : [],
+        // 手改坏 / 旧版本的脏值不许把确认框永久关掉
+        aiConfirmSkip: normalizeConfirmSkip(parsed.aiConfirmSkip)
       }
     } catch {
       return { ...DEFAULT_APP_SETTINGS }
@@ -1415,7 +1418,9 @@ function registerIpc(): void {
         : null,
       toolbarHidden: Array.isArray(settings?.toolbarHidden)
         ? settings.toolbarHidden.filter((item) => typeof item === 'string')
-        : []
+        : [],
+      // 只认清单里认识的破坏性种类：脏数据不许把确认框永久关掉
+      aiConfirmSkip: normalizeConfirmSkip(settings?.aiConfirmSkip)
     }
     await fs.writeFile(settingsFile(), JSON.stringify(next, null, 2), 'utf8')
   })

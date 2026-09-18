@@ -10,6 +10,8 @@ import {
   type QualityTier
 } from '@shared/ai'
 import type { LicenseView } from '@shared/license'
+import { DESTRUCTIVE_WRITE_LABELS, isDestructiveWriteKind } from '@shared/agent'
+import { patchAppSettings, useEditor } from '../store/editor'
 import { Modal } from './Dialogs'
 
 /**
@@ -51,6 +53,9 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
   const [licenseKey, setLicenseKey] = useState('')
   const [licenseNote, setLicenseNote] = useState<string | null>(null)
   const [licenseBusy, setLicenseBusy] = useState(false)
+  const appSettings = useEditor((s) => s.appSettings)
+  /** 「不再询问」清单：确认框里勾过的破坏性操作种类（在这里可撤销） */
+  const skipList = appSettings.aiConfirmSkip.filter(isDestructiveWriteKind)
 
   useEffect(() => {
     void (async () => {
@@ -332,6 +337,33 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
           {QUALITY_TIERS.find((item) => item.id === tier)?.hint ?? ''}
           。档位只改「要求的规模与深度」，**不改**上面的 token 上限——两件事分开。
         </span>
+
+        {/* 破坏性操作的确认偏好：勾过「不再询问」之后，必须有个地方能改回来 */}
+        <div className="ai-field">
+          <span className="ai-field__label">破坏性操作的确认</span>
+          <p className="modal__dim">
+            {skipList.length === 0
+              ? 'AI 每次要删东西（删主题、删关系线 / 边界 / 概要、合并同名主题）都会先问你一次。'
+              : `已记住不再询问：${skipList
+                  .map((kind) => DESTRUCTIVE_WRITE_LABELS[kind])
+                  .join('；')}。`}
+          </p>
+          {skipList.length > 0 && (
+            <div className="ai-presets">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  void patchAppSettings({ aiConfirmSkip: [] }).then(() =>
+                    onNotify('已恢复：AI 每次要删东西都会先问你一次')
+                  )
+                }}
+              >
+                全部恢复询问
+              </button>
+            </div>
+          )}
+        </div>
 
         {testResult && (
           <div className={testResult.ok ? 'ai-test ai-test--ok' : 'ai-test ai-test--fail'}>

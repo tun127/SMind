@@ -1134,6 +1134,51 @@ export type WriteIntent =
   | { kind: 'markers'; id: string; markerIds: string[] }
   | { kind: 'label'; id: string; label: string; add: boolean }
 
+/**
+ * 「执行前必须先问用户一次」的破坏性操作种类（**唯一来源**）。
+ *
+ * 三处必须一致：① 规划层给 `WritePlan.destructive` 打的标记；② 渲染层的确认框；
+ * ③ 「不再询问」记住的范围 + 设置界面里可撤销的清单。
+ * 三处各写一份的话，将来新加一个破坏性工具时总有一处会漏——漏掉的那一处
+ * 就是「AI 悄悄删了东西而用户没被问过」。
+ */
+export const DESTRUCTIVE_WRITE_KINDS = ['delete', 'attachmentRemove', 'dedupe'] as const
+
+export type DestructiveWriteKind = (typeof DESTRUCTIVE_WRITE_KINDS)[number]
+
+/** 中文名：给用户看的（确认框的「不再询问」与设置里的清单都用它） */
+export const DESTRUCTIVE_WRITE_LABELS: Record<DestructiveWriteKind, string> = {
+  delete: '删除主题（含整个分支）',
+  attachmentRemove: '删除关系线 / 边界 / 概要',
+  dedupe: '合并同名主题（会删掉多余的那些）'
+}
+
+export function isDestructiveWriteKind(kind: string): kind is DestructiveWriteKind {
+  return (DESTRUCTIVE_WRITE_KINDS as readonly string[]).includes(kind)
+}
+
+/** 这次操作要不要先问用户：清单见 `DESTRUCTIVE_WRITE_KINDS` */
+function destructiveOf(kind: WriteIntent['kind']): boolean {
+  return isDestructiveWriteKind(kind)
+}
+
+/**
+ * 把设置里读到的「不再询问」清单收敛成合法值。
+ *
+ * 配置可能被手改坏、也可能来自旧版本：**只认清单里的种类**，其余一律丢掉——
+ * 宁可多问一次，也不要因为一条脏数据把确认框永久关掉。
+ */
+export function normalizeConfirmSkip(raw: unknown): DestructiveWriteKind[] {
+  if (!Array.isArray(raw)) return []
+  const out: DestructiveWriteKind[] = []
+  for (const item of raw) {
+    if (typeof item === 'string' && isDestructiveWriteKind(item) && !out.includes(item)) {
+      out.push(item)
+    }
+  }
+  return out
+}
+
 /** 画布上的三种元素（第二批工具的共通目标） */
 export type AttachmentKind = 'relationship' | 'boundary' | 'summary'
 
@@ -1642,7 +1687,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       ok: true,
       intent: { kind: 'delete', id: target.topic.id, title: target.topic.title, size },
       summary: `删除「${target.topic.title}」（含 ${size} 个节点）`,
-      destructive: true
+      destructive: destructiveOf('delete')
     }
   }
 
@@ -1931,7 +1976,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       intent: { kind: 'attachmentRemove', target, id, label: ATTACHMENT_LABEL[target] },
       summary: `删除${ATTACHMENT_LABEL[target]}（id=${id}）`,
       // 破坏性：交给渲染层先问一次用户
-      destructive: true
+      destructive: destructiveOf('attachmentRemove')
     }
   }
 
@@ -2098,7 +2143,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       summary:
         `合并 ${planned.length} 组同名主题：保留内容最全的那个，删掉多余 ${removed} 个` +
         (nested > 0 ? `（另有 ${nested} 组因存在父子包含关系被跳过）` : ''),
-      destructive: true
+      destructive: destructiveOf('dedupe')
     }
   }
 
