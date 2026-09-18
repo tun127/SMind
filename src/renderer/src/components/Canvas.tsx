@@ -301,6 +301,17 @@ export default function Canvas(): ReactElement {
   const ghostOffsetRef = useRef<{ dx: number; dy: number } | null>(null)
   /** 上一次进 state 的落点目标（值形式：`id|mode`），用来避免每帧都让画布重渲染 */
   const dropTargetKeyRef = useRef('')
+  /**
+   * 「手上正按着一个节点」——从 pointerdown 到松手 / 取消之间为 true。
+   *
+   * 视角锁定的跟随循环必须在这段时间**一动不动**：按下就等于选中，`focusId` 一变
+   * 镜头立刻开始缓动到那个节点——用户看到的就是"长按节点会有一个小的视角跳转"。
+   * 而镜头一动，指针下的节点就跟着世界滑动（用户说的"飘逸"）。
+   *
+   * 为什么不能只判断 `dragVisual`：它要等指针越过 4px 阈值才置位，
+   * 而按下的那一瞬间镜头已经在跳了。
+   */
+  const nodePointerHeldRef = useRef(false)
 
   /* ---- 拖拽过程中：贴住画布边缘时自动滚动 ---- */
   const dragAutoScroll = useCallback((): void => {
@@ -635,7 +646,8 @@ export default function Canvas(): ReactElement {
   useEffect(() => {
     // 正在拖主题时不跟：镜头要是同时在移，指针下的画面会跟着滑，落点就抓不准了。
     // 松手（dragVisual 归零）后视野再咬住它。
-    if (!viewLock || dragVisual || !focusId || !focusKey) return
+    // `nodePointerHeldRef` 还要更早一步：按下就已经算"手上按着"，那一刻也不能动镜头。
+    if (!viewLock || nodePointerHeldRef.current || dragVisual || !focusId || !focusKey) return
 
     // 每秒重跑 60 次以上 = 依赖里有东西每帧都在变（几何/尺寸震荡）。
     // 这时再跟随下去就是**永久烧 CPU**：每次重跑都 setPan → 重渲染 → 重新测量 → 依赖又变。
@@ -1104,6 +1116,14 @@ export default function Canvas(): ReactElement {
         store.select(id)
         return
       }
+
+      /**
+       * 从这一刻起就算"手上按着"：下面马上会 `select(id)`，而视角锁定的跟随循环
+       * 一看到 focusId 变化就会把镜头缓动过去——那就是"长按节点的小跳转"。
+       * 先立标记，跟随循环就不动镜头（松手 / 取消在 `detach` 里清掉；
+       * 放在这里是因为上面那两处提前返回不会再走到 `detach`）。
+       */
+      nodePointerHeldRef.current = true
       const additive = e.ctrlKey || e.metaKey
       // Ctrl 点击是「加/减选」，保持原来的行为；
       // 普通点击落在**已被选中的那一群里**时不塌缩选择——否则框选一堆节点后
@@ -1133,6 +1153,8 @@ export default function Canvas(): ReactElement {
 
       const startX = e.clientX
       const startY = e.clientY
+      /** 拖拽开始时的镜头平移：位移要减掉镜头自己走的那一段（见 `applyMove`） */
+      const startPan = { x: panRef.current.x, y: panRef.current.y }
       let moved = false
       let plan: DropResult | null = null
       let side: 'left' | 'right' | null = null
@@ -1227,13 +1249,23 @@ export default function Canvas(): ReactElement {
         pointerRef.current = { x: ev.clientX, y: ev.clientY, startX, startY }
         const z = zoomRef.current
         /**
+         * 位移要**减掉镜头自己走的那一段**。
+         *
+         * 节点的屏幕位置 ＝ `pan + (布局位置 + 位移) × 缩放`。拖拽期间镜头完全可能移动
+         * （贴边自动滚动、用户滚轮、视角锁定重新咬住），位移里不减掉它，
+         * 节点就会相对指针"飘逸"——用户报的就是这个词（起因是"长按节点有个小视角跳转"）。
+         */
+        const panNow = panRef.current
+        const worldDx = (dx - (panNow.x - startPan.x)) / z
+        const worldDy = (dy - (panNow.y - startPan.y)) / z
+        /**
          * 位移**先命令式落地**，再更新 React 状态（后者只喂预览框 / 高亮 / 淡化）。
          *
          * 这一步是"拖拽不同步"的解药：以前位移要等 React 把整个画布重渲染完才生效，
          * 节点多、连线多的时候节点明显落后于指针（快甩一下差出几百像素）。
          */
-        applyGhostTransform(dx / z, dy / z)
-        setDragVisual({ anchorId: id, dx: dx / z, dy: dy / z, moving, group })
+        applyGhostTransform(worldDx, worldDy)
+        setDragVisual({ anchorId: id, dx: worldDx, dy: worldDy, moving, group })
 
         const world = screenToWorld(ev.clientX, ev.clientY)
         const rootTopic = rootRef.current
@@ -1362,6 +1394,8 @@ export default function Canvas(): ReactElement {
         if (moveFrame !== 0) window.cancelAnimationFrame(moveFrame)
         moveFrame = 0
         pendingEvent = null
+        // 手上没按着了：视角锁定的跟随循环可以重新咬住目标
+        nodePointerHeldRef.current = false
         // 命令式写的位移必须先清掉：松手后由 React 按新布局渲染，
         // 留着它会让节点「新的自动位置 + 旧的拖拽位移」叠在一起。
         clearGhostTransform()
@@ -1415,8 +1449,10 @@ export default function Canvas(): ReactElement {
         setDropBlocked('')
         if (!moved || !startClient) return
 
-        const worldDx = (startClient.x - startX) / zoomRef.current
-        const worldDy = (startClient.y - startY) / zoomRef.current
+        // 同 `applyMove`：自由摆放的落点也要减掉镜头自己走的那一段
+        const panNow = panRef.current
+        const worldDx = (startClient.x - startX - (panNow.x - startPan.x)) / zoomRef.current
+        const worldDy = (startClient.y - startY - (panNow.y - startPan.y)) / zoomRef.current
         const state = useEditor.getState()
 
         if (active) {
