@@ -93,12 +93,15 @@ export interface OverlayReserves {
  * 概要括号朝哪一侧留白。
  *
  * 判据只能是**结构家族**：布局要在摆放之前就知道往哪儿让空间，
- * 而此时还没有任何坐标（`summaryOf` 里那个「父节点 → 区间中心」的方向是摆放之后才算的）。
+ * 而此时还没有任何坐标——**绘制侧也共用这一份判据**（`summarySideOf`）。
+ * 曾经绘制侧改按「父节点 → 区间中心」的主导轴算方向，两处判据不一致，
+ * 于是节点一被手动拉伸（图片随节点放大、区间中心明显偏移）括号就会翻边：
+ * 用户看到的就是「拉伸图片后概要框从左侧跑到了所概括内容的上方」。
  * - 向左右生长的结构（逻辑 / 树形 / 括号 / 鱼骨 / 水平时间轴 / 树状表格）→ 让在生长侧；
  * - 多方向结构（平衡思维导图 / 放射图 / 垂直时间轴）→ 跟**这一支自己的方向**；
  * - 上下生长的（组织架构图）与矩阵图 → 让在区间下方（向上生长的让在上方）。
  */
-function summaryReserveSide(root: Topic, branch: FoldSide): FoldSide {
+export function summaryReserveSide(root: Topic, branch: FoldSide): FoldSide {
   const def = getStructureDef(root.structureClass)
   switch (def.family) {
     case 'mindmap':
@@ -114,6 +117,30 @@ function summaryReserveSide(root: Topic, branch: FoldSide): FoldSide {
       // 其余单方向结构（逻辑 / 树形 / 括号 / 鱼骨 / 组织架构 / 矩阵）跟生长方向
       return def.grows ?? 'right'
   }
+}
+
+/**
+ * 「这个主题上的概要括号朝哪一侧」——**留着白的位置**与**画出来的位置**
+ * 必须共用这一份判据（见 `summarySideOf`）。
+ */
+export function summarySideOf(
+  root: Topic,
+  parentOf: ReadonlyMap<string, string | undefined>
+): (topicId: string) => FoldSide {
+  /** 一级分支的展开方向（多方向结构才有；单方向结构返回空表） */
+  const branchSides = childFoldSides(root)
+  const def = getStructureDef(root.structureClass)
+  const branchSideOf = (topicId: string): FoldSide => {
+    if (topicId === root.id) return def.grows ?? 'right'
+    let current = topicId
+    let parent = parentOf.get(current)
+    while (parent !== undefined && parent !== root.id) {
+      current = parent
+      parent = parentOf.get(current)
+    }
+    return branchSides.get(current) ?? def.grows ?? 'right'
+  }
+  return (topicId) => summaryReserveSide(root, branchSideOf(topicId))
 }
 
 export function overlayReserves(root: Topic, sheet: Sheet): OverlayReserves {
@@ -132,20 +159,8 @@ export function overlayReserves(root: Topic, sheet: Sheet): OverlayReserves {
     else bump(right, id, value)
   }
 
-  /** 一级分支的展开方向（多方向结构才有；单方向结构返回空表） */
-  const branchSides = childFoldSides(root)
-  /** 一个主题属于哪一支、那一支朝哪儿展开 */
-  const branchSideOf = (topicId: string): FoldSide => {
-    const def = getStructureDef(root.structureClass)
-    if (topicId === root.id) return def.grows ?? 'right'
-    let current = topicId
-    let parent = index.parentOf.get(current)
-    while (parent !== undefined && parent !== root.id) {
-      current = parent
-      parent = index.parentOf.get(current)
-    }
-    return branchSides.get(current) ?? def.grows ?? 'right'
-  }
+  /** 概要括号朝哪一侧：与绘制共用一份判据（结构家族，不看坐标） */
+  const sideOf = summarySideOf(root, index.parentOf)
 
   for (const boundary of sheet.boundaries) {
     const topics = resolveRange(index, boundary.range)
@@ -162,11 +177,7 @@ export function overlayReserves(root: Topic, sheet: Sheet): OverlayReserves {
     const last = topics[topics.length - 1]
     if (!last) continue
     // 括号 → 尖点 → 文字；文字宽度不可预知，按一个保守的定值留一点
-    bumpSide(
-      summaryReserveSide(root, branchSideOf(last.id)),
-      last.id,
-      SUMMARY_GAP + SUMMARY_NIB + 48
-    )
+    bumpSide(sideOf(last.id), last.id, SUMMARY_GAP + SUMMARY_NIB + 48)
   }
 
   return { top, bottom, left, right }

@@ -5,6 +5,7 @@
  * （避免「适应画布」把这些元素切掉）。形状拼装见 ./shapes.ts。
  */
 import type { NodeStyle, Relationship, Sheet, Topic } from '../../model/types'
+import type { FoldSide } from '../../model/tree'
 import { readOverlayFontSize } from '../../model/overlay-style'
 import { round } from '../core'
 import type { BoundaryLayout, LayoutResult, RelationshipLayout, SummaryLayout } from '../types'
@@ -19,7 +20,13 @@ import {
   SUMMARY_NIB,
   SUMMARY_SPINE
 } from './metrics'
-import { boundsOfTopics, indexSubtreeBounds, sameBounds, type Bounds } from './reserves'
+import {
+  boundsOfTopics,
+  indexSubtreeBounds,
+  sameBounds,
+  summarySideOf,
+  type Bounds
+} from './reserves'
 import { indexTree, readCurveOffset, resolveRange, type TreeIndex } from './range'
 import {
   OVERLAY_TITLE_LINE_HEIGHT,
@@ -162,9 +169,9 @@ function boundaryOf(
 
 function summaryOf(
   summary: { id: string; topicId: string; range: string; title?: string; style?: NodeStyle },
-  result: LayoutResult,
   index: TreeIndex,
-  boundsOf: Map<string, Bounds | null>
+  boundsOf: Map<string, Bounds | null>,
+  sideOf: (topicId: string) => FoldSide
 ): SummaryLayout | null {
   const topics = resolveRange(index, summary.range)
   const bounds = boundsOfTopics(topics, boundsOf)
@@ -179,29 +186,19 @@ function summaryOf(
   const fontSize = readOverlayFontSize(summary.style, SUMMARY_FONT_SIZE)
   const labelSize = estimateOverlayLabelSize(title, fontSize)
 
-  // 朝哪个方向放括号：由「父节点 -> 区间中心」的主导轴决定
+  /**
+   * 朝哪个方向放括号：**必须与布局预留用同一判据**（结构家族，见 `summarySideOf`）。
+   *
+   * 这里以前按「父节点 → 区间中心」的主导轴算（`|dx| >= |dy|` 定横竖），
+   * 于是把节点手动拉大——图片跟着等比放大、区间包围盒的重心明显偏移——
+   * 就会在某一刻从「横向为主」翻成「纵向为主」，括号从左侧跳到上方。
+   * 而且留白是按结构算的、画出来却按几何算，两者会各说各话：
+   * 括号可能压在邻居身上，或落在根本没有留白的那一侧。
+   */
   const firstTopic = topics[0]
-  const parentId = firstTopic ? index.parentOf.get(firstTopic.id) : undefined
-  const parentNode = parentId === undefined ? undefined : result.nodeMap.get(parentId)
-  const centerX = (bounds.minX + bounds.maxX) / 2
-  const centerY = (bounds.minY + bounds.maxY) / 2
-
-  let axis: 'v' | 'h'
-  let forward: boolean
-  if (parentNode) {
-    const dx = centerX - (parentNode.x + parentNode.width / 2)
-    const dy = centerY - (parentNode.y + parentNode.height / 2)
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      axis = 'v'
-      forward = dx >= 0
-    } else {
-      axis = 'h'
-      forward = dy >= 0
-    }
-  } else {
-    axis = bounds.maxY - bounds.minY >= bounds.maxX - bounds.minX ? 'v' : 'h'
-    forward = true
-  }
+  const side = sideOf(firstTopic?.id ?? '')
+  const axis: 'v' | 'h' = side === 'left' || side === 'right' ? 'v' : 'h'
+  const forward = side === 'right' || side === 'down'
 
   if (axis === 'v') {
     const spanStart = bounds.minY
@@ -272,6 +269,8 @@ export function addOverlays(result: LayoutResult, root: Topic, sheet: Sheet): vo
   const index = indexTree(root)
   // 子树包围盒只建一次：所有边界/概要共用（以前每个都各递归一遍自己的区间）
   const boundsOf = indexSubtreeBounds(root, result)
+  // 括号朝哪一侧：与布局预留共用同一份结构判据（别各自算一套）
+  const sideOf = summarySideOf(root, index.parentOf)
 
   for (const boundary of sheet.boundaries) {
     const layout = boundaryOf(boundary, index, boundsOf)
@@ -279,7 +278,7 @@ export function addOverlays(result: LayoutResult, root: Topic, sheet: Sheet): vo
   }
 
   for (const summary of sheet.summaries) {
-    const layout = summaryOf(summary, result, index, boundsOf)
+    const layout = summaryOf(summary, index, boundsOf, sideOf)
     if (layout) result.summaries.push(layout)
   }
 
