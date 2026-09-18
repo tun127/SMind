@@ -95,6 +95,18 @@ function spinePoints(result: LayoutResult, parent: NodeLayout, child: NodeLayout
     const anchorY = below ? round(parent.y + parent.height) : parent.y
     const from: Point = { x: round(pcx), y: anchorY }
     /**
+     * 正上/正下的**单链**：就是一条竖线。
+     *
+     * 这类父子在布局里本来就在同一条竖线上（列摆放不做逐层缩进），
+     * 再"绕到脊上"就画成了没必要的 Z 形——用户要的就是「直接垂直」。
+     *
+     * 必须限定**只有一个子节点**：列里有多个格子时，第二个格子的中心 x 往往也和父节点
+     * 相同，直连就会从上面那个格子身上穿过去（自检的"穿框"当场抓到过）。
+     */
+    if (column.length === 1 && Math.abs(ccx - pcx) < 2) {
+      return [from, { x: from.x, y: round(ccy) }]
+    }
+    /**
      * 同一父节点下的所有子节点**永远从左边进**（脊在整列的左侧）。
      *
      * 不能按"这个子节点相对父节点中线在哪边"逐个决定：那样拖偏一个子节点就会让它翻到

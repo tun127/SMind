@@ -97,8 +97,12 @@ export function placeVerticalChildren(
 }
 
 /**
- * 沿垂直方向把子节点堆成缩进列表（逐层向右缩进）。
- * 时间轴的上下分支、鱼骨图的骨刺都用它。
+ * 沿垂直方向把子节点堆成一列。
+ * 时间轴的上下刻目、鱼骨图的骨刺、树状表格的深层都用它。
+ *
+ * **所有层级共用同一个 x**（早先是"逐层向右缩进"）：缩进让一条链斜着往上爬，
+ * 一列本来该是垂直的——用户原话「不是直接垂直才对吗？」。层级感由每一格自己的
+ * 短横线（列脊）表达，不需要靠横移。
  */
 export function placeVerticalColumn(
   builder: LayoutBuilder,
@@ -106,8 +110,7 @@ export function placeVerticalColumn(
   x: number,
   y: number,
   side: -1 | 1,
-  depth: number,
-  indent: number
+  depth: number
 ): void {
   const parentSize = builder.size(topic.id)
   let cursor = side < 0 ? y - builder.gapY : y + parentSize.height + builder.gapY
@@ -115,8 +118,8 @@ export function placeVerticalColumn(
   for (const child of builder.visibleChildren(topic)) {
     const size = builder.size(child.id)
     const childY = side < 0 ? cursor - size.height : cursor
-    builder.add(child, x + indent, childY, depth + 1, side < 0 ? 'up' : 'down')
-    placeVerticalColumn(builder, child, x + indent, childY, side, depth + 1, indent)
+    builder.add(child, x, childY, depth + 1, side < 0 ? 'up' : 'down')
+    placeVerticalColumn(builder, child, x, childY, side, depth + 1)
     cursor = side < 0 ? childY - builder.gapY : childY + size.height + builder.gapY
   }
 }

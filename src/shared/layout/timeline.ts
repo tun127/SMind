@@ -15,7 +15,6 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
   const rootNode = builder.add(root, -rootSize.width / 2, -rootSize.height / 2, 0, 'root')
 
   const kids = builder.visibleChildren(root)
-  const indent = Math.max(18, builder.gapX * 0.5)
   const spineGap = Math.max(rootSize.height / 2 + builder.gapY, 26)
   const spineCenterY = rootNode.y + rootNode.height / 2
 
@@ -28,9 +27,9 @@ export function layoutTimelineHorizontal(root: Topic, builder: LayoutBuilder): L
     const childY = side < 0 ? spineCenterY - spineGap - size.height : spineCenterY + spineGap
 
     builder.add(child, centerX - size.width / 2, childY, 1, side < 0 ? 'up' : 'down')
-    placeVerticalColumn(builder, child, centerX - size.width / 2, childY, side, 1, indent)
-    // 逐层缩进会往外多占宽度，推进量里要把它算进去，否则会和下一个分支重叠
-    cursor += extent + builder.gapX + indent * (builder.maxDepth(child) - 1)
+    placeVerticalColumn(builder, child, centerX - size.width / 2, childY, side, 1)
+    // 一列占的宽度就是这一列里最宽的那个（不再逐层缩进，所以不用再额外加余量）
+    cursor += extent + builder.gapX
   })
 
   const result = builder.finish(root)

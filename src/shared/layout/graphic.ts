@@ -21,7 +21,6 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
   const spineCenterY = rootNode.y + rootNode.height / 2
 
   const kids = builder.visibleChildren(root)
-  const indent = Math.max(18, builder.gapX * 0.5)
   const boneOffset = Math.max(rootSize.height / 2 + builder.gapY * 3, 46)
   // 骨刺斜度：让骨刺看起来是斜的，而不是垂直的
   const boneSlant = Math.round(boneOffset * 0.45)
@@ -38,10 +37,10 @@ export function layoutFishbone(root: Topic, builder: LayoutBuilder): LayoutResul
     const childY = side < 0 ? spineCenterY - boneOffset - size.height : spineCenterY + boneOffset
 
     builder.add(child, nodeCenterX - size.width / 2, childY, 1, side < 0 ? 'up' : 'down')
-    placeVerticalColumn(builder, child, nodeCenterX - size.width / 2, childY, side, 1, indent)
+    placeVerticalColumn(builder, child, nodeCenterX - size.width / 2, childY, side, 1)
 
     anchors.push({ id: child.id, x: round(anchorX), side })
-    cursor += extent + builder.gapX + boneSlant + indent * (builder.maxDepth(child) - 1)
+    cursor += extent + builder.gapX + boneSlant
   })
 
   const result = builder.finish(root)
@@ -132,7 +131,7 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
     const colWidth = maxWidthOf(builder, header)
     const headerSize = builder.size(header.id)
 
-    builder.add(
+    const headerNode = builder.add(
       header,
       cellX(colLeft, colWidth, headerSize, header.position?.x ?? 0),
       headerTop + (header.position?.y ?? 0),
@@ -155,7 +154,16 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
         const size = builder.size(child.id)
         const desired = rowY + (child.position?.y ?? 0)
         const y = Math.max(desired, minY)
-        builder.add(child, cellX(colLeft, colWidth, size, child.position?.x ?? 0), y, depth, 'down')
+        /**
+         * 子格与**表头左对齐**，而不是「在列宽里居中」。
+         *
+         * 列宽是按该列最宽的节点算的，居中的话每列的缩进都不一样——同一张图里
+         * 这一列的子格贴着表头、那一列却缩进一大截，看起来就是「每列格式不一样」。
+         * 左对齐后每列形状完全一致（用户看的就是"有没有对齐"）。仍钳在列内，不许溢出到邻列。
+         */
+        const maxX = colLeft + Math.max(0, colWidth - size.width)
+        const cellLeft = Math.max(colLeft, Math.min(headerNode.x + (child.position?.x ?? 0), maxX))
+        builder.add(child, cellLeft, y, depth, 'down')
         // 手动偏移过的格子不许压到同列的下一个格位（与其它家族同一套避让）
         rowY = y + size.height + builder.gapY
         walk(child, depth + 1)
