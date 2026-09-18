@@ -143,9 +143,19 @@ export function layoutMatrix(root: Topic, builder: LayoutBuilder): LayoutResult 
 
     let rowY = headerTop + headerSize.height + builder.gapY * 1.6
     const walk = (topic: Topic, depth: number): void => {
+      const parent = builder.nodeMap.get(topic.id)
+      /**
+       * 与**父节点**的最小间隙。
+       *
+       * 矩阵是唯一读手动 y 偏移的列布局（其它列摆放在 `placeVerticalColumn` 里不读偏移），
+       * 于是把格子往上拖到贴住父节点时，连线只能从它身上穿过去——任何绕行都会压到它。
+       * 这里留半个行距：偏移能保留就保留，只有真的要贴上去时才往下让一点。
+       */
+      const minY = (parent ? parent.y + parent.height : rowY) + Math.max(builder.gapY / 2, 6)
       for (const child of builder.visibleChildren(topic)) {
         const size = builder.size(child.id)
-        const y = rowY + (child.position?.y ?? 0)
+        const desired = rowY + (child.position?.y ?? 0)
+        const y = Math.max(desired, minY)
         builder.add(child, cellX(colLeft, colWidth, size, child.position?.x ?? 0), y, depth, 'down')
         // 手动偏移过的格子不许压到同列的下一个格位（与其它家族同一套避让）
         rowY = y + size.height + builder.gapY
@@ -223,7 +233,14 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
   const centerX = rootNode.x + rootNode.width / 2
   const centerY = rootNode.y + rootNode.height / 2
   const count = kids.length
-  const sector = count > 0 ? (Math.PI * 2) / count : 0
+  /**
+   * 每个一级分支分到的扇区角度。
+   *
+   * 只有一个分支时**不能**给整圈（2π）：那一支的子节点会被摊到 180° 以上、
+   * 跑到中心主题的**另一侧**（实测「一个分支 + 两个子节点」画成左一个右一个，
+   * 连线还横穿中心主题）。没有别的分支可避让时，给一个直角扇区就够。
+   */
+  const sector = count > 1 ? (Math.PI * 2) / count : Math.PI / 2
 
   let baseRadius = 220
   if (count > 1) {

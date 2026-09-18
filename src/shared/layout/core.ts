@@ -394,8 +394,141 @@ export function addEdge(
   to: Point,
   kind: ConnectorKind
 ): void {
-  const edge: EdgeLayout = { fromId, toId, d: pathFor(kind, from, to) }
+  /**
+   * 折线连线加一层**竖井绕行**：连线不许从别的节点身上穿过去。
+   *
+   * 为什么需要：各结构算锚点时只看父子两个节点，于是当兄弟**排成一列**时——
+   * 矩阵的格位、时间轴的刻目、鱼骨的骨刺、树状表格的列——连到"更远那一格"的线
+   * 会从"更近那一格"身上直插过去（用户截图：一条竖线穿过中间那个框）。
+   */
+  const d =
+    kind === 'elbow-v' || kind === 'elbow-h'
+      ? orthogonalPath(result, fromId, toId, from, to, kind)
+      : pathFor(kind, from, to)
+  const edge: EdgeLayout = { fromId, toId, d }
   result.edges.push(edge)
+}
+
+/** 离开锚点的小段：太短会贴着节点边框看不出转折 */
+const LANE_STUB = 10
+/** 竖井与挡路节点之间留的空隙 */
+const LANE_GAP = 8
+/** 判"穿过"时的容差：贴边不算穿过（连线本来就该贴着节点边缘走） */
+const HIT_TOLERANCE = 2
+
+function polyline(points: Point[]): string {
+  return points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${round(point.x)} ${round(point.y)}`)
+    .join(' ')
+}
+
+/** 轴对齐线段是否伸进了矩形内部（留容差，贴边不算） */
+function segmentHitsRect(a: Point, b: Point, rect: NodeLayout): boolean {
+  const x0 = Math.min(a.x, b.x)
+  const x1 = Math.max(a.x, b.x)
+  const y0 = Math.min(a.y, b.y)
+  const y1 = Math.max(a.y, b.y)
+  if (x1 <= rect.x + HIT_TOLERANCE || x0 >= rect.x + rect.width - HIT_TOLERANCE) return false
+  if (y1 <= rect.y + HIT_TOLERANCE || y0 >= rect.y + rect.height - HIT_TOLERANCE) return false
+  return true
+}
+
+/** 这条折线穿过了哪些节点（父子两端不算） */
+function crossedNodes(
+  result: LayoutResult,
+  fromId: string,
+  toId: string,
+  points: Point[]
+): NodeLayout[] {
+  const out: NodeLayout[] = []
+  for (const node of result.nodes) {
+    if (node.id === fromId || node.id === toId) continue
+    for (let i = 0; i + 1 < points.length; i += 1) {
+      const a = points[i]
+      const b = points[i + 1]
+      if (a && b && segmentHitsRect(a, b, node)) {
+        out.push(node)
+        break
+      }
+    }
+  }
+  return out
+}
+
+function pathLength(points: Point[]): number {
+  let total = 0
+  for (let i = 0; i + 1 < points.length; i += 1) {
+    const a = points[i]
+    const b = points[i + 1]
+    if (a && b) total += Math.abs(a.x - b.x) + Math.abs(a.y - b.y)
+  }
+  return total
+}
+
+/**
+ * 正交折线：默认走中位折角；被别的节点挡住时改走**竖井**。
+ *
+ * 竖井位置取「挡住路的那几个节点的外侧 ±8px」，左右（上下）各试一条，
+ * 取更短的一条；两条都还挡着就退回默认路径——**宁可不好看，也不能绕出更乱的线**。
+ */
+function orthogonalPath(
+  result: LayoutResult,
+  fromId: string,
+  toId: string,
+  from: Point,
+  to: Point,
+  kind: 'elbow-v' | 'elbow-h'
+): string {
+  const vertical = kind === 'elbow-v'
+  const mid = vertical ? round(from.y + (to.y - from.y) / 2) : round(from.x + (to.x - from.x) / 2)
+  const direct: Point[] = vertical
+    ? [from, { x: from.x, y: mid }, { x: to.x, y: mid }, to]
+    : [from, { x: mid, y: from.y }, { x: mid, y: to.y }, to]
+
+  const blockers = crossedNodes(result, fromId, toId, direct)
+  if (blockers.length === 0) return polyline(direct)
+
+  const lanes = vertical
+    ? [
+        Math.min(...blockers.map((n) => n.x)) - LANE_GAP,
+        Math.max(...blockers.map((n) => n.x + n.width)) + LANE_GAP
+      ]
+    : [
+        Math.min(...blockers.map((n) => n.y)) - LANE_GAP,
+        Math.max(...blockers.map((n) => n.y + n.height)) + LANE_GAP
+      ]
+
+  // 离开锚点的小段：连线很短时按一半收窄，免得冲过子节点
+  const span = vertical ? Math.abs(to.y - from.y) : Math.abs(to.x - from.x)
+  const stub = Math.min(LANE_STUB, Math.max(span / 2, 0))
+  const away = vertical ? Math.sign(mid - from.y) || 1 : Math.sign(mid - from.x) || 1
+
+  let best: Point[] | null = null
+  let bestLength = Number.POSITIVE_INFINITY
+  for (const lane of lanes) {
+    const path: Point[] = vertical
+      ? [
+          from,
+          { x: from.x, y: round(from.y + away * stub) },
+          { x: round(lane), y: round(from.y + away * stub) },
+          { x: round(lane), y: to.y },
+          to
+        ]
+      : [
+          from,
+          { x: round(from.x + away * stub), y: from.y },
+          { x: round(from.x + away * stub), y: round(lane) },
+          { x: to.x, y: round(lane) },
+          to
+        ]
+    if (crossedNodes(result, fromId, toId, path).length > 0) continue
+    const length = pathLength(path)
+    if (length < bestLength) {
+      best = path
+      bestLength = length
+    }
+  }
+  return polyline(best ?? direct)
 }
 
 export function addDecoration(result: LayoutResult, decoration: Decoration): void {

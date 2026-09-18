@@ -75,10 +75,14 @@ export function placeOrgChartChildren(
     let childX = cursor + extent / 2 - childSize.width / 2 + (child.position?.x ?? 0)
     if (childX < ceil) childX = ceil
     ceil = childX + childSize.width + builder.reserveRight(child) + builder.gapX
-    const childY =
-      direction === 'down'
-        ? rowY + (child.position?.y ?? 0)
-        : rowY - childSize.height + (child.position?.y ?? 0)
+    /**
+     * 行内**不认纵向偏移**——与矩阵「横向钳在列内」是同一套语义的转置。
+     *
+     * 一行里的兄弟必须坐在同一条基线上：认了纵向偏移，这一格就从那一行里挪出去
+     * （用户截图里的"错位"），拖得狠一点还会直接压到父节点身上。
+     * 横向偏移照旧生效（上一段就是为它写的右推避让）。
+     */
+    const childY = direction === 'down' ? rowY : rowY - childSize.height
     pending.push({ child, x: childX, y: childY, side: direction === 'down' ? 'down' : 'up' })
     cursor += extent + builder.reserveRight(child) + builder.gapX
   }

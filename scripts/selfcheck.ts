@@ -4216,6 +4216,186 @@ function firstOverlap(layout: LayoutResult): [string, string] | null {
   return null
 }
 
+/* ------------------------------------------------------------------ */
+/* 全结构 × 全形态审计：连线不许穿过节点                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 连线路径里的正交直线段。
+ *
+ * 只取 M/L/H/V：结构里的父子连线是直线或折线；曲线（逻辑图 / 思维导图的贝塞尔）
+ * 走的是父子之间的空档，不参与这套检查。
+ */
+function pathSegments(d: string): Array<[number, number, number, number]> {
+  const out: Array<[number, number, number, number]> = []
+  const tokens = d.match(/[MLHVmlhv][^MLHVmlhv]*/g) ?? []
+  let cx = 0
+  let cy = 0
+  for (const token of tokens) {
+    const cmd = token[0]
+    const nums = (token.slice(1).match(/-?\d+(\.\d+)?/g) ?? []).map(Number)
+    if (cmd === 'M' || cmd === 'L') {
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const x = nums[i]!
+        const y = nums[i + 1]!
+        if (cmd === 'L') out.push([cx, cy, x, y])
+        cx = x
+        cy = y
+      }
+    } else if (cmd === 'H') {
+      for (const x of nums) {
+        out.push([cx, cy, x, cy])
+        cx = x
+      }
+    } else if (cmd === 'V') {
+      for (const y of nums) {
+        out.push([cx, cy, cx, y])
+        cy = y
+      }
+    }
+  }
+  return out
+}
+
+/** 轴对齐线段是否伸进了节点盒内部（贴边不算） */
+function segmentHitsBox(seg: [number, number, number, number], box: NodeLayout): boolean {
+  const x0 = Math.min(seg[0], seg[2])
+  const x1 = Math.max(seg[0], seg[2])
+  const y0 = Math.min(seg[1], seg[3])
+  const y1 = Math.max(seg[1], seg[3])
+  if (x1 <= box.x + 1 || x0 >= box.x + box.width - 1) return false
+  if (y1 <= box.y + 1 || y0 >= box.y + box.height - 1) return false
+  return true
+}
+
+/** 连线穿过节点的所有情形（父子两端不算） */
+function crossingProblems(layout: LayoutResult): string[] {
+  const out: string[] = []
+  for (const edge of layout.edges) {
+    for (const seg of pathSegments(edge.d)) {
+      for (const node of layout.nodes) {
+        if (node.id === edge.fromId || node.id === edge.toId) continue
+        if (!segmentHitsBox(seg, node)) continue
+        const from = layout.nodeMap.get(edge.fromId)?.topic.title || '(空)'
+        const to = layout.nodeMap.get(edge.toId)?.topic.title || '(空)'
+        const text = `「${from}」→「${to}」穿过「${node.topic.title || '(空)'}」`
+        if (!out.includes(text)) out.push(text)
+      }
+    }
+  }
+  return out
+}
+
+interface SweepSpec {
+  title: string
+  children?: SweepSpec[]
+  /** 模拟"手动拖过"：布局要认偏移，但不能因此压到别人或让连线穿框 */
+  offset?: { x: number; y: number }
+}
+
+function buildSweepTopic(spec: SweepSpec): Topic {
+  const topic = createTopic(spec.title)
+  if (spec.offset) topic.position = spec.offset
+  topic.children = (spec.children ?? []).map(buildSweepTopic)
+  return topic
+}
+
+/** 一条 len 层的链 */
+function sweepChain(prefix: string, len: number): SweepSpec {
+  let node: SweepSpec = { title: `${prefix} 叶` }
+  for (let i = len; i >= 1; i -= 1) node = { title: `${prefix}${i}`, children: [node] }
+  return node
+}
+
+/**
+ * 审计用的文档形态：一张导图能不能排对，取决于它的**形状**（宽 / 深 / 参差 / 空标题 /
+ * 拖过），而不是标题内容。用户报的四种"错位"分别落在"一列兄弟"和"手动拖过"这两种形状上，
+ * 所以这里把形状摊开：任何一个结构在任何一个形状下都不许重叠、不许穿框。
+ */
+const STRUCTURE_SWEEP: Array<{ name: string; root: SweepSpec }> = [
+  {
+    name: '单个分支两个子',
+    root: {
+      title: '中心主题',
+      children: [{ title: '分支主题 1', children: [{ title: '子一' }, { title: '子二' }] }]
+    }
+  },
+  { name: '单链', root: { title: '中心主题', children: [sweepChain('分支', 2)] } },
+  {
+    name: '宽浅（5 分支 × 2 子）',
+    root: {
+      title: '中心主题',
+      children: Array.from({ length: 5 }, (_, i) => ({
+        title: `分支 ${i + 1}`,
+        children: [{ title: `要点 ${i + 1} 甲` }, { title: `要点 ${i + 1} 乙` }]
+      }))
+    }
+  },
+  {
+    name: '深窄（6 层链 + 两个短分支）',
+    root: {
+      title: '中心主题',
+      children: [
+        sweepChain('深', 6),
+        { title: '短一', children: [sweepChain('短一', 3)] },
+        sweepChain('短二', 2)
+      ]
+    }
+  },
+  {
+    name: '参差（深度 1 / 3 / 5）',
+    root: {
+      title: '中心主题',
+      children: [
+        { title: '浅分支', children: [{ title: '浅一' }] },
+        sweepChain('中', 3),
+        { title: '深分支', children: [sweepChain('深', 5)] }
+      ]
+    }
+  },
+  {
+    name: '长标题（换行）',
+    root: {
+      title: '中心主题写得很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长',
+      children: [
+        {
+          title: '分支标题也写得很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长',
+          children: [
+            { title: '子节点标题继续写得很长很长很长很长很长很长很长很长很长很长很长很长' },
+            { title: '另一个同样很长的子节点标题用来撑高度撑宽度看看会不会压在一起' }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    name: '空标题',
+    root: { title: '', children: [{ title: '', children: [{ title: '' }, { title: '' }] }] }
+  },
+  {
+    name: '手动拖过（每个子节点都有偏移）',
+    root: {
+      title: '中心主题',
+      children: [
+        {
+          title: '分支主题 1',
+          children: [
+            { title: '子一', offset: { x: -8, y: -30 } },
+            { title: '子二', offset: { x: 12, y: 8 } }
+          ]
+        },
+        {
+          title: '分支主题 2',
+          children: [
+            { title: '子三', offset: { x: 40, y: 0 } },
+            { title: '子四', offset: { x: 0, y: 46 } }
+          ]
+        }
+      ]
+    }
+  }
+]
+
 /**
  * 覆盖层（边界/概要）侵入了**非成员**节点没有？
  *
@@ -4327,6 +4507,32 @@ function testLayoutNoOverlap(): void {
     check(`结构「${def.label}」无节点重叠`, hit === null, hit ? hit.join(' ⨯ ') : '')
   }
 
+  /**
+   * 形状 × 结构全铺一遍：**连线也不许穿过节点**。
+   *
+   * 用户连着报的四种"错位"（矩阵的竖线穿过第一个格子、时间轴刻目、鱼骨骨刺、
+   * 组织架构行）其实是**同一个缺陷**——连线只按父子两个节点算路径，
+   * 兄弟排成一列时就会从中间那个身上直插过去；拖过之后更容易撞上。
+   * 这里按「形状 × 结构」铺开（8 × 14），以后再有任何结构把子节点摆成一列，穿框会当场报错。
+   */
+  for (const doc of STRUCTURE_SWEEP) {
+    for (const def of STRUCTURES.filter((item) => item.supported)) {
+      const sweepRoot = buildSweepTopic(doc.root)
+      sweepRoot.structureClass = def.class
+      const sweep = layoutSheet(sweepRoot, multilineMeasure)
+      const overlap = firstOverlap(sweep)
+      const problems = [
+        ...(overlap ? [`重叠「${overlap[0]}」⨯「${overlap[1]}」`] : []),
+        ...crossingProblems(sweep)
+      ]
+      check(
+        `形状「${doc.name}」× ${def.label}：无重叠、无连线穿框`,
+        problems.length === 0,
+        problems.slice(0, 3).join('；')
+      )
+    }
+  }
+
   // 手动拖过的兄弟 + 新插入的节点：偏移不许压到别人（用户反馈「新节点和老节点重合」）
   reset()
   const dragRoot = root().id
@@ -4359,6 +4565,31 @@ function testLayoutNoOverlap(): void {
     orgRowHit ? orgRowHit.join(' ⨯ ') : ''
   )
   check('组织架构行：偏移仍然保留', Boolean(orgRow.nodeMap.get(orgA)?.topic.position))
+
+  /**
+   * 行内的**纵向**偏移不生效：一行里的兄弟必须坐在同一条基线上。
+   *
+   * 认了它，这一格就从那一行里挪出去（用户截图里的"错位"），
+   * 拖得狠一点还会直接压到父节点身上（下面这条断言就是那个场景）。
+   */
+  store().offsetPositions([{ id: orgA, dx: 170, dy: -40 }])
+  const orgRowVertical = layoutSheet(root(), multilineMeasure)
+  const orgA2 = orgRowVertical.nodeMap.get(orgA)!
+  const orgSiblings = root().children.slice(1)
+  check(
+    '组织架构行：纵向偏移被忽略（同行同基线）',
+    orgSiblings.every(
+      (sibling) => Math.abs((orgRowVertical.nodeMap.get(sibling.id)?.y ?? 0) - orgA2.y) < 2
+    ),
+    `${Math.round(orgA2.y)} vs ${orgSiblings.map((s) => Math.round(orgRowVertical.nodeMap.get(s.id)?.y ?? 0)).join('/')}`
+  )
+  check('组织架构行：横向偏移照旧生效', orgA2.x > (orgRow.nodeMap.get(orgA)?.x ?? 0) + 100)
+  const orgRowParent = orgRowVertical.nodeMap.get(root().id)!
+  check(
+    '组织架构行：不会压到父节点',
+    orgA2.y >= orgRowParent.y + orgRowParent.height,
+    `${Math.round(orgA2.y)} vs ${Math.round(orgRowParent.y + orgRowParent.height)}`
+  )
 
   // 矩阵列：纵向偏移过的格子不许压到同列的下一个格位
   reset()
