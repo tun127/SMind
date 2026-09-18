@@ -36,6 +36,25 @@ function placeRightColumn(
   }
 }
 
+/**
+ * 从节点中心指向目标的射线，与**节点边框**的交点。
+ *
+ * 连线必须从边框出发：用中心点的话，线会先从自己的框里穿出来（穿过文字），
+ * 再插进对方的框里——用户看到的"直线穿过框"就是这么来的。
+ */
+function borderToward(node: NodeLayout, target: NodeLayout): Point {
+  const cx = node.x + node.width / 2
+  const cy = node.y + node.height / 2
+  const dx = target.x + target.width / 2 - cx
+  const dy = target.y + target.height / 2 - cy
+  if (dx === 0 && dy === 0) return { x: round(cx), y: round(cy) }
+  const scale = Math.min(
+    dx !== 0 ? node.width / 2 / Math.abs(dx) : Number.POSITIVE_INFINITY,
+    dy !== 0 ? node.height / 2 / Math.abs(dy) : Number.POSITIVE_INFINITY
+  )
+  return { x: round(cx + dx * scale), y: round(cy + dy * scale) }
+}
+
 /** 向右延伸的列一共占多宽（小骨上更深的层级沿它排开） */
 function rightColumnWidth(builder: LayoutBuilder, topic: Topic): number {
   let widest = 0
@@ -479,7 +498,12 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
   }
 
   const result = builder.finish(root)
-  // 放射状用「中心到中心」的连线，压在节点下方
+  /**
+   * 连线**从边框连到边框**。
+   *
+   * 早先这里是「中心到中心」：线必然从自己的框里穿出来、又插进对方的框里，
+   * 节点越大越明显——用户看到的就是"直线穿过框、直接穿过文字"。
+   */
   const connect = (topic: Topic): void => {
     const parent = result.nodeMap.get(topic.id)
     if (!parent) return
@@ -490,8 +514,8 @@ export function layoutRadial(root: Topic, builder: LayoutBuilder): LayoutResult 
           result,
           parent.id,
           childNode.id,
-          anchorPoint(parent, 'center'),
-          anchorPoint(childNode, 'center'),
+          borderToward(parent, childNode),
+          borderToward(childNode, parent),
           'line'
         )
       }

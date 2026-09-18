@@ -4314,6 +4314,38 @@ function crossingProblems(layout: LayoutResult): string[] {
   return out
 }
 
+/**
+ * 连线的两端必须落在节点**边框**上，不许从框内部出发。
+ *
+ * 反例是放射状早期的画法：「中心到中心」——线从自己的框里穿出来、穿过文字，
+ * 再插进对方的框里。用户报的"直线穿过框"就是它。
+ */
+function endpointInsideProblems(layout: LayoutResult): string[] {
+  const out: string[] = []
+  for (const edge of layout.edges) {
+    const segs = pathSegments(edge.d)
+    const firstSeg = segs[0]
+    const lastSeg = segs[segs.length - 1]
+    if (!firstSeg || !lastSeg) continue
+    const ends: Array<[number, number]> = [
+      [firstSeg[0], firstSeg[1]],
+      [lastSeg[2], lastSeg[3]]
+    ]
+    for (const node of layout.nodes) {
+      if (node.id !== edge.fromId && node.id !== edge.toId) continue
+      const inside = ends.some(
+        ([x, y]) =>
+          x > node.x + 4 &&
+          x < node.x + node.width - 4 &&
+          y > node.y + 4 &&
+          y < node.y + node.height - 4
+      )
+      if (inside) out.push(`「${node.topic.title || '(空)'}」的连线从框内部出发`)
+    }
+  }
+  return out
+}
+
 /** 两条线段是否真的相交（端点相接不算，平行也不算） */
 function segmentsCross(
   a: [number, number, number, number],
@@ -4633,10 +4665,11 @@ function testLayoutNoOverlap(): void {
       const problems = [
         ...(overlap ? [`重叠「${overlap[0]}」⨯「${overlap[1]}」`] : []),
         ...crossingProblems(sweep),
-        ...lineCrossingProblems(sweep)
+        ...lineCrossingProblems(sweep),
+        ...endpointInsideProblems(sweep)
       ]
       check(
-        `形状「${doc.name}」× ${def.label}：无重叠、无连线穿框、无线穿线`,
+        `形状「${doc.name}」× ${def.label}：无重叠、无连线穿框、无线穿线、连线端点在边框上`,
         problems.length === 0,
         problems.slice(0, 3).join('；')
       )

@@ -370,7 +370,14 @@ function relationshipOf(
   const length = Math.hypot(dx, dy)
   if (length < 1) return null
 
-  const bulge = Math.min(70, length * 0.24)
+  /**
+   * 弯度：按长度成比例，并给一个**下限**。
+   *
+   * 早先上限是 70px —— 一条横跨 1200px 的关系线只鼓 6%，视觉上就是**一条直线**，
+   * 用户看到的就是"这根线直接穿过去"（截图里那条跨国画布的长线）。
+   * 参考里关系线是**明显的曲线**（贴着节点绕开），所以按长度的 ~1/4 鼓出、下限 70、上限 240。
+   */
+  const bulge = Math.min(240, Math.max(70, length * 0.25))
   const nx = -dy / length
   const ny = dx / length
   const midX = (start.x + end.x) / 2

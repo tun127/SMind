@@ -104,7 +104,8 @@ function spinePoints(result: LayoutResult, parent: NodeLayout, child: NodeLayout
      * 相同，直连就会从上面那个格子身上穿过去（自检的"穿框"当场抓到过）。
      */
     if (column.length === 1 && Math.abs(ccx - pcx) < 2) {
-      return [from, { x: from.x, y: round(ccy) }]
+      // 终点落在子节点**近侧边框**上（落在中心就会插进框里、压住文字）
+      return [from, { x: from.x, y: below ? child.y : round(child.y + child.height) }]
     }
     /**
      * 同一父节点下的所有子节点**永远从左边进**（脊在整列的左侧）。
