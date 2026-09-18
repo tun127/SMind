@@ -186,6 +186,15 @@ export interface EditorState {
   setViewLock(on: boolean): void
   /** 切换视角锁定，返回切换后的状态（提示语要用） */
   toggleViewLock(): boolean
+  /**
+   * 最近一次折叠 / 展开的是哪个节点（`at` 是时间戳，用来去重）。
+   *
+   * 画布据此做**镜头锚点补偿**：折叠会让整张图重排，被折叠的那个节点会跟着挪位置，
+   * 于是"视角丢失"（用户原话）。锚定它、让它在屏幕上原地不动，才符合直觉——
+   * 而不是把镜头拉去居中中心主题。所有折叠入口（工具栏 / 菜单 / 空格 / 按侧徽标 / AI）
+   * 都走 `setCollapsed` / `setFoldSide`，所以这个信号在 store 里记一次就全覆盖。
+   */
+  lastFold: { id: string; at: number } | null
 
   /* ---- 文档 ---- */
   newDocument(): void
@@ -640,6 +649,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   pan: { x: 0, y: 0 },
   // 上次会话的开关选择优先；从未动过开关才用设置默认值
   viewLock: readPersistedViewLock() ?? false,
+  lastFold: null,
 
   search: { ...EMPTY_SEARCH },
   filter: { ...EMPTY_FILTER },
@@ -1297,6 +1307,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
       `collapse:${id}:${collapsed ? 'fold' : 'unfold'}`
     )
 
+    // 记下"刚折叠/展开的是谁"：画布拿它当镜头锚点（见 lastFold 的说明）
+    set({ lastFold: { id, at: Date.now() } })
+
     // 折叠会把整棵子树**藏起来**：选中的主题若正在里面，它就从布局里消失了——
     // 视角锁定再也盯不到它，用户看到的是「锁定突然失效、画面不跟了」。
     // 把选择挪到折叠节点自己身上：既看得见，锁定也能继续跟。
@@ -1333,6 +1346,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
       // 否则「收起又展开」会被并成一次空操作，撤销看起来没反应（与 setCollapsed 同一套口径）
       `fold:${id}:${side}:${folded ? 'fold' : 'unfold'}`
     )
+
+    // 与 setCollapsed 同一处理：刚折叠/展开的是谁，交给画布做镜头锚点
+    set({ lastFold: { id, at: Date.now() } })
 
     /**
      * 收起后，落在这一侧的选中主题已经从布局里消失——视角锁定再也盯不到它。

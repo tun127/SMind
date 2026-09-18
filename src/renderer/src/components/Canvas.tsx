@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -188,6 +189,7 @@ export default function Canvas(): ReactElement {
   const zoom = useEditor((s) => s.zoom)
   const pan = useEditor((s) => s.pan)
   const viewLock = useEditor((s) => s.viewLock)
+  const lastFold = useEditor((s) => s.lastFold)
   const selection = useEditor((s) => s.selection)
   const selectedOverlay = useEditor((s) => s.selectedOverlay)
   const editingId = useEditor((s) => s.editingId)
@@ -623,12 +625,16 @@ export default function Canvas(): ReactElement {
    *   镜头就此失去中心（用户看到的「折叠之后视角不居中了」）。
    * - 其余情况就是当前选中的主题。
    */
-  const focusId = useMemo(() => {
+  const focus = useMemo(() => {
     const rootTopic = activeRoot(workbook)
     const picked = selection[0]
-    if (!picked || !findTopic(rootTopic, picked)) return rootTopic.id
-    return layout.nodeMap.has(picked) ? picked : rootTopic.id
+    // 「真正的选中项」＝ 存在、且**在布局里看得见**（被折叠收进去的不在 nodeMap 里）
+    if (picked && findTopic(rootTopic, picked) && layout.nodeMap.has(picked)) {
+      return { id: picked, fromSelection: true }
+    }
+    return { id: rootTopic.id, fromSelection: false }
   }, [selection, workbook, layout])
+  const focusId = focus.id
 
   /**
    * 被盯住的主题在布局里的**位置与尺寸**（拼成字符串，方便直接当依赖）。
@@ -663,11 +669,35 @@ export default function Canvas(): ReactElement {
    */
   const viewGestureAtRef = useRef(0)
 
+  /**
+   * 用户刚把视角锁定**打开**的那一下：允许镜头居中一次中心主题。
+   *
+   * 为什么要这个例外：锁定开着但**没有选中项**时，如果什么都不做，用户看到的是
+   * 「开了锁却没反应」——这是以前修过的问题。但反过来，把它做成"只要没选中就回中心主题"
+   * 又走到另一个极端：点一下画布空白处、或折叠把选中的主题藏起来，镜头就被拽走
+   * （用户明确不要这个）。所以只认"刚打开锁定"这一次。
+   */
+  const lockJustOnRef = useRef(false)
+  const prevViewLockRef = useRef(viewLock)
+
+  useEffect(() => {
+    if (viewLock && !prevViewLockRef.current) lockJustOnRef.current = true
+    prevViewLockRef.current = viewLock
+  }, [viewLock])
+
   useEffect(() => {
     // 正在拖主题时不跟：镜头要是同时在移，指针下的画面会跟着滑，落点就抓不准了。
     // 松手（dragVisual 归零）后视野再咬住它。
     // `nodePointerHeldRef` 还要更早一步：按下就已经算"手上按着"，那一刻也不能动镜头。
     if (!viewLock || nodePointerHeldRef.current || dragVisual || !focusId || !focusKey) return
+    /**
+     * 盯的目标**不是选中项**（选择为空 / 选中项已被删掉 / 被折叠藏起来）时不动镜头。
+     * 只有"刚打开锁定"那一次例外（见 `lockJustOnRef`）。
+     */
+    if (!focus.fromSelection) {
+      if (!lockJustOnRef.current) return
+      lockJustOnRef.current = false
+    }
 
     // 每秒重跑 60 次以上 = 依赖里有东西每帧都在变（几何/尺寸震荡）。
     // 这时再跟随下去就是**永久烧 CPU**：每次重跑都 setPan → 重渲染 → 重新测量 → 依赖又变。
@@ -763,6 +793,37 @@ export default function Canvas(): ReactElement {
     return () => window.cancelAnimationFrame(raf)
     // focusKey 里已经含了被盯主题的 id 与几何，用它做依赖即可（不写进函数体会被 lint 挑刺）
   }, [viewLock, dragVisual, focusId, focusKey, editingId, zoom, size.width, size.height, setPan])
+
+  /* ---- 折叠 / 展开：以「被折叠的那个节点」为锚点，别让视角丢失 ---- */
+  /**
+   * 折叠会让整张图重排，被折叠的节点自己也会挪位置——用户看到的就是"视角丢失"。
+   * 这里**补偿平移量**，让那个节点在屏幕上原地不动；而不是把镜头拉去居中中心主题
+   * （用户明确说过那不是他要的）。
+   *
+   * 同时给跟随循环一个"让位"信号：折叠常伴随"选择被挪到折叠节点"，
+   * 不说一声的话跟随循环下一帧就把镜头拉过去居中了，锚点等于白做。
+   *
+   * 用 `useLayoutEffect`：要在**绘制前**把平移量补回来，否则会先闪一帧跳位。
+   */
+  const prevLayoutRef = useRef<LayoutResult | null>(null)
+  const consumedFoldRef = useRef(0)
+
+  useLayoutEffect(() => {
+    const prev = prevLayoutRef.current
+    prevLayoutRef.current = layout
+    const signal = lastFold
+    if (!signal || consumedFoldRef.current === signal.at || !prev) return
+    consumedFoldRef.current = signal.at
+    const before = prev.nodeMap.get(signal.id)
+    const after = layout.nodeMap.get(signal.id)
+    if (!before || !after) return
+    const z = zoomRef.current
+    const dx = (before.x - after.x) * z
+    const dy = (before.y - after.y) * z
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
+    setPan({ x: panRef.current.x + dx, y: panRef.current.y + dy })
+    viewGestureAtRef.current = performance.now()
+  }, [layout, lastFold, setPan])
 
   /* ---- 新文档打开后居中 ---- */
   const centeredSeqRef = useRef(-1)
