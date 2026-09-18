@@ -7,7 +7,59 @@
 
 import { FONT_FAMILY } from '../render/measure'
 import { HIGHLIGHT_BG } from '@shared/richtext'
+import { ICON_ART, ICON_VIEWBOX, MARKER_STROKE_WIDTH, type IconShape } from '@shared/marker-art'
 import type { Drawing, DrawOp, LineTextOp } from './drawing'
+
+/** 「x,y x,y …」形式的点串 → 画进当前路径（图标里的三角形与折线用它） */
+function tracePoints(ctx: CanvasRenderingContext2D, points: string): void {
+  let first = true
+  for (const pair of points.trim().split(/\s+/)) {
+    const [x, y] = pair.split(',').map(Number)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    if (first) {
+      ctx.moveTo(x ?? 0, y ?? 0)
+      first = false
+    } else {
+      ctx.lineTo(x ?? 0, y ?? 0)
+    }
+  }
+}
+
+/** 一块图标图元画进当前路径（坐标系是 24×24 视图盒，缩放由调用方设好） */
+function traceIconShape(ctx: CanvasRenderingContext2D, shape: IconShape): void {
+  switch (shape.k) {
+    case 'path':
+      // Path2D 直接吃 SVG 的 path 文本，不必自己实现曲线解析
+      ctx.stroke(new Path2D(shape.d))
+      return
+    case 'circle':
+      ctx.beginPath()
+      ctx.arc(shape.cx, shape.cy, shape.r, 0, Math.PI * 2)
+      ctx.stroke()
+      return
+    case 'line':
+      ctx.beginPath()
+      ctx.moveTo(shape.x1, shape.y1)
+      ctx.lineTo(shape.x2, shape.y2)
+      ctx.stroke()
+      return
+    case 'polyline':
+    case 'polygon':
+      ctx.beginPath()
+      tracePoints(ctx, shape.points)
+      if (shape.k === 'polygon') ctx.closePath()
+      ctx.stroke()
+      return
+    default:
+      ctx.beginPath()
+      if (shape.rx !== undefined && typeof ctx.roundRect === 'function') {
+        ctx.roundRect(shape.x, shape.y, shape.w, shape.h, shape.rx)
+      } else {
+        ctx.rect(shape.x, shape.y, shape.w, shape.h)
+      }
+      ctx.stroke()
+  }
+}
 
 /** 统一的字体串：粗斜体 + 字号 + 字体栈 */
 function fontOf(size: number, weight: number, italic = false, family?: string): string {
@@ -259,35 +311,28 @@ function drawOp(
     }
 
     case 'glyph': {
-      const cx = op.x + op.size / 2
-      const cy = op.y + op.size / 2
-      const r = op.size / 2
+      const art = ICON_ART[op.glyph]
       ctx.save()
-      ctx.fillStyle = op.color
-      if (op.glyph === 'star') {
+      /**
+       * 与 SVG 后端同一份图标数据、同一套缩放（24×24 视图盒 → op.size）。
+       * 线宽也在缩放里跟着变小，所以位图与矢量看起来一样粗。
+       */
+      ctx.translate(op.x, op.y)
+      ctx.scale(op.size / ICON_VIEWBOX, op.size / ICON_VIEWBOX)
+      if (!art) {
+        // 未知图形（理论上不会出现）：退回一个圆点，至少不丢标记
         ctx.beginPath()
-        for (let i = 0; i < 10; i += 1) {
-          const radius = i % 2 === 0 ? r : r * 0.45
-          const angle = -Math.PI / 2 + (i * Math.PI) / 5
-          const px = cx + radius * Math.cos(angle)
-          const py = cy + radius * Math.sin(angle)
-          if (i === 0) ctx.moveTo(px, py)
-          else ctx.lineTo(px, py)
-        }
-        ctx.closePath()
+        ctx.arc(ICON_VIEWBOX / 2, ICON_VIEWBOX / 2, (ICON_VIEWBOX / 2) * 0.62, 0, Math.PI * 2)
+        ctx.fillStyle = op.color
         ctx.fill()
-      } else if (op.glyph === 'flag') {
-        ctx.beginPath()
-        ctx.moveTo(op.x + 3, op.y + 1)
-        ctx.lineTo(op.x + op.size - 2, op.y + op.size * 0.35)
-        ctx.lineTo(op.x + 3, op.y + op.size * 0.68)
-        ctx.closePath()
-        ctx.fill()
-      } else {
-        ctx.beginPath()
-        ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2)
-        ctx.fill()
+        ctx.restore()
+        return
       }
+      ctx.strokeStyle = op.color
+      ctx.lineWidth = MARKER_STROKE_WIDTH
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      for (const shape of art) traceIconShape(ctx, shape)
       ctx.restore()
       return
     }

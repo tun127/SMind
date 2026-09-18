@@ -25,7 +25,7 @@ LICENSE / README 文件为准**，版本号以仓库的 `package.json` / `packag
 | @vitejs/plugin-react | 5.2.x | MIT |
 | electron-builder | 26.15.x | MIT |
 | typescript | 5.9.x | Apache-2.0 |
-| lucide-react（工具栏图标） | 1.45.0 | ISC |
+| lucide-react（工具栏图标；标记图标的矢量数据亦由其生成） | 1.45.0 | ISC |
 | @types/node、@types/react、@types/react-dom | — | MIT |
 
 ## 字体

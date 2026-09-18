@@ -8,7 +8,46 @@
 import { FONT_FAMILY } from '../render/measure'
 import { HIGHLIGHT_BG } from '@shared/richtext'
 import { escapeXmlAttr, escapeXmlText } from '@shared/xml-escape'
+import { ICON_ART, ICON_VIEWBOX, MARKER_STROKE_WIDTH, type IconShape } from '@shared/marker-art'
 import type { Drawing, DrawOp } from './drawing'
+
+/**
+ * 一块图标图元 → SVG 元素。
+ *
+ * 坐标都还在 lucide 的 24×24 视图盒里，缩放由外层的 `<g transform=...>` 负责——
+ * 这样每个图元都不必自己换算，也不会因为四舍五入把曲线画变形。
+ */
+function iconShapeSvg(shape: IconShape): string {
+  switch (shape.k) {
+    case 'path':
+      return `<path d="${escapeXmlAttr(shape.d)}"/>`
+    case 'circle':
+      return `<circle${attrs([
+        ['cx', shape.cx],
+        ['cy', shape.cy],
+        ['r', shape.r]
+      ])}/>`
+    case 'line':
+      return `<line${attrs([
+        ['x1', shape.x1],
+        ['y1', shape.y1],
+        ['x2', shape.x2],
+        ['y2', shape.y2]
+      ])}/>`
+    case 'polyline':
+      return `<polyline points="${escapeXmlAttr(shape.points)}"/>`
+    case 'polygon':
+      return `<polygon points="${escapeXmlAttr(shape.points)}"/>`
+    default:
+      return `<rect${attrs([
+        ['x', shape.x],
+        ['y', shape.y],
+        ['width', shape.w],
+        ['height', shape.h],
+        ['rx', shape.rx]
+      ])}/>`
+  }
+}
 
 const FONT_STACK = `${FONT_FAMILY.replace(/"/g, "'")}`
 
@@ -204,35 +243,32 @@ function opToSvg(op: DrawOp): string {
     }
 
     case 'glyph': {
-      const cx = op.x + op.size / 2
-      const cy = op.y + op.size / 2
-      const r = op.size / 2
-      if (op.glyph === 'star') {
-        // 五角星：按外/内半径交替取十个点
-        const points: string[] = []
-        for (let i = 0; i < 10; i += 1) {
-          const radius = i % 2 === 0 ? r : r * 0.45
-          const angle = -Math.PI / 2 + (i * Math.PI) / 5
-          points.push(`${num(cx + radius * Math.cos(angle))},${num(cy + radius * Math.sin(angle))}`)
-        }
-        return `<polygon points="${points.join(' ')}" fill="${escapeXmlAttr(op.color)}"/>`
-      }
-      if (op.glyph === 'flag') {
-        return `<path${attrs([
-          [
-            'd',
-            `M ${num(op.x + 3)} ${num(op.y + 1)} L ${num(op.x + op.size - 2)} ${num(op.y + op.size * 0.35)} L ${num(op.x + 3)} ${num(op.y + op.size * 0.68)} Z`
-          ],
+      const art = ICON_ART[op.glyph]
+      /**
+       * 真实图标：把 lucide 的图元按视图盒缩放到 `op.size` 后画出来。
+       *
+       * 以前这里只画一个同色圆点（当时的理由是"避免引入整套图标"），
+       * 于是导出的图里**所有标记长得一模一样**——文件名里承认的那条遗留。
+       * 现在用的是画布同一批图标（`npm run marker-art` 生成），两边形状完全一致。
+       */
+      if (!art) {
+        const radius = op.size / 2
+        return `<circle${attrs([
+          ['cx', op.x + radius],
+          ['cy', op.y + radius],
+          ['r', radius * 0.62],
           ['fill', op.color]
         ])}/>`
       }
-      // 其它图形（笑脸/箭头/灯泡等）在导出里统一画成圆点，避免引入整套图标
-      return `<circle${attrs([
-        ['cx', cx],
-        ['cy', cy],
-        ['r', r * 0.62],
-        ['fill', op.color]
-      ])}/>`
+      const scale = op.size / ICON_VIEWBOX
+      return `<g${attrs([
+        ['transform', `translate(${num(op.x)} ${num(op.y)}) scale(${num(scale)})`],
+        ['fill', 'none'],
+        ['stroke', op.color],
+        ['stroke-width', MARKER_STROKE_WIDTH],
+        ['stroke-linecap', 'round'],
+        ['stroke-linejoin', 'round']
+      ])}>${art.map(iconShapeSvg).join('')}</g>`
     }
 
     default:
