@@ -221,12 +221,13 @@ export function layoutLogic(root: Topic, builder: LayoutBuilder, dir: 1 | -1): L
 }
 
 /**
- * 树形图：与逻辑图同构，**枝干用曲线**。
+ * 树形图：与逻辑图同构，但连线是**直角折线**。
  *
- * 官方工具页只规定了布局方向（「自上而下的树形图、左右结构或多分支层级结构」），
- * **没有**规定连线形状；曲线枝干是**我方取值**（见 `docs/structure-spec.md`）：
- * 树形图是"从单一根节点向外分支"的形态（官方原文），曲线分叉读起来才像树；
- * 正交折线更像组织架构图的汇报线，两者混在一起就分不出这两个结构了。
+ * 两个结构的区分恰恰就在连线形状上（官方对两者都只规定了布局方向，没规定连线形状，
+ * 这是**我方取值**，见 `docs/structure-spec.md`）：**逻辑图＝曲线**、**树形图＝直角折线**。
+ * 有一轮我把树形图也改成了曲线——用户当场指出「树形图和逻辑图长的一模一样，
+ * 没有任何区别」，所以这里必须与逻辑图拉开：曲线是弧线枝干（读作"发散"），
+ * 折线是有棱角的枝干（读作"分类树"）。
  */
 export function layoutTree(root: Topic, builder: LayoutBuilder, dir: 1 | -1): LayoutResult {
   const rootSize = builder.size(root.id)
@@ -241,7 +242,7 @@ export function layoutTree(root: Topic, builder: LayoutBuilder, dir: 1 | -1): La
     root.structureClass
   )
   const result = builder.finish(root)
-  connectTree(result, root, 'bezier', (parent, child) =>
+  connectTree(result, root, 'elbow-h', (parent, child) =>
     anchorsForChild(parent, child, horizontalAnchors(parent, child))
   )
   return result

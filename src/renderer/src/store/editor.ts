@@ -1218,6 +1218,14 @@ export const useEditor = create<EditorState>()((set, get) => ({
   toggleCollapse: (id) => {
     const topic = findTopic(activeRoot(get().workbook), id)
     if (!topic || topic.children.length === 0) return
+    /**
+     * 只有「**超过 1 个子主题**」才允许折叠（与 `TopicNode` 的徽标显示同一条规则）：
+     * 只有一个子节点时折叠没有信息量，而且界面上已经不显示折叠徽标——
+     * 这里不守卫的话，键盘（Ctrl + /）或 AI 仍能把折叠状态写进去，
+     * 用户就会遇到"看不见任何徽标、图却少了一截"的怪状态。
+     * 已折叠的主题总是可以展开（不然一个子节点的折叠状态就永远打不开了）。
+     */
+    if (!topic.collapsed && topic.children.length < 2) return
     get().setCollapsed(id, !topic.collapsed)
   },
 

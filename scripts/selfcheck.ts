@@ -3979,11 +3979,16 @@ function testMisc(): void {
   )
   check('源节点未受影响', find(b1)?.children.length === 1)
 
-  // 折叠
+  // 折叠（规则：**超过 1 个子节点**才允许折叠；已折叠的总是可以展开）
+  addChildOf(b1, '第二个子节点')
   store().toggleCollapse(b1)
   check('折叠生效', find(b1)?.collapsed === true)
   store().toggleCollapse(b1)
   check('再次折叠取消', !find(b1)?.collapsed)
+  const onlyChild = addChildOf(rootId, '单子节点')
+  addChildOf(onlyChild, '它唯一的孩子')
+  store().toggleCollapse(onlyChild)
+  check('单子节点的主题不可折叠（界面上也不显示折叠徽标）', !find(onlyChild)?.collapsed)
   const leaf = addChildOf(rootId, '叶子')
   store().toggleCollapse(leaf)
   check('无子节点的主题不可折叠', !find(leaf)?.collapsed)
@@ -4808,6 +4813,27 @@ function testLayoutNoOverlap(): void {
   const braceCanvas = layoutSheet(root(), multilineMeasure)
   check('括号图：没有父子连线', braceCanvas.edges.length === 0, String(braceCanvas.edges.length))
   check('括号图：画出了大括号', braceCanvas.decorations.length > 0)
+
+  /**
+   * 逻辑图 vs 树形图：两个结构的区分**恰恰就在连线形状**上（曲线 vs 直角折线）。
+   * 有一轮把树形图也改成了曲线，两个结构就长得一模一样了（用户当场指出）。
+   * 这里把"可区分"钉死：逻辑图全是贝塞尔（C 指令），树形图一条贝塞尔都不许有。
+   */
+  buildStructureSample()
+  store().setStructure('org.xmind.ui.logic.right')
+  const logicCurves = layoutSheet(root(), fakeMeasure)
+  check(
+    '逻辑图：连线是曲线（贝塞尔）',
+    logicCurves.edges.length > 0 && logicCurves.edges.every((edge) => edge.d.includes('C'))
+  )
+  buildStructureSample()
+  store().setStructure('org.xmind.ui.tree.right')
+  const treeElbows = layoutSheet(root(), fakeMeasure)
+  check(
+    '树形图：连线是直角折线（与逻辑图可区分）',
+    treeElbows.edges.length > 0 && treeElbows.edges.every((edge) => !edge.d.includes('C')),
+    treeElbows.edges[0]?.d
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -5904,6 +5930,7 @@ function buildFeatureRichWorkbook(): Workbook {
   const a1 = addChildOf(a, '子项 1')
   addChildOf(a, '子项 2')
   addChildOf(b, '另一个子项')
+  addChildOf(b, '另一个子项二')
   store().toggleCollapse(b)
   store().offsetPosition(a1, 60, -30)
 

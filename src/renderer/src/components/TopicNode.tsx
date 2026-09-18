@@ -139,7 +139,15 @@ function TopicNodeInner({
 }: TopicNodeProps): ReactElement {
   const visual = visualFor(colors, node, layout)
   const color = branchColorOf(colors, layout, node.id)
-  const hasChildren = node.topic.children.length > 0
+  /**
+   * 折叠徽标只对「**超过 1 个子主题**」的主题显示（用户要求）。
+   *
+   * 为什么不是 `> 0`：只有一个子节点时折叠没有信息量（收起一个还是展开一个，图没变化），
+   * 挂着个「−」反而像坏了一样。已折叠的**始终显示**——否则只有一个子节点的主题一旦折叠，
+   * 就再也没有按钮能把它展开了。store 的 `toggleCollapse` 有同一条守卫，
+   * 键盘（Ctrl + /）和 AI 的 collapse 与这里的口径一致。
+   */
+  const canCollapse = node.topic.children.length > 1 || node.topic.collapsed
 
   /** 图片读不出来（资源缺失）时改显示占位，避免只留一个空白框 */
   const [failedImagePath, setFailedImagePath] = useState<string | null>(null)
@@ -520,7 +528,7 @@ function TopicNodeInner({
         />
       )}
 
-      {hasChildren && (
+      {canCollapse && (
         <button
           type="button"
           className={`topic__collapse topic__collapse--${node.side === 'left' ? 'left' : 'right'}`}
