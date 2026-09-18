@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | 1 | 0.9.0 正式发布 | ✅ 已发布（GitHub Release + 官网直链下载） | 观察下载数与反馈 | — |
 | 2 | **0.9.1 发版** | ⬜ 等 PDF 验收 | 用户人工验收 PDF（导出 → 选中文字 → 放大 400% 看锐利）→ `npm version 0.9.1` → `dist` → `mirror` → Release（agent 代跑，说明用户过目） | #6 验收通过 |
-| 3 | 自动更新首跑 | ⬜ 随 0.9.1 | publish 已配 tun127/SMind，打包会生成 latest.yml；Release 页上传 exe + latest.yml + blockmap | #2 |
+| 3 | 自动更新首跑 | ⬜ 随 0.9.1 | 需求见 `docs/auto-update-and-license-delivery.md` §3。Release 页上传 exe + `latest.yml` + blockmap，且必须是**已发布**（非 draft/prerelease）。⚠️ **已实测风险**：GitHub API 匿名限流（本机出口 IP 调 api.github.com 已 403），github provider 会随机静默失效 → 建议更新源改为 **generic provider 指向 `dl.smindapp.cn`**（R2 无 API 无限流），`npm run mirror` 需顺带传 `latest.yml` + blockmap | #2 |
 | 4 | README 已知限制随 0.9.1 更新 | ⬜ | PDF 改矢量、自动更新渠道就绪——发 0.9.1 时一并改写 | #2 |
 
 ## 二、分发与官网
@@ -40,6 +40,7 @@
 | 11 | 软著 | ⬜ 未办 | 用户向版权局申请（个人可办）；agent 可整理申请材料清单与 60 页源码文档 | — |
 | 12 | 面包多开店 | 🔴 **已发售但无购买入口**（当前最高优先级） | **已实测**官网首页（抓取 smindapp.cn，HTTP 200）：挂牌 v0.9.0、Pro / ¥39 / 早鸟 ¥19、「Pro 买断解锁」徽标，FAQ 写明「买断 ¥39…解锁不限量写回合」——但**全页外链只有 GitHub 仓库 / Releases / Issues 三个，没有任何购买入口**（无面包多、无爱发电）→ 用户烧完 30 个写回合后无处可买。商品页文案与发货流程已于 2026-09-18 校正（许可码口径 + `license:issue` 真实命令）；只等用户开店上架即可打通闭环 | 用户 |
 | 13 | 60 秒演示视频 | 🔶 分镜已有 | `commercialization/04-release-0.9/video-60s-script.md` 完整分镜——待录制剪辑（走剪映流程） | — |
+| 19 | **自动发激活码（卡密池）** | ⬜ 需求已交接（2026-09-18） | 目标：**付款即自动发货、零人工**。需求见 `docs/auto-update-and-license-delivery.md` §4。🔴 **阻塞性前置＝许可码目前不唯一**：payload 无序列号，同一 payload 签出的码**逐字相同**，批量预生成会得到 N 个一样的码（限量 200 形同虚设、泄露无法定位）→ 必须先加 `serial` + 批量签发工具，再实测**面包多卡密字段能否容纳 210–217 字符**（实算长度见该文件 §5） | 代码 agent |
 
 ## 四、获客与运营
 
