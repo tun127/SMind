@@ -41,10 +41,26 @@ export default tseslint.config(
       // 正则里出现控制字符是**故意**的：清洗文件名/包内路径时要按 \x00-\x1f 过滤
       'no-control-regex': 'off',
       /**
-       * 这几条是 react-hooks 新版本附带的「React Compiler 建议」，
-       * 不是 bug——它们会指着 `xxxRef.current = yyy`（渲染期写 ref）这类
-       * **有意为之**的写法报警。要照它们改，等于给整个画布做一次重构，
-       * 那是独立的一件事，不该和"接入 lint"混在一起做，所以先关掉。
+       * 这三条是 react-hooks 附带的「React Compiler 规则」——不是 bug 检查，
+       * 而是「你的写法能不能被静态推断」。本项目画布的**高频路径刻意不走 state**：
+       * 原生 pointermove、拖拽中每帧改 transform、视口/选择的镜像 ref
+       * （见 `Canvas.tsx` 的 `zoomRef.current = zoom` 一族），这是"指针跟手"的前提。
+       *
+       * 2026-09-18 实测（`npx eslint src --rule "react-hooks/refs:error" …`）共 **19 处**：
+       *   refs 10        渲染期读写视口/选择镜像（Canvas 9）+ RichTextEditor 的 handlers 镜像（1）
+       *   immutability 8 画布 `viewGestureAtRef.current += 1` 一族（5）+ 改 DOM style（1）
+       *                  + 「变量在声明前被使用」（2，见右）
+       *   purity 1       渲染期 `Date.now()` —— **已修**（Dialogs.tsx 改成"时间未知"）
+       *
+       * 那 2 处「声明前使用」经核查**语义正确、只是编译器证明不了**：
+       * `App.tsx` 是 useCallback 自引用（注册它的 effect 依赖就是它本身，拿到的一直是当前那份），
+       * `ChatPanel.tsx` 里被引用的 `setPending` 是普通局部函数（只写 ref 与稳定 setter）。
+       * 它们没有被"顺手修掉"——为了 lint 绿灯去动窗口关闭 / AI 回合流程才是真的风险。
+       *
+       * 要开这三条（也是开 React Compiler 的前置）时的做法，按性价比排序：
+       * ① 视口镜像改成「在写入点就近写 ref」（`setZoom`/`setPan` 里同步写）→ 命中能降到个位数；
+       * ② 高频状态搬进外部 store + `useSyncExternalStore`，命令式 DOM 写入规范化。
+       * 那是"把画布状态模型搬一次家"的独立任务，见 `docs/known-issues.md` 的遗留表。
        */
       'react-hooks/refs': 'off',
       'react-hooks/immutability': 'off',

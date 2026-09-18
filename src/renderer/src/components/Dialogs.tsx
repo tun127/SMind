@@ -50,7 +50,16 @@ interface RecoveryDialogProps {
 }
 
 export function RecoveryDialog({ info, onRestore, onDiscard }: RecoveryDialogProps): ReactElement {
-  const time = new Date(info.savedAt || Date.now()).toLocaleString('zh-CN')
+  /**
+   * 时间戳缺失时**不再现取当前时间**（原文是 `new Date(info.savedAt || Date.now())`）。
+   *
+   * 渲染期调用 `Date.now()` 是不纯的：每次重渲染都可能算出不同的时间
+   * （React Compiler 的 `purity` 规则会报它）。而且存档信息不完整时，
+   * 照实说「时间未知」比伪装成「刚刚」更有用——用户据此判断要不要恢复。
+   */
+  const time = info.savedAt
+    ? new Date(info.savedAt).toLocaleString('zh-CN')
+    : '时间未知（存档信息不完整）'
   return (
     <Modal
       title="发现未保存的内容"
