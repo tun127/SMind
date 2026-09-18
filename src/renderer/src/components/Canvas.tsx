@@ -1434,8 +1434,11 @@ export default function Canvas(): ReactElement {
    * 落点预览，**两种落点各用一套、绝不混用**：
    *
    * - **成为子主题**（`child`）：画出被拖主题将要占据的**空位框**（实线、框里写标题、
-   *   框下写「将成为子主题」），并从目标**子节点那一列**的边缘接一条实线过去。
+   *   框下写「将成为『**目标名**』的子主题」），并从目标**子节点那一列**的边缘接一条实线过去。
    *   特意不从目标本体拉线：目标往往已有子节点，从它身上拉线会斜穿那些子节点，看着像连错。
+   *   **提示必须带上目标名**：新子节点排在最后一个子节点之后，空位框常常离目标很远
+   *   （放中心主题下面时，框会出现在它最后一个分支的下方），只写「将成为子主题」的话
+   *   用户会以为目标就是框旁边的那个节点。
    *
    * - **插到同级之间**（`before` / `after`）：只在目标与相邻兄弟之间画一条**短粗插入线**
    *   （Xmind / 知犀那套「插入位置条」）。不再画空位框，更不再把父级框起来——
@@ -1470,6 +1473,16 @@ export default function Canvas(): ReactElement {
     const growth = growthAxis(pair)
     const color = branchColorOf(colors, layout, dropTarget.id)
     const title = dropLabel
+    /**
+     * 目标主题的名字：**提示必须写出"成为谁的子主题"**。
+     *
+     * 新子节点总是排在**最后一个子节点之后**，所以空位框经常画在离目标很远的下游
+     * （「放中心主题下面」时，框会出现在中心主题最后一个分支的下方）。只写「将成为子主题」
+     * 的话，用户只能从框的位置反推目标——于是必然读成"要成为那个框旁边的节点的子主题"，
+     * 表现就是「我明明放中心主题下面，怎么连到分支主题 2 下面去了」。把名字写进提示，
+     * 这件事才有唯一答案。
+     */
+    const targetTitle = findTopic(root, dropTarget.id)?.title ?? ''
 
     if (dropTarget.mode !== 'child') {
       // 同级插入：一条夹在"目标与相邻兄弟之间"的粗线（Xmind / 知犀那套"插入位置条"）。
@@ -1496,7 +1509,7 @@ export default function Canvas(): ReactElement {
               x2: centerOf(target).x + spanX,
               y2: front ? target.y + target.height + 7 : target.y - 7
             }
-      return { kind: 'bar' as const, bar, color, title }
+      return { kind: 'bar' as const, bar, color, title, targetTitle }
     }
 
     // 成为子主题：排在最后一个已有子节点之后
@@ -1541,7 +1554,8 @@ export default function Canvas(): ReactElement {
       from: origin,
       to: border(slot, origin),
       color,
-      title
+      title,
+      targetTitle
     }
   }, [dragVisual, dropTarget, dropLabel, layout, workbook, colors, axesOf, growthAxis, insertAxis])
 
@@ -2408,7 +2422,9 @@ export default function Canvas(): ReactElement {
                 paintOrder="stroke"
                 strokeLinejoin="round"
               >
-                将成为子主题
+                {dropPreview.targetTitle
+                  ? `将成为「${dropPreview.targetTitle.length > 12 ? `${dropPreview.targetTitle.slice(0, 12)}…` : dropPreview.targetTitle}」的子主题`
+                  : '将成为子主题'}
               </text>
             </g>
           ) : null}
