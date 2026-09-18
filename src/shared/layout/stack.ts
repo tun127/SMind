@@ -19,7 +19,6 @@ import {
   horizontalAnchors,
   round
 } from './core'
-import { roundedRectPath } from './overlays'
 
 export type XResolver = (
   child: Topic,
@@ -337,38 +336,42 @@ export function layoutSpreadsheet(root: Topic, builder: LayoutBuilder): LayoutRe
   const rootSize = builder.size(root.id)
   const rootNode = builder.add(root, colX[0] ?? 0, 0, 0, 'root')
 
-  const rows: Array<{ top: number; left: number; right: number; bottom: number }> = []
+  const rows: Array<{ ids: string[] }> = []
   let cursorY = rootNode.y + rootSize.height + builder.gapY * 2
 
   for (const branch of builder.visibleChildren(root)) {
-    const rowTop = cursorY
-    let rowBottom = cursorY
-    let rowRight = colX[1] ?? 0
+    const ids: string[] = []
     const place = (topic: Topic, depth: number): void => {
       const size = builder.size(topic.id)
-      const node = builder.add(topic, colX[depth] ?? 0, cursorY, depth, 'down')
-      rowBottom = Math.max(rowBottom, node.y + node.height)
-      rowRight = Math.max(rowRight, node.x + node.width)
+      builder.add(topic, colX[depth] ?? 0, cursorY, depth, 'down')
+      ids.push(topic.id)
       cursorY += size.height + builder.gapY
       for (const child of builder.visibleChildren(topic)) place(child, depth + 1)
     }
     place(branch, 1)
-    rows.push({ top: rowTop, left: colX[1] ?? 0, right: rowRight, bottom: rowBottom })
+    rows.push({ ids })
     cursorY += builder.gapY * 1.6
   }
 
   const result = builder.finish(root)
-  /** 每行一个框：表格的"行"感由框 + 列对齐表达（参考：没有连线） */
+  /**
+   * 表格的"行"感用**行线**表达（参考：靠表格边框表达层级，没有连线）。
+   *
+   * 两点教训：
+   * ① 不要每行画一个大圆角框——行一多就像一堆空盒子散在画布上（用户："看着乱七八糟"）；
+   * ② 行线必须从**最终**节点矩形算：早先用归一化之前的坐标，线跟节点对不上，
+   *    格子会跑到框外面去。
+   */
   for (const row of rows) {
-    const pad = 10
+    const nodes = row.ids
+      .map((id) => result.nodeMap.get(id))
+      .filter((node): node is NodeLayout => node !== undefined)
+    if (nodes.length === 0) continue
+    const left = Math.min(...nodes.map((node) => node.x)) - 12
+    const right = Math.max(...nodes.map((node) => node.x + node.width)) + 12
+    const bottom = Math.max(...nodes.map((node) => node.y + node.height)) + 12
     addDecoration(result, {
-      d: roundedRectPath(
-        round(row.left - pad),
-        round(row.top - pad),
-        round(row.right - row.left + pad * 2),
-        round(row.bottom - row.top + pad * 2),
-        10
-      ),
+      d: `M ${round(left)} ${round(bottom)} L ${round(right)} ${round(bottom)}`,
       widthScale: 1
     })
   }
