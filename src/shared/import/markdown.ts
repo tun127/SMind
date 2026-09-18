@@ -15,6 +15,7 @@
  */
 
 import type { OutlineNode, ParsedOutline } from '../ai'
+import { decodeNumericEntity } from '../entities'
 import { matchWholeLineMath } from '../formula'
 import type { RichText, RichTextRun } from '../model/types'
 
@@ -90,11 +91,9 @@ const ENTITIES: Record<string, string> = {
 
 function decodeEntity(name: string): string {
   if (name.startsWith('#')) {
-    const code =
-      name[1] === 'x' || name[1] === 'X'
-        ? Number.parseInt(name.slice(2), 16)
-        : Number.parseInt(name.slice(1), 10)
-    return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : `&${name};`
+    // 数字引用统一走 shared/entities.ts：越界（如 &#x110000;）保留原文，
+    // 不再让 String.fromCodePoint 抛 RangeError 把整次导入打断
+    return decodeNumericEntity(name) ?? `&${name};`
   }
   return ENTITIES[name.toLowerCase()] ?? `&${name};`
 }
@@ -552,9 +551,27 @@ function scanMarkdown(source: string): ScanResult {
   let fenceLines: string[] = []
   let inFrontMatter = false
 
-  source.split(/\r?\n/).forEach((line, index) => {
+  const lines = source.split(/\r?\n/)
+
+  /**
+   * 只有「开头就是 `---`」**且后面另有闭合行**时才算 front-matter。
+   *
+   * 以前只判断了第一行，于是「文档以一条水平线 `---` 开场」会被当成 front-matter 的开始，
+   * 正文一路被吞到下一个 `---` 或 `...`；要是全文再没有第二个 `---`，
+   * **整篇文档直接消失**（用户看到的是「导入成功但什么都没有」）。
+   */
+  const hasFrontMatter = ((): boolean => {
+    if ((lines[0] ?? '').trim() !== '---') return false
+    for (let i = 1; i < lines.length; i += 1) {
+      const candidate = (lines[i] ?? '').trim()
+      if (candidate === '---' || candidate === '...') return true
+    }
+    return false
+  })()
+
+  lines.forEach((line, index) => {
     const trimmed = line.trim()
-    if (index === 0 && trimmed === '---') {
+    if (hasFrontMatter && index === 0) {
       inFrontMatter = true
       return
     }
@@ -624,6 +641,16 @@ function scanMarkdown(source: string): ScanResult {
       events.push({ type: 'note', text })
     }
   })
+
+  /**
+   * 到文件末尾还没闭合的围栏：**照样算一块代码**。
+   *
+   * 以前这里什么都不做，于是「复制了一段没写完的代码」这种很常见的情况
+   * 会让整块内容凭空消失，而且没有任何提示。少一个收尾标记不该吞掉用户的内容。
+   */
+  if (inFence) {
+    events.push({ type: 'code', language: fenceLanguage, text: fenceLines.join('\n') })
+  }
 
   return { events, footnotes }
 }

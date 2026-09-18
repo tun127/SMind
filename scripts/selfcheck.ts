@@ -28,11 +28,13 @@ import {
 import {
   activeRoot,
   activeSheet,
+  ancestorsOf,
   countCharacters,
   countDescendants,
   countTopics,
   childFoldSides,
   countHiddenNodes,
+  detachTopic,
   findParent,
   findTopic,
   foldedSidesOf,
@@ -1038,6 +1040,48 @@ function testNodeDrag(): void {
   eq('根节点的子树是整棵树', subtreeIds(root(), sRoot.id).length, countTopics(root()))
   eq('不存在的 id 返回空', subtreeIds(root(), 'nope'), [])
   check('不包含无关的兄弟节点', !subtreeIds(root(), s1).includes(s2))
+
+  /*
+   * 自由摆放（floating / detached）的主题：Xmind 里合法的一类节点。
+   *
+   * 以前树操作里有一半只写 `topic.children`（`detachTopic`、`ancestorsOf`、
+   * `subtreeIds`），于是这类主题**删也删不掉、移也移不动**，删除时界面还照报成功；
+   * 而 `walk` / 统计 / 搜索 / 大纲早就把它们算作树的一部分。
+   * 这一组把「浮动主题 = 树的一部分」这个口径钉死。
+   */
+  group('自由摆放的主题：与挂着的主题同等对待')
+
+  reset()
+  const fRootId = root().id
+  let floating = ''
+  store().mutate((draft) => {
+    const draftRoot = activeRoot(draft)
+    const node = createTopic('浮动想法')
+    floating = node.id
+    draftRoot.detachedChildren.push(node)
+  }, '造一个自由摆放的主题')
+
+  check('浮动主题能被 findTopic 找到', find(floating) !== null)
+  check('浮动主题能算出父级', findParent(root(), floating)?.id === fRootId)
+  eq('浮动主题的祖先链不为空（地址/路径可用）', ancestorsOf(root(), floating), [fRootId])
+  eq('浮动主题的子树含自己', subtreeIds(root(), floating), [floating])
+  check('统计口径把浮动主题算进去', countTopics(root(), false) === 3, String(countTopics(root())))
+
+  check('deleteTopic 对浮动主题返回 true', store().deleteTopic(floating) === true)
+  check('浮动主题确实被删除', find(floating) === null)
+  check('对不存在的主题返回 false', store().deleteTopic('nope') === false)
+
+  // 移得动：把挂着的一个子主题移成浮动主题之后，还能再删掉它
+  reset()
+  const moveTarget = addChildOf(root().id, '待移动')
+  store().mutate((draft) => {
+    const draftRoot = activeRoot(draft)
+    const node = detachTopic(draftRoot, moveTarget)
+    if (node) draftRoot.detachedChildren.push(node)
+  }, '把子主题改成自由摆放')
+  check('改成自由摆放后仍然在树上', find(moveTarget) !== null)
+  check('改成自由摆放后仍然删得掉', store().deleteTopic(moveTarget) === true)
+  check('删掉后确实不在了', find(moveTarget) === null)
 
   group('拖拽落点裁决：任意两个节点之间')
 
@@ -8837,6 +8881,26 @@ async function testLegacy(): Promise<void> {
   eq('单引号属性也能解析', parseXml(`<a x='1'/>`)!.attrs['x'], '1')
   eq('数字实体', parseXml('<a>&#65;&#x42;</a>')!.text, 'AB')
   check('非 XML 文本返回 null', parseXml('这不是 XML') === null)
+
+  /*
+   * 数字字符引用的越界与非法写法（三处解码器以前各写一遍，其中两处会崩）。
+   * 这里的口径：**解不出来就原样保留**，绝不抛异常、绝不静默换成别的字符。
+   */
+  eq(
+    '越界码点原样保留（不抛 RangeError）',
+    parseXml('<a>&#x110000;</a>')!.text,
+    '&#x110000;'
+  )
+  eq('超大十进制引用原样保留', parseXml('<a>&#99999999;</a>')!.text, '&#99999999;')
+  eq('NUL 引用原样保留', parseXml('<a>&#0;</a>')!.text, '&#0;')
+  eq('合法的非 BMP 字符照常解码', parseXml('<a>&#x1F600;</a>')!.text, '\u{1f600}')
+  eq('合成的十六进制写法不被当十进制', parseXml('<a>&#12ab;</a>')!.text, '&#12ab;')
+  eq(
+    '大写 X 的十六进制引用按 XML 规范原样保留（只认小写 x）',
+    parseXml('<a>&#X41;</a>')!.text,
+    '&#X41;'
+  )
+  eq('未知命名实体原样保留', parseXml('<a>&unknown;</a>')!.text, '&unknown;')
   check('只有声明时返回 null', parseXml('<?xml version="1.0"?>') === null)
 
   group('Xmind 8 旧版：读取')
@@ -10516,6 +10580,19 @@ function testImport(): void {
   const frontMatter = parseMarkdownOutline('---\ntitle: x\n tags: [a]\n---\n# 真标题\n- 项')
   eq('front-matter 被跳过', frontMatter.root?.title, '真标题')
   eq('front-matter 后节点数正确', frontMatter.count, 2)
+
+  /*
+   * 开头是水平线、后面再没有第二个 `---`：**不是** front-matter。
+   * 以前只判断第一行，于是整篇文档被当 front-matter 吞掉（导入成功但没有内容）。
+   */
+  const horizontalOnly = parseMarkdownOutline('---\n# 标题\n- 项')
+  eq('开头水平线不再吞掉全文', horizontalOnly.root?.title, '标题')
+  eq('开头水平线后的节点数', horizontalOnly.count, 2)
+
+  const openFence = parseMarkdownOutline('# 标题\n```ts\nconst a = 1\nconst b = 2')
+  eq('未闭合的代码围栏照样算一块代码', openFence.root?.code?.text, 'const a = 1\nconst b = 2')
+  eq('未闭合围栏保留语言标注', openFence.root?.code?.language, 'ts')
+  eq('未闭合围栏不影响节点数', openFence.count, 1)
 
   const noisy = parseMarkdownOutline('# 标题\n> 引用不是节点\n| a | b |\n| - | - |\n---\n- 项')
   eq(

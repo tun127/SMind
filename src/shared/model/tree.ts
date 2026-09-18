@@ -54,6 +54,21 @@ export function findParent(root: Topic, id: string): Topic | null {
   return found
 }
 
+/**
+ * 一个主题的**全部**子节点：正常子主题 + 自由摆放（floating / detached）的主题。
+ *
+ * 为什么要收成一个函数：`walk`（上面）本来就是两类都走的，但树操作里有几处
+ * 只写 `topic.children`，于是同一棵树上出现两套口径——
+ * 自由摆放的主题能被找到、能被统计，却**删不掉也移不动**（`detachTopic` 只在
+ * `children` 里找），而且删除还会对外报「成功」。以后凡是要遍历子节点，
+ * 一律用这个函数，别再手写 `topic.children`（除非明确只要"挂在树上的那些"）。
+ */
+export function allChildrenOf(topic: Topic): Topic[] {
+  return topic.detachedChildren.length > 0
+    ? [...topic.children, ...topic.detachedChildren]
+    : topic.children
+}
+
 /** 某节点的所有祖先 id（从根到父） */
 export function ancestorsOf(root: Topic, id: string): string[] {
   const chain: string[] = []
@@ -62,7 +77,9 @@ export function ancestorsOf(root: Topic, id: string): string[] {
       chain.push(...trail)
       return true
     }
-    return topic.children.some((c) => search(c, [...trail, topic.id]))
+    // 自由摆放的主题也算树的一部分（`walk` 就是这么走的）：
+    // 只走 `children` 会让它们的祖先链为空，地址解析、路径显示、导出层级全部落空
+    return allChildrenOf(topic).some((c) => search(c, [...trail, topic.id]))
   }
   search(root, [])
   return chain
@@ -90,20 +107,31 @@ export function subtreeIds(root: Topic, id: string): string[] {
   const ids: string[] = []
   const collect = (topic: Topic): void => {
     ids.push(topic.id)
-    for (const child of topic.children) collect(child)
+    // 与 `walk` 同口径：自由摆放的子树也属于这棵子树，拖拽时要跟着一起走
+    for (const child of allChildrenOf(topic)) collect(child)
   }
   collect(start)
   return ids
 }
 
-/** 从树上摘除节点并返回它 */
+/**
+ * 从树上摘除节点并返回它。
+ *
+ * 两类子节点都要找：以前只在 `parent.children` 里找，于是**自由摆放的主题删不掉**
+ * （`detachTopic` 返回 null，但 `deleteTopic` 照样对外报成功——用户看到"删了却没删"）。
+ */
 export function detachTopic(root: Topic, id: string): Topic | null {
   let removed: Topic | null = null
   walk(root, (_t, parent) => {
     if (!parent || removed) return
-    const i = parent.children.findIndex((c) => c.id === id)
-    if (i >= 0) {
-      removed = parent.children.splice(i, 1)[0] ?? null
+    const fromAttached = parent.children.findIndex((c) => c.id === id)
+    if (fromAttached >= 0) {
+      removed = parent.children.splice(fromAttached, 1)[0] ?? null
+      return
+    }
+    const fromFloating = parent.detachedChildren.findIndex((c) => c.id === id)
+    if (fromFloating >= 0) {
+      removed = parent.detachedChildren.splice(fromFloating, 1)[0] ?? null
     }
   })
   return removed

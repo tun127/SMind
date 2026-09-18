@@ -41,6 +41,7 @@ import { formulaSize } from '../render/formula'
 import {
   activeRoot,
   activeSheet,
+  allChildrenOf,
   cloneTopicDeep,
   detachTopic,
   ensureExpanded,
@@ -1162,11 +1163,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const parent = findParent(root, first)
     let nextId: string | null = null
     if (parent) {
-      const firstIndex = parent.children.findIndex((child) => child.id === first)
-      const after = parent.children
-        .slice(firstIndex + 1)
-        .find((child) => !targets.includes(child.id))
-      const before = parent.children
+      // 兄弟要按「挂着的 + 自由摆放的」一起算：自由摆放的主题被选中时，
+      // 它不在 parent.children 里，只按 children 算会挑到一个不相干的兄弟
+      const siblings = allChildrenOf(parent)
+      const firstIndex = siblings.findIndex((child) => child.id === first)
+      const after = siblings.slice(firstIndex + 1).find((child) => !targets.includes(child.id))
+      const before = siblings
         .slice(0, Math.max(firstIndex, 0))
         .reverse()
         .find((child) => !targets.includes(child.id))
@@ -1191,6 +1193,11 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (id === root.id || !findTopic(root, id)) return false
 
     const parent = findParent(root, id)
+    // 真正能摘下来才动手：以前这里不检查，`detachTopic` 找不到（自由摆放的主题）
+    // 也会走完整个流程并 `return true`——界面报"已删除"，树却没变
+    const removable = parent !== null && allChildrenOf(parent).some((child) => child.id === id)
+    if (!removable) return false
+
     get().mutate((draft) => {
       const draftRoot = activeRoot(draft)
       detachTopic(draftRoot, id)

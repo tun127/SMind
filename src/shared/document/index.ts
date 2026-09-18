@@ -12,6 +12,8 @@
  *   docx 或 txt），而不是静默失败。
  */
 
+import { decodeNumericEntity } from '../entities'
+
 export type DocumentKind = 'text' | 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'unsupported'
 
 export interface DocumentClass {
@@ -165,15 +167,11 @@ const ENTITIES: Record<string, string> = {
 
 /** 解掉 XML 实体（含数字引用） */
 export function decodeXmlEntities(text: string): string {
-  return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (whole, body: string) => {
-    if (body.startsWith('#x') || body.startsWith('#X')) {
-      const code = Number.parseInt(body.slice(2), 16)
-      return Number.isFinite(code) ? String.fromCodePoint(code) : whole
-    }
-    if (body.startsWith('#')) {
-      const code = Number.parseInt(body.slice(1), 10)
-      return Number.isFinite(code) ? String.fromCodePoint(code) : whole
-    }
+  // 数字引用交给 shared/entities.ts（越界不抛异常）；命名实体表保持小写查表——
+  // 这里做的是「XML → 纯文本」，`&nbsp;` 当普通空格比塞一个 U+00A0 更好用
+  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
+    const numeric = decodeNumericEntity(body)
+    if (numeric !== null) return numeric
     return ENTITIES[body.toLowerCase()] ?? whole
   })
 }

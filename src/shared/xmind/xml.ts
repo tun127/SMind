@@ -8,6 +8,8 @@
  * 不支持（用不到的）：DTD 实体定义、处理指令以外的 Parser 扩展。
  */
 
+import { decodeNumericEntity } from '../entities'
+
 export interface XmlNode {
   /** 完整标签名（含命名空间前缀，如 xhtml:img） */
   name: string
@@ -28,21 +30,11 @@ const NAMED_ENTITIES: Record<string, string> = {
   nbsp: '\u00a0'
 }
 
-function fromCodePoint(code: number): string {
-  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return ''
-  try {
-    return String.fromCodePoint(code)
-  } catch {
-    return ''
-  }
-}
-
 /** 解码 XML 实体（&amp; / &#65; / &#x41; …） */
 export function decodeEntities(input: string): string {
   return input.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
-    if (body.startsWith('#x') || body.startsWith('#X'))
-      return fromCodePoint(parseInt(body.slice(2), 16)) || whole
-    if (body.startsWith('#')) return fromCodePoint(parseInt(body.slice(1), 10)) || whole
+    const numeric = decodeNumericEntity(body)
+    if (numeric !== null) return numeric
     return NAMED_ENTITIES[body] ?? whole
   })
 }
