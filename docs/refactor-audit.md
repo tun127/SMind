@@ -87,7 +87,7 @@
 ## 四、执行顺序（每步都要过五道门槛）
 
 1. ✅ **死代码清理**（§2）——提交 `8b7908a`
-2. **`shared` 层**（进行中）：`layout/core` ✅（提交 `6eeab2f`）→ `overlays` → `graphic` → `agent` → `ai` → `highlight`
+2. **`shared` 层** ✅ 全部完成：`layout/core`（`6eeab2f`）→ `overlays`（`6c2f7ee`）→ `graphic`（`a7b01ec`）→ `agent`（`db46ffd`）→ `highlight` → `ai`
 3. 渲染层：`measure` → `drawing` → `TopicNode` → `NodePanel` → `Toolbar` → `ChatPanel` → `App` → `Canvas`
 4. `store/editor.ts` 切片 + 纯逻辑下沉（撤销/排序/移动/派生值）
 5. `main/index.ts` 按 IPC 域拆分（注入 `ctx`，通道名不动）
@@ -100,7 +100,12 @@
 | 批次 | 内容 | 结果 |
 |---|---|---|
 | 死代码清理 | 删零引用 16 类、收窄导出面 14 处、去重 2 组 | 25 文件、净 −124 行；五道门槛全绿（`8b7908a`） |
-| `layout/core.ts` | 1252 行 → `core.ts` 597（LayoutBuilder）+ `core/cache.ts` 160 + `core/geometry.ts` 32 + `core/connect.ts` 512 | 调用点**零改动**（`export *` 统一再导出），五道门槛全绿（`6eeab2f`） |
+| `layout/core.ts` | 1252 行 → `core.ts` 597 + `core/{cache,geometry,connect}.ts`（160/32/512） | 调用点零改动，全绿（`6eeab2f`） |
+| `layout/overlays.ts` | 758 行 → 门面 34 + `overlays/{range,metrics,reserves,shapes,build}.ts`（157/17/170/135/336） | 公开面 14 个名字逐一对应，全绿（`6c2f7ee`） |
+| `layout/graphic.ts` | 669 行 → 门面 11 + `graphic/{span,fishbone,matrix,radial}.ts`（23/267/205/202） | 全绿（`a7b01ec`） |
+| `agent/index.ts` | 2308 行 → 门面 45 + 8 个职责文件（106/167/188/621/136/362/687/87） | 依赖单向无环，全绿（`db46ffd`） |
+| `code/highlight.ts` | 1484 行 → `lang-defs.ts` 889 + `lexer.ts` 509 + 入口 103 | 入口保留原文件名，全绿 |
+| `ai/index.ts` | 1782 行 → 门面 85 + `ai/{config,prompts,outline,context,errors,stream}.ts` | 提示词文本独立成文件；全绿 |
 
 ### 搬迁手法（后续批次沿用）
 
