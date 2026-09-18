@@ -1492,7 +1492,14 @@ export default function Canvas(): ReactElement {
      * 表现就是「我明明放中心主题下面，怎么连到分支主题 2 下面去了」。把名字写进提示，
      * 这件事才有唯一答案。
      */
-    const targetTitle = findTopic(root, dropTarget.id)?.title ?? ''
+    const rawTarget = findTopic(root, dropTarget.id)?.title ?? ''
+    /**
+     * 没有标题的目标也要说清是谁——用「未命名节点」而不是退回通用文案。
+     * 画布上允许存在空标题节点（新建节点就是空标题 + 直接进编辑态），
+     * 一旦退回「将成为子主题」，用户就又变回"不知道落在谁身上"，
+     * 而"是不是中心主题"恰恰是他最需要确认的那件事。
+     */
+    const targetTitle = rawTarget.trim().length > 0 ? rawTarget : '未命名节点'
 
     if (dropTarget.mode !== 'child') {
       // 同级插入：一条夹在"目标与相邻兄弟之间"的粗线（Xmind / 知犀那套"插入位置条"）。
@@ -2483,9 +2490,11 @@ export default function Canvas(): ReactElement {
                 paintOrder="stroke"
                 strokeLinejoin="round"
               >
-                {dropPreview.targetTitle
-                  ? `将成为「${dropPreview.targetTitle.length > 12 ? `${dropPreview.targetTitle.slice(0, 12)}…` : dropPreview.targetTitle}」的子主题`
-                  : '将成为子主题'}
+                {`将成为「${
+                  dropPreview.targetTitle.length > 12
+                    ? `${dropPreview.targetTitle.slice(0, 12)}…`
+                    : dropPreview.targetTitle
+                }」的子主题`}
               </text>
             </g>
           ) : null}
