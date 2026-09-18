@@ -1611,6 +1611,14 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     if ('problem' in target) return target.problem
     if (typeof args.title !== 'string') return fail('title 必须是字符串。')
     const title = args.title.trim()
+    /**
+     * 空标题会被拒绝：以前漏传 `title`（=空串）会被当成"清空标题"，
+     * 而节点在画布上就只剩一个白条——**静默地毁掉一个节点的内容**。
+     * 想"去标题"是用图片 / 公式 / 代码节点，那是节点属性面板里的事，不走改名。
+     */
+    if (title.length === 0) {
+      return fail('标题不能改成空的（那会留下一个看不出内容的节点）。要改请写上新标题。')
+    }
     // 空操作要如实说：否则一次「改了名」的报告背后什么都没变，用户以为 AI 在糊弄他
     if (target.topic.title === title) {
       return fail(`「${title}」的标题本来就是它，这次没有任何改动。`)
