@@ -4286,6 +4286,54 @@ function crossingProblems(layout: LayoutResult): string[] {
   return out
 }
 
+/** 两条线段是否真的相交（端点相接不算，平行也不算） */
+function segmentsCross(
+  a: [number, number, number, number],
+  b: [number, number, number, number]
+): boolean {
+  const d1x = a[2] - a[0]
+  const d1y = a[3] - a[1]
+  const d2x = b[2] - b[0]
+  const d2y = b[3] - b[1]
+  const den = d1x * d2y - d1y * d2x
+  if (Math.abs(den) < 1e-6) return false
+  const t = ((b[0] - a[0]) * d2y - (b[1] - a[1]) * d2x) / den
+  const u = ((b[0] - a[0]) * d1y - (b[1] - a[1]) * d1x) / den
+  const eps = 1e-3
+  return t > eps && t < 1 - eps && u > eps && u < 1 - eps
+}
+
+/**
+ * 连线**互相**穿过：用户说的「随便穿线」。
+ *
+ * 只查"线穿节点"是不够的——放射状（顺时针）那种长斜线可以一根节点都不碰，
+ * 却横七竖八地互相交叉，看起来就是乱画。同一个父节点发出的线、指向同一个子节点的线不算。
+ */
+function lineCrossingProblems(layout: LayoutResult): string[] {
+  const out: string[] = []
+  for (let i = 0; i < layout.edges.length; i += 1) {
+    for (let j = i + 1; j < layout.edges.length; j += 1) {
+      const first = layout.edges[i]
+      const second = layout.edges[j]
+      if (!first || !second) continue
+      if (first.fromId === second.fromId || first.toId === second.toId) continue
+      let crossed = false
+      for (const a of pathSegments(first.d)) {
+        for (const b of pathSegments(second.d)) {
+          if (segmentsCross(a, b)) crossed = true
+        }
+      }
+      if (!crossed) continue
+      const f1 = layout.nodeMap.get(first.fromId)?.topic.title || '(空)'
+      const t1 = layout.nodeMap.get(first.toId)?.topic.title || '(空)'
+      const f2 = layout.nodeMap.get(second.fromId)?.topic.title || '(空)'
+      const t2 = layout.nodeMap.get(second.toId)?.topic.title || '(空)'
+      out.push(`「${f1}」→「${t1}」⨯「${f2}」→「${t2}」`)
+    }
+  }
+  return out
+}
+
 interface SweepSpec {
   title: string
   children?: SweepSpec[]
@@ -4534,10 +4582,11 @@ function testLayoutNoOverlap(): void {
       const overlap = firstOverlap(sweep)
       const problems = [
         ...(overlap ? [`重叠「${overlap[0]}」⨯「${overlap[1]}」`] : []),
-        ...crossingProblems(sweep)
+        ...crossingProblems(sweep),
+        ...lineCrossingProblems(sweep)
       ]
       check(
-        `形状「${doc.name}」× ${def.label}：无重叠、无连线穿框`,
+        `形状「${doc.name}」× ${def.label}：无重叠、无连线穿框、无线穿线`,
         problems.length === 0,
         problems.slice(0, 3).join('；')
       )

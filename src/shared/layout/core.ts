@@ -94,12 +94,15 @@ function spinePoints(result: LayoutResult, parent: NodeLayout, child: NodeLayout
     const below = ccy >= pcy
     const anchorY = below ? round(parent.y + parent.height) : parent.y
     const from: Point = { x: round(pcx), y: anchorY }
-    // 子节点在父节点中线的右侧 → 从它的左边进（脊总在整列的外侧）
-    const enterLeft = ccx >= pcx
-    const to: Point = { x: enterLeft ? child.x : round(child.x + child.width), y: round(ccy) }
-    const spineX = enterLeft
-      ? Math.min(from.x, Math.min(...column.map((node) => node.x)) - SPINE_GAP)
-      : Math.max(from.x, Math.max(...column.map((node) => node.x + node.width)) + SPINE_GAP)
+    /**
+     * 同一父节点下的所有子节点**永远从左边进**（脊在整列的左侧）。
+     *
+     * 不能按"这个子节点相对父节点中线在哪边"逐个决定：那样拖偏一个子节点就会让它翻到
+     * 另一边去，同一列里一半脊在左、一半在右——用户看到的正是"两边格式不一样"。
+     * 结构化的东西就该给出与内容无关的稳定形状。
+     */
+    const to: Point = { x: child.x, y: round(ccy) }
+    const spineX = Math.min(from.x, Math.min(...column.map((node) => node.x)) - SPINE_GAP)
     const nearest = column.reduce(
       (acc, node) => (below ? Math.min(acc, node.y) : Math.max(acc, node.y)),
       anchorY
