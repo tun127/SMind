@@ -49,7 +49,7 @@ import {
 } from 'lucide-react'
 import { DEFAULT_STRUCTURE, STRUCTURES } from '@shared/xmind/constants'
 import type { OutlineFormat } from '@shared/outline'
-import { activeRoot, findTopic } from '@shared/model/tree'
+import { activeRoot } from '@shared/model/tree'
 import { viewportActions } from '../render/viewport'
 import { overlayToggleOf, patchAppSettings, useEditor } from '../store/editor'
 
@@ -379,8 +379,12 @@ export default function Toolbar({
 
   const root = activeRoot(workbook)
   const selectedId = selection[0]
-  const selectedTopic = selectedId ? findTopic(root, selectedId) : null
-  const currentStructure = selectedTopic?.structureClass ?? root.structureClass ?? DEFAULT_STRUCTURE
+  /**
+   * 结构是**画布级**属性（只住在中心主题上）：无论当前选中谁，这里显示与改动的都是整张画布。
+   * 以前它跟着选中主题走，于是在分支上切一下结构，就会得到"一棵树里混着几套结构"的
+   * 画面——主干是对的、下面那截乱（用户就是这么报的）。分支自己声明的结构不再参与布局。
+   */
+  const currentStructure = root.structureClass ?? DEFAULT_STRUCTURE
   const store = useEditor.getState
 
   const toggleHidden = (id: string, hidden: boolean): void => {
@@ -722,7 +726,8 @@ export default function Toolbar({
           <select
             className="select"
             value={currentStructure}
-            onChange={(e) => store().setStructure(e.target.value, selectedId ?? root.id)}
+            title="结构是整张画布的属性：改动作用在中心主题上"
+            onChange={(e) => store().setStructure(e.target.value)}
           >
             {STRUCTURES.map((item) => (
               <option key={item.class} value={item.class} disabled={!item.supported}>

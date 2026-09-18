@@ -13,12 +13,12 @@ import {
   LayoutBuilder,
   addDecoration,
   addEdge,
+  anchorsForChild,
   bracePath,
   connectTree,
   horizontalAnchors,
   round
 } from './core'
-import { anchorsForChild, declaresOwnStructure, placeSubtree } from './subtree'
 
 export type XResolver = (
   child: Topic,
@@ -82,29 +82,16 @@ export function placeVerticalChildren(
   }
 
   for (const item of pending) {
-    // 分支自己声明了别的结构 → 这棵子树交给对应家族去排
-    if (declaresOwnStructure(builder, item.child, inherited)) {
-      placeSubtree(
-        builder,
-        item.child,
-        item.x,
-        item.y,
-        depth,
-        dir === 1 ? 'right' : 'left',
-        inherited
-      )
-    } else {
-      const node = builder.add(item.child, item.x, item.y, depth, dir === 1 ? 'right' : 'left')
-      placeVerticalChildren(
-        builder,
-        node,
-        builder.visibleChildren(item.child),
-        dir,
-        depth + 1,
-        xResolver,
-        inherited
-      )
-    }
+    const node = builder.add(item.child, item.x, item.y, depth, dir === 1 ? 'right' : 'left')
+    placeVerticalChildren(
+      builder,
+      node,
+      builder.visibleChildren(item.child),
+      dir,
+      depth + 1,
+      xResolver,
+      inherited
+    )
   }
 }
 

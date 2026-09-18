@@ -560,8 +560,8 @@ export default function ChatPanel({
         touched([intent.id])
         return { ok: true, note: '' }
       case 'structure':
-        // 结构切换是主题上的一个属性：整张图就改中心主题，某一支就改那一支
-        store.setStructure(intent.structureClass, intent.id)
+        // 结构是整张画布的属性：只改中心主题（intent.id 由规划层保证就是根节点）
+        store.setStructure(intent.structureClass)
         touched([intent.id])
         return { ok: true, note: '' }
       case 'sortChildren': {

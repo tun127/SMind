@@ -260,20 +260,20 @@ export class LayoutBuilder {
   }
 
   /**
-   * 家族感知的子树占用：按 topic 声明的结构家族计算宽高。
+   * 家族感知的子树占用：按**这张画布的结构**计算宽高。
    *
-   * 与 verticalExtent / horizontalExtent 的区别：当分支自己声明了不同结构时，
-   * 它的子树可能是横向铺行（组织架构图）或沿主脊展开（鱼骨图），
-   * 占用不能再套用「垂直堆叠」的公式——否则兄弟分支会与它重叠。
+   * 结构是画布级属性（由中心主题决定，见「结构▾」只作用于中心主题），所以占用一律
+   * 按 `cls` 算：组织架构图横向铺行、鱼骨图沿主脊展开，不能套用「垂直堆叠」的公式，
+   * 否则兄弟分支会互相重叠。
    *
-   * @param cls 从父链继承下来的有效结构（topic 自己的 structureClass 优先）
+   * @param cls 画布级结构，递归时原样传下去（**不再看子主题自己的 structureClass**）
    */
   subtreeExtent(topic: Topic, cls: StructureClass | undefined): { width: number; height: number } {
     const key = topic.id + '\u0000' + (cls ?? '')
     const cached = this.subtreeExtentCache.get(key)
     if (cached) return cached
 
-    const effective = topic.structureClass ?? cls ?? DEFAULT_STRUCTURE
+    const effective = cls ?? DEFAULT_STRUCTURE
     const family = getStructureDef(effective).family
     const size = this.size(topic.id)
     const kids = this.visibleChildren(topic)
@@ -412,14 +412,20 @@ export function connectTree(
   kind: ConnectorKind,
   anchorOf: (parent: NodeLayout, child: NodeLayout) => { from: Anchor; to: Anchor }
 ): void {
+  /**
+   * 括号图：括号本身就是连线，父子边不再重复画（括号由 `layoutBrace` 的钩子补画）。
+   *
+   * 判断依据是**这张画布的结构**（＝中心主题的 structureClass），
+   * 而不是当前走到的那一层：结构是画布级属性。
+   */
+  const braceCanvas = getStructureDef(root.structureClass ?? DEFAULT_STRUCTURE).family === 'brace'
   const walk = (topic: Topic): void => {
     const parent = result.nodeMap.get(topic.id)
     if (!parent) return
     for (const child of topic.collapsed ? [] : topic.children) {
       const childNode = result.nodeMap.get(child.id)
       if (!childNode) continue
-      // 括号图：括号本身就是连线，父子边不再重复画（括号由 placeBraceChildren 的钩子补）
-      if (topic.structureClass && getStructureDef(topic.structureClass).family === 'brace') {
+      if (braceCanvas) {
         walk(child)
         continue
       }
@@ -444,6 +450,22 @@ export function horizontalAnchors(
   child: NodeLayout
 ): { from: Anchor; to: Anchor } {
   return child.side === 'left' ? { from: 'left', to: 'right' } : { from: 'right', to: 'left' }
+}
+
+/**
+ * 连接锚点：先看子节点落在父节点的哪一侧，再回落到各结构自己的默认锚点。
+ *
+ * 为什么需要这一层：纵向缩进列（鱼骨的骨刺、时间轴的分支、树状表格的列）里，
+ * 子节点排在父节点**正下方**，若沿用父级家族的默认锚点（左右），连线会斜着穿过去。
+ * `side` 是 up/down 就说明这是纵向列，改用上下锚点。
+ */
+export function anchorsForChild(
+  parent: NodeLayout,
+  child: NodeLayout,
+  fallback: { from: Anchor; to: Anchor }
+): { from: Anchor; to: Anchor } {
+  if (child.side === 'up' || child.side === 'down') return verticalAnchors(parent, child)
+  return fallback
 }
 
 /** 垂直方向堆叠时的默认锚点：父的下/上边 -> 子的上/下边 */

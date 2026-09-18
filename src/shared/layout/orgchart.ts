@@ -4,8 +4,7 @@
  */
 import type { StructureClass, Topic } from '../model/types'
 import type { LayoutResult } from './types'
-import { LayoutBuilder, connectTree, verticalAnchors } from './core'
-import { anchorsForChild, declaresOwnStructure, placeSubtree } from './subtree'
+import { LayoutBuilder, anchorsForChild, connectTree, verticalAnchors } from './core'
 
 export function layoutOrgChart(
   root: Topic,
@@ -86,11 +85,7 @@ export function placeOrgChartChildren(
 
   for (const item of pending) {
     const { child, x: childX, y: childY, side } = item
-    if (declaresOwnStructure(builder, child, inherited)) {
-      placeSubtree(builder, child, childX, childY, depth + 1, side, inherited)
-    } else {
-      builder.add(child, childX, childY, depth + 1, side)
-      placeOrgChartChildren(builder, child, childX, childY, depth + 1, direction, inherited)
-    }
+    builder.add(child, childX, childY, depth + 1, side)
+    placeOrgChartChildren(builder, child, childX, childY, depth + 1, direction, inherited)
   }
 }

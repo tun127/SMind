@@ -253,7 +253,15 @@ export interface EditorState {
   setCollapsed(id: string, collapsed: boolean): void
   /** 渲染默认值变更后调用：让布局与画布重算 */
   bumpRenderEpoch(): void
-  setStructure(structureClass: string, targetId?: string): void
+  /**
+   * 切换**整张画布**的结构。
+   *
+   * 刻意的签名（没有 targetId）：结构是画布级属性，只住在中心主题上。
+   * 以前它接一个可选目标，于是能在分支上写 `structureClass`——布局随即把那一支
+   * 交给别的家族排，画面变成"主干对、下面那截乱"。数据字段仍保留（导入的文件里
+   * 可能带着它，另存时原样写回），但**不再参与布局**。
+   */
+  setStructure(structureClass: string): void
   /**
    * 移动主题。
    *
@@ -1381,11 +1389,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
     }
   },
 
-  setStructure: (structureClass, targetId) => {
+  setStructure: (structureClass) => {
     const root = activeRoot(get().workbook)
-    const id = targetId ?? root.id
     get().mutate((draft) => {
-      const topic = findTopic(activeRoot(draft), id)
+      const topic = findTopic(activeRoot(draft), root.id)
       if (topic) topic.structureClass = structureClass
     }, '切换结构')
   },

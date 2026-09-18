@@ -1485,11 +1485,12 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
   {
     name: 'setStructure',
     description:
-      '切换结构类型：把整张图（或某一支）从逻辑图改成思维导图 / 鱼骨图 / 时间轴 / 括号图 / 矩阵图等。' +
+      '切换**整张画布**的结构类型：从逻辑图改成思维导图 / 鱼骨图 / 时间轴 / 括号图 / 矩阵图等。' +
       `可选结构：${STRUCTURES.filter((s) => s.supported)
         .map((s) => (s.class === DEFAULT_STRUCTURE ? `${s.class}（默认）` : s.class))
         .join('、')}。` +
-      '改整张图不填 address（用的是中心主题）；只改某支用 address 指定。' +
+      '结构是整张画布的属性（住在中心主题上），**不要传 address**——' +
+      '只改某一支会被拒绝（那会让一棵树混着几套结构、画面乱）。' +
       '用户说"换成鱼骨图 / 改成时间轴 / 排成矩阵"时就调它——**不要**手动搬节点去模拟结构。',
     parameters: schema(
       {
@@ -2060,17 +2061,28 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     }
     // 不填 address = 整张图（改中心主题的结构），与界面上点「结构」下拉的效果一致
     const address = stringArg(args, 'address')
-    let target = root
+    /**
+     * 结构是**整张画布**的属性（＝中心主题上的一个字段）：只接受空地址或中心主题本身。
+     *
+     * 为什么拒绝"只改某一支"：那会在数据里写下子节点的 structureClass，
+     * 布局随即把那一支交给别的家族排，画面变成"主干对、下面那截乱"（一棵树混着几套结构）。
+     * 工具栏的「结构▾」已经收成只作用于中心主题，两边口径必须一致。
+     */
     if (address.length > 0) {
       const resolved = resolveTopicAddress(root, address)
       if (!resolved.ok) return fail(resolved.error)
-      target = resolved.resolved.topic
+      if (resolved.resolved.topic.id !== root.id) {
+        return fail(
+          `结构是整张画布的属性，不能只改「${resolved.resolved.topic.title}」这一支。` +
+            '要改就改中心主题（address 留空）。'
+        )
+      }
     }
     const label = STRUCTURES.find((s) => s.class === structureClass)?.label ?? structureClass
     return {
       ok: true,
-      intent: { kind: 'structure', id: target.id, structureClass },
-      summary: `把「${target.title}」的结构改成${label}`,
+      intent: { kind: 'structure', id: root.id, structureClass },
+      summary: `把整张画布的结构改成${label}`,
       destructive: false
     }
   }

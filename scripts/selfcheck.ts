@@ -3564,23 +3564,35 @@ function testWriteToolsAndTurn(): void {
     eq('不认识的结构被拒', bad.ok, false)
     check('并列出可选值', !bad.ok && bad.error.includes('可选'), bad.ok ? '' : bad.error)
 
-    // 不填 address = 改中心主题（整张图）；填了则只改那一支
+    // 结构是**画布级**属性：只接受不填 address（= 中心主题）
     check(
       '不填 address 时改的是中心主题',
       structPlan.ok && structPlan.intent.kind === 'structure'
         ? structPlan.intent.id === tree.id
         : false
     )
+    /**
+     * 填了某一支 → **明确拒绝**。
+     *
+     * 以前这里是"只改那一支"，于是数据里会留下子节点的 structureClass，
+     * 布局把那一支交给别的家族排——画面变成"主干对、下面那截乱"。
+     * 现在结构与「结构▾」都只作用于中心主题，两边口径一致。
+     */
     const scopedStruct = plan('setStructure', {
       structure: 'org.xmind.ui.logic.right',
       address: '成本'
     })
+    eq('填了某一支被拒绝', scopedStruct.ok, false)
     check(
-      '填了 address 时只改那一支',
-      scopedStruct.ok && scopedStruct.intent.kind === 'structure'
-        ? scopedStruct.intent.id === cost.id
-        : false
+      '拒绝时说清"结构属于整张画布"',
+      !scopedStruct.ok && scopedStruct.error.includes('整张画布'),
+      scopedStruct.ok ? scopedStruct.summary : scopedStruct.error
     )
+    const rootAddress = plan('setStructure', {
+      structure: 'org.xmind.ui.logic.right',
+      address: '中心主题'
+    })
+    check('address 明确写成中心主题仍然可以', rootAddress.ok)
   }
 
   const rename = plan('renameTopic', { address: '中心主题/成本/人力', title: '人力成本' })
@@ -3976,15 +3988,18 @@ function testMisc(): void {
   store().toggleCollapse(leaf)
   check('无子节点的主题不可折叠', !find(leaf)?.collapsed)
 
-  // 结构
-  store().setStructure('org.xmind.ui.logic.right', rootId)
+  // 结构（画布级：只写在中心主题上）
+  store().setStructure('org.xmind.ui.logic.right')
   check(
     '根结构已切换',
     root().structureClass === 'org.xmind.ui.logic.right',
     String(root().structureClass)
   )
-  store().setStructure('org.xmind.ui.map.unbalanced', b1)
-  check('分支可单独设置结构', find(b1)?.structureClass === 'org.xmind.ui.map.unbalanced')
+  check(
+    '切换结构不碰子节点',
+    find(b1)?.structureClass === undefined,
+    String(find(b1)?.structureClass)
+  )
 
   // 自由定位
   store().offsetPosition(b1, 10, -20)
@@ -4055,49 +4070,56 @@ function testTypedChar(): void {
 }
 
 /* ------------------------------------------------------------------ */
-/* 8.5e 分支级结构：分支自己声明的结构要真正生效                        */
+/* 8.5e 结构是画布级：子节点自己声明的结构一律忽略                      */
 /* ------------------------------------------------------------------ */
 
-function testBranchStructure(): void {
-  group('分支级结构')
+function testStructureIsCanvasLevel(): void {
+  group('结构是画布级：子节点声明的结构一律忽略')
   reset()
   const rootId = root().id
-  const a = addChildOf(rootId, '逻辑分支')
-  const b = addChildOf(rootId, '组织分支')
-  const c = addChildOf(rootId, '鱼骨分支')
-  const a1 = addChildOf(a, '甲')
-  const b1 = addChildOf(b, '乙一')
-  const b2 = addChildOf(b, '乙二')
-  const c1 = addChildOf(c, '丙一')
-  const c2 = addChildOf(c, '丙二')
+  const branch = addChildOf(rootId, '分支')
+  const kidA = addChildOf(branch, '子一')
+  const kidB = addChildOf(branch, '子二')
 
-  store().setStructure('org.xmind.ui.logic.right', rootId)
-  store().setStructure('org.xmind.ui.org-chart.down', b)
-  store().setStructure('org.xmind.ui.fishbone.leftHeaded', c)
+  const before = layoutSheet(root(), fakeMeasure)
 
-  const layout = layoutSheet(root(), fakeMeasure)
-  const boxA = layout.nodeMap.get(a)!
-  const boxB = layout.nodeMap.get(b)!
-  const boxC = layout.nodeMap.get(c)!
-  const nodeA1 = layout.nodeMap.get(a1)!
-  const nodeB1 = layout.nodeMap.get(b1)!
-  const nodeB2 = layout.nodeMap.get(b2)!
-  const nodeC1 = layout.nodeMap.get(c1)!
-  const nodeC2 = layout.nodeMap.get(c2)!
+  /**
+   * 模拟「导入的文件里带着分支自己的结构」：直接写数据。
+   * 界面与 AI 都已经不能这么写了（结构下拉只作用于中心主题、`setStructure` 没有 target 参数），
+   * 但**数据字段必须继续被忽略**——否则打开一个老文件，画面又会变成"主干对、下面那截乱"。
+   */
+  store().mutate((draft) => {
+    const topic = findTopic(activeRoot(draft), branch)
+    if (topic) topic.structureClass = 'org.xmind.ui.org-chart.down'
+  }, '测试：分支自带结构')
 
-  const mine = [rootId, a, b, c, a1, b1, b2, c1, c2]
-  check(
-    '新建的主题都进了布局',
-    mine.every((id) => layout.nodeMap.has(id)),
-    String(layout.nodes.length) + ' 个节点'
+  const after = layoutSheet(root(), fakeMeasure)
+  const moved = [rootId, branch, kidA, kidB].filter((id) => {
+    const from = before.nodeMap.get(id)
+    const to = after.nodeMap.get(id)
+    return !from || !to || from.x !== to.x || from.y !== to.y
+  })
+
+  /**
+   * 这条断言就是「结构只属于整张画布」的**证明**：分支自带结构时，所有坐标必须一字不差。
+   * 以前它会真的把那一支改按组织架构图排——子节点跑到下方、与邻居重叠，
+   * 用户看到的就是"主干是对的、下面那截乱"。
+   */
+  check('分支自带结构被忽略：坐标一字不差', moved.length === 0, `被影响的节点：${moved.join('、')}`)
+
+  // 反向确认：写进数据的字段还在（导入保真：另存时原样写回），只是不参与布局
+  eq(
+    '字段保留（导入保真），只是不参与布局',
+    findTopic(root(), branch)?.structureClass,
+    'org.xmind.ui.org-chart.down'
   )
-  check('没声明结构的分支：子节点仍在右侧', nodeA1.x > boxA.x + boxA.width - 1)
-  check('组织架构分支：子节点排到下方', nodeB1.y > boxB.y + boxB.height - 1)
-  check('组织架构分支：两个子节点同排', Math.abs(nodeB1.y - nodeB2.y) < 2)
-  check(
-    '鱼骨分支：子节点分居主脊上下',
-    nodeC1.y < boxC.y && nodeC2.y > boxC.y,
-    `${Math.round(nodeC1.y)} / ${Math.round(nodeC2.y)} vs ${Math.round(boxC.y)}`
+
+  store().setStructure('org.xmind.ui.map.unbalanced')
+  eq('setStructure 写在中心主题上', root().structureClass, 'org.xmind.ui.map.unbalanced')
+  eq(
+    'setStructure 不会动子节点上的结构字段',
+    findTopic(root(), branch)?.structureClass,
+    'org.xmind.ui.org-chart.down'
   )
 }
 
@@ -4234,7 +4256,7 @@ function testOverlayReserve(): void {
   const mid1 = addChildOf(rRoot, '中间一')
   const mid2 = addChildOf(rRoot, '中间二')
   addChildOf(rRoot, '下方分支')
-  store().setStructure('org.xmind.ui.logic.right', rRoot)
+  store().setStructure('org.xmind.ui.logic.right')
   const boundaryId = store().addBoundaryFor([mid1, mid2], '边界标题')
   const logicLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
   check(
@@ -4251,7 +4273,7 @@ function testOverlayReserve(): void {
   const h1 = addChildOf(oRoot, '表头一')
   const h2 = addChildOf(oRoot, '表头二')
   addChildOf(oRoot, '表头三')
-  store().setStructure('org.xmind.ui.org-chart.down', oRoot)
+  store().setStructure('org.xmind.ui.org-chart.down')
   const orgBoundary = store().addBoundaryFor([h1, h2], '边界标题')
   const orgLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
   check(
@@ -4267,7 +4289,7 @@ function testOverlayReserve(): void {
   addChildOf(pRoot, '上方分支')
   const q1 = addChildOf(pRoot, '中间一')
   const q2 = addChildOf(pRoot, '中间二')
-  store().setStructure('org.xmind.ui.logic.right', pRoot)
+  store().setStructure('org.xmind.ui.logic.right')
   const plain = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
   store().addBoundaryFor([q1, q2], '边界标题')
   const reserved = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
@@ -4360,31 +4382,6 @@ function testLayoutNoOverlap(): void {
     '矩阵列：纵向偏移真的生效（矩阵以前完全不认偏移）',
     (matrix.nodeMap.get(cellA)?.y ?? 0) > (matrixPlain.nodeMap.get(cellA)?.y ?? 0) + 10,
     `${Math.round(matrixPlain.nodeMap.get(cellA)?.y ?? 0)} → ${Math.round(matrix.nodeMap.get(cellA)?.y ?? 0)}`
-  )
-
-  // 分支级组合：逻辑图根 + 分支各自声明鱼骨 / 组织架构 / 矩阵
-  reset()
-  const rootId = root().id
-  const f = addChildOf(rootId, `鱼骨分支：${titles[0]}`)
-  const o = addChildOf(rootId, `组织分支：${titles[3]}`)
-  const m = addChildOf(rootId, `矩阵分支：${titles[2]}`)
-  for (const [parent, count] of [
-    [f, 3],
-    [o, 2],
-    [m, 3]
-  ] as const) {
-    for (let i = 1; i <= count; i += 1) addChildOf(parent, `子项 ${i}：${titles[2]}`)
-  }
-  store().setStructure('org.xmind.ui.logic.right', rootId)
-  store().setStructure('org.xmind.ui.fishbone.leftHeaded', f)
-  store().setStructure('org.xmind.ui.org-chart.down', o)
-  store().setStructure('org.xmind.ui.matrix', m)
-  const mixed = layoutSheet(root(), multilineMeasure)
-  const mixedHit = firstOverlap(mixed)
-  check(
-    '分支级组合（鱼骨+组织+矩阵）无节点重叠',
-    mixedHit === null,
-    mixedHit ? mixedHit.join(' ⨯ ') : ''
   )
 }
 
@@ -4617,64 +4614,6 @@ function testMarkdownRoundTrip(): void {
   const importedRich = importedPlan?.children.find((child) => child.rich)
   check('往返：粗体进富文本', importedRich?.rich?.paragraphs[0]?.runs[0]?.bold === true)
   eq('往返：节点数一致', parsed.count, countTopics(root()))
-}
-
-function testBranchFamiliesMore(): void {
-  group('分支级结构：矩阵 / 括号 / 时间轴 / 树状表格')
-  reset()
-  const rootId = root().id
-  const m = addChildOf(rootId, '矩阵分支')
-  const b = addChildOf(rootId, '括号分支')
-  const t = addChildOf(rootId, '时间轴分支')
-  const s = addChildOf(rootId, '表格分支')
-  const m1 = addChildOf(m, '格一')
-  const m2 = addChildOf(m, '格二')
-  const m3 = addChildOf(m, '格三')
-  const b1 = addChildOf(b, '括甲')
-  const s1 = addChildOf(s, '列甲')
-  const s11 = addChildOf(s1, '甲一')
-  const t1 = addChildOf(t, '刻一')
-  const t2 = addChildOf(t, '刻二')
-
-  store().setStructure('org.xmind.ui.logic.right', rootId)
-  store().setStructure('org.xmind.ui.matrix', m)
-  store().setStructure('org.xmind.ui.brace.right', b)
-  store().setStructure('org.xmind.ui.timeline.horizontal', t)
-  store().setStructure('org.xmind.ui.spreadsheet', s)
-
-  const layout = layoutSheet(root(), fakeMeasure)
-  const n = (id: string): NodeLayout => {
-    const item = layout.nodeMap.get(id)
-    if (!item) throw new Error(`节点 ${id} 不在布局里`)
-    return item
-  }
-
-  check(
-    '全部进布局',
-    [m, b, t, s, m1, m2, m3, b1, s1, s11, t1, t2].every((id) => layout.nodeMap.has(id))
-  )
-  // 矩阵：两列网格——三个格子里恰有两个同列（x 相同、y 不同），第三个在更右的一列
-  {
-    const xs = [n(m1).x, n(m2).x, n(m3).x]
-    const left = Math.min(...xs)
-    const sameColumn = xs.filter((x) => Math.abs(x - left) < 2)
-    check(
-      '矩阵：两列网格',
-      new Set(xs.map((x) => Math.round(x))).size === 2 && sameColumn.length === 2,
-      JSON.stringify(xs.map((x, i) => ({ x, y: [n(m1).y, n(m2).y, n(m3).y][i] })))
-    )
-  }
-  // 括号：父子边被括号取代，括号是结构装饰线
-  check('括号：不再画父子边', !layout.edges.some((edge) => edge.toId === b1))
-  check(
-    '括号：有括号装饰线',
-    layout.decorations.some((d) => d.branchId === b)
-  )
-  // 时间轴：刻目沿主脊上下交替
-  check('时间轴：刻目分居主脊上下', n(t1).y < n(t).y && n(t2).y > n(t).y)
-  // 树状表格：列头行在分支下方，后代沿缩进列往下
-  check('表格：列头在分支下方', n(s1).y > n(s).y + n(s).height - 1)
-  check('表格：后代在列头下方', n(s11).y > n(s1).y + n(s1).height - 1)
 }
 
 /* ------------------------------------------------------------------ */
@@ -7027,7 +6966,7 @@ async function testOverlays(): Promise<void> {
   store().select(s2, true)
   store().addSummary()
 
-  store().setStructure('org.xmind.ui.logic.right', sRoot.id)
+  store().setStructure('org.xmind.ui.logic.right')
   const rightLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
   const rightSummary = rightLayout.summaries[0]
   const rightNode = rightLayout.nodeMap.get(s1)!
@@ -7038,7 +6977,7 @@ async function testOverlays(): Promise<void> {
     `${rightSummary.label.x} vs ${rightNode.x + rightNode.width}`
   )
 
-  store().setStructure('org.xmind.ui.logic.left', sRoot.id)
+  store().setStructure('org.xmind.ui.logic.left')
   const leftLayout = layoutSheet(root(), fakeMeasure, {}, store().workbook.sheets[0])
   const leftSummary = leftLayout.summaries[0]
   const leftNode = leftLayout.nodeMap.get(s1)!
@@ -9844,8 +9783,7 @@ async function main(): Promise<void> {
   await testSafetyHelpers()
   testMisc()
   testTypedChar()
-  testBranchStructure()
-  testBranchFamiliesMore()
+  testStructureIsCanvasLevel()
   testMultiWindow()
   testTabs()
   testDefaultStyles()
