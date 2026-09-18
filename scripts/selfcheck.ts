@@ -204,6 +204,7 @@ import { formulaHtml, formulaSize } from '../src/renderer/src/render/formula'
 import { buildDrawing } from '../src/renderer/src/export/drawing'
 import { drawingToSvg } from '../src/renderer/src/export/svg'
 import { KATEX_INLINE_CSS, KATEX_INLINED_FONTS } from '../src/renderer/src/export/katex-assets'
+import { measureTopic } from '../src/renderer/src/render/measure'
 import { buildImagePdf } from '../src/shared/export/pdf'
 import {
   IMAGE_EXPORT_FORMATS,
@@ -8942,11 +8943,7 @@ async function testLegacy(): Promise<void> {
    * 数字字符引用的越界与非法写法（三处解码器以前各写一遍，其中两处会崩）。
    * 这里的口径：**解不出来就原样保留**，绝不抛异常、绝不静默换成别的字符。
    */
-  eq(
-    '越界码点原样保留（不抛 RangeError）',
-    parseXml('<a>&#x110000;</a>')!.text,
-    '&#x110000;'
-  )
+  eq('越界码点原样保留（不抛 RangeError）', parseXml('<a>&#x110000;</a>')!.text, '&#x110000;')
   eq('超大十进制引用原样保留', parseXml('<a>&#99999999;</a>')!.text, '&#99999999;')
   eq('NUL 引用原样保留', parseXml('<a>&#0;</a>')!.text, '&#0;')
   eq('合法的非 BMP 字符照常解码', parseXml('<a>&#x1F600;</a>')!.text, '\u{1f600}')
@@ -9417,11 +9414,7 @@ function testSearch(): void {
   // 关键词按**字面**匹配：`a.b` 不能命中 `axb`
   eq('正则元字符按字面处理（计数）', countOccurrences('axb a.b', 'a.b'), 1)
   eq('正则元字符按字面处理（替换）', replaceInText('axb a.b', 'a.b', '-').text, 'axb -')
-  eq(
-    '替换文本里的 $& 原样写入（不当占位符展开）',
-    replaceInText('ab', 'b', '$&$1').text,
-    'a$&$1'
-  )
+  eq('替换文本里的 $& 原样写入（不当占位符展开）', replaceInText('ab', 'b', '$&$1').text, 'a$&$1')
 
   group('搜索：关键词两端空白归一（搜索/计数/替换同一口径）')
 
@@ -9434,7 +9427,11 @@ function testSearch(): void {
   eq('计数与搜索同口径', countTitleMatches(store().workbook, '成本 '), 1)
   const trimmedReplace = store().replaceAllInTitles()
   eq('替换与搜索同口径（不再报 0 处）', trimmedReplace, 1)
-  eq('替换确实落库（关键词本身被替换）', findTopic(activeRoot(store().workbook), spaceTitle)?.title, 'X 控制')
+  eq(
+    '替换确实落库（关键词本身被替换）',
+    findTopic(activeRoot(store().workbook), spaceTitle)?.title,
+    'X 控制'
+  )
   eq('只有空白的关键词不算关键词', searchSheet(activeSheet(store().workbook), '   ').length, 0)
 
   group('筛选：按标记与标签')
@@ -9885,15 +9882,11 @@ function testExportDrawing(): void {
   })
   const decorations = decoSvg.match(/text-decoration="[^"]*"/g) ?? []
   eq('SVG：三种装饰组合各输出一次', decorations.length, 3)
-  eq(
-    'SVG：下划线 → underline，删除线 → line-through，同时存在则两个都给',
-    decorations,
-    [
-      'text-decoration="underline"',
-      'text-decoration="line-through"',
-      'text-decoration="underline line-through"'
-    ]
-  )
+  eq('SVG：下划线 → underline，删除线 → line-through，同时存在则两个都给', decorations, [
+    'text-decoration="underline"',
+    'text-decoration="line-through"',
+    'text-decoration="underline line-through"'
+  ])
 
   const dashSvg = svg
   check('SVG：虚线占位框输出 stroke-dasharray', dashSvg.includes('stroke-dasharray="4 3"'))
@@ -10072,6 +10065,57 @@ function testExportFormats(): void {
 /* ------------------------------------------------------------------ */
 /* 12.11 AI：配置 / 提示词 / 解析 / 错误翻译                            */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* 12.12 画布测量：富文本样式必须带进 segments                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 「编辑态里有颜色、Enter 一提交就恢复黑色」的回归防线。
+ *
+ * 画布不是画 tiptap 的 DOM，而是按 `node.lines[].segments` 自己渲染，
+ * 颜色只能来自测量结果 `segment.color`。`resolveRun` 以前漏了这一项，
+ * 于是编辑器里（tiptap 自己渲染）看得见颜色、提交后画布与导出全是主题默认色。
+ *
+ * 测量要 canvas，这里给个**最小替身**（只验证样式传递，不验证真实字宽），
+ * 用完立刻还原，免得全局 document 影响后面的断言。
+ */
+function testMeasureStyles(): void {
+  group('画布测量：富文本样式传递')
+
+  const saved = (globalThis as { document?: unknown }).document
+  ;(globalThis as { document?: unknown }).document = {
+    createElement: () => ({
+      getContext: () => ({ font: '', measureText: (text: string) => ({ width: text.length * 8 }) })
+    })
+  }
+  try {
+    const rich: RichText = {
+      paragraphs: [{ runs: [{ text: '红色', color: '#ff0000' }, { text: '普通' }] }]
+    }
+    const topic = { id: 't', title: '红色普通', titleRich: rich, children: [] } as unknown as Topic
+    const segments = measureTopic(topic, 1).lines[0]?.segments ?? []
+    eq('颜色写进 segments（否则画布只剩主题色）', segments[0]?.color, '#ff0000')
+    eq('没显式颜色的 run 保持 undefined（好继承主题色）', segments[1]?.color, undefined)
+    eq('带颜色的 run 不会与无色 run 合并', segments.length, 2)
+
+    const styled = {
+      id: 's',
+      title: 'A',
+      titleRich: {
+        paragraphs: [{ runs: [{ text: 'A', color: '#00ff00', fontSize: 22, fontFamily: 'serif' }] }]
+      },
+      children: []
+    } as unknown as Topic
+    const styledSegments = measureTopic(styled, 1).lines[0]?.segments ?? []
+    eq('字号一并带进 segments', styledSegments[0]?.fontSize, 22)
+    eq('字体一并带进 segments', styledSegments[0]?.fontFamily, 'serif')
+    eq('颜色一并带进 segments', styledSegments[0]?.color, '#00ff00')
+  } finally {
+    if (saved === undefined) delete (globalThis as { document?: unknown }).document
+    else (globalThis as { document?: unknown }).document = saved
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* 文档 → 导图：格式识别、抽文本、分段                                  */
@@ -11534,6 +11578,7 @@ async function main(): Promise<void> {
   testSearch()
   testExportDrawing()
   testExportFormats()
+  testMeasureStyles()
   testAi()
   testDocument()
   testImport()

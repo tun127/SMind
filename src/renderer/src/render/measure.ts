@@ -408,7 +408,16 @@ function resolveRun(run: RichTextRun, base: BaseStyle): ResolvedStyle {
     weight: bold ? Math.max(base.weight, 700) : base.weight,
     fontFamily: run.fontFamily && run.fontFamily.length > 0 ? run.fontFamily : FONT_FAMILY,
     highlight: run.highlight || undefined,
-    script: run.script
+    script: run.script,
+    /**
+     * 字体颜色必须**带进测量结果**：画布不是画 tiptap 的 DOM，而是按
+     * `node.lines[].segments` 自己渲染（`segmentStyle` 直接用 `segment.color`）。
+     * 这里以前漏了这一行，于是 `segmentOf` 写出的永远是 `color: undefined`——
+     * 表现就是用户报的：「编辑态里颜色是对的，Enter 一提交就恢复黑色」
+     * （编辑态是 tiptap 在渲染，只有它认识这个颜色），导出 SVG/PNG 同样丢色。
+     * 没显式颜色的 run 保持 undefined，好让 DOM 继承主题的节点文字颜色。
+     */
+    color: run.color || undefined
   }
 }
 
