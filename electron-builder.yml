@@ -2,13 +2,13 @@ appId: com.smind.local
 productName: SMind
 # ---- 自动更新（electron-updater）----
 # 更新渠道 = GitHub Releases（与开源发布是同一个地方）。
-# 建好仓库后把 owner/repo 填上并打 tag 发 Release（产物上传 release/*.exe + latest.yml），
-# 客户端的「检查更新」才会真的查到东西；没填之前主动检查会明确提示「检查失败」，属预期。
-# publish:
-#   provider: github
-#   owner: 你的GitHub用户名
-#   repo: SMind
-#   releaseType: release
+# 仓库已定（tun127/SMind），发布产物时 electron-builder 会顺带生成 latest.yml——
+# 把它和 exe 一起传到 Release，客户端「检查更新」即可用。
+publish:
+  provider: github
+  owner: tun127
+  repo: SMind
+  releaseType: release
 # ---- 代码签名（Azure Trusted Signing，商业化计划选定的方案）----
 # 证书开通后设三个环境变量再打包即可，**不用改这份文件**：
 #   AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
