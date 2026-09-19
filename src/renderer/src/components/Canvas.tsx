@@ -1,16 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-  type ReactElement
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { createLayoutCache, layoutSheetCached } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
-import { readOverlayTextStyle } from '@shared/model/overlay-style'
 import type { RichText, Topic } from '@shared/model/types'
 import { activeRoot, activeSheet, countTopics, type FoldSide } from '@shared/model/tree'
 import type { DragMove } from '@shared/model/dragmove'
@@ -21,8 +12,6 @@ import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
 import { attrTranslate, cssTranslate } from '../render/transform'
 import { themeColorsOf, useEditor } from '../store/editor'
-import TopicNode from './TopicNode'
-import { clipText } from './canvas/clip-text'
 import { useCanvasGeometry } from './canvas/use-canvas-geometry'
 import { useCanvasViewport } from './canvas/use-canvas-viewport'
 import { useFlashNodes } from './canvas/use-flash-nodes'
@@ -34,6 +23,10 @@ import { useRelationshipDrag } from './canvas/use-relationship-drag'
 import { useTitleEdit } from './canvas/use-title-edit'
 import { useNodeDrag } from './canvas/use-node-drag'
 import { useCanvasDisplay } from './canvas/use-canvas-display'
+import { CanvasEdgesLayer } from './canvas/canvas-edges-layer'
+import { CanvasNodesLayer } from './canvas/canvas-nodes-layer'
+import { CanvasOverlayLayer } from './canvas/canvas-overlay-layer'
+import { CanvasRelationshipHitLayer } from './canvas/canvas-relationship-hit-layer'
 
 export default function Canvas(): ReactElement {
   // 每秒渲染次数：数字爆表就是「重渲染风暴」，是这类卡死最常见的形态
@@ -476,24 +469,6 @@ export default function Canvas(): ReactElement {
     // 三个 ref 来自 useNodeDrag，身份恒定，列进依赖数组不改本 effect 的重跑时机
   }, [dragSet, ghostElsRef, dragEdgesRef, ghostOffsetRef])
 
-  /** 画一条树上的连线。静态层与拖拽层共用，避免样式写两遍。 */
-  const renderEdge = (edge: (typeof layout.edges)[number], dim = false): ReactElement => {
-    const target = layout.nodeMap.get(edge.toId)
-    const isFirstLevel = Boolean(target && target.depth === 1)
-    return (
-      <path
-        key={`${edge.fromId}->${edge.toId}`}
-        d={edge.d}
-        fill="none"
-        stroke={branchColorOf(colors, layout, edge.toId)}
-        strokeWidth={isFirstLevel ? colors.edgeWidth * 1.5 : colors.edgeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={colors.edgeOpacity * (dim ? 0.3 : 1)}
-      />
-    )
-  }
-
   return (
     <div
       ref={containerRef}
@@ -514,613 +489,66 @@ export default function Canvas(): ReactElement {
           height: layout.bounds.height
         }}
       >
-        <svg className="canvas__edges" width={layout.bounds.width} height={layout.bounds.height}>
-          {/* 结构专属的装饰线（时间轴主轴、鱼骨图主脊、括号图的括号） */}
-          {layout.decorations.map((decoration, index) => (
-            <path
-              key={`deco-${index}`}
-              d={decoration.d}
-              fill="none"
-              stroke={
-                decoration.branchId
-                  ? branchColorOf(colors, layout, decoration.branchId)
-                  : colors.deepText
-              }
-              strokeWidth={colors.edgeWidth * (decoration.widthScale ?? 1)}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={decoration.dashed ? 0.5 : colors.edgeOpacity}
-              strokeDasharray={decoration.dashed ? '6 5' : undefined}
-            />
-          ))}
+        <CanvasEdgesLayer
+          layout={layout}
+          colors={colors}
+          boundaryGroups={boundaryGroups}
+          selectedOverlay={selectedOverlay}
+          pickOverlay={pickOverlay}
+          setTitleEdit={setTitleEdit}
+          staticEdges={staticEdges}
+          dragEdges={dragEdges}
+          dragSet={dragSet}
+          dragVisual={dragVisual}
+          dragFocus={dragFocus}
+          dragEdgesRef={dragEdgesRef}
+        />
 
-          {/* 边界：同色的多个边界拼成一条 path 一次性填充，
-              所以重叠区域不会被半透明叠加成更深的颜色 */}
-          {boundaryGroups.map((group) => (
-            <path
-              key={`boundary-fill-${group.color}`}
-              d={group.d}
-              fill={group.color}
-              fillOpacity={0.08}
-              fillRule="nonzero"
-              stroke={group.color}
-              strokeWidth={1.5}
-              strokeOpacity={0.6}
-            />
-          ))}
+        <CanvasRelationshipHitLayer
+          layout={layout}
+          handleCurvePointerDown={handleCurvePointerDown}
+        />
 
-          {/* 每个边界一个透明命中区：双击即可改标题。
-              单独画是为了能分辨出点中的是哪一个（填充是按颜色合并的） */}
-          {layout.boundaries.map((boundary) => (
-            <path
-              key={`boundary-hit-${boundary.id}`}
-              className="overlay-boundary-hit"
-              d={boundary.d}
-              fill="transparent"
-              onPointerDown={(event) => pickOverlay(event, 'boundary', boundary.id)}
-              onDoubleClick={() =>
-                setTitleEdit({
-                  kind: 'boundary',
-                  id: boundary.id,
-                  x: boundary.label.x,
-                  y: boundary.label.y,
-                  anchor: 'start',
-                  value: boundary.title ?? ''
-                })
-              }
-            />
-          ))}
+        <CanvasNodesLayer
+          layout={layout}
+          colors={colors}
+          selection={selection}
+          editingId={editingId}
+          editingRich={editingRich}
+          visibleNodes={visibleNodes}
+          handleDrag={handleDrag}
+          dragVisual={dragVisual}
+          dragSet={dragSet}
+          dragFocus={dragFocus}
+          dropTarget={dropTarget}
+          searchHits={searchHits}
+          marqueeHits={marqueeHits}
+          flashIds={flashIds}
+          filterResult={filterResult}
+          handleNodePointerDown={handleNodePointerDown}
+          handleNodeDoubleClick={handleNodeDoubleClick}
+          handleNodeRichChange={handleNodeRichChange}
+          handleNodeCancelEdit={handleNodeCancelEdit}
+          handleNodeCommitEdit={handleNodeCommitEdit}
+          handleNodeCommitAndAddChild={handleNodeCommitAndAddChild}
+          handleNodeCommitAndAddSibling={handleNodeCommitAndAddSibling}
+          handleNodeNavigateEdit={handleNodeNavigateEdit}
+          handleNodeToggleCollapse={handleNodeToggleCollapse}
+          handleNodeToggleFoldSide={handleNodeToggleFoldSide}
+        />
 
-          {/* 选中边界的虚线框（与概要一致：选中就能在面板里改文字与字体） */}
-          {layout.boundaries.map((boundary) =>
-            selectedOverlay?.kind === 'boundary' &&
-            selectedOverlay.id === boundary.id &&
-            boundary.bounds ? (
-              <rect
-                key={`boundary-selected-${boundary.id}`}
-                className="overlay-selected"
-                x={boundary.bounds.x - 5}
-                y={boundary.bounds.y - 5}
-                width={boundary.bounds.width + 10}
-                height={boundary.bounds.height + 10}
-                rx={6}
-              />
-            ) : null
-          )}
-
-          {/* 边界标题单独画，保证文字在填充之上 */}
-          {layout.boundaries.map((boundary) => {
-            const boundaryText = readOverlayTextStyle(boundary.style, { fontSize: 12, bold: true })
-            return boundary.title ? (
-              <text
-                key={`boundary-title-${boundary.id}`}
-                className="overlay-title"
-                x={boundary.label.x}
-                y={boundary.label.y}
-                fontSize={boundaryText.fontSize}
-                fontWeight={boundaryText.bold ? 700 : 400}
-                fontStyle={boundaryText.italic ? 'italic' : undefined}
-                fill={
-                  boundaryText.color ??
-                  (boundary.branchId
-                    ? branchColorOf(colors, layout, boundary.branchId)
-                    : colors.deepText)
-                }
-                dominantBaseline="middle"
-                onPointerDown={(event) => pickOverlay(event, 'boundary', boundary.id)}
-                onDoubleClick={() =>
-                  setTitleEdit({
-                    kind: 'boundary',
-                    id: boundary.id,
-                    x: boundary.label.x,
-                    y: boundary.label.y,
-                    anchor: 'start',
-                    value: boundary.title ?? ''
-                  })
-                }
-              >
-                {/* 边界标题同样支持换行（自上而下排） */}
-                {overlayTitleLines(boundary.title).map((line, index) => (
-                  <tspan
-                    key={index}
-                    x={boundary.label.x}
-                    dy={index === 0 ? 0 : OVERLAY_TITLE_LINE_HEIGHT}
-                  >
-                    {line.length > 0 ? line : '\u00A0'}
-                  </tspan>
-                ))}
-              </text>
-            ) : null
-          })}
-
-          {/* 概要：覆盖一组同级主题的大括号 + 概要文字。
-              文字为空时也画占位文字与命中区——否则「把文字删空」之后就再也点不到它了 */}
-          {layout.summaries.map((summary) => {
-            const color = summary.branchId
-              ? branchColorOf(colors, layout, summary.branchId)
-              : colors.deepText
-            const text = readOverlayTextStyle(summary.style, { fontSize: 13, bold: true })
-            const selected =
-              selectedOverlay?.kind === 'summary' && selectedOverlay.id === summary.id
-            const labelSize = summary.labelSize ?? { width: 48, height: OVERLAY_TITLE_LINE_HEIGHT }
-            const labelLeft =
-              summary.anchor === 'start'
-                ? summary.label.x
-                : summary.anchor === 'end'
-                  ? summary.label.x - labelSize.width
-                  : summary.label.x - labelSize.width / 2
-            const openEditor = (): void =>
-              setTitleEdit({
-                kind: 'summary',
-                id: summary.id,
-                x: summary.label.x,
-                y: summary.label.y,
-                anchor: summary.anchor,
-                value: summary.title ?? ''
-              })
-            const pick = (event: ReactPointerEvent<SVGElement>): void =>
-              pickOverlay(event, 'summary', summary.id)
-            return (
-              <g key={`summary-${summary.id}`}>
-                <path
-                  d={summary.d}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={1.6}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeOpacity={0.75}
-                />
-                {/* 命中区：括号线（按描边命中）+ 文字块矩形（空文字时也能点到） */}
-                <path
-                  d={summary.d}
-                  fill="none"
-                  stroke="transparent"
-                  strokeWidth={12}
-                  className="overlay-hit"
-                  onPointerDown={pick}
-                  onDoubleClick={openEditor}
-                />
-                <rect
-                  x={labelLeft - 3}
-                  y={summary.label.y - labelSize.height / 2 - 3}
-                  width={labelSize.width + 6}
-                  height={labelSize.height + 6}
-                  fill="transparent"
-                  className="overlay-hit"
-                  onPointerDown={pick}
-                  onDoubleClick={openEditor}
-                />
-                <text
-                  className="overlay-title"
-                  x={summary.label.x}
-                  y={summary.label.y}
-                  fontSize={text.fontSize}
-                  fontWeight={text.bold ? 700 : 400}
-                  fontStyle={text.italic ? 'italic' : undefined}
-                  fill={text.color ?? color}
-                  textAnchor={summary.anchor}
-                  dominantBaseline="middle"
-                  /* 用画布色给文字描一圈边，即使压到别的内容上也读得清 */
-                  stroke={colors.canvas}
-                  strokeWidth={4}
-                  paintOrder="stroke"
-                  strokeLinejoin="round"
-                  /* 空文字时用半透明占位，提示「双击可以输入」 */
-                  opacity={summary.title ? 1 : 0.45}
-                  pointerEvents="none"
-                >
-                  {summary.title
-                    ? overlayTitleLines(summary.title).map((line, index, all) => (
-                        <tspan
-                          key={index}
-                          x={summary.label.x}
-                          dy={
-                            index === 0
-                              ? -(all.length - 1) * (OVERLAY_TITLE_LINE_HEIGHT / 2)
-                              : OVERLAY_TITLE_LINE_HEIGHT
-                          }
-                        >
-                          {line.length > 0 ? line : '\u00A0'}
-                        </tspan>
-                      ))
-                    : '概要（双击输入）'}
-                </text>
-                {selected && summary.bounds ? (
-                  <rect
-                    className="overlay-selected"
-                    x={summary.bounds.x - 5}
-                    y={summary.bounds.y - 5}
-                    width={summary.bounds.width + 10}
-                    height={summary.bounds.height + 10}
-                    rx={4}
-                  />
-                ) : null}
-              </g>
-            )
-          })}
-
-          {staticEdges.map((edge) =>
-            renderEdge(edge, dragFocus !== null && !dragFocus.has(edge.toId))
-          )}
-
-          {/*
-            子树内部的连线：跟着被拖的节点一起平移重画。
-            位移由 `applyGhostTransform` **命令式**写（React 不管这个 transform——
-            否则它每帧会用上一帧的状态盖回来，节点反而抖）。
-          */}
-          {dragSet && dragVisual ? (
-            <g ref={dragEdgesRef} opacity={0.9}>
-              {dragEdges.map((edge) => renderEdge(edge))}
-            </g>
-          ) : null}
-        </svg>
-
-        {/* 关系线线身的命中层：特意画在节点**下面**。
-            否则那 18px 的透明命中区会压在上层，把经过线下方节点的拖拽操作抢走，
-            表现为「某些节点怎么都拖不动」。 */}
-        <svg className="canvas__overlay" width={layout.bounds.width} height={layout.bounds.height}>
-          {layout.relationships.map((relationship) => (
-            <path
-              key={`hit-${relationship.id}`}
-              className="overlay-curve"
-              d={relationship.d}
-              fill="none"
-              stroke="transparent"
-              strokeWidth={18}
-              strokeLinecap="round"
-              onPointerDown={(event) => handleCurvePointerDown(event, relationship.id)}
-              onDoubleClick={(event) => {
-                event.stopPropagation()
-                useEditor.getState().resetRelationshipCurve(relationship.id)
-              }}
-            >
-              <title>拖动可移动这条线；双击恢复自动弯度</title>
-            </path>
-          ))}
-        </svg>
-
-        {visibleNodes.map((node) => (
-          <TopicNode
-            key={node.id}
-            node={node}
-            layout={layout}
-            colors={colors}
-            selected={selection.includes(node.id)}
-            editing={editingId === node.id}
-            editingRich={editingId === node.id ? editingRich : null}
-            highlight={
-              dropTarget && dropTarget.mode === 'child' && dropTarget.id === node.id
-                ? 'child'
-                : dropTarget && dropTarget.mode !== 'child' && dropTarget.id === node.id
-                  ? 'sibling'
-                  : handleDrag?.targetId === node.id
-                    ? 'child'
-                    : null
-            }
-            dragged={Boolean(dragSet?.has(node.id))}
-            draggable={node.depth > 0}
-            searchHit={searchHits ? searchHits.has(node.id) : false}
-            marqueeHit={marqueeHits ? marqueeHits.has(node.id) : false}
-            flash={flashIds.has(node.id)}
-            dimmed={
-              filterResult
-                ? !filterResult.keep.has(node.id)
-                : dragFocus && !dragFocus.has(node.id)
-                  ? 'soft'
-                  : false
-            }
-            dragOffset={
-              dragVisual && dragSet?.has(node.id) ? { dx: dragVisual.dx, dy: dragVisual.dy } : null
-            }
-            dragPrimary={Boolean(dragVisual && dragVisual.anchorId === node.id)}
-            onPointerDown={handleNodePointerDown}
-            onDoubleClick={handleNodeDoubleClick}
-            onRichChange={handleNodeRichChange}
-            onCancelEdit={handleNodeCancelEdit}
-            onCommitEdit={handleNodeCommitEdit}
-            onCommitAndAddChild={handleNodeCommitAndAddChild}
-            onCommitAndAddSibling={handleNodeCommitAndAddSibling}
-            onNavigateEdit={handleNodeNavigateEdit}
-            onToggleCollapse={handleNodeToggleCollapse}
-            onToggleFoldSide={handleNodeToggleFoldSide}
-          />
-        ))}
-
-        {/* 关系线画在节点之上，避免被节点挡住 */}
-        <svg className="canvas__overlay" width={layout.bounds.width} height={layout.bounds.height}>
-          {layout.relationships.map((relationship) => {
-            const color = relationship.branchId
-              ? branchColorOf(colors, layout, relationship.branchId)
-              : colors.deepText
-            const angle = ((relationship.arrow.angle * 180) / Math.PI).toFixed(1)
-            // 标题那一小块就是这条线的可选中区域（空标题也给一块，否则选不中）
-            const size = relationship.labelSize ?? { width: 24, height: 16 }
-            const labelBox = {
-              x: relationship.label.x - size.width / 2 - 4,
-              y: relationship.label.y - size.height / 2 - 4,
-              width: size.width + 8,
-              height: size.height + 8
-            }
-            const active =
-              selectedOverlay?.kind === 'relationship' && selectedOverlay.id === relationship.id
-            return (
-              <g key={`relationship-${relationship.id}`}>
-                <path
-                  d={relationship.d}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={1.8}
-                  strokeLinecap="round"
-                />
-                {/* 线身的可拖拽命中区在节点下面那一层，见上方 canvas__overlay 命中层 */}
-
-                <path
-                  d="M 0 0 L -10 -4 L -10 4 Z"
-                  transform={`translate(${relationship.arrow.x} ${relationship.arrow.y}) rotate(${angle})`}
-                  fill={color}
-                />
-
-                {/* 标题区的透明命中区：单击选中、双击改文字 */}
-                <rect
-                  className="overlay-hit"
-                  x={labelBox.x}
-                  y={labelBox.y}
-                  width={labelBox.width}
-                  height={labelBox.height}
-                  rx={4}
-                  fill="transparent"
-                  onPointerDown={(event) => pickOverlay(event, 'relationship', relationship.id)}
-                  onDoubleClick={() =>
-                    setTitleEdit({
-                      kind: 'relationship',
-                      id: relationship.id,
-                      x: relationship.label.x,
-                      y: relationship.label.y,
-                      anchor: 'middle',
-                      value: relationship.title ?? ''
-                    })
-                  }
-                />
-                {active ? (
-                  <rect
-                    className="overlay-selected"
-                    x={labelBox.x}
-                    y={labelBox.y}
-                    width={labelBox.width}
-                    height={labelBox.height}
-                    rx={4}
-                  />
-                ) : null}
-
-                {relationship.title ? (
-                  <text
-                    className="overlay-title"
-                    x={relationship.label.x}
-                    y={relationship.label.y}
-                    fontSize={12}
-                    fontWeight={600}
-                    fill={color}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    stroke={colors.canvas}
-                    strokeWidth={4}
-                    paintOrder="stroke"
-                    strokeLinejoin="round"
-                    pointerEvents="none"
-                  >
-                    {/* 关系线标题同样支持手动换行（与边界 / 概要一致）：按 \n 拆行、整体垂直居中 */}
-                    {overlayTitleLines(relationship.title).map((line, index, all) => (
-                      <tspan
-                        key={index}
-                        x={relationship.label.x}
-                        dy={
-                          index === 0
-                            ? -((all.length - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2
-                            : OVERLAY_TITLE_LINE_HEIGHT
-                        }
-                      >
-                        {line.length > 0 ? line : '\u00A0'}
-                      </tspan>
-                    ))}
-                  </text>
-                ) : null}
-
-                {/* 两端各一个手柄：拖到别的主题上即可改接这一端 */}
-                {(
-                  [
-                    { end: 'end1Id' as const, point: relationship.start },
-                    { end: 'end2Id' as const, point: relationship.arrow }
-                  ] as const
-                ).map((handle) => (
-                  <circle
-                    key={`${relationship.id}-${handle.end}`}
-                    className={
-                      handleDrag &&
-                      handleDrag.relationshipId === relationship.id &&
-                      handleDrag.end === handle.end
-                        ? 'overlay-handle overlay-handle--active'
-                        : 'overlay-handle'
-                    }
-                    cx={handle.point.x}
-                    cy={handle.point.y}
-                    r={7}
-                    fill={color}
-                    onPointerDown={(event) =>
-                      handleRelationshipPointerDown(
-                        event,
-                        relationship.id,
-                        handle.end,
-                        handle.point
-                      )
-                    }
-                  >
-                    <title>拖到另一个主题上可改接这一端</title>
-                  </circle>
-                ))}
-              </g>
-            )
-          })}
-
-          {/* 落点预览：要么是"成为子主题"的空位框，要么是"插到同级之间"的插入线 */}
-          {dropPreview && dropPreview.kind === 'slot' ? (
-            <g>
-              <line
-                x1={dropPreview.from.x}
-                y1={dropPreview.from.y}
-                x2={dropPreview.to.x}
-                y2={dropPreview.to.y}
-                stroke={dropPreview.color}
-                strokeWidth={1.8}
-                /* 用实线 —— 那就是这个主题将来真正的那条连线，虚线会让人以为"还没连上" */
-                strokeLinecap="round"
-                opacity={0.9}
-              />
-              <rect
-                x={dropPreview.slot.x}
-                y={dropPreview.slot.y}
-                width={dropPreview.slot.width}
-                height={dropPreview.slot.height}
-                rx={10}
-                fill={dropPreview.color}
-                fillOpacity={0.14}
-                stroke={dropPreview.color}
-                strokeWidth={2}
-              />
-              {/* 空位框里写上"是谁要落到这里"，比只显示一个空格子清楚得多 */}
-              {dropPreview.title ? (
-                <text
-                  x={dropPreview.slot.x + dropPreview.slot.width / 2}
-                  y={dropPreview.slot.y + dropPreview.slot.height / 2}
-                  fontSize={12}
-                  fontWeight={600}
-                  fill={dropPreview.color}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                >
-                  {clipText(dropPreview.title, dropPreview.slot.width)}
-                </text>
-              ) : null}
-              {/* 成为子主题这件事光看几何位置不够直观，直接在空位框下写明 */}
-              <text
-                x={dropPreview.slot.x + dropPreview.slot.width / 2}
-                y={dropPreview.slot.y + dropPreview.slot.height + 14}
-                fontSize={11}
-                fontWeight={700}
-                fill={dropPreview.color}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                stroke={colors.canvas}
-                strokeWidth={4}
-                paintOrder="stroke"
-                strokeLinejoin="round"
-              >
-                {`将成为「${
-                  dropPreview.targetTitle.length > 12
-                    ? `${dropPreview.targetTitle.slice(0, 12)}…`
-                    : dropPreview.targetTitle
-                }」的子主题`}
-              </text>
-            </g>
-          ) : null}
-
-          {/*
-            同级插入：只画一条夹在目标与相邻兄弟之间的粗插入线（Xmind / 知犀那套"插入位置条"）。
-            位置紧贴目标外缘，就在指针附近，不会像过去的空位框那样跑到很远的父级那边去。
-          */}
-          {dropPreview && dropPreview.kind === 'bar' ? (
-            <g>
-              <line
-                x1={dropPreview.bar.x1}
-                y1={dropPreview.bar.y1}
-                x2={dropPreview.bar.x2}
-                y2={dropPreview.bar.y2}
-                stroke={dropPreview.color}
-                strokeWidth={5}
-                strokeLinecap="round"
-              />
-              <circle
-                cx={(dropPreview.bar.x1 + dropPreview.bar.x2) / 2}
-                cy={(dropPreview.bar.y1 + dropPreview.bar.y2) / 2}
-                r={4.5}
-                fill="#ffffff"
-                stroke={dropPreview.color}
-                strokeWidth={2.5}
-              />
-            </g>
-          ) : null}
-
-          {/* 左右对调的预览：镜像到中心主题另一侧 */}
-          {sideFlipPreview ? (
-            <g>
-              <rect
-                x={sideFlipPreview.x}
-                y={sideFlipPreview.y}
-                width={sideFlipPreview.width}
-                height={sideFlipPreview.height}
-                rx={10}
-                fill={sideFlipPreview.color}
-                fillOpacity={0.08}
-                stroke={sideFlipPreview.color}
-                strokeWidth={1.5}
-                strokeDasharray="6 5"
-              />
-              {sideFlipPreview.title ? (
-                <text
-                  x={sideFlipPreview.x + sideFlipPreview.width / 2}
-                  y={sideFlipPreview.y + sideFlipPreview.height / 2}
-                  fontSize={12}
-                  fontWeight={600}
-                  fill={sideFlipPreview.color}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                >
-                  {clipText(sideFlipPreview.title, sideFlipPreview.width)}
-                </text>
-              ) : null}
-            </g>
-          ) : null}
-
-          {/* 多选拖拽：角上挂一个「N 个主题」的徽标 */}
-          {groupBadge ? (
-            <g>
-              <rect
-                x={groupBadge.x}
-                y={groupBadge.y}
-                width={groupBadge.text.length * 11 + 14}
-                height={22}
-                rx={11}
-                fill="#f59e0b"
-              />
-              <text
-                x={groupBadge.x + (groupBadge.text.length * 11 + 14) / 2}
-                y={groupBadge.y + 11}
-                fontSize={12}
-                fontWeight={700}
-                fill="#ffffff"
-                textAnchor="middle"
-                dominantBaseline="middle"
-              >
-                {groupBadge.text}
-              </text>
-            </g>
-          ) : null}
-
-          {/* 拖拽端点时的预览线 */}
-          {handleDrag ? (
-            <line
-              x1={handleDrag.anchor.x}
-              y1={handleDrag.anchor.y}
-              x2={handleDrag.pointer.x}
-              y2={handleDrag.pointer.y}
-              stroke={colors.deepText}
-              strokeWidth={1.6}
-              strokeDasharray="6 5"
-              strokeLinecap="round"
-              opacity={0.7}
-            />
-          ) : null}
-        </svg>
+        <CanvasOverlayLayer
+          layout={layout}
+          colors={colors}
+          selectedOverlay={selectedOverlay}
+          dropPreview={dropPreview}
+          sideFlipPreview={sideFlipPreview}
+          groupBadge={groupBadge}
+          handleDrag={handleDrag}
+          handleRelationshipPointerDown={handleRelationshipPointerDown}
+          pickOverlay={pickOverlay}
+          setTitleEdit={setTitleEdit}
+        />
 
         {/* 双击标题后的就地编辑框。放在世界容器内，所以会随画布一起缩放。
             关系线 / 边界 / 概要**都支持手动换行**（Enter 换行、Esc 取消、Ctrl+Enter 提交、失焦也提交）——
