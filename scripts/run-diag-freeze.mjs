@@ -4,30 +4,25 @@
  *
  * 用法：node scripts/run-diag-freeze.mjs [xmind 路径]
  * 不传路径时取应用自动存档（%APPDATA%/smind/autosave/slot-1.xmind）。
+ *
+ * 打包与执行的原语在 `scripts/lib/esbuild-runner.mjs`；本脚本的**两段式**编排留在自己身上：
+ * 先只打包（入口 `scripts/diag-freeze-child.ts`、产物 `.tmp-check/diag-freeze-child.cjs`、
+ * 别名只有 `@shared`），**打完包不立刻跑**——后面自己读 xmind、逐块起子进程。
  */
-import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import * as esbuild from 'esbuild'
+import { OUT_DIR, bundleTs, runNode } from './lib/esbuild-runner.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const root = resolve(here, '..')
-const outDir = resolve(root, '.tmp-check')
-mkdirSync(outDir, { recursive: true })
-const outFile = resolve(outDir, 'diag-freeze-child.cjs')
 
-await esbuild.build({
-  entryPoints: [resolve(here, 'diag-freeze-child.ts')],
-  outfile: outFile,
-  bundle: true,
-  platform: 'node',
-  format: 'cjs',
-  target: 'node20',
-  logLevel: 'warning',
-  tsconfig: resolve(root, 'tsconfig.json'),
-  alias: { '@shared': resolve(root, 'src/shared') }
+const outFile = await bundleTs(resolve(here, 'diag-freeze-child.ts'), {
+  outName: 'diag-freeze-child.cjs',
+  aliases: { '@shared': resolve(here, '..', 'src/shared') }
 })
+
+const outDir = OUT_DIR
+mkdirSync(outDir, { recursive: true })
 
 const defaultXmind = process.env.APPDATA
   ? join(process.env.APPDATA, 'smind', 'autosave', 'slot-1.xmind')
@@ -64,7 +59,11 @@ console.log(`文档里共 ${blocks.length} 个非空代码块，逐块测试（�
 
 let poison = 0
 for (const [index, block] of blocks.entries()) {
-  const child = spawnSync(process.execPath, [outFile, String(index)], {
+  // 这里刻意**不用** runNode 的默认 `stdio: 'inherit'`：子进程会打印分词/指标进度，
+  // 而父进程只关心"回没回来"（超时即毒块）——改动前的姿势就是把子进程输出丢掉（默认 pipe + utf8），
+  // 所以显式保留 `stdio: 'pipe'` 与原样的 timeout/env/encoding。
+  const child = runNode(outFile, [String(index)], {
+    stdio: 'pipe',
     timeout: 4000,
     env: { ...process.env, DIAG_XMIND: xmindPath, DIAG_INDEX: String(index) },
     encoding: 'utf8'
