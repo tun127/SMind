@@ -88,11 +88,11 @@
 
 1. ✅ **死代码清理**（§2）——提交 `8b7908a`
 2. **`shared` 层** ✅ 全部完成：`layout/core`（`6eeab2f`）→ `overlays`（`6c2f7ee`）→ `graphic`（`a7b01ec`）→ `agent`（`db46ffd`）→ `highlight` → `ai`
-3. 渲染层：🟡 `measure` ✅（`9b5f077`）→ `drawing` ✅（`8fdc8d6`）→ `TopicNode` 🟡（A3-1 纯搬动 `64ed49e`；A3-2 抽子组件未做）→ `NodePanel` ⬜ → `Toolbar` ⬜ → `ChatPanel` ⬜ → `App` ⬜ → `Canvas` ⬜
-4. `store/editor.ts` 切片 + 纯逻辑下沉（撤销/排序/移动/派生值）⬜（已实测：可机械搬走的只有约 10 个纯函数 / 99 行，主体是语义重构）
-5. `main/index.ts` 按 IPC 域拆分（注入 `ctx`，通道名不动）✅ 已拆完：`a8aebe6` → `3a61e69` 共 8 批，入口 2498 → **65** 行，14 个域在 `main/ipc/*`（另有 `windows.ts` / `files.ts` / `ai.ts` / `lifecycle.ts` / `autosave.ts` / `themes.ts` / `doc-resources.ts` / `dialogs.ts` / `env.ts` / `resource-protocol.ts`）
-6. `selfcheck.ts` 按域拆分（harness 先落地，再逐域搬）✅ 全部完成：`a40bce9` → `dcacfb4` 共 10 批，入口 11,844 → 473 行，断言仍 2628 项
-7. 重复实现收敛（§2.4 剩余项）🟡 已收 1 组：`FOLD_SIDE_LABELS` → `shared/model/fold-labels.ts`（`0054b68`）+ `styles.css` 拆分 ✅（`cca2c5b`：21 个分片 + `index.css` 按原顺序 @import）
+3. 渲染层 ✅ 全部完成（**2026-09-19 复核时按实测行数订正**）：`measure` 698 → 486（+ `render/measure/` 4 文件 286）；`drawing` 739 → 170；`Canvas` 2869 → 385（+ `components/canvas/` 22 文件 3932）；`ChatPanel` 1934 → 419（+ `components/chat/` 14 文件 2289）；`App` → `app/` 13 文件 1656（入口已迁）；`Toolbar` 1060 → 322（+ `components/toolbar/` 11 文件 975）；`NodePanel` 815 → 152（+ `components/nodePanel/` 7 文件 932）；`TopicNode` 619 → 305（+ `components/topic/` 11 文件 555）
+4. `store/editor.ts` 切片 ✅ 已完成（实测）：`editor.ts` 2283 → **82 行**，实现落在 `store/slices/` 12 文件 2325 行
+5. `main/index.ts` 按 IPC 域拆分 ✅ 已拆完：`a8aebe6` → `3a61e69` 共 8 批，入口 2498 → **54** 行（复核实测），14 个域在 `main/ipc/*`（另有 `windows.ts` / `files.ts` / `ai.ts` / `lifecycle.ts` / `autosave.ts` / `themes.ts` / `doc-resources.ts` / `dialogs.ts` / `env.ts` / `resource-protocol.ts`）
+6. `selfcheck.ts` 按域拆分 ✅ 全部完成：`a40bce9` → `dcacfb4` 共 10 批，入口 11,844 → 473 行，域文件在 `scripts/selfcheck/{domains/*,helpers.ts,harness.ts}`（复核实测断言 **2660** 项，全绿）
+7. 重复实现收敛 🟡 大部分已收：`FOLD_SIDE_LABELS` → `shared/model/fold-labels.ts`（`0054b68`）、`styles.css` 拆分（`cca2c5b`）、引号扫描 3→1（`scanQuoted`）、祖先标题链 →1、字体串 → `cssFontOf`、概览文字样式 → `readOverlayTextStyle` 单一来源、PNG/CRC → `scripts/lib/png.mjs`、esbuild runner 3→1、`baseNameOf`/`fileNameOf` → `shared/model/naming`；**仅剩 XML 实体解码 3 份**（见 §七 复核结论）
 8. 文档与门槛收口（CHANGELOG / known-issues 状态更新）✅（`8527fa3`；G1 收尾 `56e477d`；本处状态由状态列同步提交补记）
 
 ### 已完成批次
@@ -127,7 +127,31 @@
 typecheck    零错误（含 strict）
 lint         零 error / 零 warning
 format:check 全部通过
-selfcheck    2522 项断言全绿
+selfcheck    2660 项断言全绿（拆分中新增 138 条）
 verify       21 个样本往返一致
-工作树       25 个文件有改动（含此前 A 档未提交的 3 个）
+工作树       干净
 ```
+
+## 七、独立复核结论（2026-09-19）
+
+复核方（重构 agent）对全部解耦成果做了一次**机械复核**，方法与结论如下；复核时工作树干净、五道门槛全绿。
+
+| 复核项 | 方法 | 结论 |
+|---|---|---|
+| 巨型文件是否真的拆开 | 逐文件实测行数 | 全部落地，见 §四 各项（最大遗留为自检域文件与 `lang-defs.ts` 纯数据） |
+| 循环依赖 | 全量 import 图 DFS（283 文件） | 报 16 条，**逐条核实全部是 `import type`**（编译期抹掉）→ 运行时值循环 **0 条** |
+| 死导出 / 虚胖导出面 | 导出符号全仓引用计数（27 候选，export 行上的使用也计入以免假阳性） | 3 个真死（仅剩声明）：`CodeLanguage`、`CODE_CHAR_WIDTH`、`richIsEmpty` —— **已删并提交 `2ffaac1`**；其余 24 个都在自己文件内被真实使用（只是多写了 `export`，可留作模块内 API 形态） |
+| 孤儿文件 | 全仓 import specifier 扫描 | 2 个（`scripts/diag-freeze-child.ts`、`scripts/license-tool.ts`），均为 esbuild 入口，**正常** |
+| 空壳文件 | < 8 行扫描 | **0 个** |
+| 重复实现收敛 | 逐组 grep 定位实现份数 | 见 §四 第 7 项，绝大部分已收敛为单一来源；**仅剩 XML 实体解码 3 份** |
+| 门面是否纯再导出 | 检查含 `export *` 的文件 | 4 个（`layout/core.ts`、`layout/index.ts`、`export/drawing.ts`、`import/markdown.ts`），均为「聚合再导出」，无实现混入 |
+
+### 唯一遗留（未做，待决策）
+
+**XML 实体解码 3 份**：`shared/document/index.ts`、`shared/import/markdown/inline.ts`、`shared/xmind/xml.ts` 各有一套「命名实体 + `&#x` 十六进制」解码。三者语义接近但**服务三种外部格式**（Word XML / Markdown 行内 / Xmind 旧版 XML），合并会同时改动三条**解析用户文件**的路径。
+
+- 收益：去掉两份重复实现，未来修实体表只改一处；
+- 风险：属行为敏感区（解析外部文件），需按「先加共用实现 + 三处改为调用 + 逐格式回归」的小步走；
+- 兜底：自检 2660 条断言 + 21 样本往返可覆盖主要路径。
+
+建议作为**独立一批**执行，不与其它改动混提。
