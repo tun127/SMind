@@ -41,9 +41,9 @@
 
 | # | 现状 | 目标结构 | 手法 | 调用点改动 | 主要风险 | 状态 |
 |---|---|---|---|---|---|---|
-| A1 | `render/measure.ts` 723 | `render/measure.ts` 入口 + `measure/{cache,formula-size,wrap,style,main}.ts` | 先把「字宽缓存」「公式尺寸」「断行」「样式解析」四块按行范围搬出，入口保留同名再导出 | 0 | `cssFontOf` / `ResolvedStyle` 刚被导出过，注意别丢公开面 | ⬜ |
-| A2 | `export/drawing.ts` 741 | `export/drawing.ts` 入口 + `export/ops.ts`（类型）+ `drawNode.ts` + `drawOverlay.ts` + `compose.ts` | 类型先搬到 `ops.ts`，`svg.ts`/`raster.ts` 改从 `ops` 引类型 | 2（svg、raster 的 import） | 类型搬动后 `strict` 配置下的 `noUncheckedIndexedAccess` 可能报新错 → 逐处按语义处理 | ⬜ |
-| A3 | `components/TopicNode.tsx` 618 | `topic/` 5 个（外壳 / 文本 / 装饰 / 附件与指示器 / 内联公式） | 抽子组件，props 原样传 | 0 | `React.memo` 的浅比较：回调 props 必须是稳定引用，别在拆分时引入内联箭头函数 | ⬜ |
+| A1 | `render/measure.ts` 723 | `render/measure.ts` 入口 + `measure/{cache,formula-size,wrap,style,main}.ts` | 先把「字宽缓存」「公式尺寸」「断行」「样式解析」四块按行范围搬出，入口保留同名再导出 | 0 | `cssFontOf` / `ResolvedStyle` 刚被导出过，注意别丢公开面 | ✅ 9b5f077 |
+| A2 | `export/drawing.ts` 741 | `export/drawing.ts` 入口 + `export/ops.ts`（类型）+ `drawNode.ts` + `drawOverlay.ts` + `compose.ts` | 类型先搬到 `ops.ts`，`svg.ts`/`raster.ts` 改从 `ops` 引类型 | 2（svg、raster 的 import） | 类型搬动后 `strict` 配置下的 `noUncheckedIndexedAccess` 可能报新错 → 逐处按语义处理 | ✅ 8fdc8d6 |
+| A3 | `components/TopicNode.tsx` 618 | `topic/` 5 个（外壳 / 文本 / 装饰 / 附件与指示器 / 内联公式） | 抽子组件，props 原样传 | 0 | `React.memo` 的浅比较：回调 props 必须是稳定引用，别在拆分时引入内联箭头函数 | ✅ 64ed49e |
 | A4 | `components/NodePanel.tsx` 814 | `nodePanel/` 4 个（两条独立分支各拆组件 + 公共控件） | 按"选到节点 / 选到画布元素"两条分支拆 | 0 | 面板内草稿状态（`useState`）跨组件后要确认没有重复初始化 | ⬜ |
 | A5 | `components/Toolbar.tsx` 1059 | `toolbar/` 3 个（主栏 / 结构切换 / 视图与缩放） | 自洽组件直接搬家 | 0 | 工具栏项数组里有彼此依赖的禁用条件，搬完要手点一遍逻辑分支 | ⬜ |
 | A6 | `components/ChatPanel.tsx` 1953 | `chat/` 5 个（runtime 状态机 / 纯函数 / 消息列表 / 工具条目 / 确认弹层） | 先抽纯函数与 runtime（本轮修过 `aiTurn` 收尾，`commitTurnRef` 一族必须整体搬、不能拆开） | 0 | **最高风险之一**：`runRoundRef`/`processQueueRef`/`commitTurnRef`/`stopRef` 是"打破循环引用"的一组 ref，拆散的瞬间会变成"用到未初始化" | ⬜ |
@@ -66,7 +66,7 @@
 
 | # | 现状 | 目标 | 手法 | 调用点改动 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| D1 | `scripts/selfcheck.ts` 11,844 | `scripts/selfcheck/` 16 个域文件 + `harness.ts` | **先落 harness**（`check`/`eq`/`group`/`failures`/`reset` 等），再逐域搬；`main()` 调用顺序不变 | 0（入口仍叫 `scripts/selfcheck.ts`，`run-selfcheck.mjs` 不动） | 各域的局部 helper（如 `json`）作用域会变——本轮就踩过"在 A 域里用了 B 域的 `json`"导致运行时报 `ReferenceError` | ⬜ |
+| D1 | `scripts/selfcheck.ts` 11,844 | `scripts/selfcheck/` 16 个域文件 + `harness.ts` | **先落 harness**（`check`/`eq`/`group`/`failures`/`reset` 等），再逐域搬；`main()` 调用顺序不变 | 0（入口仍叫 `scripts/selfcheck.ts`，`run-selfcheck.mjs` 不动） | 各域的局部 helper（如 `json`）作用域会变——本轮就踩过"在 A 域里用了 B 域的 `json`"导致运行时报 `ReferenceError` | ✅ a40bce9 / 1357011 / 72b35cf / b12c0f7 / e45774b / 8247a9d / 232ca88 / 23bbf5f / e075a84 / dcacfb4 |
 
 ### Step E · 剩余重复实现收敛（按需，逐组单独提交）
 
@@ -78,7 +78,7 @@
 
 | # | 现状 | 目标 | 手法 | 调用点改动 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| F1 | `renderer/styles.css` 3649 | `styles/*.css` 12 个（按现有区块） | `main.tsx` 按**原顺序** import（层叠顺序是行为的一部分） | 1 | 顺序一变就会静默改样式；拆完要逐屏比对关键界面（列表/画布/面板/对话框） | ⬜ |
+| F1 | `renderer/styles.css` 3649 | `styles/*.css` 12 个（按现有区块） | `main.tsx` 按**原顺序** import（层叠顺序是行为的一部分） | 1 | 顺序一变就会静默改样式；拆完要逐屏比对关键界面（列表/画布/面板/对话框） | ✅ cca2c5b |
 
 ### Step G · 收尾（2 项）
 
@@ -124,6 +124,18 @@
 | 门槛红了 | **先 `git checkout` 该文件回退**，不要在红的基础上继续搬；确认是"搬错"还是"本来就红"再动手 |
 
 ---
+
+## 六点五、已完成的拆分轨迹（截至 2026-09-19）
+
+| 目标 | 结果 |
+|---|---|
+| `render/measure.ts` 724 | → **493** + `measure/{text-metrics,wrap,segments,style}.ts`（调用点 0 行） |
+| `export/drawing.ts` 771 | → **162** + `export/{ops,node}.ts`（类型经 `export *` 兜住，调用点 0 行） |
+| `components/TopicNode.tsx` 619 | → **542** + `topic/{props,segment-style}.ts`（纯搬动部分；抽子组件留作 A3-2） |
+| `styles.css` 3650 | → `styles/*.css` **21 个** + `index.css`（按原顺序 @import；`main.tsx` 1 行改动） |
+| `scripts/selfcheck.ts` 11,844 | → **473**（−96%）：`harness.ts` 76 + `helpers.ts` 853 + `domains/{edit,canvas,layout,ai,agent,io,ui,xmind}.ts` 共 8 个；入口只剩 import 表 + `main()` 调用顺序。**入口契约不变**（`run-selfcheck.mjs` 未动，断言仍 2628 项） |
+
+**手法（可复用）**：按行范围字节级搬迁脚本 + 把 `typecheck`/`lint` 当簿记检查器；块起止按"顶层声明边界"机械计算（不手写行号）；每批固定收尾 = `eslint --fix` 清导入 → 去掉它给入口补的 `.ts` 后缀 → prettier；带删除的脚本必须有前置守卫（名字不能少、搬走行数 == 删除行数）。
 
 ## 七、执行记录
 

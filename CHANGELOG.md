@@ -46,6 +46,23 @@
   新增 `shared/outline-dialect.ts` 抽出大纲方言的共享原语（制表符宽度、缩进→层级、项目符号词汇表）。
   快照**配额**经核对**本来就有**（`SNAPSHOT_LIMITS.perDoc` + 手动版本优先保留），审计说"无上限"不成立。
 
+### 解耦 · 单文件拆分（每项一个提交，五道门槛全绿）
+
+> 依据 [`docs/decoupling-plan.md`](docs/decoupling-plan.md)（15 项任务表）。原则：**行为零变化**、调用点 0–2 行、
+> 入口保留同名再导出；搬动按行范围字节级进行，用 `typecheck`/`lint` 当簿记检查器。
+
+- `render/measure.ts` 724 → **493** + `measure/{text-metrics,wrap,segments,style}.ts`（`9b5f077`）
+- `export/drawing.ts` 771 → **162** + `export/{ops,node}.ts`；类型经 `export *` 兜住，调用点 0 行（`8fdc8d6`）
+- `components/TopicNode.tsx` 619 → **542** + `topic/{props,segment-style}.ts`（`64ed49e`，纯搬动部分）
+- `styles.css` 3650 → `styles/*.css` **21 个** + `index.css`（按原顺序 @import，`main.tsx` 1 行改动，`cca2c5b`）
+- `scripts/selfcheck.ts` 11,844 → **473**（−96%）：拆分 10 批——`harness.ts` 76、`helpers.ts` 853（34 个共享助手）、
+  `domains/{edit,canvas,layout,ai,agent,io,ui,xmind}.ts` 8 个域文件。**入口契约不变**：`run-selfcheck.mjs` 一行未改，
+  断言仍 **2628 项**，`main()` 调用顺序一字未动（`a40bce9`…`dcacfb4`）
+
+**过程留痕（含一次危险操作）**：拆分 `styles.css` 的第一版脚本正则被 CRLF 挡掉、**一个区块都没匹配到却照样删了源文件**；
+发现后立即 `git checkout` 恢复，并给脚本补了两道守卫（匹配数为 0 不动源文件；搬走行数必须等于原文件行数）。
+其后所有搬运脚本都带这两道守卫。
+
 ### 文档 · 清理过时与无用文书（只动文档，不碰代码）
 
 - **删除 `docs/structure-specs.md`**：其主参考是那篇被证伪的 CSDN 文章（层级方向做反的根源），
