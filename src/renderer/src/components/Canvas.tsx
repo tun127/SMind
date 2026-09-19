@@ -36,13 +36,14 @@ import { usePacedWorkbook } from '../hooks/usePacedWorkbook'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
-import { NOOP_VIEWPORT_ACTIONS, viewportActions } from '../render/viewport'
 import { attrTranslate, cssTranslate } from '../render/transform'
 import { themeColorsOf, useEditor } from '../store/editor'
 import TopicNode from './TopicNode'
 import { clipText } from './canvas/clip-text'
 import { DROP_HYSTERESIS, DROP_HYSTERESIS_TARGET, SNAP_PREFILTER } from './canvas/geometry'
 import { useCanvasGeometry } from './canvas/use-canvas-geometry'
+import { useCanvasViewport } from './canvas/use-canvas-viewport'
+import { useFlashNodes } from './canvas/use-flash-nodes'
 
 /**
  * 视角锁定的异常告警：**同一类只报一次**。
@@ -66,31 +67,8 @@ export default function Canvas(): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
 
-  /**
-   * AI 刚改过的节点：闪一下。
-   *
-   * 直接操作画布省掉了「预览确认」，信任就只能来自**事后看得见**——回合结束时
-   * 闪一下改过的节点、把视口带过去，否则用户根本不知道它动了哪儿。
-   */
-  const [flashIds, setFlashIds] = useState<ReadonlySet<string>>(() => new Set<string>())
-  const flashTimerRef = useRef<number | null>(null)
-  const flashNodes = useCallback((ids: string[]): void => {
-    if (ids.length === 0) return
-    setFlashIds(new Set(ids))
-    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
-    flashTimerRef.current = window.setTimeout(() => {
-      flashTimerRef.current = null
-      // 已经空了就不换新对象：省掉一次无意义的整画布重渲染
-      setFlashIds((prev) => (prev.size === 0 ? prev : new Set<string>()))
-    }, 1700)
-  }, [])
-  useEffect(
-    () => () => {
-      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
-    },
-    []
-  )
-
+  /* ---- 闪一下：状态、定时器与清理 effect 整块搬进 canvas/use-flash-nodes.ts ---- */
+  const { flashIds, flashNodes } = useFlashNodes()
   const workbook = useEditor((s) => s.workbook)
   /** AI 回合进行中？（面板那边开的事务）——只用来决定「布局要不要节流」 */
   const aiTurnActive = useEditor((s) => s.aiTurn !== null)
@@ -394,146 +372,32 @@ export default function Canvas(): ReactElement {
     return () => observer.disconnect()
   }, [])
 
-  /* ---- 视口动作 ---- */
-  const centerRoot = useCallback((): void => {
-    const el = containerRef.current
-    const lay = layoutRef.current
-    if (!el || !lay) return
-    // 显式把镜头拉回中心＝接管视角，别让跟随循环两帧后把镜头又拽走
-    viewGestureAtRef.current += 1
-    const rootNode = lay.nodeMap.get(rootRef.current.id)
-    if (!rootNode) return
-    const width = el.clientWidth
-    const height = el.clientHeight
-    if (width === 0 || height === 0) return
-    setZoom(1)
-    setPan({
-      x: width / 2 - (rootNode.x + rootNode.width / 2),
-      y: height / 2 - (rootNode.y + rootNode.height / 2)
-    })
-  }, [setPan, setZoom])
+  /**
+   * 用户「接管视角」的次数（滚轮、拖拽平移、缩放都算）。
+   *
+   * 视角锁定是**自动**动镜头，用户手动操作是**意图**——两者同时动镜头就会互相对拉：
+   * 你往下滚一屏，跟随循环每帧把镜头往回拽 22%，看起来就是「上下抽动一阵」，
+   * 直到 240 帧止损才停（长文档里滚动多，所以「画面一长就抽风」）。
+   * 「正在拖主题就不跟」这条规则早就有，但**滚轮一直漏着**——而滚轮才是浏览长文档的主要方式。
+   * 这里给跟随循环一个让位信号：用户一旦自己动过视角，本轮跟随立刻退出；
+   * 下一次选择变化 / 目标几何变化时重新咬住（与拖拽之后的行为一致）。
+   */
+  const viewGestureAtRef = useRef(0)
 
-  const fit = useCallback((): void => {
-    const el = containerRef.current
-    const lay = layoutRef.current
-    if (!el || !lay) return
-    // 适应画布同样是显式接管视角
-    viewGestureAtRef.current += 1
-    const width = el.clientWidth
-    const height = el.clientHeight
-    if (width === 0 || height === 0) return
-    const margin = 48
-    const scale = Math.min(
-      (width - margin * 2) / lay.bounds.width,
-      (height - margin * 2) / lay.bounds.height,
-      1.5
-    )
-    const z = Math.max(0.1, Math.min(4, scale))
-    setZoom(z)
-    setPan({ x: (width - lay.bounds.width * z) / 2, y: (height - lay.bounds.height * z) / 2 })
-  }, [setPan, setZoom])
-
-  const zoomTo = useCallback(
-    (next: number): void => {
-      const el = containerRef.current
-      if (!el) return
-      // 缩放按钮/快捷键＝接管视角
-      viewGestureAtRef.current += 1
-      const px = el.clientWidth / 2
-      const py = el.clientHeight / 2
-      const oldZoom = zoomRef.current
-      const currentPan = panRef.current
-      const z = Math.max(0.1, Math.min(4, next))
-      const wx = (px - currentPan.x) / oldZoom
-      const wy = (py - currentPan.y) / oldZoom
-      setZoom(z)
-      setPan({ x: px - wx * z, y: py - wy * z })
-    },
-    [setPan, setZoom]
-  )
-
-  /** 把节点滚动到可见范围内，避免新建的主题落在视口外 */
-  const ensureVisible = useCallback(
-    (id: string): void => {
-      const el = containerRef.current
-      const lay = layoutRef.current
-      if (!el || !lay) return
-      const node = lay.nodeMap.get(id)
-      if (!node) return
-      const z = zoomRef.current
-      const currentPan = panRef.current
-      const width = el.clientWidth
-      const height = el.clientHeight
-      if (width === 0 || height === 0) return
-      const margin = 56
-      const left = node.x * z + currentPan.x
-      const top = node.y * z + currentPan.y
-      const right = (node.x + node.width) * z + currentPan.x
-      const bottom = (node.y + node.height) * z + currentPan.y
-
-      let dx = 0
-      let dy = 0
-      if (left < margin) dx = margin - left
-      else if (right > width - margin) dx = width - margin - right
-      if (top < margin) dy = margin - top
-      else if (bottom > height - margin) dy = height - margin - bottom
-
-      if (dx !== 0 || dy !== 0) {
-        setPan({ x: currentPan.x + dx, y: currentPan.y + dy })
-      }
-    },
-    [setPan]
-  )
-
-  /** 把某个节点移到视口正中（搜索跳转用，缩放保持不变） */
-  const centerOn = useCallback(
-    (id: string): void => {
-      const el = containerRef.current
-      const lay = layoutRef.current
-      if (!el || !lay) return
-      const node = lay.nodeMap.get(id)
-      if (!node) return
-      const z = zoomRef.current
-      const width = el.clientWidth
-      const height = el.clientHeight
-      if (width === 0 || height === 0) return
-      // 让节点中心落在视口中心；搜索面板占了右侧，这里往左让出一点，避免被面板挡住
-      const targetX = width / 2 - 150
-      const targetY = height / 2
-      const centerX = (node.x + node.width / 2) * z
-      const centerY = (node.y + node.height / 2) * z
-      setPan({ x: targetX - centerX, y: targetY - centerY })
-    },
-    [setPan]
-  )
-
-  useEffect(() => {
-    viewportActions.fit = fit
-    viewportActions.centerRoot = centerRoot
-    viewportActions.zoomTo = zoomTo
-    viewportActions.ensureVisible = ensureVisible
-    viewportActions.centerOn = centerOn
-    viewportActions.flash = flashNodes
-    /**
-     * **卸载必须复位**：`viewportActions` 是模块级单例（见 render/viewport.ts 的说明）。
-     * 画布换掉/关掉之后若还留着这里的闭包，工具栏、搜索面板、AI 面板再触发
-     * 「适应画布 / 跳到命中 / 闪一下」就是在操作一个已经不存在的画布——
-     * 那些闭包读的是旧组件的 ref 与旧 DOM。复位成空实现，最坏是"什么也不做"。
-     */
-    return () => {
-      Object.assign(viewportActions, NOOP_VIEWPORT_ACTIONS)
-    }
-  }, [fit, centerRoot, zoomTo, ensureVisible, centerOn, flashNodes])
-
-  /* ---- 进入编辑态时保证节点可见（新建主题可能超出视口） ---- */
-  useEffect(() => {
-    // 视角锁定开着时交给下面的跟随循环处理：它会把编辑中的节点居中，
-    // ensureVisible 只保证可见不居中，两套逻辑同时跑会互相打架
-    if (!editingId || viewLock) return
-    const target = editingId
-    const frame = window.requestAnimationFrame(() => viewportActions.ensureVisible(target))
-    return () => window.cancelAnimationFrame(frame)
-  }, [editingId, viewLock])
+  /* ---- 视口动作：整块搬进 canvas/use-canvas-viewport.ts（含注册与可见性两个 effect，位置不变） ---- */
+  const { centerRoot } = useCanvasViewport({
+    containerRef,
+    layoutRef,
+    zoomRef,
+    panRef,
+    rootRef,
+    viewGestureAtRef,
+    setPan,
+    setZoom,
+    flashNodes,
+    editingId,
+    viewLock
+  })
 
   /**
    * 视角锁定要盯住的那个主题。
@@ -583,18 +447,6 @@ export default function Canvas(): ReactElement {
   /* ---- 视角锁定：把选中的主题稳稳按在视口中央 ---- */
   /** 这个 effect 最近一秒重跑了几次：用来抓「有东西在震荡 → 每帧重跑 → 死循环」 */
   const followRunsRef = useRef<number[]>([])
-
-  /**
-   * 用户「接管视角」的次数（滚轮、拖拽平移、缩放都算）。
-   *
-   * 视角锁定是**自动**动镜头，用户手动操作是**意图**——两者同时动镜头就会互相对拉：
-   * 你往下滚一屏，跟随循环每帧把镜头往回拽 22%，看起来就是「上下抽动一阵」，
-   * 直到 240 帧止损才停（长文档里滚动多，所以「画面一长就抽风」）。
-   * 「正在拖主题就不跟」这条规则早就有，但**滚轮一直漏着**——而滚轮才是浏览长文档的主要方式。
-   * 这里给跟随循环一个让位信号：用户一旦自己动过视角，本轮跟随立刻退出；
-   * 下一次选择变化 / 目标几何变化时重新咬住（与拖拽之后的行为一致）。
-   */
-  const viewGestureAtRef = useRef(0)
 
   /**
    * 用户刚把视角锁定**打开**的那一下：允许镜头居中一次中心主题。
