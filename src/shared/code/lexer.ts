@@ -70,6 +70,32 @@ function indexOfFrom(text: string, needle: string, from: number): number {
   return text.indexOf(needle, from)
 }
 
+/**
+ * 从 `start`（引号本身所在位置）扫到配对的收尾引号，返回**收尾引号之后**的下标；
+ * 没找到（未闭合）就返回行尾。
+ *
+ * 转义必须认：`"a\"b"` 里的 `\"` 不是结尾，`'\''` 同理。
+ *
+ * 这是**唯一**一份引号扫描：code / data / CSS 三个模式以前各抄一份同样的循环，
+ * 而 CSS 那份曾经漏掉转义规则——于是只有 CSS 会串色。一份实现就不会再出现
+ * "某个模式单独跑偏"这种偏差。
+ */
+function scanQuoted(line: string, start: number): number {
+  const quote = line[start] ?? ''
+  let j = start + 1
+  while (j < line.length) {
+    const cur = line[j] ?? ''
+    if (cur === '\\') {
+      j += 2
+      continue
+    }
+    j += 1
+    if (cur === quote) return Math.min(j, line.length)
+  }
+  // 未闭合：按"到行尾"处理，不吞下一行（否则后面的代码会跟着染色）
+  return line.length
+}
+
 /* ------------------------------------------------------------------ */
 /* code 模式（大多数语言）                                             */
 /* ------------------------------------------------------------------ */
@@ -173,24 +199,9 @@ export function scanCodeLine(line: string, def: LanguageDef, state: ScanState): 
 
     // 6) 字符串
     if (def.strings?.includes(ch)) {
-      let j = i + 1
-      let closed = false
-      while (j < line.length) {
-        if (line[j] === '\\') {
-          j += 2
-          continue
-        }
-        if (line[j] === ch) {
-          j += 1
-          closed = true
-          break
-        }
-        j += 1
-      }
-      // 未闭合的字符串按"到行尾"处理（不吞下一行，避免把后面的代码都染色）
-      push(line.slice(i, Math.min(j, line.length)), 'string')
-      i = Math.min(j, line.length)
-      if (!closed) i = line.length
+      const end = scanQuoted(line, i)
+      push(line.slice(i, end), 'string')
+      i = end
       continue
     }
 
@@ -312,24 +323,13 @@ export function scanDataLine(line: string, def: LanguageDef): CodeToken[] {
     }
 
     if (def.strings?.includes(ch)) {
-      let j = i + 1
-      while (j < line.length) {
-        if (line[j] === '\\') {
-          j += 2
-          continue
-        }
-        if (line[j] === ch) {
-          j += 1
-          break
-        }
-        j += 1
-      }
-      const text = line.slice(i, Math.min(j, line.length))
+      const end = scanQuoted(line, i)
+      const text = line.slice(i, end)
       // JSON / YAML 里「字符串后面跟冒号」就是键
-      let k = Math.min(j, line.length)
+      let k = end
       while (k < line.length && isSpace(line[k] ?? '')) k += 1
       push(text, line[k] === ':' ? 'property' : 'string')
-      i = Math.min(j, line.length)
+      i = end
       continue
     }
 
@@ -485,22 +485,9 @@ export function scanCssLine(line: string): CodeToken[] {
       continue
     }
     if (ch === '"' || ch === "'") {
-      /**
-       * 转义必须认：`content: "a\"b"` 里的 `\"` 不是字符串结尾。
-       * 以前这里只用 `indexOf` 找下一个同类引号——字符串被**腰斩**在转义引号处，
-       * 后半截跟着串色（同族的 data / markup 扫描器都做了转义处理，只有 CSS 这份漏了）。
-       */
-      let j = i + 1
-      while (j < line.length) {
-        const cur = line[j] ?? ''
-        if (cur === '\\') {
-          j += 2
-          continue
-        }
-        j += 1
-        if (cur === ch) break
-      }
-      const end = Math.min(j, line.length)
+      // 转义必须认（`content: "a\"b"` 里的 `\"` 不是结尾）——共用 scanQuoted，
+      // 这份扫描器以前自己写循环时漏了转义，只有 CSS 会串色
+      const end = scanQuoted(line, i)
       push(line.slice(i, end), 'string')
       i = end
       continue
