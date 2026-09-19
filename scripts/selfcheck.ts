@@ -248,6 +248,8 @@ import { matchWholeLineMath, normalizeFormulaInput, splitInlineMath } from '../s
 import { estimateOverlayLabelSize, overlayTitleLines } from '../src/shared/layout/overlays'
 import { LABEL_ELLIPSIS, fitLabelText } from '../src/shared/layout/label-fit'
 import { CODE_TOKEN_COLORS, highlightCode } from '../src/shared/code/highlight'
+import { ALIASES, DEFS } from '../src/shared/code/lang-defs'
+import { CODE_LANGUAGES } from '../src/shared/code-language'
 import { autosaveSlotName, findWindowForPath, sameDocPath } from '../src/shared/window'
 import {
   readOverlayFontSize,
@@ -7999,6 +8001,36 @@ async function testMediaElements(): Promise<void> {
       cssLine
     )
   }
+
+  /**
+   * 语言清单与高亮定义表必须同步。`CODE_LANGUAGES`（UI 下拉 + AI 工具描述的唯一来源）
+   * 里每一个都得有 `DEFS` 定义，否则会出现"下拉里能选、高亮却按纯文本处理"。
+   * 三处清单以前各写一份、没人保证一致，这条断言把口径钉住。
+   *
+   * 两个**有意**的例外：`text` 不在 `DEFS` 里（纯文本＝不高亮，是兜底而不是一种语言），
+   * `ALIASES` 里 `text / plain / plaintext` 也刻意映射到空串走同一条兜底路径。
+   * 这两条是本轮写断言时实测出来的——第一版断言把"全部都要有定义"当契约，直接红了。
+   */
+  const definedLanguages = CODE_LANGUAGES.filter((language) => language !== 'text')
+  check(
+    '每种可选语言都有高亮定义（清单不会漂移）',
+    definedLanguages.every((language) => Object.hasOwn(DEFS, language)),
+    definedLanguages.filter((language) => !Object.hasOwn(DEFS, language)).join(',')
+  )
+  check(
+    '简写别名要么指向已定义的语言、要么指向纯文本兜底（空串）',
+    Object.values(ALIASES).every((target) => target === '' || Object.hasOwn(DEFS, target)),
+    Object.entries(ALIASES)
+      .filter(([, target]) => target !== '' && !Object.hasOwn(DEFS, target))
+      .map(([alias]) => alias)
+      .join(',')
+  )
+  check(
+    'AI 写代码块的工具描述用的是同一份清单（不是手写散文）',
+    (AGENT_WRITE_TOOLS.find((tool) => tool.name === 'setCode')?.description ?? '').includes(
+      CODE_LANGUAGES.join(' / ')
+    )
+  )
 
   group('标签：过长按测量宽度截断（不切半个字）')
 

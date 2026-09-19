@@ -3,6 +3,7 @@
  *
  * 单一职责：只声明参数与约束；把参数解析成 WriteIntent 见 plan-write.ts。
  */
+import { CODE_LANGUAGES } from '../code-language'
 import { DEFAULT_STRUCTURE, STRUCTURES } from '../xmind/constants'
 import { schema, type AgentToolDef } from './tools-read'
 
@@ -139,7 +140,10 @@ export const AGENT_WRITE_TOOLS: AgentToolDef[] = [
     name: 'setCode',
     description:
       '写主题的代码块（会按语言语法高亮）。text 传空字符串即移除代码块。' +
-      'language 用常见名：js / ts / python / java / c / cpp / csharp / go / rust / sql / json / yaml / bash / html / css / text。',
+      // 语言清单**从唯一来源取**：以前这里手写一遍散文清单，与 UI 的下拉选项
+      // （`CODE_LANGUAGES`）和 `lang-defs` 的定义表三处并存，加一种语言就得改三处、
+      // 漏一处就出现"下拉里有、模型却被告知不支持"这类不一致
+      `language 用常见名：${CODE_LANGUAGES.join(' / ')}（js / ts / py 等简写也认）。`,
     parameters: schema(
       {
         address: { type: 'string', description: '目标主题' },
