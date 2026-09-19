@@ -25,8 +25,13 @@ export const MINDMAP_EXTENSIONS = ['xmind', 'emmx', 'emm'] as const
 /** 判定「这是不是一个思维导图文件」。带 `i`，文件名大小写不敏感；共享带 `g` 的正则有 lastIndex 陷阱，这里刻意不带 */
 export const MINDMAP_FILE_RE = /\.(xmind|emmx|emm)$/i
 
-/** 能被本软件直接打开的文档扩展名（.emmx/.emm 是亿图脑图） */
-export const DOCUMENT_EXTENSIONS = ['.xmind', '.emmx', '.emm'] as const
+/**
+ * 带点的小写后缀（`pickDocumentArg` 用 `endsWith` 判定，所以要带点）——由上面那份清单派生。
+ *
+ * 名字**不叫** `DOCUMENT_EXTENSIONS`：`main/document.ts` 里曾有一个同名导出，那是**另一件事**
+ * （可读取/导入的 docx/xlsx/md… 清单），两者只是撞名、语义完全不同（E1 尾巴，仅改名 + 派生）。
+ */
+export const MINDMAP_SUFFIXES = MINDMAP_EXTENSIONS.map((ext) => `.${ext}`)
 
 /**
  * 从命令行参数里挑出要打开的文档路径。
@@ -42,7 +47,7 @@ export function pickDocumentArg(
     const arg = argv[index]
     if (!arg || arg.startsWith('-')) continue
     const lower = arg.toLowerCase()
-    if (!DOCUMENT_EXTENSIONS.some((ext) => lower.endsWith(ext))) continue
+    if (!MINDMAP_SUFFIXES.some((ext) => lower.endsWith(ext))) continue
     if (!exists(arg)) continue
     return arg
   }

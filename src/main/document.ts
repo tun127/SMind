@@ -140,8 +140,13 @@ export async function extractDocumentFromPath(path: string): Promise<ExtractedDo
   return extractDocumentFromBytes(basename(path), new Uint8Array(bytes))
 }
 
-/** 支持读取的扩展名（打开对话框的过滤器用；与 classifyDocument 保持一致） */
-export const DOCUMENT_EXTENSIONS = [
+/**
+ * 支持读取/导入的文档扩展名（打开对话框的过滤器用；与 classifyDocument 保持一致）。
+ *
+ * 名字带 `IMPORT_` 是为了跟 `@shared/openfile` 的思维导图清单区分开：那边以前也叫
+ * `DOCUMENT_EXTENSIONS`，但两处语义完全不同（这里是 docx/xlsx/md…，那边是 xmind/emmx/emm）。
+ */
+export const IMPORT_DOCUMENT_EXTENSIONS = [
   'docx',
   'xlsx',
   'pptx',

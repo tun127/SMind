@@ -1,5 +1,9 @@
 import { ipcMain } from 'electron'
-import { DOCUMENT_EXTENSIONS, extractDocumentFromBytes, extractDocumentFromPath } from '../document'
+import {
+  IMPORT_DOCUMENT_EXTENSIONS,
+  extractDocumentFromBytes,
+  extractDocumentFromPath
+} from '../document'
 import { type ExtractedDocument } from '@shared/document'
 import { promises as fs } from 'node:fs'
 import { basename } from 'node:path'
@@ -36,7 +40,7 @@ export function registerImportIpc(ctx: MainContext): void {
     const result = await showOpenIn(ctx.winOf(e.sender), {
       title: '选择要生成导图的文档',
       filters: [
-        { name: '文档', extensions: [...DOCUMENT_EXTENSIONS] },
+        { name: '文档', extensions: [...IMPORT_DOCUMENT_EXTENSIONS] },
         { name: '全部文件', extensions: ['*'] }
       ],
       properties: ['openFile']
