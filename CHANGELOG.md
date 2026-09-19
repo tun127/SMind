@@ -9,7 +9,7 @@
 ### 修复 · 本轮代码审计（2026-09-18，分批各自过五道门槛）
 
 > 来源：`docs/shared-audit.md`（83 文件 / 18k 行的 `src/shared/**` 审计）+ 应用层实测。
-> 每批都跑 typecheck / lint / format:check / selfcheck / verify 并单独提交；自检 2522 → 2625 项。
+> 每批都跑 typecheck / lint / format:check / selfcheck / verify 并单独提交；自检 2522 → 2628 项。
 
 - **P1 导出装饰失真**（`export/svg.ts`、`export/raster.ts`、`export/drawing.ts`）：SVG 把删除线写成下划线、
   PNG 与位图 PDF **完全没画**下划线与删除线、缺失图片的占位与画布不一致（现统一为虚线框 + 「图片缺失」）、
@@ -39,6 +39,12 @@
   搜索/计数/替换统一 `normalizeQuery` 口径；XML 闭标签**对名字弹栈**（错位嵌套不再把节点挂错父级）；
   zip 解压前按**声明的**未压缩大小拦压缩炸弹；SSE 分割器补 `flush()`（末尾不带换行的 `data:` 行会整段丢正文）；
   CSS 字符串认转义（`content: "a\"b"` 不再腰斩串色）；许可 payload 校验日期格式与长度上限；「昨天」按日历日算。
+- **后续收敛（同一轮，按任务表逐项）**：快照恢复前按 `snapshotOwnerKey` **校验归属**（id 来自别份文档时拒绝，
+  避免把别的文档内容恢复进当前文件）；`cssFontOf` 统一测量与导出的字体串；`ancestorTitlesOf`/`titlePathOf`
+  统一三处祖先标题链；`scanQuoted` 统一 code/data/CSS 三处引号扫描（CSS 那份历史上就漏过转义）；
+  `CODE_LANGUAGES` 成为语言清单的**唯一来源**（AI 工具描述不再手写散文），并加断言钉住"清单 ↔ 高亮定义表"同步；
+  新增 `shared/outline-dialect.ts` 抽出大纲方言的共享原语（制表符宽度、缩进→层级、项目符号词汇表）。
+  快照**配额**经核对**本来就有**（`SNAPSHOT_LIMITS.perDoc` + 手动版本优先保留），审计说"无上限"不成立。
 
 ### 文档 · 清理过时与无用文书（只动文档，不碰代码）
 
