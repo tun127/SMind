@@ -60,7 +60,7 @@
 
 | # | 现状 | 目标 | 手法 | 调用点改动 | 风险 | 状态 |
 |---|---|---|---|---|---|---|
-| C1 | `main/index.ts` 2498 | `main/ipc/*`（12 域）+ `windows.ts` / `files.ts` / `ai.ts` / `lifecycle.ts` | **先建 `ctx` 类型并让现有代码适配**，再按域逐个搬回调；**通道名一律不动** | 0（渲染层完全无感） | 窗口状态（`stateOf`/`docOf`）与关闭确认链路是跨域共享的，必须全部经 `ctx` 传递，不许留模块级可变单例 | ⬜ |
+| C1 | `main/index.ts` 2498 | `main/ipc/*`（12 域）+ `windows.ts` / `files.ts` / `ai.ts` / `lifecycle.ts` | **先建 `ctx` 类型并让现有代码适配**，再按域逐个搬回调；**通道名一律不动** | 0（渲染层完全无感） | 窗口状态（`stateOf`/`docOf`）与关闭确认链路是跨域共享的，必须全部经 `ctx` 传递，不许留模块级可变单例 | ✅ **已拆完（8 批）**：`a8aebe6`（建 `MainContext` 并让现有代码适配）→ `cdf8cff`（历史域）→ `b2b0647`（文档资源表下沉成纯函数）→ `e3aaf3c`（AI / 自动保存 / 主题 / 文件读写）→ `a7af884`（窗口 / 文档 / 恢复 / 设置 / 主题 5 域）→ `230d4c9`（其余 8 域）→ `7d7cbe8`（windows / resource-protocol / ipc 调度器）→ `3a61e69`（lifecycle）。入口 `main/index.ts` **2498 → 65 行**；14 个 IPC 域在 `main/ipc/*`（1479 行）；跨域可变状态只经 `ctx` 传递，无模块级可变单例；通道名与注册顺序未动 |
 
 ### Step D · `scripts/selfcheck.ts`（1 项）
 
@@ -144,3 +144,5 @@
 | 2026-09-19 | 本计划制定 | — | 现状实测 144 文件 / 56,681 行；`shared` 层 6 次拆分已完成，剩余 13 个 600+ 行文件全在 renderer/main/scripts |
 | 2026-09-19 | A1 / A2 / A3-1 / D1(10 批) / E1(1 组) / F1 / G1 / G2 | `9b5f077` `8fdc8d6` `64ed49e` `a40bce9`–`dcacfb4` `0054b68` `cca2c5b` `56e477d` `8527fa3` | 补记（原表停留在计划制定时）。各批五道门槛逐条打印退出码全绿；契约不变：selfcheck 入口仍是 `scripts/selfcheck.ts`、`run-selfcheck.mjs` 未动、断言 2628 项、70 条 IPC 通道与 `.xmind`/`.emmx` 字段未动 |
 | 2026-09-19 | 状态列同步（本次） | — | 修正 G1（⛔→已完成 `56e477d`）、G2（⬜→✅ `8527fa3`）、A3（✅→🟡，仅 A3-1）三处滞后状态；现状规模与剩余文件行数按实测更新；`refactor-audit.md` §四 第 3–8 步补勾 |
+| 2026-09-19 | C1（8 批） | `a8aebe6` `cdf8cff` `b2b0647` `e3aaf3c` `a7af884` `230d4c9` `7d7cbe8` `3a61e69` | `main/index.ts` 2498 → 65 行，14 个 IPC 域拆进 `main/ipc/*`。每批五道门槛逐条打印退出码全绿；结构守卫「`ipcMain.handle\|on(` 注册总数 = 66」全程不变；契约未动（通道名 / `.xmind`·`.emmx` 字段 / `@import` 顺序 / `selfcheck` 入口） |
+| 2026-09-19 | C1 状态列同步（本次） | — | C1 行两处打勾 + `refactor-audit.md` §四 第 5 步打勾；未完成文件表仍待更新（下次统一做） |

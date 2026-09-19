@@ -1,6 +1,10 @@
 # 交接文档：解耦战役（给新 agent 的提示词与现态总结）
 
-> 生成：2026-09-19 ｜ 仓库：`D:\Mind`（产品名 SMind）｜ 当前 HEAD：`56e477d`
+> 生成：2026-09-19 ｜ 仓库：`D:\Mind`（产品名 SMind）｜ 当前 HEAD：`3a61e69`
+> **更新（同日）：C1 已完成**（8 批，`a8aebe6` → `3a61e69`）：`main/index.ts` 2498 → **65 行**，
+> 14 个 IPC 域在 `main/ipc/*`，另有 `windows.ts` / `files.ts` / `ai.ts` / `lifecycle.ts` / `autosave.ts` /
+> `themes.ts` / `doc-resources.ts` / `dialogs.ts` / `env.ts` / `resource-protocol.ts`。
+> 主进程侧只剩下文渲染层的 A4–A8、B1、A3-2 与 E1 余项；下面 §2.3 的 C1 行已标完成。
 > 本文件是**自包含**的：新 agent 只读它 + 仓库本身即可继续，不需要回看之前的对话。
 
 ---
@@ -72,7 +76,7 @@
 
 | 项 | 现状规模 | 性质 | 建议做法 |
 |---|---|---|---|
-| **C1** `src/main/index.ts` | **2,498** | 语义（需先建 `ctx`） | 通读文件 → 列出跨 IPC 域共享的状态（`stateOf`/`docOf`/窗口表/`allowClose`/`quitRequested`/`streamAborters`/自动保存槽位…）→ 定义 `interface MainContext`（**不放模块级可变单例**）→ 先让现有代码适配 `ctx`（单独一批、不改通道名）→ 再按 12 个 IPC 域搬进 `main/ipc/*`。**高危**：窗口关闭确认链路（`closeRequest`/`closeCancel`/`quitRequested`）与单实例心跳是跨域的，适配阶段必须保证回调顺序不变 |
+| **C1** ✅ **已完成**（8 批 `a8aebe6`→`3a61e69`；入口 2498 → 65 行，14 域在 `main/ipc/*`） | ~~2,498~~ 65 | 语义（需先建 `ctx`） | 通读文件 → 列出跨 IPC 域共享的状态（`stateOf`/`docOf`/窗口表/`allowClose`/`quitRequested`/`streamAborters`/自动保存槽位…）→ 定义 `interface MainContext`（**不放模块级可变单例**）→ 先让现有代码适配 `ctx`（单独一批、不改通道名）→ 再按 12 个 IPC 域搬进 `main/ipc/*`。**高危**：窗口关闭确认链路（`closeRequest`/`closeCancel`/`quitRequested`）与单实例心跳是跨域的，适配阶段必须保证回调顺序不变 |
 | **B1** `src/renderer/src/store/editor.ts` | **2,316** | 语义为主 | 实测可机械搬走的只有约 10 个纯函数 / **99 行（4%）**；真正的工作是**纯逻辑下沉 `shared/model` + `store/slices/` 6 个**。注意 `aiTurn`/`viewLock`/`lastFold` 等跨域状态的归属要先画表 |
 | **A4–A8** 渲染层 | `NodePanel.tsx` 814 / `Toolbar.tsx` 1059 / `ChatPanel.tsx` 1953 / `App.tsx` 1272 / `Canvas.tsx` 2951 | 纯语义 | 这些文件**主体都是一整个大函数/组件**（TopicNode 的 `TopicNodeInner` 480 行、NodePanel 组件 760 行），按"只搬不改"收益仅 2–4%。要**逐个整轮**做：抽子组件 / 抽 hooks。**守 `React.memo`**：回调 props 必须稳定引用，不许在拆分中引入内联箭头函数（该 memo 曾因 8 个内联箭头整体失效） |
 | **A6 特别提示** | — | 高危 | `ChatPanel` 里 `runRoundRef`/`processQueueRef`/`commitTurnRef`/`stopRef` 是**打破循环引用的一组 ref**，必须**整体搬进同一模块**，拆散会变成"用到未初始化" |
@@ -151,5 +155,7 @@ GUI 截图无法验证（本会话模型不声明图片输入、modlens 桥不�
 
 ## 六、下一步建议（一句话）
 
-**先做 C1**（`main/index.ts` 2,498 行，收益最大：解锁 12 个 IPC 域文件），按 §2.3 的 C1 步骤走；
-若想先拿一个稳的，就做 **A3-2**（TopicNode 抽子组件，文件最小、上下文最好掌握）。
+**C1 已完成**（`main/index.ts` 2498 → 65 行，14 个 IPC 域在 `main/ipc/*`）——收益最大的那块已经拿走，
+剩下的是渲染层：建议先做 **A3-2**（TopicNode 抽子组件，文件最小、上下文最好掌握），
+再按 A4 → A5 → A6（注意 ref 环）→ A7 → A8（注意挂载顺序）推进；`B1 store/editor.ts` 是语义重构，
+排在渲染层之后。C1 的完整轨迹见 `docs/decoupling-plan.md` 状态列与执行记录。
