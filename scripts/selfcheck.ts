@@ -1226,7 +1226,20 @@ function testNodeDrag(): void {
     '多选拖拽只能插到同级之间'
   )
   eq('落回自己身上', blockReasonOf(root(), ga, ga, 'child'), '不能落回自己身上')
-  eq('同级插值类的非法落点', blockReasonOf(root(), ga, gb, 'before'), '这里不能落')
+  eq(
+    '同级插入类的非法落点 → 说清规则（不是笼统的「这里不能落」）',
+    blockReasonOf(root(), ga, gb, 'before'),
+    '只能插到相邻的同级主题之间'
+  )
+  /**
+   * 多选 + 非 child 落点：约束最具体的那条要**优先**说出来。
+   * 以前 `zone !== 'child'` 判在前面，这里拿到的是笼统的"这里不能落"。
+   */
+  eq(
+    '多选 + 同级插入类落点 → 仍然说「只能插到同级之间」',
+    blockReasonOf(root(), ga, gb, 'after', [gb]),
+    '多选拖拽只能插到同级之间'
+  )
 
   group('折叠状态：拖拽时要能把落点展开')
 
@@ -1419,6 +1432,23 @@ function testNodeDrag(): void {
     closestNodeWithin(snapNodes, { x: 50, y: 15 }, new Set(['n1']))?.id === 'n2'
   )
   check('空列表不会崩', closestNodeWithin([], { x: 0, y: 0 }, new Set()) === null)
+
+  /**
+   * 吸附半径的**边界**：文档写的是"**超过** maxDistance 就当作空白"，
+   * 所以正好等于半径时要吸附。以前起点就是 maxDistance、判断又是严格 `<`，
+   * 于是边界上的点被判成空白——与同一份文件里 `nearestSiblingGap` 的 `<=` 也不一致。
+   */
+  {
+    const only: DropNode[] = [{ id: 'n1', rect: { x: 0, y: 0, width: 100, height: 30 } }]
+    check(
+      '正好在吸附半径边界上 → 仍然吸附',
+      closestNodeWithin(only, { x: 50, y: 290 }, new Set(), 260)?.id === 'n1'
+    )
+    check(
+      '超出半径一点点 → 才是"这里真的是空白"',
+      closestNodeWithin(only, { x: 50, y: 291 }, new Set(), 260) === null
+    )
+  }
   eq(
     '贴着矩形内也算 0 距离',
     distanceToRect({ x: 0, y: 0 }, { x: 0, y: 0, width: 10, height: 10 }),

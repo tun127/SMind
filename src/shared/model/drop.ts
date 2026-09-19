@@ -99,8 +99,14 @@ export function blockReasonOf(
   alsoDragged: readonly string[] = []
 ): string {
   if (draggedId === targetId) return '不能落回自己身上'
-  if (zone !== 'child') return '这里不能落'
+  /**
+   * 多选拖拽的约束最具体，**先判它**。
+   * 以前 `zone !== 'child'` 排在这一句前面，于是"多选拖同级插入"这种最需要说清规则的场景
+   * 反而只拿到笼统的"这里不能落"——用户不知道规矩，只觉得拖不动。
+   */
   if (alsoDragged.length > 0) return '多选拖拽只能插到同级之间'
+  // 插到目标前/后被否，绝大多数是"目标不是同级相邻主题"（根主题、跨父级、自己的后代）
+  if (zone !== 'child') return '只能插到相邻的同级主题之间'
   if (findParent(root, draggedId)?.id === targetId) return '它已经是这个主题的子主题了'
   return '不能落进自己的子主题里'
 }
@@ -306,7 +312,16 @@ export function closestNodeWithin(
   maxDistance = 260
 ): DropNode | null {
   let best: DropNode | null = null
-  let bestDistance = maxDistance
+  /**
+   * 起点取 `maxDistance + 1` 而不是 `maxDistance`：这样下面那句严格 `<` 也能把
+   * **正好等于 maxDistance** 的点算进范围内。
+   *
+   * 以前起点就是 `maxDistance`，于是"正好在边界上"被判成空白——这与本函数的文档
+   * （"**超过** maxDistance 才当作这里真的是空白"）以及 `nearestSiblingGap` 的
+   * `distance <= maxDistance` 都不一致：两个"吸附近 N 像素"的助手在边界上各说各话。
+   * 用 +1 而不是把判断改成 `<=`，是为了保住"同距取先出现的那个"（先到先得）。
+   */
+  let bestDistance = maxDistance + 1
   for (const node of nodes) {
     if (exclude.has(node.id)) continue
     const distance = distanceToRect(pointer, node.rect)
