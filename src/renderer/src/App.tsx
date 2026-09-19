@@ -602,7 +602,6 @@ export default function App(): ReactElement {
     })
     return off
   }, [
-    guard,
     newDocument,
     openDocument,
     saveDocument,

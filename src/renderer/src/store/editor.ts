@@ -1010,13 +1010,18 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!entry) return
     const next = applyPatches(workbook, entry.inverse) as Workbook
     const root = activeRoot(next)
-    // 撤销连选择一起还原：框选了几个节点，撤销后还是那几个
-    entry.selectionAtUndo = get().selection
+    /**
+     * 撤销连选择一起还原：框选了几个节点，撤销后还是那几个。
+     *
+     * 写进**新对象**而不是就地改 `entry.selectionAtUndo`：`entry` 是 store 里的历史条目，
+     * 就地改等于绕过 `set` 改 state——不触发渲染、dev 下若对象被冻结就直接抛错。
+     */
+    const undone = { ...entry, selectionAtUndo: get().selection }
     set({
       workbook: next,
       dirty: true,
       undoStack: undoStack.slice(0, -1),
-      redoStack: [...redoStack, entry],
+      redoStack: [...redoStack, undone],
       ...NO_EDITING,
       selection: liveSelection(root, entry.selectionBefore)
     })

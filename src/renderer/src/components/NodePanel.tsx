@@ -16,6 +16,7 @@ import {
 import { activeRoot, activeSheet, findTopic } from '@shared/model/tree'
 import { imageBoxSize } from '@shared/layout/accessory'
 import { MARKER_GROUPS } from '@shared/xmind/constants'
+import { normalizeFormulaInput } from '@shared/formula'
 import { markerVisualOf } from '../render/markers'
 import { formulaHtml } from '../render/formula'
 import { resourceUrl } from '../render/resource'
@@ -33,7 +34,6 @@ const OVERLAY_COLORS = ['#1f2328', '#EB5757', '#F2994A', '#27AE60', '#2D9CDB', '
 function defaultCodeLanguage(): string {
   return useEditor.getState().appSettings.defaultCodeLanguage || 'text'
 }
-import { normalizeFormulaInput } from '@shared/formula'
 
 interface Props {
   onClose(): void
