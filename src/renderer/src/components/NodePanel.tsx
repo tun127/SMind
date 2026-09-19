@@ -1,77 +1,27 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import {
-  Bold,
-  Code2,
-  Download,
-  Eraser,
-  ExternalLink,
-  FolderOpen,
-  Image as ImageIcon,
-  Italic,
-  Paperclip,
-  Plus,
-  Sigma,
-  X
-} from 'lucide-react'
 import { activeRoot, activeSheet, findTopic } from '@shared/model/tree'
-import { imageBoxSize } from '@shared/layout/accessory'
-import { MARKER_GROUPS } from '@shared/xmind/constants'
-import { normalizeFormulaInput } from '@shared/formula'
-import { markerVisualOf } from '../render/markers'
-import { formulaHtml } from '../render/formula'
-import { resourceUrl } from '../render/resource'
 import { useEditor } from '../store/editor'
-import { activeDocId } from '../store/tabs'
-import MarkerIcon from './MarkerIcon'
-import { CODE_LANGUAGES } from '@shared/code-language'
-import { readOverlayTextStyle, type OverlayKind } from '@shared/model/overlay-style'
-
-/** 画布元素标题的字体控制（与主题的格式栏同一套观感） */
-const OVERLAY_FONT_SIZES = [12, 13, 14, 16, 18, 22, 28]
-const OVERLAY_COLORS = ['#1f2328', '#EB5757', '#F2994A', '#27AE60', '#2D9CDB', '#2F6BFF', '#9B51E0']
-
-/** 新建代码块的默认语言：来自「默认样式」面板的设置（null = 纯文本） */
-function defaultCodeLanguage(): string {
-  return useEditor.getState().appSettings.defaultCodeLanguage || 'text'
-}
+import OverlayBranch from './nodePanel/overlay-branch'
+import TopicBranch from './nodePanel/topic-branch'
+import { PanelHeader, defaultCodeLanguage } from './nodePanel/panel-parts'
 
 interface Props {
   onClose(): void
   onNotify(message: string): void
 }
 
-/** 附件大小显示成 KB/MB，列表里一眼能看出体积 */
-function formatSize(bytes: number | undefined): string {
-  if (!bytes || bytes <= 0) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** 备注与超链接用本地草稿 + 失焦提交：既不怕输入法打断，也不需要每敲一个字就写历史 */
+/**
+ * 节点属性面板的入口：三条分支（画布元素 / 未选中 / 选中主题）+ 面板级草稿状态。
+ *
+ * 面板级草稿 `useState`、聚焦 ref 与相关 effect **刻意留在这一层**：分支组件会随选中对象
+ * 挂载/卸载，草稿一旦搬下去，它的生命周期就跟着挂载点变了（任务表 A4 的高危点）。
+ * 两条分支组件只收原样 props，JSX 与处理器逐字未改。
+ *
+ * 备注与超链接用本地草稿 + 失焦提交：既不怕输入法打断，也不需要每敲一个字就写历史。
+ */
 export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   const selection = useEditor((s) => s.selection)
-  const toggleMarker = useEditor((s) => s.toggleMarker)
-  const addLabel = useEditor((s) => s.addLabel)
-  const removeLabel = useEditor((s) => s.removeLabel)
-  const setNotes = useEditor((s) => s.setNotes)
-  const setHref = useEditor((s) => s.setHref)
-  const setFormula = useEditor((s) => s.setFormula)
-  const setCode = useEditor((s) => s.setCode)
-  const setSizeOverride = useEditor((s) => s.setSizeOverride)
-  const codeFocusTick = useEditor((s) => s.codeFocusTick)
-  const formulaFocusTick = useEditor((s) => s.formulaFocusTick)
-  const notesFocusTick = useEditor((s) => s.notesFocusTick)
-  const setImage = useEditor((s) => s.setImage)
-  const addAttachment = useEditor((s) => s.addAttachment)
-  const removeAttachment = useEditor((s) => s.removeAttachment)
-  const removeRelationship = useEditor((s) => s.removeRelationship)
-  const removeBoundary = useEditor((s) => s.removeBoundary)
-  const removeSummary = useEditor((s) => s.removeSummary)
-  const setRelationshipTitle = useEditor((s) => s.setRelationshipTitle)
-  const setBoundaryTitle = useEditor((s) => s.setBoundaryTitle)
-  const setSummaryTitle = useEditor((s) => s.setSummaryTitle)
 
   const sheet = useMemo(() => activeSheet(workbook), [workbook])
 
@@ -80,7 +30,6 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
 
   // 选中的是画布级元素（概要 / 边界 / 关系线）：它也有文字与字体，照样能改
   const selectedOverlay = useEditor((s) => s.selectedOverlay)
-  const setOverlayStyle = useEditor((s) => s.setOverlayStyle)
   const overlayItem = useMemo(() => {
     const target = selectedOverlay
     if (!target) return null
@@ -92,6 +41,10 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
           : sheet.relationships
     return list.find((item) => item.id === target.id) ?? null
   }, [selectedOverlay, sheet])
+
+  const codeFocusTick = useEditor((s) => s.codeFocusTick)
+  const formulaFocusTick = useEditor((s) => s.formulaFocusTick)
+  const notesFocusTick = useEditor((s) => s.notesFocusTick)
 
   const [labelDraft, setLabelDraft] = useState('')
   const [notesDraft, setNotesDraft] = useState('')
@@ -135,680 +88,55 @@ export default function NodePanel({ onClose, onNotify }: Props): ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const header = (
-    <div className="side-panel__header">
-      <span>节点属性</span>
-      <button
-        type="button"
-        className="tool-btn"
-        title="关闭"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={onClose}
-      >
-        <X size={16} />
-      </button>
-    </div>
-  )
-
-  /**
-   * 画布级元素的属性：文字 + 字体（字号/加粗/斜体/颜色）+ 删除。
-   *
-   * 概要此前「文字删空就只剩一个框、点不到也改不了」——现在它和主题一样可选中、可改样式，
-   * 文字清空后依然保留点击区（画布上有占位提示）。
-   */
+  // 三条分支互斥（选中画布元素时 `selection` 已被清空），与原实现的 early return 一一对应
+  let body: ReactElement
   if (selectedOverlay && overlayItem) {
-    const kind: OverlayKind = selectedOverlay.kind
-    const label = kind === 'summary' ? '概要' : kind === 'boundary' ? '边界' : '关系线'
-    const styleText = readOverlayTextStyle(
-      overlayItem.style,
-      kind === 'summary' ? { fontSize: 13, bold: true } : { fontSize: 12, bold: true }
+    body = (
+      <OverlayBranch
+        selectedOverlay={selectedOverlay}
+        overlayItem={overlayItem}
+        onClose={onClose}
+      />
     )
-    const setTitle =
-      kind === 'summary'
-        ? setSummaryTitle
-        : kind === 'boundary'
-          ? setBoundaryTitle
-          : setRelationshipTitle
-    const remove =
-      kind === 'summary' ? removeSummary : kind === 'boundary' ? removeBoundary : removeRelationship
-
-    return (
-      <div className="side-panel">
-        {header}
-        <div className="side-panel__body">
-          <div className="side-panel__empty">
-            已选中画布上的「{label}」：文字与字体都能改，和主题一样支持撤销。
-          </div>
-
-          <div className="side-panel__title">{label}文字</div>
-          <textarea
-            key={`${overlayItem.id}-${overlayItem.title ?? ''}`}
-            className="input input--area overlay-row__multi"
-            rows={3}
-            defaultValue={overlayItem.title ?? ''}
-            placeholder="输入文字（Enter 换行；清空后画布上仍留有可点击的占位）"
-            onBlur={(event) => setTitle(overlayItem.id, event.currentTarget.value)}
-          />
-
-          <div className="side-panel__title">字体</div>
-          <div className="side-panel__row">
-            <select
-              className="select"
-              value={styleText.fontSize}
-              onChange={(event) =>
-                setOverlayStyle(kind, overlayItem.id, { fontSize: Number(event.target.value) })
-              }
-            >
-              {OVERLAY_FONT_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className={styleText.bold ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
-              title="加粗"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setOverlayStyle(kind, overlayItem.id, { bold: !styleText.bold })}
-            >
-              <Bold size={15} />
-            </button>
-            <button
-              type="button"
-              className={styleText.italic ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
-              title="斜体"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setOverlayStyle(kind, overlayItem.id, { italic: !styleText.italic })}
-            >
-              <Italic size={15} />
-            </button>
-            <button
-              type="button"
-              className="fmt-btn"
-              title="恢复默认字体"
-              onMouseDown={(e) => e.preventDefault()}
-              /* 传 0 / false / 空串＝把对应属性删掉，恢复元素本身的默认外观 */
-              onClick={() =>
-                setOverlayStyle(kind, overlayItem.id, {
-                  fontSize: 0,
-                  bold: false,
-                  italic: false,
-                  color: ''
-                })
-              }
-            >
-              <Eraser size={14} />
-            </button>
-          </div>
-          <div className="side-panel__row">
-            <span className="side-panel__hint">颜色</span>
-            {OVERLAY_COLORS.map((color) => (
-              <button
-                key={color}
-                type="button"
-                className={styleText.color === color ? 'color-dot color-dot--active' : 'color-dot'}
-                style={{ background: color }}
-                title={color}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setOverlayStyle(kind, overlayItem.id, { color })}
-              />
-            ))}
-          </div>
-
-          <div className="side-panel__hint">
-            双击画布上的文字也能直接编辑；选中后按 Delete 删除这个{label}。
-          </div>
-          <div className="side-panel__row">
-            <button
-              type="button"
-              className="btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                remove(overlayItem.id)
-                useEditor.getState().clearOverlaySelection()
-              }}
-            >
-              <X size={14} /> 删除{label}
-            </button>
-          </div>
+  } else if (!topic || !id) {
+    body = (
+      <div className="side-panel__body">
+        <div className="side-panel__empty">
+          请先在画布上选中一个主题，再设置它的标记图标、标签、备注与超链接。
         </div>
       </div>
     )
-  }
-
-  if (!topic || !id) {
-    return (
-      <div className="side-panel">
-        {header}
-        <div className="side-panel__body">
-          <div className="side-panel__empty">
-            请先在画布上选中一个主题，再设置它的标记图标、标签、备注与超链接。
-          </div>
-        </div>
-      </div>
+  } else {
+    body = (
+      <TopicBranch
+        topic={topic}
+        topicId={id}
+        sheet={sheet}
+        labelDraft={labelDraft}
+        setLabelDraft={setLabelDraft}
+        notesDraft={notesDraft}
+        setNotesDraft={setNotesDraft}
+        hrefDraft={hrefDraft}
+        setHrefDraft={setHrefDraft}
+        formulaDraft={formulaDraft}
+        setFormulaDraft={setFormulaDraft}
+        codeDraft={codeDraft}
+        setCodeDraft={setCodeDraft}
+        codeLangDraft={codeLangDraft}
+        setCodeLangDraft={setCodeLangDraft}
+        notesAreaRef={notesAreaRef}
+        formulaAreaRef={formulaAreaRef}
+        codeAreaRef={codeAreaRef}
+        onClose={onClose}
+        onNotify={onNotify}
+      />
     )
   }
-
-  const topicId = id
-
-  const commitNotes = (): void => {
-    if ((topic.notes ?? '') !== notesDraft) setNotes(topicId, notesDraft)
-  }
-
-  const commitHref = (): void => {
-    if ((topic.href ?? '') !== hrefDraft) setHref(topicId, hrefDraft)
-  }
-
-  const handleAddLabel = (): void => {
-    const text = labelDraft.trim()
-    if (text.length === 0) return
-    addLabel(topicId, text)
-    setLabelDraft('')
-  }
-
-  const openHref = async (): Promise<void> => {
-    if (!topic.href) return
-    try {
-      const ok = await window.api.openExternal(topic.href)
-      if (!ok) onNotify('这个链接不是 http/https/mailto，无法用系统程序打开')
-    } catch (error) {
-      onNotify(`打开链接失败：${(error as Error).message}`)
-    }
-  }
-
-  const commitFormula = (): void => {
-    // 支持 Markdown / LaTeX 各种数学写法：$x^2$、$$x^2$$、\(x^2\)、\[x^2\] 都剥成纯 LaTeX
-    const next = normalizeFormulaInput(formulaDraft)
-    if (next !== formulaDraft) setFormulaDraft(next)
-    if ((topic.formula ?? '') !== next) setFormula(topicId, next)
-  }
-
-  const commitCode = (): void => {
-    const text = codeDraft.replace(/\s+$/, '')
-    const language = codeLangDraft
-    if ((topic.code?.text ?? '') === text && (topic.code?.language ?? 'text') === language) return
-    setCode(topicId, text.length === 0 && language === 'text' ? null : { language, text })
-  }
-
-  const insertImage = async (): Promise<void> => {
-    try {
-      const picked = await window.api.pickImage(activeDocId())
-      if (!picked) return
-      setImage(topicId, { path: picked.path, width: picked.width, height: picked.height })
-      onNotify(
-        picked.width > 0
-          ? `已插入图片 ${picked.name}（${picked.width}×${picked.height}）`
-          : `已插入图片 ${picked.name}（未取到像素尺寸，按默认大小显示）`
-      )
-    } catch (error) {
-      onNotify(`插入图片失败：${(error as Error).message}`)
-    }
-  }
-
-  const attachFile = async (): Promise<void> => {
-    try {
-      const picked = await window.api.pickAttachment(activeDocId())
-      if (!picked) return
-      addAttachment(topicId, picked)
-      onNotify(`已添加附件 ${picked.name}，保存时会打包进 .xmind`)
-    } catch (error) {
-      onNotify(`添加附件失败：${(error as Error).message}`)
-    }
-  }
-
-  const openAttachment = async (path: string, name: string): Promise<void> => {
-    try {
-      const ok = await window.api.openAttachment(path, name)
-      if (!ok) onNotify('打不开这个附件：它可能只是文件里的记录，内容已经丢失')
-    } catch (error) {
-      onNotify(`打开附件失败：${(error as Error).message}`)
-    }
-  }
-
-  const exportAttachment = async (path: string, name: string): Promise<void> => {
-    try {
-      const ok = await window.api.saveAttachmentAs(path, name)
-      if (ok) onNotify('附件已导出')
-    } catch (error) {
-      onNotify(`导出附件失败：${(error as Error).message}`)
-    }
-  }
-
-  /**
-   * 画布元素的一行。
-   * 标题用「非受控输入 + 失焦提交」：既不会被中文输入法打断，
-   * 也不会每敲一个字就写一条撤销记录。
-   * key 里带上已保存的标题，撤销/重做后能自动同步显示。
-   */
-  const overlayRow = (
-    kind: string,
-    items: Array<{ id: string; title: string | undefined }>,
-    setTitle: (id: string, title: string) => void,
-    remove: (id: string) => void,
-    multiline = false
-  ): ReactElement[] =>
-    items.map((item) => (
-      <div key={`${kind}-${item.id}`} className="overlay-row">
-        <span className="overlay-row__tag">{kind}</span>
-        {multiline ? (
-          <textarea
-            key={`${item.id}-${item.title ?? ''}`}
-            className="input input--mini overlay-row__multi"
-            rows={2}
-            defaultValue={item.title ?? ''}
-            placeholder="标题（可留空，Enter 换行）"
-            onBlur={(event) => setTitle(item.id, event.currentTarget.value)}
-          />
-        ) : (
-          <input
-            key={`${item.id}-${item.title ?? ''}`}
-            className="input input--mini"
-            defaultValue={item.title ?? ''}
-            placeholder="标题（可留空）"
-            onBlur={(event) => setTitle(item.id, event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur()
-            }}
-          />
-        )}
-        <button
-          type="button"
-          className="chip__del"
-          title={`移除这条${kind}`}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => remove(item.id)}
-        >
-          <X size={10} />
-        </button>
-      </div>
-    ))
 
   return (
     <div className="side-panel">
-      {header}
-
-      <div className="side-panel__body">
-        <div className="side-panel__title">当前主题</div>
-        <div className="node-preview" title={topic.title}>
-          {topic.title || '（空标题）'}
-        </div>
-
-        <div className="side-panel__title">标记图标</div>
-
-        {/* 已添加的标记（包含文件里带来、本软件不认识的标记，这里可以移除） */}
-        {topic.markers.length > 0 ? (
-          <div className="chip-row">
-            {topic.markers.map((marker) => (
-              <span key={`on-${marker.markerId}`} className="chip">
-                <MarkerIcon markerId={marker.markerId} size={14} />
-                <span className="chip__text">{markerVisualOf(marker.markerId).label}</span>
-                <button
-                  type="button"
-                  className="chip__del"
-                  title="移除此标记"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => toggleMarker(topicId, marker.markerId)}
-                >
-                  <X size={10} />
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <div className="side-panel__hint">还没有标记。点击下面的图标即可添加。</div>
-        )}
-
-        {MARKER_GROUPS.map((group) => (
-          <div key={group.title} className="marker-row">
-            <span className="marker-row__label">{group.title}</span>
-            <div className="marker-picker">
-              {group.markers.map((markerId) => {
-                const active = topic.markers.some((marker) => marker.markerId === markerId)
-                return (
-                  <button
-                    key={markerId}
-                    type="button"
-                    className={active ? 'marker-btn marker-btn--active' : 'marker-btn'}
-                    title={markerVisualOf(markerId).label}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => toggleMarker(topicId, markerId)}
-                  >
-                    <MarkerIcon markerId={markerId} />
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        ))}
-
-        <div className="side-panel__title">标签</div>
-        {topic.labels.length > 0 && (
-          <div className="chip-row">
-            {topic.labels.map((label) => (
-              <span key={`label-${label}`} className="chip">
-                <span className="chip__text">{label}</span>
-                <button
-                  type="button"
-                  className="chip__del"
-                  title="移除标签"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => removeLabel(topicId, label)}
-                >
-                  <X size={10} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="side-panel__row">
-          <input
-            className="input"
-            placeholder="输入标签后回车"
-            value={labelDraft}
-            onChange={(event) => setLabelDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') handleAddLabel()
-            }}
-          />
-          <button
-            type="button"
-            className="btn btn--primary"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={handleAddLabel}
-          >
-            <Plus size={14} />
-            添加
-          </button>
-        </div>
-
-        <div className="side-panel__title">备注</div>
-        <textarea
-          ref={notesAreaRef}
-          className="input input--area"
-          rows={5}
-          placeholder="记录这个主题的详细说明（点别处或离开输入框时保存）"
-          value={notesDraft}
-          onChange={(event) => setNotesDraft(event.target.value)}
-          onBlur={commitNotes}
-        />
-
-        <div className="side-panel__title">超链接</div>
-        <div className="side-panel__row">
-          <input
-            className="input"
-            placeholder="https://example.com"
-            value={hrefDraft}
-            onChange={(event) => setHrefDraft(event.target.value)}
-            onBlur={commitHref}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') commitHref()
-            }}
-          />
-          <button
-            type="button"
-            className="btn"
-            disabled={!topic.href}
-            title={topic.href ? '用系统浏览器打开' : '先填写链接'}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void openHref()}
-          >
-            <ExternalLink size={14} />
-            打开
-          </button>
-        </div>
-
-        <div className="side-panel__title">节点内图片</div>
-        {topic.image ? (
-          <div className="image-row">
-            <img
-              className="image-row__thumb"
-              src={resourceUrl(topic.image.path)}
-              alt=""
-              style={{ width: 64, height: 48 }}
-            />
-            <div className="image-row__meta">
-              <div className="image-row__name" title={topic.image.path}>
-                {topic.image.path.split('/').pop()}
-              </div>
-              <div className="side-panel__hint">
-                {topic.image.width && topic.image.height
-                  ? `${topic.image.width}×${topic.image.height}`
-                  : '尺寸未知'}
-                {' · 显示 '}
-                {imageBoxSize(topic.image).width}×{imageBoxSize(topic.image).height}
-              </div>
-              <div className="side-panel__row">
-                <button
-                  type="button"
-                  className="btn"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => void insertImage()}
-                >
-                  <ImageIcon size={14} />
-                  更换
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setImage(topicId, null)}
-                >
-                  <X size={14} />
-                  移除
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="side-panel__row">
-            <button
-              type="button"
-              className="btn btn--primary"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => void insertImage()}
-            >
-              <ImageIcon size={14} />
-              插入图片…
-            </button>
-          </div>
-        )}
-
-        <div className="side-panel__title">附件</div>
-        {topic.attachments.length > 0 && (
-          <div className="attachment-list">
-            {topic.attachments.map((item) => (
-              <div key={item.id} className="attachment-row">
-                <Paperclip size={13} />
-                <span className="attachment-row__name" title={item.name}>
-                  {item.name}
-                </span>
-                <span className="attachment-row__size">{formatSize(item.size)}</span>
-                <button
-                  type="button"
-                  className="chip__del"
-                  title="用系统默认程序打开"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => void openAttachment(item.path, item.name)}
-                >
-                  <FolderOpen size={12} />
-                </button>
-                <button
-                  type="button"
-                  className="chip__del"
-                  title="导出到其他位置"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => void exportAttachment(item.path, item.name)}
-                >
-                  <Download size={12} />
-                </button>
-                <button
-                  type="button"
-                  className="chip__del"
-                  title="移除附件"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => removeAttachment(topicId, item.id)}
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="side-panel__row">
-          <button
-            type="button"
-            className="btn"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void attachFile()}
-          >
-            <Paperclip size={14} />
-            添加附件…
-          </button>
-        </div>
-
-        <div className="side-panel__title">LaTeX 公式</div>
-        <textarea
-          ref={formulaAreaRef}
-          className="input input--area input--mono"
-          rows={3}
-          placeholder="例如 \frac{a}{b}、\sqrt{x^2+y^2}；也支持 Markdown 写法 $x^2$ / $$E=mc^2$$"
-          value={formulaDraft}
-          onChange={(event) => setFormulaDraft(event.target.value)}
-          onBlur={commitFormula}
-        />
-        <div className="formula-preview-row">
-          <span className="formula-preview__label">
-            <Sigma size={13} /> 预览
-          </span>
-          {formulaDraft.trim().length > 0 ? (
-            <div
-              className="formula-preview"
-              // KaTeX 的输出由渲染器生成，不是用户 HTML
-              dangerouslySetInnerHTML={{ __html: formulaHtml(formulaDraft.trim()) }}
-            />
-          ) : (
-            <span className="side-panel__hint">输入公式后这里会实时预览，离开输入框即保存</span>
-          )}
-        </div>
-        {topic.formula && (
-          <div className="side-panel__row">
-            <button
-              type="button"
-              className="btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                setFormulaDraft('')
-                setFormula(topicId, '')
-              }}
-            >
-              <X size={14} />
-              移除公式
-            </button>
-          </div>
-        )}
-
-        {topic.sizeOverride && (
-          <>
-            <div className="side-panel__title">尺寸</div>
-            <div className="side-panel__row">
-              <span className="side-panel__hint">
-                已手动拉伸为 {topic.sizeOverride.width} × {topic.sizeOverride.height}
-              </span>
-              <button
-                type="button"
-                className="btn"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setSizeOverride(topicId, null)}
-              >
-                <X size={14} />
-                恢复自动尺寸
-              </button>
-            </div>
-          </>
-        )}
-
-        <div className="side-panel__title">
-          <Code2 size={13} /> 代码块
-        </div>
-        <div className="side-panel__row">
-          <select
-            className="select"
-            value={codeLangDraft}
-            onChange={(event) => {
-              setCodeLangDraft(event.target.value)
-              setCode(topicId, { language: event.target.value, text: codeDraft })
-            }}
-          >
-            {CODE_LANGUAGES.map((lang) => (
-              <option key={lang} value={lang}>
-                {lang === 'text' ? '纯文本' : lang}
-              </option>
-            ))}
-          </select>
-        </div>
-        <textarea
-          ref={codeAreaRef}
-          className="input input--area input--mono"
-          rows={6}
-          placeholder={'粘贴或输入代码，例如：\nconst sum = (a, b) => a + b'}
-          value={codeDraft}
-          onChange={(event) => setCodeDraft(event.target.value)}
-          onBlur={commitCode}
-        />
-        <div className="side-panel__hint">
-          离开输入框即保存；节点里会按等宽字体排版，超出部分可滚动
-        </div>
-        {(topic.code || codeDraft.length > 0) && (
-          <div className="side-panel__row">
-            <button
-              type="button"
-              className="btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                setCodeDraft('')
-                setCodeLangDraft(defaultCodeLanguage())
-                setCode(topicId, null)
-              }}
-            >
-              <X size={14} />
-              移除代码块
-            </button>
-          </div>
-        )}
-
-        <div className="side-panel__title">画布元素</div>
-        <div className="side-panel__hint">
-          新建请用<b>工具栏</b>上的「关系线 / 概要 / 边界」：
-          <br />
-          关系线需按住 <b>Ctrl</b> 选中两个主题；概要 / 边界需选中若干个<b>同级</b>主题。
-          <br />
-          <b>双击画布上的标题</b>可直接改文字；关系线拖动<b>两端圆点</b>改接、拖动<b>线身</b>移动。
-        </div>
-
-        {overlayRow(
-          '关系线',
-          sheet.relationships.map((item) => ({ id: item.id, title: item.title })),
-          setRelationshipTitle,
-          removeRelationship,
-          // 关系线标题也要能手动换行（与概要一致），否则画布上排不了两行
-          true
-        )}
-        {overlayRow(
-          '边界',
-          sheet.boundaries.map((item) => ({ id: item.id, title: item.title })),
-          setBoundaryTitle,
-          removeBoundary,
-          true
-        )}
-        {overlayRow(
-          '概要',
-          sheet.summaries.map((item) => ({ id: item.id, title: item.title })),
-          setSummaryTitle,
-          removeSummary,
-          true
-        )}
-      </div>
+      <PanelHeader onClose={onClose} />
+      {body}
     </div>
   )
 }
