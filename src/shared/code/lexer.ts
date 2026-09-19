@@ -485,9 +485,24 @@ export function scanCssLine(line: string): CodeToken[] {
       continue
     }
     if (ch === '"' || ch === "'") {
-      const end = line.indexOf(ch, i + 1)
-      push(line.slice(i, end < 0 ? line.length : end + 1), 'string')
-      i = end < 0 ? line.length : end + 1
+      /**
+       * 转义必须认：`content: "a\"b"` 里的 `\"` 不是字符串结尾。
+       * 以前这里只用 `indexOf` 找下一个同类引号——字符串被**腰斩**在转义引号处，
+       * 后半截跟着串色（同族的 data / markup 扫描器都做了转义处理，只有 CSS 这份漏了）。
+       */
+      let j = i + 1
+      while (j < line.length) {
+        const cur = line[j] ?? ''
+        if (cur === '\\') {
+          j += 2
+          continue
+        }
+        j += 1
+        if (cur === ch) break
+      }
+      const end = Math.min(j, line.length)
+      push(line.slice(i, end), 'string')
+      i = end
       continue
     }
     if (ch === '!') {

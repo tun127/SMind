@@ -74,21 +74,42 @@ export type AiStreamEvent =
  * 网络包会在**任意位置**断开——一行 `data: {...}` 很可能分两次到达，
  * 所以必须留缓冲：只吐出确定完整的行，半截的留在缓冲里等下一包。
  * 这是流式解析唯一容易写错的地方。
+ *
+ * **还必须能收尾**：缓冲里那一截"没有换行结尾的最后一个 data 行"要等 `flush()`
+ * 才能吐出。有些服务商的流结尾不带换行，以前没有 flush，最后一段正文就此丢掉
+ * （表现是"回答末尾少了一截"，而且极难复现）。
  */
-export function createSseLineSplitter(): (chunk: string) => string[] {
+export interface SseLineSplitter {
+  (chunk: string): string[]
+  /** 流结束时调用：把缓冲里剩下的最后一行也交出来 */
+  flush(): string[]
+}
+
+export function createSseLineSplitter(): SseLineSplitter {
   let buffer = ''
-  return (chunk: string): string[] => {
-    buffer += chunk
+  const drain = (final: boolean): string[] => {
     const out: string[] = []
+    const take = (line: string): void => {
+      if (line.startsWith('data:')) out.push(line.slice(5).trim())
+    }
     let index = buffer.indexOf('\n')
     while (index >= 0) {
-      const line = buffer.slice(0, index).replace(/\r$/, '')
+      take(buffer.slice(0, index).replace(/\r$/, ''))
       buffer = buffer.slice(index + 1)
-      if (line.startsWith('data:')) out.push(line.slice(5).trim())
       index = buffer.indexOf('\n')
+    }
+    if (final && buffer.length > 0) {
+      take(buffer.replace(/\r$/, ''))
+      buffer = ''
     }
     return out
   }
+  const splitter = ((chunk: string): string[] => {
+    buffer += chunk
+    return drain(false)
+  }) as SseLineSplitter
+  splitter.flush = (): string[] => drain(true)
+  return splitter
 }
 
 /** 一次请求的 token 消耗（服务商回报；拿不到就不显示，**不要估**——估了就是编数字） */

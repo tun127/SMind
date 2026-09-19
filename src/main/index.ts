@@ -630,19 +630,20 @@ async function callAiStream(
       if (repetition(text)) degenerated = true
       push({ requestId, kind: 'chunk', text })
     }
+    const handleLine = (line: string): void => {
+      const delta = extractStreamDelta(line)
+      if (!delta) return
+      if (delta.model) model = delta.model
+      if (delta.usage) usage = delta.usage
+      // 结束原因要留住：`length` 意味着这次输出被服务商的输出上限掐断了
+      if (delta.finishReason) finishReason = delta.finishReason
+      // 工具调用的参数是**逐片追加**的字符串，必须按 index 累积（见 accumulateToolCalls）
+      if (delta.toolCalls.length > 0) toolCalls = accumulateToolCalls(toolCalls, delta.toolCalls)
+      if (delta.reasoning.length > 0) emitReasoning(delta.reasoning)
+      emit(think.push(delta.text))
+    }
     const feed = (piece: string): void => {
-      for (const line of splitter(piece)) {
-        const delta = extractStreamDelta(line)
-        if (!delta) continue
-        if (delta.model) model = delta.model
-        if (delta.usage) usage = delta.usage
-        // 结束原因要留住：`length` 意味着这次输出被服务商的输出上限掐断了
-        if (delta.finishReason) finishReason = delta.finishReason
-        // 工具调用的参数是**逐片追加**的字符串，必须按 index 累积（见 accumulateToolCalls）
-        if (delta.toolCalls.length > 0) toolCalls = accumulateToolCalls(toolCalls, delta.toolCalls)
-        if (delta.reasoning.length > 0) emitReasoning(delta.reasoning)
-        emit(think.push(delta.text))
-      }
+      for (const line of splitter(piece)) handleLine(line)
     }
 
     const reader = response.body.getReader()
@@ -656,6 +657,12 @@ async function callAiStream(
     }
     // 收尾：解码器里可能还压着没有换行的最后一行
     feed(decoder.decode())
+    /**
+     * 还要冲**分割器**的缓冲：有些服务商的流结尾不带换行，
+     * 最后那个 `data:` 行会一直躺在缓冲里——以前没有这一步，
+     * 用户看到的就是"回答末尾少了一截"（正文最后一段整段丢失）。
+     */
+    for (const line of splitter.flush()) handleLine(line)
     // 过滤器里可能留着「像标签前缀其实是正文」的尾巴
     emit(think.flush())
 

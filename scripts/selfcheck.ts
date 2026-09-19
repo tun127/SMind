@@ -2631,6 +2631,14 @@ function testAiChatHelpers(): void {
   eq('一包里多行一次吐完', json(splitter('data: 1\ndata: 2\n')), json(['1', '2']))
   eq('CRLF 也能吃', json(splitter('data: 3\r\n')), json(['3']))
   eq('非 data 行被忽略', json(splitter('event: ping\n:注释\n')), json([]))
+  /**
+   * 冲刷：有些服务商的流结尾**不带换行**，最后那个 `data:` 行会一直躺在缓冲里。
+   * 以前没有 flush，用户看到的是"回答末尾少了一截"——正文最后一段整段丢掉。
+   */
+  eq('末尾不带换行的最后一行：flush 才交出来', json(splitter('data: 末尾')), json([]))
+  eq('flush 交出它', json(splitter.flush()), json(['末尾']))
+  eq('flush 是幂等的（第二次没东西可交）', json(splitter.flush()), json([]))
+  eq('空缓冲 flush 不报错也不吐东西', json(createSseLineSplitter().flush()), json([]))
 
   const chunk = '{"model":"m1","choices":[{"delta":{"content":"你好"}}]}'
   eq('取增量文本', extractStreamDelta(chunk)?.text, '你好')
@@ -7843,6 +7851,25 @@ async function testMediaElements(): Promise<void> {
     )
   )
   check('空行不产生 token', highlightCode('a\n\nb', 'javascript')[1].tokens.length === 0)
+
+  /**
+   * CSS 字符串里的**转义**：`content: "a\"b"` 的 `\"` 不是字符串结尾。
+   * 以前 CSS 扫描器只用 `indexOf` 找下一个同类引号，字符串被腰斩在转义引号处，
+   * 后半截跟着串色（同族的 data / markup 扫描器都认转义，只有这份漏了）。
+   * 顺带钉住"token 首尾相接、原样覆盖整行"这条不变量——串色一旦发生它就会破。
+   */
+  {
+    const cssLine = 'content: "a\\"b"; color: red'
+    const tokens = highlightCode(cssLine, 'css')[0]?.tokens ?? []
+    const strings = tokens.filter((token) => token.kind === 'string').map((token) => token.text)
+    eq('转义引号不断串：整段算一个字符串', strings.length, 1)
+    eq('字符串内容完整', strings[0], '"a\\"b"')
+    eq(
+      'token 首尾相接、覆盖整行（串色的报警器）',
+      tokens.map((token) => token.text).join(''),
+      cssLine
+    )
+  }
 
   group('标签：过长按测量宽度截断（不切半个字）')
 
