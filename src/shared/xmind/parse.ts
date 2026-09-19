@@ -16,6 +16,7 @@ import {
 } from '../model/types'
 import { createId } from '../model/factory'
 import { coerceCode, coerceRichText } from '../model/coerce'
+import { LEGACY_ATTACHMENTS_DIR } from '../model/resources'
 import { normalizeThemeColors } from '../theme'
 import { STRUCTURES, THEME_NAMESPACE, XMIND_FILES } from './constants'
 import { buildEmmxWorkbook, extractEmmxTexts, parseEmmxDocument, EMMX_PAGE_FILE } from './emmx'
@@ -401,7 +402,9 @@ async function readResources(zip: JSZip): Promise<Record<string, Uint8Array>> {
   const resources: Record<string, Uint8Array> = {}
   for (const [name, file] of Object.entries(zip.files)) {
     if (file.dir) continue
-    if (!name.startsWith(XMIND_FILES.resourcesDir) && !name.startsWith('attachments/')) continue
+    if (!name.startsWith(XMIND_FILES.resourcesDir) && !name.startsWith(LEGACY_ATTACHMENTS_DIR)) {
+      continue
+    }
     resources[name] = await file.async('uint8array')
   }
   return resources

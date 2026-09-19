@@ -7,8 +7,15 @@
 
 import type { Topic, Workbook } from './types'
 
-/** resources/ 前缀（与 .xmind 包内路径一致） */
-const RESOURCES_DIR = 'resources/'
+/**
+ * 包内资源目录前缀：**唯一来源**。
+ *
+ * 现役写法是 `resources/`；旧版（Xmind 8 / 亿图）的包里写作 `attachments/`——
+ * 两个都要认，所以别再在别处各写一份字面量（`xmind/constants.ts` 的
+ * `XMIND_FILES.resourcesDir` 由这里派生，`xmind/parse.ts` 读包时两个前缀都收）。
+ */
+export const RESOURCES_DIR = 'resources/'
+export const LEGACY_ATTACHMENTS_DIR = 'attachments/'
 
 /** 收集工作簿里被引用的资源路径（图片 + 附件） */
 export function collectResourceRefs(workbook: Workbook): Set<string> {

@@ -4,6 +4,7 @@
  */
 
 import type { StructureClass } from '../model/types'
+import { RESOURCES_DIR } from '../model/resources'
 
 /** 分支整体展开的方向（中心主题折叠后看不见子节点，靠它给徽标定位） */
 export type StructureGrowth = 'left' | 'right' | 'up' | 'down'
@@ -308,5 +309,5 @@ export const XMIND_FILES = {
   manifest: 'manifest.json',
   legacyContent: 'content.xml',
   thumbnail: 'Thumbnails/thumbnail.png',
-  resourcesDir: 'resources/'
+  resourcesDir: RESOURCES_DIR
 } as const
