@@ -1,16 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { createLayoutCache, layoutSheetCached } from '@shared/layout'
-import type { LayoutResult } from '@shared/layout/types'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import type { Topic } from '@shared/model/types'
-import { activeRoot, activeSheet, countTopics } from '@shared/model/tree'
+import { activeRoot } from '@shared/model/tree'
 import type { DragMove } from '@shared/model/dragmove'
-import { measureTopic, bumpMeasureEpoch } from '../render/measure'
-import { beginCost, count, isDiagArmed, mark, setStage } from '../dev/stage'
+import { count } from '../dev/stage'
 import { usePacedWorkbook } from '../hooks/usePacedWorkbook'
-import { clearFormulaCache } from '../render/formula'
-import { branchColorOf } from '../render/theme'
 import { attrTranslate, cssTranslate } from '../render/transform'
-import { themeColorsOf, useEditor } from '../store/editor'
+import { useEditor } from '../store/editor'
 import { useCanvasGeometry } from './canvas/use-canvas-geometry'
 import { useCanvasViewport } from './canvas/use-canvas-viewport'
 import { useFlashNodes } from './canvas/use-flash-nodes'
@@ -22,6 +17,7 @@ import { useRelationshipDrag } from './canvas/use-relationship-drag'
 import { useTitleEdit } from './canvas/use-title-edit'
 import { useNodeDrag } from './canvas/use-node-drag'
 import { useCanvasDisplay } from './canvas/use-canvas-display'
+import { useCanvasLayout } from './canvas/use-canvas-layout'
 import { CanvasEdgesLayer } from './canvas/canvas-edges-layer'
 import { CanvasNodesLayer } from './canvas/canvas-nodes-layer'
 import { CanvasHints } from './canvas/canvas-hints'
@@ -35,7 +31,6 @@ export default function Canvas(): ReactElement {
   count('画布渲染')
 
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const [size, setSize] = useState({ width: 0, height: 0 })
 
   /* ---- 闪一下：状态、定时器与清理 effect 整块搬进 canvas/use-flash-nodes.ts ---- */
   const { flashIds, flashNodes } = useFlashNodes()
@@ -100,139 +95,15 @@ export default function Canvas(): ReactElement {
   const nodePointerHeldRef = useRef(false)
 
   /* ---- 布局计算 ---- */
-  /**
-   * 字体（含 KaTeX 的数学字体）加载完成后，公式的真实宽度才稳定。
-   * 这里用它触发一次重新测量与布局，避免首次打开时公式框尺寸偏小。
-   */
-  const [fontEpoch, setFontEpoch] = useState(0)
-
-  useEffect(() => {
-    let cancelled = false
-    const fonts = typeof document !== 'undefined' ? document.fonts : undefined
-    if (!fonts) return
-    void fonts.ready.then(() => {
-      if (cancelled) return
-      setStage('字体就绪后重算')
-      // 两处缓存都要失效：公式尺寸缓存 + 节点测量缓存（后者里存着 formulaBox）
-      clearFormulaCache()
-      bumpMeasureEpoch()
-      setFontEpoch((n) => n + 1)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const renderEpoch = useEditor((s) => s.renderEpoch)
-
-  /**
-   * 布局缓存（跨渲染保留）。
-   *
-   * 有了它，这一格的代价就从「每次击键整图重排」变成「只重算真的变了的那一支」
-   * （见 `@shared/layout/incremental.ts`）：输入没变时直接还上一轮的对象，
-   * 只有编辑中的节点换了文字、尺寸没变时就只换那一个节点。
-   */
-  const layoutCacheRef = useRef(createLayoutCache())
-
-  const layout: LayoutResult = useMemo(() => {
-    // 注意用 layoutWorkbook（节流后）：AI 一挥而就的几十次写入不必次次整图重排
-    const root = activeRoot(layoutWorkbook)
-    const sheet = activeSheet(layoutWorkbook)
-    // 正在编辑的节点用「未提交的内容」参与测量，做到边打字边自适应尺寸
-    const measure = (topic: Topic, depth: number): ReturnType<typeof measureTopic> =>
-      topic.id === editingId && editingRich
-        ? measureTopic({ ...topic, title: editingText, titleRich: editingRich }, depth)
-        : measureTopic(topic, depth)
-    // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
-    count('画布布局')
-    setStage('画布布局')
-    // 进这一阶段先落一行：布局是「写完之后的提交/排版」里最重的一步，
-    // 真卡死时最后一条就是它，且带上节点数（内容依赖型问题一眼能看出来）
-    const endLayout = beginCost('画布布局', isDiagArmed() ? `节点 ${countTopics(root)}` : '')
-    /**
-     * 编辑态的节点要显式当"脏"传进去：它的文字还没提交，工作簿里的对象没变，
-     * 靠引用比较看不出来（宽度却在每个键上都变）。
-     */
-    const computed = layoutSheetCached(
-      root,
-      measure,
-      {},
-      sheet,
-      layoutCacheRef.current,
-      `${fontEpoch}:${renderEpoch}`,
-      editingId ? [editingId] : []
-    )
-    endLayout()
-    setStage('画布布局完成')
-    return computed
-  }, [layoutWorkbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
-
-  /**
-   * 渲染提交（DOM 落定）后的界标，与「进入 画布布局」配对。
-   *
-   * 卡死时最后一条日志落在哪一边，就直接指认了性质：
-   * 「进入 画布布局」→ 卡在计算；「画布提交完成」→ 卡在 DOM 提交（例如 token span 爆炸）。
-   */
-  useEffect(() => {
-    mark('画布提交完成', `节点 ${layout.nodes.length}`)
-  }, [layout])
-
-  const layoutRef = useRef<LayoutResult>(layout)
-  layoutRef.current = layout
-
-  /**
-   * 吸附用的候选节点表：每帧都要扫一遍，所以按布局算一次就够。
-   * 带上 `depth`：距离相同时优先落进更深的节点（和成熟实现一致，见 `nearestInRegion`）。
-   */
-  const dropCandidates = useMemo(
-    () => layout.nodes.map((node) => ({ id: node.id, rect: node, depth: node.depth })),
-    [layout]
-  )
-
-  /** 当前画布生效的主题配色 */
-  const colors = useMemo(() => themeColorsOf(workbook), [workbook])
-
-  /**
-   * 边界按颜色分组：同色的多个边界拼成一条 path 一次性填充。
-   * 这样即使两个边界区域重叠，也不会因为半透明填充叠加而显得颜色更深。
-   */
-  const boundaryGroups = useMemo(() => {
-    const groups = new Map<string, { d: string; titles: typeof layout.boundaries }>()
-    for (const boundary of layout.boundaries) {
-      const color = boundary.branchId
-        ? branchColorOf(colors, layout, boundary.branchId)
-        : colors.deepText
-      const entry = groups.get(color) ?? { d: '', titles: [] }
-      entry.d = entry.d.length > 0 ? `${entry.d} ${boundary.d}` : boundary.d
-      entry.titles.push(boundary)
-      groups.set(color, entry)
-    }
-    return Array.from(groups.entries()).map(([color, entry]) => ({ color, ...entry }))
-  }, [layout, colors])
-
-  /* ---- 容器尺寸 ---- */
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    /**
-     * 尺寸**真的变了**才写进状态。
-     *
-     * 以前无条件 `setSize({ width, height })`：每次都是新对象 → React 必然重渲染 →
-     * 重渲染又可能让被观察的容器尺寸抖动一个像素 → 观察器再触发……一旦勾上就是**自激循环**，
-     * 主线程被烧满、窗口连关闭都点不动（日志里的连续 `unresponsive` 就是这么来的）。
-     * 尺寸没变时返回原对象，React 会直接跳过这次更新，环就断了。
-     */
-    const update = (): void => {
-      count('容器尺寸回调')
-      const width = el.clientWidth
-      const height = el.clientHeight
-      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }))
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  /* ---- 布局与测量：整块搬进 canvas/use-canvas-layout.ts（三条 effect 的次序不变） ---- */
+  const { layout, layoutRef, dropCandidates, colors, boundaryGroups, size } = useCanvasLayout({
+    containerRef,
+    workbook,
+    layoutWorkbook,
+    editingId,
+    editingText,
+    editingRich
+  })
 
   /**
    * 用户「接管视角」的次数（滚轮、拖拽平移、缩放都算）。
