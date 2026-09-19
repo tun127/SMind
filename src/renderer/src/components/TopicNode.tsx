@@ -1,7 +1,6 @@
 import { memo, useMemo, useState, type CSSProperties, type ReactElement } from 'react'
 import { collapseBadgeSide } from '@shared/layout/core'
 import {
-  BLOCK_GAP,
   MARKER_MAX_COLUMNS,
   MARKER_PER_COLUMN,
   codeBlockMetrics,
@@ -10,7 +9,6 @@ import {
   imageBoxSize
 } from '@shared/layout/accessory'
 import { nodePaddingOf } from '../render/measure'
-import { CODE_LANGUAGES } from '@shared/code-language'
 import { FOLD_SIDE_LABELS } from '@shared/model/fold-labels'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
 import {
@@ -19,11 +17,9 @@ import {
   hiddenCountOfSide,
   splitFoldSidesOf
 } from '@shared/model/tree'
-import { useEditor } from '../store/editor'
 import { count, isDiagArmed, noteAmount } from '../dev/stage'
 import { richFromPlain } from '@shared/richtext'
-import { formulaHtml, formulaSize } from '../render/formula'
-import { resourceUrl } from '../render/resource'
+import { formulaSize } from '../render/formula'
 import { branchColorOf, visualFor } from '../render/theme'
 import RichTextEditor from './RichTextEditor'
 
@@ -33,6 +29,10 @@ import { TopicMarkersStrip } from './topic/markers'
 import { TopicAccessoryRow } from './topic/accessories'
 import { TopicTextLines } from './topic/text-lines'
 import { TopicLabelRow } from './topic/label-row'
+import { TopicImageBlock } from './topic/image-block'
+import { TopicFormulaBlock } from './topic/formula-block'
+import { TopicCodeBlock } from './topic/code-block'
+import { TopicResizeHandle } from './topic/resize-handle'
 export type { TopicNodeProps } from './topic/props'
 
 function TopicNodeInner({
@@ -264,125 +264,33 @@ function TopicNodeInner({
           </div>
         )}
 
-        {/* 节点内图片：显示框尺寸来自布局测量结果，保证「测量=显示」 */}
-        {image && imageBox && (
-          <div className="topic__image" style={{ marginTop: BLOCK_GAP }}>
-            {imageFailed ? (
-              <div
-                className="topic__image-missing"
-                style={{ width: imageBox.width, height: imageBox.height }}
-                title={`图片资源缺失：${image.path}`}
-              >
-                图片缺失
-              </div>
-            ) : (
-              <img
-                src={resourceUrl(image.path)}
-                alt=""
-                draggable={false}
-                width={imageBox.width}
-                height={imageBox.height}
-                style={{ width: imageBox.width, height: imageBox.height }}
-                onError={() => setFailedImagePath(image.path)}
-              />
-            )}
-          </div>
-        )}
+        <TopicImageBlock
+          image={image}
+          imageBox={imageBox}
+          imageFailed={imageFailed}
+          setFailedImagePath={setFailedImagePath}
+        />
 
-        {/* LaTeX 公式：KaTeX 渲染成 HTML，直接内嵌在节点里 */}
-        {formula && formulaBox && (
-          <div
-            className="topic__formula"
-            style={{
-              width: formulaBox.width,
-              height: formulaBox.height,
-              marginTop: BLOCK_GAP,
-              fontSize: node.fontSize
-            }}
-            // KaTeX 的输出是我们自己生成的 HTML，不来自用户输入的原样注入
-            dangerouslySetInnerHTML={{ __html: formulaHtml(formula) }}
-          />
-        )}
+        <TopicFormulaBlock node={node} formula={formula} formulaBox={formulaBox} />
 
-        {/* 代码块：等宽排版，尺寸与字号都来自测量（节点被拉伸时一起等比缩放）；语言小标可直接切换 */}
-        {code && codeMetrics && codeBox && (
-          <div
-            className="topic__code"
-            style={{ width: codeBox.width, height: codeBox.height, marginTop: BLOCK_GAP }}
-          >
-            <select
-              className="topic__code-lang"
-              value={code.language || 'text'}
-              title="切换代码语言"
-              style={{
-                fontSize: Math.max(8, Math.round(9 * codeMetrics.scale)),
-                lineHeight: `${codeMetrics.header}px`
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-              onMouseDown={(event) => event.stopPropagation()}
-              onChange={(event) =>
-                useEditor
-                  .getState()
-                  .setCode(node.id, { language: event.target.value, text: code.text })
-              }
-            >
-              {CODE_LANGUAGES.map((lang) => (
-                <option key={lang} value={lang}>
-                  {lang === 'text' ? 'text' : lang}
-                </option>
-              ))}
-            </select>
-            <pre
-              className="topic__code-pre"
-              style={{
-                fontSize: codeMetrics.fontSize,
-                lineHeight: `${codeMetrics.lineHeight}px`,
-                padding: `${codeMetrics.header}px ${codeMetrics.paddingX}px ${codeMetrics.paddingY}px`
-              }}
-            >
-              {codeLines}
-            </pre>
-          </div>
-        )}
+        <TopicCodeBlock
+          node={node}
+          code={code}
+          codeMetrics={codeMetrics}
+          codeBox={codeBox}
+          codeLines={codeLines}
+        />
 
         <TopicLabelRow node={node} />
       </div>
 
-      {/* 手动拉伸手柄：选中且不在编辑态时出现，拖右下角改尺寸，双击恢复自动尺寸 */}
-      {selected && !editing && (
-        <span
-          className="topic__resize"
-          title="拖动调整节点大小；双击恢复自动尺寸"
-          onPointerDown={(event) => {
-            event.stopPropagation()
-            event.preventDefault()
-            const startX = event.clientX
-            const startY = event.clientY
-            const startWidth = node.width
-            const startHeight = node.height
-            const zoom = useEditor.getState().zoom || 1
-            // 框不能小于内容：代码块缩到缩放下限、公式块整块原子——取两者更大的下限
-            const minWidth = Math.max(60, minNodeWidth)
-            const minHeight = Math.max(28, minNodeHeight)
-            const move = (moveEvent: PointerEvent): void => {
-              useEditor.getState().setSizeOverride(node.id, {
-                width: Math.max(minWidth, startWidth + (moveEvent.clientX - startX) / zoom),
-                height: Math.max(minHeight, startHeight + (moveEvent.clientY - startY) / zoom)
-              })
-            }
-            const up = (): void => {
-              window.removeEventListener('pointermove', move)
-              window.removeEventListener('pointerup', up)
-            }
-            window.addEventListener('pointermove', move)
-            window.addEventListener('pointerup', up)
-          }}
-          onDoubleClick={(event) => {
-            event.stopPropagation()
-            useEditor.getState().setSizeOverride(node.id, null)
-          }}
-        />
-      )}
+      <TopicResizeHandle
+        node={node}
+        selected={selected}
+        editing={editing}
+        minNodeWidth={minNodeWidth}
+        minNodeHeight={minNodeHeight}
+      />
 
       {/* 双向展开的结构：每个方向一根徽标，分别收起（各贴自己那一侧的边） */}
       {splitSides.map((side) => (
