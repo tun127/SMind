@@ -77,7 +77,15 @@ import {
   stampRichDefaults,
   walkStampDefaults
 } from '@shared/model/editor-pure'
-import { navigateTargetOf, resolveKeyMove, selectReducer } from '@shared/model/editor-ops'
+import {
+  clampSizeToContent,
+  navigateTargetOf,
+  normalizeImage,
+  normalizeSizeOverride,
+  resolveKeyMove,
+  selectReducer,
+  selectionAfterDelete
+} from '@shared/model/editor-ops'
 
 /**
  * 公开面：`themeColorsOf` / `overlayToggleOf` 已下沉到 `@shared/model/editor-pure`。
@@ -1084,20 +1092,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     // 落点顺序：原位置**之后**的下一个未删除兄弟 → **之前**的上一个 → 父级。
     const first = targets[0]
     if (!first) return
-    const parent = findParent(root, first)
-    let nextId: string | null = null
-    if (parent) {
-      // 兄弟要按「挂着的 + 自由摆放的」一起算：自由摆放的主题被选中时，
-      // 它不在 parent.children 里，只按 children 算会挑到一个不相干的兄弟
-      const siblings = allChildrenOf(parent)
-      const firstIndex = siblings.findIndex((child) => child.id === first)
-      const after = siblings.slice(firstIndex + 1).find((child) => !targets.includes(child.id))
-      const before = siblings
-        .slice(0, Math.max(firstIndex, 0))
-        .reverse()
-        .find((child) => !targets.includes(child.id))
-      nextId = after?.id ?? before?.id ?? parent.id
-    }
+    const nextIds = selectionAfterDelete(root, first, targets)
 
     get().mutate((draft) => {
       const draftRoot = activeRoot(draft)
@@ -1106,7 +1101,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
       pruneOverlays(activeSheet(draft))
     }, '删除主题')
     set({
-      selection: nextId ? [nextId] : [],
+      selection: nextIds,
       ...NO_EDITING
     })
   },
@@ -1307,10 +1302,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   setSizeOverride: (id, size) => {
-    const next =
-      size && size.width > 0 && size.height > 0
-        ? { width: Math.round(size.width), height: Math.round(size.height) }
-        : null
+    const next = normalizeSizeOverride(size)
     get().mutate(
       (draft) => {
         const root = activeRoot(draft)
@@ -1346,15 +1338,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
             height: box.height + Math.round(fontSize * 1.6) + BLOCK_GAP + padding.y * 2
           })
         }
-        const minWidth = Math.max(0, ...mins.map((item) => item.width))
-        const minHeight = Math.max(0, ...mins.map((item) => item.height))
-        const clamped =
-          minWidth > next.width || minHeight > next.height
-            ? {
-                width: Math.max(next.width, Math.round(minWidth)),
-                height: Math.max(next.height, Math.round(minHeight))
-              }
-            : next
+        const clamped = clampSizeToContent(next, mins)
         if (
           topic.sizeOverride?.width === clamped.width &&
           topic.sizeOverride?.height === clamped.height
@@ -1731,13 +1715,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   setImage: (id, image) => {
     // 拿不到像素尺寸时不要写 0，交给渲染层走「尺寸未知」的兜底框
-    const positive = (value: number | undefined): number | undefined =>
-      typeof value === 'number' && Number.isFinite(value) && value > 0
-        ? Math.round(value)
-        : undefined
-    const next: TopicImage | null = image
-      ? { path: image.path, width: positive(image.width), height: positive(image.height) }
-      : null
+    const next = normalizeImage(image)
 
     get().mutate(
       (draft) => {

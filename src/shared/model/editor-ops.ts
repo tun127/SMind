@@ -18,8 +18,9 @@
  * 所以外部文件一行都不用改。
  */
 
-import { findParent, findTopic } from './tree'
-import type { Topic } from './types'
+import type { Size } from '../layout/types'
+import { allChildrenOf, findParent, findTopic } from './tree'
+import type { Topic, TopicImage } from './types'
 
 /* ------------------------------------------------------------------ */
 /* 选择与键盘                                                          */
@@ -115,4 +116,78 @@ export function navigateTargetOf(
     if (next) return next.id
   }
   return null
+}
+
+/* ------------------------------------------------------------------ */
+/* 结构操作：删除之后的**选择落点**                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 删除主题之后选择落到哪个主题上。
+ *
+ * 删完必须把选择落到一个**还存在**的主题上：否则选择指向"空"，
+ * 方向键、Delete、Tab/Enter 全都失灵，用户只能先拿鼠标点一下才能继续用键盘
+ * （这就是反馈里的「删除节点后选择失效，必须鼠标点击才能生效」）。
+ *
+ * `first` = 被删的第一个主题（调用方已经从 `targets` 取过并做过空值早退），
+ * `targets` = 这一批会被全部删掉的 id。
+ */
+export function selectionAfterDelete(root: Topic, first: string, targets: string[]): string[] {
+  const parent = findParent(root, first)
+  if (!parent) return []
+  // 兄弟要按「挂着的 + 自由摆放的」一起算：自由摆放的主题被选中时，
+  // 它不在 parent.children 里，只按 children 算会挑到一个不相干的兄弟
+  const siblings = allChildrenOf(parent)
+  const firstIndex = siblings.findIndex((child) => child.id === first)
+  const after = siblings.slice(firstIndex + 1).find((child) => !targets.includes(child.id))
+  const before = siblings
+    .slice(0, Math.max(firstIndex, 0))
+    .reverse()
+    .find((child) => !targets.includes(child.id))
+  return [after?.id ?? before?.id ?? parent.id]
+}
+
+/* ------------------------------------------------------------------ */
+/* 节点尺寸：归一与钳制                                                */
+/* ------------------------------------------------------------------ */
+
+/** 手动拉伸尺寸的归一：宽高必须**都**为正才算有效（否则等于「恢复自动尺寸」），有效值四舍五入取整 */
+export function normalizeSizeOverride(size: { width: number; height: number } | null): Size | null {
+  return size && size.width > 0 && size.height > 0
+    ? { width: Math.round(size.width), height: Math.round(size.height) }
+    : null
+}
+
+/**
+ * 把尺寸**钳制**到不小于内容最小盒（`mins` 里任一项都不许被压过去）。
+ *
+ * `mins` 的构造刻意留在 store：它要用 renderer 的 `nodePaddingOf` / `NODE_FONT_SIZES` /
+ * `formulaSize`（`shared` 不许 import `renderer`），这里只做紧随其后的纯计算。
+ * 不需要钳制时**原样返回传入的那个对象**（不复制），与搬迁前一致。
+ */
+export function clampSizeToContent(size: Size, mins: Size[]): Size {
+  const minWidth = Math.max(0, ...mins.map((item) => item.width))
+  const minHeight = Math.max(0, ...mins.map((item) => item.height))
+  return minWidth > size.width || minHeight > size.height
+    ? {
+        width: Math.max(size.width, Math.round(minWidth)),
+        height: Math.max(size.height, Math.round(minHeight))
+      }
+    : size
+}
+
+/* ------------------------------------------------------------------ */
+/* 节点内图片：尺寸归一                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 图片尺寸归一：拿不到有效像素尺寸时给 `undefined`，**不要写 0**
+ * ——写 0 会让渲染层画出一个 0×0 的框，`undefined` 才走「尺寸未知」的兜底框。
+ */
+export function normalizeImage(image: TopicImage | null): TopicImage | null {
+  const positive = (value: number | undefined): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : undefined
+  return image
+    ? { path: image.path, width: positive(image.width), height: positive(image.height) }
+    : null
 }
