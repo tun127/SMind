@@ -64,8 +64,30 @@ ref-vs-state / 回调身份与 `React.memo` 浅比较面 / 事件绑定 / zustan
 | `NodePanel.tsx` 入口在 `{body}` 外面又包了一层 `.side-panel` + `PanelHeader`，而两条分支组件**各自也带一份**（它们的 JSX 是从原实现的三条 early-return 整块搬来的，每块本来就自带外壳）→ 选中主题 / 画布元素时出现**嵌套面板与两个关闭按钮** | **真回归**（A4 引入）。当时的行多重集守卫只比对"旧文件有没有丢行"，**看不见多出来的行** | **已修**：恢复「每条分支渲染自己的外壳」，空态分支补回外壳；DOM 与拆分前一致。**待人眼确认**（见 `handover.md` §五） |
 | `NodePanel` 的草稿同步 effect 只依赖 `[id]`：撤销后选中的还是同一节点 → effect 不重跑 → 草稿仍是撤销前的文本，再失焦就把撤销掉的内容**盖回去** | 真缺陷，**早于解耦**（不是拆分引入的） | **已修**：依赖补上该节点**已提交**的字段（`notes` / `href` / `formula` / `code.text` / `code.language`）；草稿只在失焦时写回 store，所以打字过程中不会被覆盖 |
 | `store/slices/document.ts` 顶部注释称「仍在同一次 `set` 里写 `aiTurn: null`」，实际调用 `resetHistory()`（两次 `set`） | 注释与代码不符；**无用户可见副作用**（换文档本就是"整屏换内容"） | **已订正注释**并如实登记两轮通知的差异 |
-| `TabBar.tsx` 拖拽重排：`onDragOver` 里 `moveTab(from, index)` 之后把 `dragIdRef` 指向**被悬停的**标签 | **中等信心、早于解耦、未立案** | **登记待验**：多标签**来回拖动**时是否跳位/换错对象；确认后再单独立项 |
+| `TabBar.tsx` 拖拽重排：`onDragOver` 里 `moveTab(from, index)` 之后把 `dragIdRef` 指向**被悬停的**标签（不是被拖的那个） | **中等信心、早于解耦、未立案**（该文件没被本轮重构动过；不跑应用无法确认） | **登记待验**：多标签**来回拖动**时是否跳位/换错对象；确认后再单独立项 |
 | 其余（A8 九批 / A3 `topic/**` / A4 `nodePanel/**` / A5 Toolbar / A6 `turn-runtime` / A7 App hooks / B1 十一个切片 / E1 常量收敛） | **未见缺陷** | 逐条对照拆分前版本；切片状态键集合经核对互不重叠 |
+
+**"核查干净"的具体口径**（审计记录，供后来者判断这份结论的覆盖面）：
+
+- **A8 Canvas（9 批，2951 → 385）**：每个搬走的块与 `9acca77^:Canvas.tsx` **逐字节、按序**比对一致；
+  effect 注册顺序逐条保留（闪一下 cleanup → 字体就绪 → 布局 `mark` → ResizeObserver → `viewportActions`
+  注册 → 编辑时 ensureVisible → 跟随一对 → 折叠 `useLayoutEffect` → 文档居中 → 滚轮 → 拖拽层 transform）；
+  `geometry.ts` 显式入参化后每个阈值/分支（14 / 6 / 260 / 0.22 / 0.5 / 240 / 90 / \>60 与
+  `{axis:'x',forward:true}` 兜底）都还在；依赖数组逐字未变或只补了恒定身份的 `RefObject`；
+  10 个节点回调仍是 `useCallback` + ref → `TopicNode` 的浅比较面没变。两条"疑似泄漏"（窗口 pointer 监听、
+  跟随循环里的 `nodePointerHeldRef` 复查）经比对是**早于解耦**就存在的写法，已排除。
+- **A3 / A4 / A5**：`topic/**` 与 `nodePanel/**` 内**没有任何 useState/useEffect/useRef**（草稿仍在入口层，
+  与原实现一致）；正反向行多重集都干净；`OVERLAY_TITLE_DEFAULTS[kind]` 与旧内联三元逐值相等；
+  Toolbar 的处理器接线 1:1（只有 `root`→`rootId` 这类改名）。
+- **A6 chat**：订阅 effect 依赖 `[handleEvent]`、`handleEvent` 依赖 `[update, dumpDiag]` 且两者都是
+  `useCallback([], …)` → cleanup 里的 `stopRef.current()` / `commitTurnRef.current()` **不可能在回合中途触发**；
+  `resolvePending` 那条裸 disable 无害（只碰 ref、稳定 setter 与 `useEditor.getState()`）；35 个展示组件的 props 1:1。
+- **A7 App**：effect 顺序保留；`onCloseRequest` 只注册一次；自动保存/恢复/关窗正文逐字未改；
+  三处 disable（`App.tsx` / `HistoryDialog.tsx` / `ThemePanel.tsx`）的理由**属实**（一次性信号 / 异步读盘）。
+- **B1 store**：11 个切片的**顶层状态键互不重叠**（不存在组合覆盖）；除上面第 3 条外，每个切片正文与
+  `1db2999:editor.ts` 逐行相同；`editor-pure.ts` / `editor-ops.ts` 的抽取逐调用点语义等价。
+- **E1**：所有收敛后的数值逐字节相等（概要/边界/关系线标题 13/12/12 px；`LABEL_*` 11/18/7/4/170；
+  `metrics.ts` 的常量由 `OVERLAY_TITLE_DEFAULTS` 派生）。
 
 ---
 
