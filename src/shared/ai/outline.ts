@@ -4,6 +4,15 @@
  * 单一职责：把模型输出的**文本大纲**解析成 OutlineNode 树（含容错与告警），
  * 以及长文档分段生成后如何**无缝拼接**两段大纲。
  */
+import {
+  BULLET_MARKER,
+  HEADING_MARKER,
+  ORDERED_MARKER,
+  depthOfIndent,
+  expandTabs,
+  hasOutlineMarker,
+  indentWidthOf
+} from '../outline-dialect'
 import { createTopic } from '../model/factory'
 import { notesHtmlFrom } from '../richtext'
 import type { RichText, Topic, TopicCode } from '../model/types'
@@ -55,24 +64,24 @@ function stripCodeFence(text: string): string {
 function parseOutlineLine(line: string): { depth: number; text: string; marked: boolean } | null {
   if (line.trim().length === 0) return null
 
-  // 制表符按两个空格算，缩进按两格一级
-  const expanded = line.replace(/\t/g, '  ')
-  const indent = expanded.length - expanded.trimStart().length
+  // 制表符与缩进规则走共享方言（与 Markdown 导入一致，见 shared/outline-dialect.ts）
+  const expanded = expandTabs(line)
+  const indent = indentWidthOf(expanded)
   let body = expanded.trim()
 
-  const marked = /^([-*+•]\s+|\d+[.)、]\s*|#{1,6}\s+)/.test(body)
+  const marked = hasOutlineMarker(body)
 
-  // 去掉列表符号：- * + • 、1. 1)、# 标题
-  body = body.replace(/^[-*+•]\s+/, '')
-  body = body.replace(/^\d+[.)、]\s*/, '')
-  body = body.replace(/^#{1,6}\s+/, '')
+  // 去掉列表符号：- * + • 、1. 1)、# 标题（词汇表与导入器共用）
+  body = body.replace(BULLET_MARKER, '')
+  body = body.replace(ORDERED_MARKER, '')
+  body = body.replace(HEADING_MARKER, '')
   body = body.replace(/^\*\*(.+)\*\*$/, '$1').trim()
 
   if (body.length === 0) return null
   // 纯分隔线/装饰行直接跳过
   if (/^[-=_*]{3,}$/.test(body)) return null
 
-  return { depth: Math.floor(indent / 2), text: body, marked }
+  return { depth: depthOfIndent(indent), text: body, marked }
 }
 
 /** 短句才可能是主题；带句号的长句通常是模型的解释文字 */

@@ -18,6 +18,7 @@ import type { OutlineNode, ParsedOutline } from '../ai'
 import { decodeNumericEntity } from '../entities'
 import { matchWholeLineMath } from '../formula'
 import { MARKDOWN_ESCAPABLE } from '../markdown-escape'
+import { depthOfIndent, expandTabs } from '../outline-dialect'
 import type { RichText, RichTextRun } from '../model/types'
 
 /** 行内代码在节点里用的等宽字体（与代码块一致） */
@@ -449,12 +450,13 @@ export function parseMarkdownLine(line: string, context: InlineContext = {}): Ma
     }
   }
 
-  const expanded = line.replace(/\t/g, '  ')
+  const expanded = expandTabs(line)
   const list = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(expanded)
   if (list) {
     // 任务列表：勾选框不进标题（- [x] 已完成 → 「已完成」）
     const body = (list[3] ?? '').replace(/^\[[ xX]\]\s+/, '')
-    const depth = Math.floor((list[1] ?? '').length / 2)
+    // 缩进→层级走共享方言（两格一级），别在这里再写一遍 Math.floor(len / 2)
+    const depth = depthOfIndent((list[1] ?? '').length)
     // 整句是数学 → 变成节点的公式（节点标题留空，公式自成一块）
     const math = matchWholeLineMath(body)
     if (math) return { kind: 'list', depth, level: 0, text: '', formula: math }
