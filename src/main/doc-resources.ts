@@ -43,3 +43,6 @@ export function pruneForSave(doc: DocResources, workbook: Workbook): void {
   doc.resources = resources
   for (const path of removed) doc.inserted.delete(path)
 }
+
+/** docId 的长度上限：它会被当成主进程里的 map 键（`docOf`），脏输入不该让主进程无界长胖 */
+export const DOC_ID_MAX = 120

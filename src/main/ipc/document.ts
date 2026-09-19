@@ -1,0 +1,105 @@
+import { ipcMain } from 'electron'
+import { isPlausibleFilePath } from '@shared/ipc-args'
+import { writeFileAtomic, writeJsonAtomic } from '../atomic-write'
+import { promises as fs } from 'node:fs'
+import { join } from 'node:path'
+import { IPC, type OpenResult, type SaveResult } from '@shared/ipc'
+
+import type { Workbook } from '@shared/model/types'
+
+import { serializeXmind } from '@shared/xmind/serialize'
+import { currentSaveDir } from '../history'
+
+import { type RecoveryMeta } from '@shared/recovery'
+import { showOpenIn, showSaveIn } from '../dialogs'
+import { ensureXmindExt, firstPathOf, readDocumentInto, writeDocument } from '../files'
+import { docOf, pruneForSave } from '../doc-resources'
+import { autosaveDir, autosaveFile, autosaveMeta } from '../autosave'
+import type { MainContext } from '../context'
+
+/**
+ * 这些处理器原来都在 `main/index.ts` 的 `registerIpc()` 里，整块搬来：
+ * 函数体、先后顺序、通道名逐字未改（搬迁只做剪切粘贴）。
+ */
+export function registerDocumentIpc(ctx: MainContext): void {
+  ipcMain.handle(IPC.openDialog, async (e, docId: string): Promise<OpenResult | null> => {
+    const result = await showOpenIn(ctx.winOf(e.sender), {
+      title: '打开思维导图',
+      filters: [
+        // .emmx 是亿图脑图（EdrawMind / MindMaster）的文件，能直接打开
+        { name: '思维导图文件', extensions: ['xmind', 'emmx', 'emm'] },
+        { name: 'Xmind 文件', extensions: ['xmind'] },
+        { name: '亿图脑图文件', extensions: ['emmx', 'emm'] },
+        { name: '全部文件', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    })
+    const file = firstPathOf(result)
+    if (!file) return null
+    return readDocumentInto(ctx.stateOf(e.sender), docId, file)
+  })
+  ipcMain.handle(IPC.openPath, async (e, docId: string, path: string): Promise<OpenResult> => {
+    if (!isPlausibleFilePath(path)) throw new Error('文件路径无效，无法打开')
+    return readDocumentInto(ctx.stateOf(e.sender), docId, path)
+  })
+  ipcMain.handle(
+    IPC.saveToPath,
+    async (e, docId: string, path: string, workbook: Workbook): Promise<SaveResult> => {
+      // 写文件比读文件更值得拦：这条通道决定了"能往哪里写"
+      if (!isPlausibleFilePath(path)) throw new Error('保存路径无效')
+      return writeDocument(ctx.stateOf(e.sender), docId, ensureXmindExt(path), workbook)
+    }
+  )
+  ipcMain.handle(
+    IPC.saveAs,
+    async (
+      e,
+      docId: string,
+      workbook: Workbook,
+      suggestedName: string
+    ): Promise<SaveResult | null> => {
+      // 默认落在记住的保存目录（首次是「文档/思维导图」）
+      const dir = await currentSaveDir()
+      const result = await showSaveIn(ctx.winOf(e.sender), {
+        title: '另存为',
+        defaultPath: join(dir, suggestedName),
+        filters: [{ name: '思维导图文件', extensions: ['xmind'] }]
+      })
+      if (result.canceled || !result.filePath) return null
+      return writeDocument(ctx.stateOf(e.sender), docId, ensureXmindExt(result.filePath), workbook)
+    }
+  )
+  ipcMain.handle(
+    IPC.autosave,
+    async (
+      e,
+      docId: string,
+      workbook: Workbook,
+      originalPath: string | null,
+      title: string
+    ): Promise<void> => {
+      const state = ctx.stateOf(e.sender)
+      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
+      if (!state) return
+      await fs.mkdir(autosaveDir(), { recursive: true })
+      if (doc) pruneForSave(doc, workbook)
+      const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
+      // 存档也走原子写：半截的存档在恢复时会被判为损坏，等于白存一份
+      await writeFileAtomic(autosaveFile(state.slot), bytes)
+      const meta: RecoveryMeta = {
+        originalPath: originalPath ?? null,
+        title: title || '未命名导图',
+        savedAt: Date.now()
+      }
+      // 元信息也要原子写：它是"这次自动保存对应哪份原稿"的唯一凭证，
+      // 半截 JSON 会让恢复功能读不出标题与原路径（正文却好端端地在那儿）
+      await writeJsonAtomic(autosaveMeta(state.slot), meta)
+    }
+  )
+  ipcMain.handle(IPC.autosaveClear, async (e): Promise<void> => {
+    const state = ctx.stateOf(e.sender)
+    if (!state) return
+    await fs.rm(autosaveFile(state.slot), { force: true })
+    await fs.rm(autosaveMeta(state.slot), { force: true })
+  })
+}

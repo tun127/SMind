@@ -10,7 +10,7 @@ import {
 } from 'electron'
 import { isInstanceAlive, isRecord, isSelfNavigation } from '../shared/guards'
 import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
-import { writeFileAtomic, writeJsonAtomic } from './atomic-write'
+import { writeFileAtomic } from './atomic-write'
 import { logDirectory, logMain } from './log'
 import { DOCUMENT_EXTENSIONS, extractDocumentFromBytes, extractDocumentFromPath } from './document'
 import { pathFromFileUrl, type ExtractedDocument } from '@shared/document'
@@ -19,18 +19,13 @@ import { promises as fs, existsSync, readFileSync, rmSync, writeFileSync } from 
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
-  DEFAULT_APP_SETTINGS,
   IPC,
   type AiChatResult,
   type AiConfigPatch,
   type AiTestResult,
-  type AppSettings,
   type ImportedTextFile,
-  type OpenResult,
   type PickedAttachment,
   type PickedImage,
-  type RecoveryInfo,
-  type SaveResult,
   type SnapshotRestoreResult
 } from '@shared/ipc'
 import { pickDocumentArg } from '@shared/openfile'
@@ -43,7 +38,7 @@ import {
   type AiMessage,
   type ChatHistoryEntry
 } from '@shared/ai'
-import { normalizeConfirmSkip, planAvailableTools } from '@shared/agent'
+import { planAvailableTools } from '@shared/agent'
 import { hasWriteToolCall, markTrialTurnSeen, type LicenseView } from '@shared/license'
 import { activateLicense, consumeTrialTurn, deactivateLicense, getLicenseView } from './license'
 import type { Workbook } from '@shared/model/types'
@@ -55,11 +50,9 @@ import {
   safeResourceName
 } from '@shared/model/resources'
 import { parseXmind } from '@shared/xmind/parse'
-import { serializeXmind } from '@shared/xmind/serialize'
 import { buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
 import { defaultFileName } from '@shared/model/naming'
 import { documentKeyOf, type SnapshotItem, type SnapshotReason } from '@shared/snapshot'
-import { currentSaveDir } from './history'
 import {
   clearSnapshotsFor,
   createSnapshot,
@@ -69,26 +62,15 @@ import {
   snapshotOwnerKey
 } from './snapshot'
 import { imageExportFormatDef, type ImageExportFormat } from '@shared/export/types'
-import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
-import { shouldOfferRecovery, type RecoveryMeta } from '@shared/recovery'
 import { autosaveSlotName, sameDocPath } from '@shared/window'
-import { CODE_LANGUAGES } from '@shared/code-language'
 import { buildAppMenu } from './menu'
 import { checkForUpdateInteractive, startAutoUpdate } from './update'
 import { createMainContext, type DocWindow } from './context'
 import { showOpenIn, showSaveIn } from './dialogs'
-import { ensureXmindExt, firstPathOf, readDocumentInto, writeDocument } from './files'
-import { docOf, pruneForSave } from './doc-resources'
+import { firstPathOf } from './files'
+import { docOf } from './doc-resources'
 import { registerHistoryIpc } from './ipc/history'
-import { readThemes, writeThemes } from './themes'
-import {
-  autosaveDir,
-  autosaveFile,
-  autosaveMeta,
-  copyDir,
-  pruneStaleCopies,
-  readAutosaveMeta
-} from './autosave'
+import { autosaveFile, autosaveMeta, pruneStaleCopies } from './autosave'
 import {
   WRITE_TOOL_NAMES,
   callAi,
@@ -96,10 +78,14 @@ import {
   countedTrialTurns,
   migrateAiConfigKey,
   readAiConfig,
-  settingsFile,
   streamAborters,
   writeAiConfig
 } from './ai'
+import { registerWindowIpc } from './ipc/window'
+import { registerThemeIpc } from './ipc/theme'
+import { registerSettingsIpc } from './ipc/settings'
+import { registerRecoveryIpc } from './ipc/recovery'
+import { registerDocumentIpc } from './ipc/document'
 
 /** 应用名：与 electron-builder 的 productName、窗口标题保持一致 */
 const APP_NAME = 'SMind'
@@ -136,8 +122,6 @@ if (isDev && process.env.SMIND_PROFILE === '1') {
  * 必须在 app ready 之前登记，否则 scheme 不会被当作「标准且安全」的来源。
  */
 const RESOURCE_SCHEME = 'mind-resource'
-/** docId 的长度上限：它会被当成主进程里的 map 键（`docOf`），脏输入不该让主进程无界长胖 */
-const DOC_ID_MAX = 120
 protocol.registerSchemesAsPrivileged([
   {
     scheme: RESOURCE_SCHEME,
@@ -487,372 +471,20 @@ function registerResourceProtocol(): void {
 const startupOpenPath: string | null = pickDocumentArg(process.argv, existsSync)
 
 function registerIpc(): void {
-  /**
-   * 渲染进程就绪后取「这个窗口启动时带的文件」，取一次即清空。
-   */
-  ipcMain.handle(IPC.openFilePending, async (e): Promise<string | null> => {
-    const state = ctx.stateOf(e.sender)
-    if (!state) return null
-    const target = state.pendingPath
-    state.pendingPath = null
-    return target
-  })
+  /* ---- 窗口与文档壳（标签 / 新窗口 / 画布副本 / 关窗确认 / 外链） ---- */
+  registerWindowIpc(ctx, createWindow)
 
-  /** 渲染进程报告「某个标签现在打开的是哪个文件」（新建＝null）：用于同文件不重复开窗/开标签 */
-  ipcMain.on(IPC.documentPath, (e, docId: string, path: string | null) => {
-    const state = ctx.stateOf(e.sender)
-    if (!state || typeof docId !== 'string') return
-    docOf(state, docId).docPath = typeof path === 'string' && path.length > 0 ? path : null
-  })
+  /* ---- 打开 / 保存 / 自动保存 ---- */
+  registerDocumentIpc(ctx)
 
-  /** 释放一个文档（标签关闭）：丢掉它的资源表；自动存档槽位不归它管 */
-  ipcMain.handle(IPC.releaseDoc, async (e, docId: string): Promise<void> => {
-    const state = ctx.stateOf(e.sender)
-    if (!state || typeof docId !== 'string') return
-    state.docs.delete(docId)
-  })
-
-  /** 新建一个窗口（菜单「新建窗口」/ Ctrl+Shift+N） */
-  ipcMain.handle(IPC.newWindow, async (): Promise<void> => {
-    createWindow()
-  })
-
-  /**
-   * 在新窗口打开**当前文档的副本**（并定位到指定画布）。
-   *
-   * 为什么是"副本"而不是"在同一份文件上再开一个窗口"：
-   * 用户要的是"A 画布新建 B 画布，B 能自己导入/导出，**不影响 A**，两者互不影响"。
-   * 两个窗口指向同一个文件时，谁后保存谁覆盖——那就谈不上互不影响了。
-   * 所以这里把当前文档（含未保存改动与图片资源）写成一份**临时副本**，
-   * 新窗口打开它但**不认路径**：保存时会走「另存为」，永远不会写回原文件。
-   */
-  ipcMain.handle(
-    IPC.openSheetWindow,
-    async (e, docId: string, workbook: Workbook): Promise<'ok' | 'failed'> => {
-      const state = ctx.stateOf(e.sender)
-      if (!state) return 'failed'
-      try {
-        await fs.mkdir(copyDir(), { recursive: true })
-        const doc = typeof docId === 'string' ? docOf(state, docId) : null
-        if (doc) pruneForSave(doc, workbook)
-        const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
-        const copyPath = join(copyDir(), `${state.slot}-copy-${randomUUID()}.xmind`)
-        await fs.writeFile(copyPath, Buffer.from(bytes))
-        createWindow({ path: copyPath, copySource: copyPath })
-        return 'ok'
-      } catch (error) {
-        /**
-         * 失败要**留下可查的痕迹**：以前这里只有一个裸 `catch {}`，
-         * 用户看到"新窗口打不开"、日志里什么都没有，只能靠猜。
-         * 返回值仍是 'failed'（渲染层的契约不变），但主进程日志里有原因。
-         */
-        logMain('open-sheet-window-failed', (error as Error).message)
-        return 'failed'
-      }
-    }
-  )
-
-  /**
-   * 读系统剪贴板里的纯文本。
-   * 渲染进程自己也读得到（navigator.clipboard），但那个 API 在没聚焦/无权限时会抛，
-   * 走主进程更稳——粘贴 Markdown 片段要靠它。
-   */
-  ipcMain.handle(IPC.clipboardText, async (): Promise<string> => clipboard.readText())
-
-  ipcMain.handle(IPC.openDialog, async (e, docId: string): Promise<OpenResult | null> => {
-    const result = await showOpenIn(ctx.winOf(e.sender), {
-      title: '打开思维导图',
-      filters: [
-        // .emmx 是亿图脑图（EdrawMind / MindMaster）的文件，能直接打开
-        { name: '思维导图文件', extensions: ['xmind', 'emmx', 'emm'] },
-        { name: 'Xmind 文件', extensions: ['xmind'] },
-        { name: '亿图脑图文件', extensions: ['emmx', 'emm'] },
-        { name: '全部文件', extensions: ['*'] }
-      ],
-      properties: ['openFile']
-    })
-    const file = firstPathOf(result)
-    if (!file) return null
-    return readDocumentInto(ctx.stateOf(e.sender), docId, file)
-  })
-
-  ipcMain.handle(IPC.openPath, async (e, docId: string, path: string): Promise<OpenResult> => {
-    if (!isPlausibleFilePath(path)) throw new Error('文件路径无效，无法打开')
-    return readDocumentInto(ctx.stateOf(e.sender), docId, path)
-  })
-
-  ipcMain.handle(
-    IPC.saveToPath,
-    async (e, docId: string, path: string, workbook: Workbook): Promise<SaveResult> => {
-      // 写文件比读文件更值得拦：这条通道决定了"能往哪里写"
-      if (!isPlausibleFilePath(path)) throw new Error('保存路径无效')
-      return writeDocument(ctx.stateOf(e.sender), docId, ensureXmindExt(path), workbook)
-    }
-  )
-
-  ipcMain.handle(
-    IPC.saveAs,
-    async (
-      e,
-      docId: string,
-      workbook: Workbook,
-      suggestedName: string
-    ): Promise<SaveResult | null> => {
-      // 默认落在记住的保存目录（首次是「文档/思维导图」）
-      const dir = await currentSaveDir()
-      const result = await showSaveIn(ctx.winOf(e.sender), {
-        title: '另存为',
-        defaultPath: join(dir, suggestedName),
-        filters: [{ name: '思维导图文件', extensions: ['xmind'] }]
-      })
-      if (result.canceled || !result.filePath) return null
-      return writeDocument(ctx.stateOf(e.sender), docId, ensureXmindExt(result.filePath), workbook)
-    }
-  )
-
-  ipcMain.handle(
-    IPC.autosave,
-    async (
-      e,
-      docId: string,
-      workbook: Workbook,
-      originalPath: string | null,
-      title: string
-    ): Promise<void> => {
-      const state = ctx.stateOf(e.sender)
-      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
-      if (!state) return
-      await fs.mkdir(autosaveDir(), { recursive: true })
-      if (doc) pruneForSave(doc, workbook)
-      const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
-      // 存档也走原子写：半截的存档在恢复时会被判为损坏，等于白存一份
-      await writeFileAtomic(autosaveFile(state.slot), bytes)
-      const meta: RecoveryMeta = {
-        originalPath: originalPath ?? null,
-        title: title || '未命名导图',
-        savedAt: Date.now()
-      }
-      // 元信息也要原子写：它是"这次自动保存对应哪份原稿"的唯一凭证，
-      // 半截 JSON 会让恢复功能读不出标题与原路径（正文却好端端地在那儿）
-      await writeJsonAtomic(autosaveMeta(state.slot), meta)
-    }
-  )
-
-  /** 只清「这个窗口」的存档：别的窗口还开着，不能把它们的存档一起删了 */
-  ipcMain.handle(IPC.autosaveClear, async (e): Promise<void> => {
-    const state = ctx.stateOf(e.sender)
-    if (!state) return
-    await fs.rm(autosaveFile(state.slot), { force: true })
-    await fs.rm(autosaveMeta(state.slot), { force: true })
-  })
-
-  ipcMain.handle(IPC.recoveryCheck, async (e): Promise<RecoveryInfo | null> => {
-    const state = ctx.stateOf(e.sender)
-    if (!state) return null
-    // 只有本次进程的**第一个窗口**问恢复：否则每开一个窗口都弹一遍上一次的存档
-    if (!ctx.isPrimaryWindow(state.id)) return null
-    const meta = await readAutosaveMeta(state.slot)
-    if (!meta || !existsSync(autosaveFile(state.slot))) return null
-
-    let originalMtime: number | null = null
-    if (meta.originalPath && existsSync(meta.originalPath)) {
-      try {
-        originalMtime = (await fs.stat(meta.originalPath)).mtimeMs
-      } catch {
-        originalMtime = null
-      }
-    }
-
-    if (!shouldOfferRecovery(meta, originalMtime)) return null
-    return { originalPath: meta.originalPath, title: meta.title, savedAt: meta.savedAt }
-  })
-
-  ipcMain.handle(IPC.recoveryLoad, async (e, docId: string): Promise<OpenResult | null> => {
-    const state = ctx.stateOf(e.sender)
-    if (!state || !existsSync(autosaveFile(state.slot))) return null
-    // docId 会被当 map 键用（docOf）：加个长度上限，脏输入不该让主进程无界长胖
-    if (typeof docId === 'string' && docId.length > DOC_ID_MAX) return null
-    /**
-     * **必须兜住异常**：要恢复的是自动保存的临时存档，它很可能正是上次断电/崩溃时写坏的那一份。
-     * 以前这里没有 try/catch，`parseXmind` 一抛就把整个 IPC 变成 rejected——渲染层 `await` 直接炸，
-     * 用户看到的是"启动提示可恢复 → 点恢复 → 满屏报错"，而正确处理是
-     * "读不出来就当没有可恢复的存档"（返回 null，界面照常进空文档）。
-     */
-    try {
-      const meta = await readAutosaveMeta(state.slot)
-      const buf = await fs.readFile(autosaveFile(state.slot))
-      const parsed = await parseXmind(new Uint8Array(buf))
-      // 存档里同样带着图片/附件：不还原资源的话，恢复后一保存就全丢了。
-      // 资源记到**恢复到的那份文档**名下（多标签之间互不沾染）
-      if (typeof docId === 'string') {
-        const doc = docOf(state, docId)
-        doc.resources = parsed.resources
-        doc.inserted.clear()
-        doc.docPath = meta?.originalPath ?? null
-      }
-      return {
-        path: meta?.originalPath ?? '',
-        workbook: parsed.workbook,
-        warnings: parsed.warnings,
-        resourceCount: Object.keys(parsed.resources).length
-      }
-    } catch (error) {
-      logMain('recovery-load-failed', (error as Error).message)
-      return null
-    }
-  })
-
-  ipcMain.handle(IPC.recoveryDiscard, async (e): Promise<void> => {
-    const state = ctx.stateOf(e.sender)
-    if (!state) return
-    await fs.rm(autosaveFile(state.slot), { force: true })
-    await fs.rm(autosaveMeta(state.slot), { force: true })
-  })
+  /* ---- 崩溃恢复 ---- */
+  registerRecoveryIpc(ctx)
 
   /* ---- 应用设置（%APPDATA%\SMind\settings.json） ---- */
-
-  ipcMain.handle(IPC.settingsLoad, async (): Promise<AppSettings> => {
-    try {
-      const raw = await fs.readFile(settingsFile(), 'utf8')
-      const parsed = JSON.parse(raw) as Partial<AppSettings>
-      // 与默认值合并：文件缺字段 / 老版本写过的都还能读
-      return {
-        defaultViewLock:
-          typeof parsed.defaultViewLock === 'boolean'
-            ? parsed.defaultViewLock
-            : DEFAULT_APP_SETTINGS.defaultViewLock,
-        defaultThemeId:
-          typeof parsed.defaultThemeId === 'string' && parsed.defaultThemeId.length > 0
-            ? parsed.defaultThemeId
-            : null,
-        defaultAlign:
-          parsed.defaultAlign === 'left' || parsed.defaultAlign === 'right'
-            ? parsed.defaultAlign
-            : DEFAULT_APP_SETTINGS.defaultAlign,
-        defaultFontFamily:
-          typeof parsed.defaultFontFamily === 'string' && parsed.defaultFontFamily.length > 0
-            ? parsed.defaultFontFamily
-            : null,
-        defaultFontSize:
-          typeof parsed.defaultFontSize === 'number' && parsed.defaultFontSize > 0
-            ? parsed.defaultFontSize
-            : null,
-        defaultColor:
-          typeof parsed.defaultColor === 'string' && parsed.defaultColor.length > 0
-            ? parsed.defaultColor
-            : null,
-        defaultCodeFontSize:
-          typeof parsed.defaultCodeFontSize === 'number' &&
-          Number.isFinite(parsed.defaultCodeFontSize) &&
-          parsed.defaultCodeFontSize >= 8
-            ? Math.round(parsed.defaultCodeFontSize)
-            : null,
-        defaultCodeLanguage: CODE_LANGUAGES.includes(parsed.defaultCodeLanguage as never)
-          ? (parsed.defaultCodeLanguage as string)
-          : null,
-        toolbarHidden: Array.isArray(parsed.toolbarHidden)
-          ? parsed.toolbarHidden.filter((item): item is string => typeof item === 'string')
-          : [],
-        // 手改坏 / 旧版本的脏值不许把确认框永久关掉
-        aiConfirmSkip: normalizeConfirmSkip(parsed.aiConfirmSkip)
-      }
-    } catch {
-      return { ...DEFAULT_APP_SETTINGS }
-    }
-  })
-
-  ipcMain.handle(IPC.settingsSave, async (_e, settings: AppSettings): Promise<void> => {
-    const next: AppSettings = {
-      defaultViewLock: Boolean(settings?.defaultViewLock),
-      defaultThemeId:
-        typeof settings?.defaultThemeId === 'string' && settings.defaultThemeId.length > 0
-          ? settings.defaultThemeId
-          : null,
-      defaultAlign:
-        settings?.defaultAlign === 'left' || settings?.defaultAlign === 'right'
-          ? settings.defaultAlign
-          : 'center',
-      defaultFontFamily:
-        typeof settings?.defaultFontFamily === 'string' && settings.defaultFontFamily.length > 0
-          ? settings.defaultFontFamily
-          : null,
-      defaultFontSize:
-        typeof settings?.defaultFontSize === 'number' && settings.defaultFontSize > 0
-          ? settings.defaultFontSize
-          : null,
-      defaultColor:
-        typeof settings?.defaultColor === 'string' && settings.defaultColor.length > 0
-          ? settings.defaultColor
-          : null,
-      defaultCodeFontSize:
-        typeof settings?.defaultCodeFontSize === 'number' &&
-        Number.isFinite(settings.defaultCodeFontSize) &&
-        settings.defaultCodeFontSize >= 8
-          ? Math.round(settings.defaultCodeFontSize)
-          : null,
-      defaultCodeLanguage: CODE_LANGUAGES.includes(settings?.defaultCodeLanguage as never)
-        ? (settings.defaultCodeLanguage as string)
-        : null,
-      toolbarHidden: Array.isArray(settings?.toolbarHidden)
-        ? settings.toolbarHidden.filter((item) => typeof item === 'string')
-        : [],
-      // 只认清单里认识的破坏性种类：脏数据不许把确认框永久关掉
-      aiConfirmSkip: normalizeConfirmSkip(settings?.aiConfirmSkip)
-    }
-    await writeJsonAtomic(settingsFile(), next)
-  })
+  registerSettingsIpc()
 
   /* ---- 主题 ---- */
-
-  ipcMain.handle(IPC.themesList, async (): Promise<ThemeDefinition[]> => readThemes())
-
-  ipcMain.handle(IPC.themesSave, async (_e, theme: ThemeDefinition): Promise<void> => {
-    const normalized = normalizeThemeDefinition(theme, { builtin: false })
-    if (!normalized) return
-    const list = await readThemes()
-    const index = list.findIndex((item) => item.id === normalized.id)
-    if (index >= 0) list[index] = normalized
-    else list.push(normalized)
-    await writeThemes(list)
-  })
-
-  ipcMain.handle(IPC.themesDelete, async (_e, id: string): Promise<void> => {
-    await writeThemes((await readThemes()).filter((item) => item.id !== id))
-  })
-
-  ipcMain.handle(IPC.themesImport, async (e): Promise<ThemeDefinition | null> => {
-    const result = await showOpenIn(ctx.winOf(e.sender), {
-      title: '导入主题',
-      filters: [{ name: '主题文件', extensions: ['json'] }],
-      properties: ['openFile']
-    })
-    const file = firstPathOf(result)
-    if (!file) return null
-
-    const parsed: unknown = JSON.parse(await fs.readFile(file, 'utf8'))
-    const candidate = isRecord(parsed) && 'theme' in parsed ? parsed.theme : parsed
-    const theme = normalizeThemeDefinition(candidate, { builtin: false })
-    if (!theme) throw new Error('主题文件格式不正确，请确认是本软件导出的主题文件')
-    // 分配新 id，避免覆盖已有的自定义主题
-    return { ...theme, id: `custom-${Date.now().toString(36)}`, builtin: false }
-  })
-
-  ipcMain.handle(IPC.themesExport, async (e, theme: ThemeDefinition): Promise<boolean> => {
-    const result = await showSaveIn(ctx.winOf(e.sender), {
-      title: '导出主题',
-      defaultPath: `${theme.name || '主题'}.json`,
-      filters: [{ name: '主题文件', extensions: ['json'] }]
-    })
-    if (result.canceled || !result.filePath) return false
-    const target = result.filePath.toLowerCase().endsWith('.json')
-      ? result.filePath
-      : `${result.filePath}.json`
-    await fs.writeFile(
-      target,
-      JSON.stringify({ type: 'mindmap-theme', version: 1, theme }, null, 2)
-    )
-    return true
-  })
+  registerThemeIpc(ctx)
 
   /* ---- 图片与附件（P4） ---- */
 
@@ -1561,81 +1193,6 @@ function registerIpc(): void {
    * 渲染层报告界面已损坏（错误边界触发）；页面重新加载完成时会自动清除。
    * 顺手把错误写进日志——渲染期异常以前只打在终端里，应用一重启就查不到了。
    */
-  ipcMain.on(IPC.uiState, (e, message: unknown, stack: unknown, broken: unknown) => {
-    const state = ctx.stateOf(e.sender)
-    // 只有错误边界那种「整块界面已停止渲染」才算坏；异步错误不影响界面可用性，
-    // 不能因此跳过关窗前的未保存确认
-    if (state && broken === true) state.uiBroken = true
-    const text = typeof message === 'string' ? message.slice(0, 2000) : ''
-    const detail = typeof stack === 'string' ? stack.slice(0, 8000) : ''
-    logMain('renderer-error', `${broken === true ? '[界面已停止渲染] ' : ''}${text}`, detail)
-  })
-
-  /** 由主进程刷新窗口：渲染层自己发的 location.reload 会被 will-navigate 拦下 */
-  ipcMain.on(IPC.windowReload, (e) => {
-    const state = ctx.stateOf(e.sender)
-    if (state && !state.win.isDestroyed()) {
-      state.uiBroken = false
-      state.win.webContents.reload()
-    }
-  })
-
-  ipcMain.on(IPC.confirmClose, (e) => {
-    const state = ctx.stateOf(e.sender)
-    if (!state) return
-    state.allowClose = true
-
-    if (ctx.isQuitRequested()) {
-      // 退出流程：**所有**窗口都确认过（或已经不可用）才真的退
-      const blocked = [...ctx.windows.values()].some(
-        (item) => !item.allowClose && !item.win.webContents.isDestroyed()
-      )
-      if (!blocked) {
-        ctx.approveQuit()
-        app.quit()
-        return
-      }
-      // 还有别的窗口没确认：这个窗口自己照样要关。
-      // 以前这里无条件 return，于是「退出 → 取消 → 再点 X → 放弃修改」时
-      // 窗口留在原地不动，用户以为程序卡死了（再点一次才关，且那次不再提示）。
-    }
-    if (!state.win.isDestroyed()) state.win.close()
-  })
-
-  /**
-   * 未保存确认框里点了「取消」。
-   *
-   * `quitRequested` 是"退出流程进行中"的全局标记，只能在两处复位：
-   * 真的退成（走 quitApproved），或者用户明确取消（这里）。
-   * 以前没有这条回执，标记一直是真——之后每次关窗都进退出分支，
-   * 那个分支看到"还有窗口没确认"就 return，窗口永远关不掉。
-   */
-  ipcMain.on(IPC.closeCancel, (e) => {
-    const state = ctx.stateOf(e.sender)
-    // 这个窗口并没有被允许关闭，标记也要退回去，否则下次点 X 会直接关窗、不再提示
-    if (state) state.allowClose = false
-    ctx.setQuitRequested(false)
-  })
-
-  ipcMain.on(IPC.setTitle, (e, title: string) => {
-    const win = ctx.winOf(e.sender)
-    if (win) win.setTitle(title)
-  })
-
-  ipcMain.handle(IPC.openExternal, async (_e, url: string): Promise<boolean> => {
-    // 只放行安全协议，避免被诱导打开本地可执行文件
-    if (typeof url !== 'string' || !/^(https?|mailto):/i.test(url.trim())) return false
-    try {
-      await shell.openExternal(url.trim())
-      return true
-    } catch {
-      return false
-    }
-  })
-
-  ipcMain.on(IPC.showInFolder, (_e, path: string) => {
-    if (isPlausibleFilePath(path) && existsSync(path)) shell.showItemInFolder(path)
-  })
 }
 
 /* ------------------------------------------------------------------ */
