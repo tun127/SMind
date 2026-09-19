@@ -60,7 +60,12 @@
 | 自检 | `scripts/selfcheck.ts` → **2628 项断言**，全绿（⚠️ 它只测 shared 逻辑与 store，**不渲染 React 组件**） |
 | 往返 | `npm run verify`：21 个 `.xmind` + 4 个 `.emmx` 样本往返一致 |
 | 提交 | 解耦战役累计 **33 个提交**，最新 `a87ff82` |
-| 门槛注意 | `format:check` 只覆盖 `src/**/*.{ts,tsx,css}`；行数要在 `prettier` 之后再统计 |
+| 门槛注意 | `format:check` 只覆盖 `src/**/*.{ts,tsx,css}`；**行数统计别用 PowerShell 的 `Get-Content`**（见 §3.4 第一条坑），也别在 `prettier` 之前统计 |
+
+> **行数口径（node 实测，2026-09-19 更正）**：A4 `NodePanel.tsx` **142**（814 →）、A5 `Toolbar.tsx` **322**（1059 →）、
+> A6 `ChatPanel.tsx` **417**（1953 →，另 `chat/use-chat-loop.ts` 1274）、A7 `App.tsx` **466**（1272 →）；
+> A3 `TopicNode.tsx` 305、`main/index.ts` 54、`scripts/selfcheck.ts` 473、`Canvas.tsx` 2951、`store/editor.ts` 2316。
+> 各提交信息里写的 133 / 310 / 386 / 443 是 `Get-Content` 口径（偏小），**以本表为准**。
 
 ### 2.2 已完成（任务表打钩项）
 
@@ -89,8 +94,8 @@
 | 项 | 现状规模 | 性质与做法 | 高危点 |
 |---|---|---|---|
 | **A8** `Canvas.tsx` | **2951** | 先抽纯函数（命中测试 / 落点 / 手势数学），再抽 hooks（视口 / 跟随 / 拖拽 / 框选），最后拆组件 | **最高风险**：`viewportActions` 注册（模块级单例，卸载须复位 `NOOP_VIEWPORT_ACTIONS`）与 `useLayoutEffect` 锚点补偿**依赖挂载顺序**；`refs` 一族是"指针跟手"的前提，**不许改成 state** |
-| **A6-3** `chat/use-chat-loop.ts` | **1155** | 按域函数收显式 deps 对象（函数体用解构还原局部名，逐字不动） | `handleEvent`/`send` 带 `useCallback` 依赖数组：deps 对象必须稳定，否则订阅 effect 重跑会掐掉正在跑的 AI 回合 |
-| **A7-3** `App.tsx` 入口 | **443** | 关窗链路 + `pending` 弹窗 + JSX 装配 | 数据安全关键路径：改完只能人肉验收（自动存档、逐个标签询问、取消回执主进程） |
+| **A6-3** `chat/use-chat-loop.ts` | **1274** | 按域函数收显式 deps 对象（函数体用解构还原局部名，逐字不动） | `handleEvent`/`send` 带 `useCallback` 依赖数组：deps 对象必须稳定，否则订阅 effect 重跑会掐掉正在跑的 AI 回合 |
+| **A7-3** `App.tsx` 入口 | **466** | 关窗链路 + `pending` 弹窗 + JSX 装配 | 数据安全关键路径：改完只能人肉验收（自动存档、逐个标签询问、取消回执主进程） |
 | **B1** `store/editor.ts` | **2316** | 先下沉纯逻辑到 `shared/model`（有 selfcheck 断言保护），切片最后做 | 可机械搬的只有约 10 个纯函数 / **99 行（4%）**；`aiTurn`/`viewLock`/`lastFold` 跨域状态要先画归属表 |
 | **E1 余 18 组** | — | 判据：**抽原语，让调用点各自表达策略**，不强行合一 | 差异可能是有意的（见 §3.5） |
 
@@ -148,6 +153,7 @@ trimmed 行做多重集 diff，旧文件独有的行**必须逐条能解释**。
 
 | 坑 | 症状 | 正解 |
 |---|---|---|
+| **用 `Get-Content` 统计行数** | 数字比实际小（本轮 A7 完工时报 443，实际 **466**）；因为本机 `Get-Content` 按 GBK 解码，**吞掉 LF-only 文件里紧跟中文的换行符**（实测 5 行临时文件被数成 2 行；CRLF 文件不受影响，所以仓库里旧文件量得准、新文件量不准） | 行数一律用 **node**：`fs.readFileSync(f,'utf8').split('\n').length`，或直接看 `read` 工具的末行号。`.editorconfig` 要求 LF，所以新文件是 LF、旧文件是 CRLF，两者混用是现状（不是本轮引入的问题） |
 | 行范围切在注释中间 | 入口留孤立 `/**`，**它把后面的 `}` 注释掉**；配平守卫查不出来 | 区间取"分节注释整行"或"声明行"为边界；首末行**都**断言 |
 | 每删一段行号就变 | 手工推算的行号连错两次 | **一次扫描 + 一次改写**，别分段搬 |
 | **导入块的边界算错** | 把**模块级助手**（`applyRenderDefaults` 等）当成导入块复制进每个 hook，符号重复定义/未使用一片红 | 导入块边界＝**第一个模块级 doc 注释之前**，不是「到组件函数那一行」 |

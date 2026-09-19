@@ -28,8 +28,11 @@
 | 分层方向 | `shared` 从不 import `renderer`/`main`；`main`/`preload` 不 import `renderer`；**无循环依赖**（唯一一个是类型态可擦除的 `layout/types ↔ layout/accessory`） |
 | IPC 面 | **70 条通道，两侧齐全**（脚本逐条核对：preload 缺失 0、main/menu 缺失 0） |
 | 已完成拆分 | **`shared` 层 6 次全完成**：`layout/core`（`6eeab2f`）、`layout/overlays`（`6c2f7ee`）、`layout/graphic`（`a7b01ec`）、`agent/index`（`db46ffd`）、`code/highlight`、`ai/index`；死代码清理 `8b7908a` |
-| 未完成（2026-09-19 本轮实测同步） | 剩 **7 个 600+ 行文件**，全在 `renderer` / `main`：`Canvas.tsx` 2951、`main/index.ts` 2498、`store/editor.ts` 2316、`ChatPanel.tsx` 1953、`App.tsx` 1272、`Toolbar.tsx` 1059、`NodePanel.tsx` 814；`scripts` 侧已全部拆完（入口 473 行） |
+| 未完成（2026-09-19 本轮实测同步） | 只剩 **3 个 600+ 行文件**：`Canvas.tsx` 2951（A8，未开工）、`store/editor.ts` 2316（B1）、`chat/use-chat-loop.ts` 1274（A6 的 runtime 模块，按任务表「ref 环不可跨文件拆」整块落地）。`main/index.ts` 已降到 54 行、`selfcheck` 入口 473 行、`NodePanel`/`Toolbar`/`ChatPanel`/`App` 均已降到 142/322/417/466 行 |
 | 安全网 | `selfcheck` **2628 项断言**（本轮从 2522 涨上来的），`verify` 21 个 `.xmind` + 4 个 `.emmx` 往返一致 |
+
+> **行数口径更正（2026-09-19）**：本机 PowerShell 的 `Get-Content` 按 GBK 解码，会**吞掉 LF-only 文件里紧跟中文的换行符**——用它统计行数偏小（实测：5 行的临时 LF 文件被数成 2 行；仓库里的 CRLF 文件不受影响）。`.editorconfig` 要求 `end_of_line = lf`，所以本轮新增/重写的文件都是 LF，**行数必须用 node 统计**（`fs.readFileSync(f,'utf8').split('\n')`）或直接看 `read` 工具的末行号。
+> **node 口径实测**：A4 `NodePanel.tsx` **814 → 142**、A5 `Toolbar.tsx` **1059 → 322**、A6 `ChatPanel.tsx` **1953 → 417**（另 `chat/use-chat-loop.ts` **1274**）、A7 `App.tsx` **1272 → 466**；未受影响的项：`TopicNode.tsx` 305、`Canvas.tsx` 2951、`store/editor.ts` 2316、`scripts/selfcheck.ts` 473、`main/index.ts` 54。**任务表各行括注的行数是当时用 Get-Content 量的（偏小），以本条为准。**
 
 ---
 
