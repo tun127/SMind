@@ -5,7 +5,7 @@
  * schema 声明见 tools-read.ts。结果文本有长度上限，防止把上下文撑爆。
  */
 import type { Sheet, Topic } from '../model/types'
-import { ancestorsOf, countHiddenNodes, findTopic, foldedSidesOf, walk } from '../model/tree'
+import { countHiddenNodes, findTopic, foldedSidesOf, titlePathOf, walk } from '../model/tree'
 import { isRecord } from '../guards'
 import { parseRange } from '../layout'
 import { MARKER_LABELS } from '../xmind/constants'
@@ -462,11 +462,7 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
       base = resolved.resolved.topic
       scopeNote = `「${base.title}」这一支`
     }
-    const pathOf = (id: string): string =>
-      ancestorsOf(context.root, id)
-        .map((ancestor) => findTopic(context.root, ancestor)?.title ?? '')
-        .filter((title) => title.length > 0)
-        .join(' → ')
+    const pathOf = (id: string): string => titlePathOf(context.root, id).join(' → ')
     const groups = duplicateGroups(base)
     const lines: string[] = [`按「同名」查重（范围：${scopeNote}）：`]
     if (groups.length === 0) lines.push('- 没有发现同名主题 ✅')
@@ -552,12 +548,8 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     }
     const limit = intArg(args, 'limit', 20, 1, 50)
 
-    const titleOf = (id: string): string => findTopic(context.root, id)?.title ?? ''
-    /** 祖先路径（含中心主题，不含自己） */
-    const pathOf = (id: string): string[] =>
-      ancestorsOf(context.root, id)
-        .map(titleOf)
-        .filter((title) => title.length > 0)
+    /** 祖先路径（含中心主题，不含自己）；空标题跳过——走共用的 titlePathOf */
+    const pathOf = (id: string): string[] => titlePathOf(context.root, id)
 
     const hits: Array<{ topic: Topic; path: string[] }> = []
     let total = 0

@@ -85,6 +85,26 @@ export function ancestorsOf(root: Topic, id: string): string[] {
   return chain
 }
 
+/**
+ * 祖先标题链（**不含自己**，保持位置：标题为空的祖先留一个空串占位）。
+ *
+ * 这是**唯一**一份祖先标题遍历：以前 `agent/address.ts` 与 `agent/run-read.ts`
+ * 各写一份 `ancestorsOf(...).map(findTopic?.title ?? '')`，风格还各不相同
+ * （一处带自己、一处过滤空标题、一处拼成 ` → ` 文本）——地址显示、查重报告、
+ * 搜索结果里的路径说法因此可能不一致。
+ */
+export function ancestorTitlesOf(root: Topic, id: string): string[] {
+  return ancestorsOf(root, id).map((item) => findTopic(root, item)?.title ?? '')
+}
+
+/**
+ * 祖先标题链，但**跳过空标题**（拼成路径文本 / 面包屑时用；
+ * 空标题留位会在路径里插进 `a →  → b` 这种读不懂的东西）。
+ */
+export function titlePathOf(root: Topic, id: string): string[] {
+  return ancestorTitlesOf(root, id).filter((title) => title.length > 0)
+}
+
 /** 是否是自己或自己的后代（用于阻止把节点拖进自己的子树） */
 export function isSelfOrDescendant(root: Topic, ancestorId: string, targetId: string): boolean {
   if (ancestorId === targetId) return true

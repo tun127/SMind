@@ -5,7 +5,7 @@
  * 而不是一句「找不到」。
  */
 import type { Topic } from '../model/types'
-import { allChildrenOf, ancestorsOf, findTopic } from '../model/tree'
+import { allChildrenOf, ancestorTitlesOf, findTopic } from '../model/tree'
 
 /* ------------------------------------------------------------------ */
 /* 寻址：模型只会给字符串，解析成具体节点是**应用的责任**               */
@@ -36,8 +36,8 @@ export function shortHandleOf(id: string): string {
 export function topicPathOf(root: Topic, id: string): string[] | null {
   const self = findTopic(root, id)
   if (!self) return null
-  const titles = ancestorsOf(root, id).map((item) => findTopic(root, item)?.title ?? '')
-  return [...titles, self.title]
+  // 祖先链走共用的 ancestorTitlesOf（**不**过滤空标题：这里要保住位置，缺一个就显得层级错乱）
+  return [...ancestorTitlesOf(root, id), self.title]
 }
 
 /** 某节点下的子主题清单（最多 8 个）：把候选回给模型，它下一步就能自己纠正 */
