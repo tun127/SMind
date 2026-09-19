@@ -53,6 +53,35 @@
 
 ---
 
+## E1 剩项的个人复核结论（2026-09-19 · E1 收口批次）
+
+来源：`shared-audit.md` §5 的第 (2)(3)(4)(5)(10)(12)(15) 组。判据仍是**抽原语、调用点各自保留策略**，
+**每一行都是本次亲自 grep/读代码核实的，不是照抄审计**（审计的行号已多处漂移，且有两处结论需要修正）。
+
+**本轮收掉的 3 组（各一个提交，五道门槛逐条退出码全绿）：**
+
+| 组 | 提交 | 原语 | 说明 |
+|---|---|---|---|
+| (5) 概览/边界标题默认样式 | `4d21d08` | `model/overlay-style.ts` 的 `OVERLAY_TITLE_DEFAULTS` | 10 个写数字的点（布局 3 常量 + 画布 2 + 导出 3 + 面板 1 + 关系线 1）收敛成一处；`metrics.ts` 的 `*_FONT_SIZE` **保留名字、改为派生**，取值逐字对齐、外观零变化 |
+| (3) `extensionOf` ×2 | `5a6830b` | `model/resources.ts` 的 `extensionOf` | 实测确实只有两份（`document/index.ts` 私有 + `resources.ts` 导出）；`license.ts` 的 `key.split('.')` 是密钥分段、不是扩展名。25 输入实测等价，两处 `??` 兜底均不可达 |
+| (12) 资源目录前缀 ×3 | `022b0bd` | `model/resources.ts` 的 `RESOURCES_DIR` / `LEGACY_ATTACHMENTS_DIR` | 审计归为"三份同值"**需修正**：真同值只有 2 份 `'resources/'`，第三处 `xmind/parse.ts` 是 `'attachments/'`（旧版包前缀，另一个字符串）。一并收进同一模块 |
+
+**本轮核实后确认"不合并"的组（附具体证据）：**
+
+| 组 | 实测位置 | 为什么不合并（证据） |
+|---|---|---|
+| (2) `normalizeDocPath` vs `documentKeyOf` | `shared/window.ts:12`、`shared/snapshot/index.ts:71` | **同族但口径确实不同（实跑复核）**：斜杠方向相反（前者统一成 `/`、后者统一成 `\`）、后者多 `file:` 前缀；**归一强度也不同**——同一份文件的 `C:/A//B.XMIND/` 与 `c:\a\\b.xmind`，`normalizeDocPath` 判为同键（折叠重复斜杠 + 去尾斜杠 + 小写），`documentKeyOf` **判为不同键**（不折叠、不去尾斜杠）；空格与空串口径也不同（前者不 trim、后者 trim 且空返回 `null`）。另外 `documentKeyOf` 的返回值是**持久化面**（写进快照索引的 `docKey` 字段，`snapshot/index.ts:81` 读取时还要 trim 校验）。合并等于改一处持久化键 → 不改 |
+| (4) `bracePath` ×2 | `layout/core/connect.ts:499`、`layout/overlays/shapes.ts:20` | **同名不同义**：前者 `(x, yTop, yBottom, tipX)` 4 参、只竖着、给括号图结构；后者 `(axis, spanStart, spanEnd, base, spine, nib)` 6 参、有 spine/nib 两段几何、给概要括号。圆角也不同（`clamp(2,12,span/4)` vs `clamp(2,14,span/4)`）。**无任何文件同时 import 两者**（`stack.ts` 只 import `core` 的、`build.ts` 只 import `shapes` 的）→ 合并必须加 axis 参数并统一圆角，属行为改动 |
+| (15) 两种节点计数 | `ai/context.ts:20` `countTopicTree`、`model/tree.ts:381` `countTopics` | **口径有意不同**：`countTopics` 走 `walk`（`tree.ts:28` 递归 `detachedChildren`，含自由摆放主题，另有 `includeRoot` 开关）；`countTopicTree` 只递归 `children`。调用方也是两组：`StatusBar.tsx:35` / `use-canvas-layout.ts:97` 用前者，`ai/context.ts:50` / `plan-write.ts:141,676` / `use-chat-loop.ts:693` 用后者。`context.ts:12-19` 的注释**明确写着"别把两者合并"** → 不改 |
+| (10) `activeSheet` 族 | `tree.ts:422` `activeSheet`、`outline/index.ts:232` `activeSheetOf`、`naming.ts:55-58`（内联第三次） | **审计漏了一处**：同一"找当前画布"的表达式实测有 **3** 份（不是 2 份）。三者**空工作簿契约不同**：`tree.activeSheet` 用 `!` 断言（渲染热路径不许抛，注释已写明）、`activeSheetOf` 返回 `undefined` 且调用方抛"当前没有可导出的画布"、`defaultDocumentName` 还要容忍 `workbook === undefined`。§八 已写"建议不做" → 只登记 |
+| (10) 字节数格式化 | `snapshot/index.ts:223` `formatBytes` vs `nodePanel/attachment-section.tsx:15` `formatSize`（审计原引 `NodePanel.tsx:44-49`，已搬走） | **可合并但会改文案**：①空态 `'0 B'` vs `''`；②KB 口径 `(size/1024).toFixed(1)` vs `Math.round(size/1024)`（`1536` → `1.5 KB` vs `2 KB`）；③B 口径 `Math.round(size)` vs 原值。合并必然改其中一处的界面文字 → 属行为改动，留用户拍板 |
+| (10) 颜色校验 | `theme/index.ts:139` `HEX_RE` vs `model/coerce.ts:19` `COLOR_PATTERN` | **宽严相反、用途不同**：前者只认 `#rgb`/`#rrggbb`（校验**导入的主题 JSON**），后者是宽松白名单 `[a-zA-Z0-9#(),.%\s-]{1,64}`（校验**节点富文本样式**，同时兼作导出 SVG/PDF 的转义防线，会被写进属性）。合并任一方都会砍掉另一方现在合法接受的输入 → 不改 |
+| (10) 文件名清理 | `model/naming.ts:41` `sanitizeFileName` vs `model/resources.ts:66` `safeResourceName` | **口径不同**：前者面向"用户可见的默认文件名"（60 字上限、折叠空白、去尾部点/空格、Windows 保留设备名加 `_`、清空返回 `''`）；后者面向"包内资源文件名"（先取基名、去**开头**的点、80 字上限、**空则兜底 `'file'`**）。§八 已写"建议不做" → 不改 |
+| (10) 默认对齐 `'center'` | `shared/ipc.ts:68` `DEFAULT_APP_SETTINGS.defaultAlign` vs `renderer/render/defaults.ts:10` | 两处都写同一个值：一个是**设置项的落盘默认值**，一个是渲染层模块级可变默认值（启动早期、设置读回来之前的初值）。**可合并（改 1 行、零行为变化）且不属 §八 的"建议不做"三项**，但属 (10) 混合组、本批按"只核实"处理 → 建议另开一个小提交 |
+| (10) basename 取法 | `history/index.ts:72,104`、`naming.ts:80` `fileNameOf`、`store/tabs.ts:124`、`model/resources.ts:93`（`extensionOf` 内的同一表达式） | **同族、但空态与尾分隔符口径不同**：`history` 用 `?? path`（**死代码**，`pop()` 永不 undefined）、`resources` 用 `?? ''`、`fileNameOf` 返回 `string \| null` 且空基名时退回**整条路径**、`tabs.ts` 空基名时退回**中心主题名**。可抽 `baseNameOf(path): string` 而各调用点保留策略（正是本战役判据），但会动 `history/`、`renderer/store/tabs.ts` 等 3 个模块 → 超出 E1 本批范围，登记待派 |
+
+---
+
 ## 处理结果（2026-09-15）
 
 | 项 | 结果 | 落地位置 |
