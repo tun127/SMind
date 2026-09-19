@@ -8,7 +8,9 @@ import { activeDocId } from '../store/tabs'
  * 全局键盘快捷键（自 App.tsx 整块搬出，effect 体逐字未改）。
  *
  * 模块级助手 `hasDomTextSelection` / `readClipboardImage`（含 `PastedImage`）随块搬来：
- * 它们只被这条链路使用。依赖数组仍是 `[showToast]`。
+ * 它们只被这条链路使用。依赖数组是 `[showToast, setSidePanel]`——`showToast` 是
+ * `useCallback([])` 的稳定引用、`setSidePanel` 是 `useState` 的 setter，两者身份恒定，
+ * 所以重跑时机与搬迁前一致（2026-09-19 订正：本行原写"仍是 `[showToast]`"）。
  */
 
 interface Deps {

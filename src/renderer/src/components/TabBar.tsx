@@ -94,15 +94,19 @@ export default function TabBar({ onNewTab, onCloseTab }: Props): ReactElement {
               }}
               draggable
               onDragStart={() => {
+                // 记住**被拖的那个**标签：它是整个拖拽过程中唯一不变的锚点
                 dragIdRef.current = tab.id
               }}
               onDragOver={(e) => {
                 e.preventDefault()
                 const from = tabs.findIndex((item) => item.id === dragIdRef.current)
                 if (from >= 0 && from !== index) {
+                  // 跟手：拖到哪就排到哪。`dragIdRef` 必须**始终指向被拖的那个标签**——
+                  // 这里曾经多写一行 `dragIdRef.current = tab.id`：而 `tab === tabs[index]`
+                  // （map 绑定），且能进本分支的前提就是 `from !== index`，所以那一行
+                  // **必然**把"被拖的标签"替换成"被悬停的标签"，此后每次 dragover 都会去移动
+                  // 另一个标签（来回拖动时表现为跳位）。
                   moveTab(from, index)
-                  // 跟手：拖到哪就排到哪，dragId 指向的标签跟着走
-                  dragIdRef.current = tab.id
                 }
               }}
               onDragEnd={() => {
