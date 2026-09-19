@@ -9,6 +9,7 @@ import { useKeyboardShortcuts } from './app/use-keyboard-shortcuts'
 import { useMenuCommands } from './app/use-menu-commands'
 import { useRecovery } from './app/use-recovery'
 import { useThemeLibrary } from './app/use-theme-library'
+import { useWindowClose } from './app/use-window-close'
 import { useWindowTitle } from './app/use-window-title'
 import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
@@ -29,7 +30,7 @@ import { setDefaultTextAlign } from './render/defaults'
 import { setCodeFontSizeBase } from '@shared/layout/accessory'
 import { setStage } from './dev/stage'
 import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
-import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
+import { activeDocId, useTabs } from './store/tabs'
 import TabBar from './components/TabBar'
 import { type AppSettings } from '@shared/ipc'
 import { type ThemeDefinition } from '@shared/theme'
@@ -56,14 +57,6 @@ export default function App(): ReactElement {
   const toolbarHidden = useEditor((s) => s.appSettings.toolbarHidden)
 
   const [toast, setToast] = useState<string | null>(null)
-  /** 未保存确认：run＝确认后的动作；fileName＝被确认的文档名；discard＝「不保存」的额外动作 */
-  const [pending, setPending] = useState<{
-    run: () => void
-    fileName: string
-    discard?: () => void
-    /** 这次询问来自主进程的关窗/退出请求：点「取消」必须回执主进程（见 closeCancel） */
-    windowClose?: boolean
-  } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   /** 右侧抽屉：同一时刻只开一个 */
   const [sidePanel, setSidePanel] = useState<'none' | 'theme' | 'node' | 'search' | 'chat'>('none')
@@ -111,66 +104,7 @@ export default function App(): ReactElement {
     importOutlineFile
   } = useDocumentActions({ showToast, themesRef, applyRenderDefaults })
 
-  /**
-   * 正常关闭应用。
-   * 关键：关闭前必须清掉自动存档，否则「不保存退出」后下次启动还会反复提示恢复。
-   * 但如果用户还停在「发现未保存内容」的弹窗上没有做决定，就不能悄悄删掉存档。
-   */
-  const closeApp = useCallback((): void => {
-    const finish = (): void => window.api.confirmClose()
-    if (recoveryPendingRef.current) {
-      finish()
-      return
-    }
-    void (async () => {
-      try {
-        await window.api.clearAutosave()
-      } catch {
-        /* 忽略：清不掉也不该阻塞关闭 */
-      }
-      finish()
-    })()
-  }, [])
-
   useThemeLibrary({ resolveTheme, themesRef, applyRenderDefaults })
-
-  /** 关闭一个标签（带未保存确认；确认文案里显示这份文档自己的名字） */
-  const closeTabById = useCallback(
-    (id: string): void => {
-      commitPending()
-      const tabs = useTabs.getState()
-      const tab = tabs.tabs.find((item) => item.id === id)
-      if (!tab) return
-      const liveDirty = id === tabs.activeId ? useEditor.getState().dirty : tab.dirty
-      const run = (): void => {
-        useTabs.getState().closeTab(id)
-        // 主进程丢掉这份文档的图片/附件资源（别的标签不受影响）
-        void window.api.releaseDoc(id).catch(() => undefined)
-      }
-      if (liveDirty) {
-        // 保存要保的是被关的那份：先把它切到前台再问
-        if (id !== tabs.activeId) useTabs.getState().switchTo(id)
-        setPending({ fileName: tabTitleOf(tab), run, discard: run })
-        return
-      }
-      run()
-    },
-    [commitPending]
-  )
-
-  /** 有未保存内容时先弹确认框（先把未提交的输入落定，dirty 才准确） */
-  const guard = useCallback(
-    (run: () => void): void => {
-      commitPending()
-      if (useEditor.getState().dirty) {
-        const active = useTabs
-          .getState()
-          .tabs.find((item) => item.id === useTabs.getState().activeId)
-        setPending({ fileName: active ? tabTitleOf(active) : '当前文档', run })
-      } else run()
-    },
-    [commitPending]
-  )
 
   useMenuCommands({
     newDocument,
@@ -223,49 +157,15 @@ export default function App(): ReactElement {
   /* ------------------------------------------------------------------ */
 
   /**
-   * 退出前把**每个有未保存改动的标签**都问一遍（逐个切到前台询问），
-   * 全部有了着落（保存 / 丢弃）才真正关闭窗口。
+   * 关窗链路（未保存确认 / 逐个标签询问 / 取消后回执主进程）整块在 `app/use-window-close.ts`。
+   *
+   * **调用点必须留在原来那条 `onCloseRequest` effect 的位置上**：hook 内只有这一条 effect，
+   * 放在这里，它在这份组件 effect 序列里的相对位置才与搬迁前一致（别挪到 `pending` 原来的位置去）。
    */
-  const forceCloseIds = useRef(new Set<string>())
-  const closeWindowFlow = useCallback((): void => {
-    commitPending()
-    const tabs = useTabs.getState()
-    const askThis = (fileName: string): void =>
-      setPending({
-        fileName,
-        windowClose: true,
-        run: closeWindowFlow,
-        discard: () => {
-          forceCloseIds.current.add(useTabs.getState().activeId)
-          closeWindowFlow()
-        }
-      })
-    // 先问激活的（它就是屏幕上这份，用户最有概念）
-    if (useEditor.getState().dirty && !forceCloseIds.current.has(tabs.activeId)) {
-      const active = tabs.tabs.find((item) => item.id === tabs.activeId)
-      askThis(active ? tabTitleOf(active) : '当前文档')
-      return
-    }
-    // 再问其余脏标签（逐个切过去问）
-    const nextDirty = tabs.tabs.find(
-      (item) => item.dirty && item.id !== tabs.activeId && !forceCloseIds.current.has(item.id)
-    )
-    if (nextDirty) {
-      tabs.switchTo(nextDirty.id)
-      askThis(tabTitleOf(nextDirty))
-      return
-    }
-    closeApp()
-    // closeApp 是 settle 后的最终动作：漏了它这里会一直调用**首次渲染时**的那个闭包
-  }, [commitPending, closeApp])
-
-  useEffect(() => {
-    const off = window.api.onCloseRequest(() => {
-      forceCloseIds.current.clear()
-      closeWindowFlow()
-    })
-    return off
-  }, [closeWindowFlow])
+  const { pending, setPending, closeTabById, guard } = useWindowClose({
+    commitPending,
+    recoveryPendingRef
+  })
 
   useAutosave({ showToast })
 
