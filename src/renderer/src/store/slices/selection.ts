@@ -9,6 +9,15 @@
  */
 
 import type { RichText } from '@shared/model/types'
+import { appendToRich, hasFormatting, normalizeRich, richFromPlain } from '@shared/richtext'
+
+import { activeRoot, findTopic } from '@shared/model/tree'
+
+import { editingContent, sameRich, stampRichDefaults } from '@shared/model/editor-pure'
+import { selectReducer } from '@shared/model/editor-ops'
+import type { StateCreator } from 'zustand'
+import type { EditorState } from './types'
+import { NO_EDITING } from './types'
 
 export interface SelectionSlice {
   selection: string[]
@@ -50,4 +59,77 @@ export interface SelectionSlice {
   bumpRenderEpoch(): void
 }
 
-/** 实现（状态初值与动作）随「B1 第二步 B」的对应批次搬入；本文件此刻只有类型声明。 */
+export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSlice> = (
+  set,
+  get
+) => ({
+  selection: [],
+  ...NO_EDITING,
+  renderEpoch: 0,
+
+  /* ------------------------------------------------------------------ */
+  /* 选择与编辑态                                                        */
+  /* ------------------------------------------------------------------ */
+
+  select: (id, additive = false) => set((s) => selectReducer(s.selection, id, additive)),
+
+  beginEdit: (id, insertText) => {
+    const topic = findTopic(activeRoot(get().workbook), id)
+    const base = topic?.titleRich
+      ? normalizeRich(topic.titleRich)
+      : richFromPlain(topic?.title ?? '')
+    const rich = insertText ? appendToRich(base, insertText) : base
+    set({ editingId: id, ...editingContent(rich), selection: [id] })
+  },
+
+  updateEditingText: (text) => set(editingContent(richFromPlain(text))),
+
+  updateEditingRich: (rich) => set(editingContent(rich)),
+
+  commitEdit: (forId) => {
+    const { editingId, editingText, editingRich, workbook } = get()
+    if (!editingId) return
+    // 旧输入框失焦时可能已经切到了新节点，此时必须忽略这次提交
+    if (forId !== undefined && forId !== editingId) return
+
+    const topic = findTopic(activeRoot(workbook), editingId)
+    const nextTitle = editingText
+    const nextRich = editingRich ? normalizeRich(editingRich) : null
+    // 「首次命名」＝新建节点第一次输入文字：给打的内容补上默认字体/字号/颜色。
+    // 只认「原来标题为空」的节点——改老节点的文字绝不能突然被换样式。
+    const firstNaming = topic !== null && topic.title === ''
+    const stampedRich =
+      nextRich && firstNaming ? stampRichDefaults(nextRich, get().appSettings) : nextRich
+    const keepRich = stampedRich && hasFormatting(stampedRich) ? stampedRich : null
+
+    set(NO_EDITING)
+    if (!topic) return
+    if (topic.title === nextTitle && sameRich(topic.titleRich, keepRich)) return
+
+    get().mutate((draft) => {
+      const target = findTopic(activeRoot(draft), editingId)
+      if (!target) return
+      target.title = nextTitle
+      // 只有真正带格式时才写 titleRich，保持 .xmind 干净且与 Xmind 兼容
+      target.titleRich = keepRich ?? undefined
+    }, '修改文本')
+  },
+
+  cancelEdit: () => set(NO_EDITING),
+
+  bumpRenderEpoch: () => set((state) => ({ renderEpoch: state.renderEpoch + 1 })),
+
+  commitAndAddChild: () => {
+    const id = get().editingId
+    if (!id) return
+    get().commitEdit()
+    get().addChild(id)
+  },
+
+  commitAndAddSibling: () => {
+    const id = get().editingId
+    if (!id) return
+    get().commitEdit()
+    get().addSibling(id)
+  }
+})
