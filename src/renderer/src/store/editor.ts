@@ -77,6 +77,7 @@ import {
   stampRichDefaults,
   walkStampDefaults
 } from '@shared/model/editor-pure'
+import { navigateTargetOf, resolveKeyMove, selectReducer } from '@shared/model/editor-ops'
 
 /**
  * 公开面：`themeColorsOf` / `overlayToggleOf` 已下沉到 `@shared/model/editor-pure`。
@@ -957,15 +958,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   /* 选择与编辑态                                                        */
   /* ------------------------------------------------------------------ */
 
-  select: (id, additive = false) =>
-    set((s) => {
-      // 动主题就把画布元素的选中取消（两者不同时高亮）
-      if (id === null) return { selection: [], selectedOverlay: null }
-      if (!additive) return { selection: [id], selectedOverlay: null }
-      return s.selection.includes(id)
-        ? { selection: s.selection.filter((x) => x !== id) }
-        : { selection: [...s.selection, id], selectedOverlay: null }
-    }),
+  select: (id, additive = false) => set((s) => selectReducer(s.selection, id, additive)),
 
   beginEdit: (id, insertText) => {
     const topic = findTopic(activeRoot(get().workbook), id)
@@ -1380,36 +1373,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const id = state.selection[0]
     if (!id) return false
     const root = activeRoot(state.workbook)
-    // 中心主题不能被移动
-    if (id === root.id) return false
-    const parent = findParent(root, id)
-    if (!parent) return false
-    const index = parent.children.findIndex((child) => child.id === id)
-    if (index < 0) return false
-    const last = parent.children.length - 1
+    const plan = resolveKeyMove(root, id, key)
+    if (!plan) return false
 
     // 每次按键各记一步撤销，**刻意不合并**：移动是数组重排，
     // 合并两步的 inverse 会因为下标错位而改坏 children（见 moveNode 的说明）。
-    if (key === 'ArrowUp') return index === 0 ? false : state.moveNode(id, parent.id, index - 1)
-    if (key === 'ArrowDown')
-      return index === last ? false : state.moveNode(id, parent.id, index + 1)
-    if (key === 'Home') return index === 0 ? false : state.moveNode(id, parent.id, 0)
-    if (key === 'End')
-      return index === last ? false : state.moveNode(id, parent.id, parent.children.length)
-
-    if (key === 'ArrowLeft') {
-      // 升级：挪到父级的后面，成为父级的兄弟
-      const grandParent = findParent(root, parent.id)
-      if (!grandParent) return false
-      const parentIndex = grandParent.children.findIndex((child) => child.id === parent.id)
-      if (parentIndex < 0) return false
-      return state.moveNode(id, grandParent.id, parentIndex + 1)
-    }
-
-    // 降级：挂到前一个兄弟下面。没有前一个兄弟就无处可降。
-    const previous = index > 0 ? parent.children[index - 1] : undefined
-    if (!previous) return false
-    return state.moveNode(id, previous.id)
+    return state.moveNode(id, plan.targetId, plan.index)
   },
 
   navigateSelection: (key) => {
@@ -1422,24 +1391,8 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (selectedId && !selected) set({ selection: [root.id] })
     const currentId = selected ? selected.id : root.id
 
-    if (key === 'ArrowLeft') {
-      const parent = findParent(root, currentId)
-      if (parent) set({ selection: [parent.id] })
-      return
-    }
-    if (key === 'ArrowRight') {
-      const firstChild = findTopic(root, currentId)?.children[0]
-      if (firstChild) set({ selection: [firstChild.id] })
-      return
-    }
-    const parent = findParent(root, currentId) ?? root
-    const index = parent.children.findIndex((child) => child.id === currentId)
-    if (index < 0) return
-    const nextIndex = key === 'ArrowUp' ? index - 1 : index + 1
-    if (nextIndex >= 0 && nextIndex < parent.children.length) {
-      const next = parent.children[nextIndex]
-      if (next) set({ selection: [next.id] })
-    }
+    const target = navigateTargetOf(root, currentId, key)
+    if (target) set({ selection: [target] })
   },
 
   setStructure: (structureClass) => {
