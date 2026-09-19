@@ -9,7 +9,7 @@
 ### 修复 · 本轮代码审计（2026-09-18，分批各自过五道门槛）
 
 > 来源：`docs/shared-audit.md`（83 文件 / 18k 行的 `src/shared/**` 审计）+ 应用层实测。
-> 每批都跑 typecheck / lint / format:check / selfcheck / verify 并单独提交；自检 2522 → 2624 项。
+> 每批都跑 typecheck / lint / format:check / selfcheck / verify 并单独提交；自检 2522 → 2625 项。
 
 - **P1 导出装饰失真**（`export/svg.ts`、`export/raster.ts`、`export/drawing.ts`）：SVG 把删除线写成下划线、
   PNG 与位图 PDF **完全没画**下划线与删除线、缺失图片的占位与画布不一致（现统一为虚线框 + 「图片缺失」）、
