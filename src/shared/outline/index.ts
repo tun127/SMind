@@ -81,9 +81,17 @@ export function outlineRows(root: Topic, options: OutlineRowsOptions = {}): Outl
       hasImage: Boolean(topic.image),
       hasFormula: Boolean(topic.formula)
     })
-    // 面板（skipCollapsed）只列**可见**的分支；导出不受折叠影响，仍走全部子节点
+    /**
+     * 面板（skipCollapsed）只列**可见**的分支（`visibleChildren` 已把整体折叠与按侧收起都算进去）；
+     * 导出不受折叠影响，仍走全部子节点。
+     *
+     * 浮动主题（`detachedChildren`）两种模式下**都列**，排在最后：它们不随父级折叠重排，
+     * 而大纲面板是"还能找到它们"的主要入口，藏起来反而更难找回。
+     * 之前这里的注释与代码不一致（上面写着"只列可见"，下面却无条件列）——现在按**实际行为**写清楚：
+     * 面板与导出对浮动主题的处理相同，差别只在折叠起来的子树。
+     * 若产品上想要"父级折叠时浮动主题也跟着不列"，改这一处即可（`if (!skipCollapsed)`）。
+     */
     for (const child of skipCollapsed ? visible : topic.children) walk(child, depth + 1)
-    // 浮动主题没有固定的树位置，但也不该在大纲里消失，排在最后
     for (const floating of topic.detachedChildren) walk(floating, depth + 1)
   }
 
