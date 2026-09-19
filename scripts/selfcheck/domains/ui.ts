@@ -53,6 +53,14 @@ import {
   UPDATE_RECHECK_INTERVAL_MS
 } from '../../../src/shared/update-policy'
 import { writeFileAtomic, writeJsonAtomic } from '../../../src/main/atomic-write'
+/*
+ * 主进程的回归网：`selfcheck` 此前只覆盖到 `atomic-write.ts` 一个主进程文件（14 个 IPC 域拆分后
+ * 全靠 `npm run build` + 手工冒烟）。下面这两个模块**不依赖 Electron**，可以直接纳入：
+ * `doc-resources.ts`（按 docId 隔离图片/附件）与 `document.ts`（拖文档抽取 + 防 zip 炸弹）。
+ */
+import { DOC_ID_MAX, docOf, pruneForSave, type DocResources } from '../../../src/main/doc-resources'
+import { IMPORT_DOCUMENT_EXTENSIONS, extractDocumentFromBytes } from '../../../src/main/document'
+import { createWorkbook } from '../../../src/shared/model/factory'
 
 import { evictOldest } from '../../../src/shared/cache'
 
@@ -85,7 +93,7 @@ import {
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 
-import { pathFromFileUrl } from '../../../src/shared/document'
+import { classifyDocument, pathFromFileUrl } from '../../../src/shared/document'
 
 import { autosaveSlotName, findWindowForPath, sameDocPath } from '../../../src/shared/window'
 
@@ -167,6 +175,123 @@ export async function testSafetyHelpers(): Promise<void> {
   )
   eq('正好到间隔 → 查', shouldRecheck(1_000, 1_000 + UPDATE_RECHECK_INTERVAL_MS), true)
   eq('隔了一整天 → 查', shouldRecheck(1_000, 1_000 + 24 * 60 * 60 * 1000), true)
+
+  group('主进程：文档资源按 docId 隔离（docOf / pruneForSave）')
+
+  const docState: { docs: Map<string, DocResources> } = { docs: new Map() }
+  const docA = docOf(docState, 'doc-a')
+  eq('第一次取会建出来', docState.docs.size, 1)
+  check('再取拿到同一个对象（不会每次新建、把已收集的资源丢掉）', docOf(docState, 'doc-a') === docA)
+  const docB = docOf(docState, 'doc-b')
+  check('两份文档各自一条记录（A 保存不会把 B 的图片打进包里）', docA !== docB)
+  eq('新记录还没有文件路径', docA.docPath, null)
+  eq('docId 长度上限是常量（脏输入不该让主进程无界长胖）', DOC_ID_MAX, 120)
+
+  // pruneForSave：只清「本次会话新插入、之后又不再被引用」的资源
+  const pruneWorkbook = createWorkbook({ rootTitle: '裁剪测试' })
+  pruneWorkbook.sheets[0].rootTopic.image = { path: 'resources/referenced.png' }
+  docA.resources = {
+    'resources/referenced.png': new Uint8Array([1]),
+    'resources/orphan-new.png': new Uint8Array([2]),
+    'resources/orphan-old.png': new Uint8Array([3])
+  }
+  docA.inserted = new Set(['resources/orphan-new.png'])
+  pruneForSave(docA, pruneWorkbook)
+  check('仍被节点引用的资源保留', 'resources/referenced.png' in docA.resources)
+  check('新插入且已不再被引用的资源被清掉', !('resources/orphan-new.png' in docA.resources))
+  check(
+    '文件里原本带着的资源一律不动（可能有本软件尚未建模的引用）',
+    'resources/orphan-old.png' in docA.resources
+  )
+  check('清掉之后 inserted 里也一并移除', !docA.inserted.has('resources/orphan-new.png'))
+
+  group('主进程：拖进来的文档怎么读（抽取 + 防 zip 炸弹）')
+
+  {
+    // 清单与识别口径必须一致，否则会出现"对话框里能选、真读的时候说读不了"
+    const unreadable = IMPORT_DOCUMENT_EXTENSIONS.filter(
+      (ext) => classifyDocument(`样本.${ext}`).kind === 'unsupported'
+    )
+    eq('导入清单里的扩展名都是能读的', unreadable.length, 0)
+  }
+
+  let pdfMessage = ''
+  try {
+    await extractDocumentFromBytes('说明书.pdf', new Uint8Array([1, 2, 3]))
+  } catch (error) {
+    pdfMessage = (error as Error).message
+  }
+  check('PDF 明确拒绝并给人话原因（不是空结果让人发呆）', pdfMessage.includes('PDF'))
+
+  let unknownMessage = ''
+  try {
+    await extractDocumentFromBytes('神秘.zzz', new Uint8Array([1, 2, 3]))
+  } catch (error) {
+    unknownMessage = (error as Error).message
+  }
+  check('未知格式同样给人话原因', unknownMessage.length > 0)
+
+  let emptyMessage = ''
+  try {
+    await extractDocumentFromBytes('空白.txt', new TextEncoder().encode('   \n  '))
+  } catch (error) {
+    emptyMessage = (error as Error).message
+  }
+  check('没有可读文字时给专门的原因', emptyMessage.includes('没有可读的文字'))
+
+  const plain = await extractDocumentFromBytes(
+    '笔记.txt',
+    new TextEncoder().encode('第一行\n\n\n第二行  ')
+  )
+  eq('纯文本按排版清洗（空行压缩、行尾空白去掉）', plain.text, '第一行\n\n第二行')
+  eq('没超上限就不写 note', plain.note, null)
+  eq('名字只留文件名', plain.name, '笔记.txt')
+
+  // GBK：Windows 上的中文 txt / csv 大量是 GBK，用 UTF-8 硬读会得到一片「锟斤拷」
+  const gbk = await extractDocumentFromBytes('中文.txt', new Uint8Array([0xd6, 0xd0, 0xce, 0xc4]))
+  eq('GBK 文本按 GBK 读（不是替换符）', gbk.text, '中文')
+
+  let oversizeMessage = ''
+  try {
+    await extractDocumentFromBytes('超大.txt', new Uint8Array(32 * 1024 * 1024 + 1))
+  } catch (error) {
+    oversizeMessage = (error as Error).message
+  }
+  check('超过 32MB 直接拒绝并说清上限', oversizeMessage.includes('文件太大'))
+
+  const JSZipMod = (await import('jszip')).default
+  const docxZip = new JSZipMod()
+  docxZip.file(
+    'word/document.xml',
+    '<w:document><w:p><w:r><w:t>要点&amp;细节</w:t></w:r></w:p></w:document>'
+  )
+  const docx = await extractDocumentFromBytes(
+    '报告.docx',
+    await docxZip.generateAsync({ type: 'uint8array' })
+  )
+  check('docx 走 zip 解包并还原实体', docx.text.includes('要点&细节'), docx.text)
+
+  const longZip = new JSZipMod()
+  longZip.file('word/document.xml', `<w:t>${'长'.repeat(320_000)}</w:t>`)
+  const longDoc = await extractDocumentFromBytes(
+    '长文.docx',
+    await longZip.generateAsync({ type: 'uint8array' })
+  )
+  eq('超过 30 万字的正文如实截断', longDoc.text.length, 300_000)
+  check('截断时明确写清「只取了前 N 字」', (longDoc.note ?? '').includes('只取了前'))
+
+  const noTextZip = new JSZipMod()
+  noTextZip.file('docProps/app.xml', '<Properties/>')
+  let noTextMessage = ''
+  try {
+    await extractDocumentFromBytes(
+      '空壳.docx',
+      await noTextZip.generateAsync({ type: 'uint8array' })
+    )
+  } catch (error) {
+    noTextMessage = (error as Error).message
+  }
+  check('zip 里抽不到文字时给专门的原因', noTextMessage.includes('没有抽到文字'))
 
   group('原子写文件')
 
