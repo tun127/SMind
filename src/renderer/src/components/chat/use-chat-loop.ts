@@ -38,6 +38,8 @@ import {
 } from '@shared/ai'
 import {
   canContinueAgentLoop,
+  DESTRUCTIVE_WRITE_LABELS,
+  isDestructiveWriteKind,
   segmentTitleMentions,
   shortHandleOf,
   topicPathOf,
@@ -226,9 +228,9 @@ export function useChatLoop({
     return () => {
       cancelled = true
     }
-    // setPending（工厂返回，每渲染重建）**不能**补进依赖数组：补了本 effect 就会每渲染重跑，
-    // 把正在跑的回合取消、聊天记录反复重载。它只写 pendingRef 与两个稳定 setter，用哪一份都等价。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // setPending 是**本 hook 里的函数字面量**（A6-4 配方② 之后），lint 不再要求列进依赖数组；
+    // 即便列进来也不该列：补了本 effect 就会每渲染重跑，把正在跑的回合取消、聊天记录反复重载。
+    // 它只写 pendingRef 与两个稳定 setter，用哪一份都等价。
   }, [filePath, update])
 
   /** 落盘：防抖 800ms；流式过程中不写（逐字保存等于每个字都写一次盘） */
@@ -283,18 +285,45 @@ export function useChatLoop({
   }, [])
 
   /* ---- 工具执行 / 回合收尾：整块搬进 chat/turn-runtime.ts（显式 deps 对象，函数体逐字未改） ---- */
+
+  /**
+   * 待确认的写操作：state 只用于渲染，判定走 `pendingRef`。
+   *
+   * **A6-4 配方② 把它搬回 hook**（A6-3 时它住在 runtime 工厂里）：
+   * 它只是 `pendingRef` + 两个 React setter 的写入，定义留在这里、以 deps 传进工厂之后，
+   * `handleEvent` 那处订阅 effect 与 `send` 都不必再挂 `eslint-disable`——
+   * 既没有改变它的重建时机（本来就是普通函数字面量、每渲染重建），
+   * 也不必为"让 lint 变绿"去动高频路径的 ref 用法（§五 的纪律）。
+   */
+  const setPending = (
+    value: { call: ToolCall; intent: WriteIntent; summary: string } | null
+  ): void => {
+    pendingRef.current = value
+    setPendingWrite(
+      value
+        ? {
+            summary: value.summary,
+            kind: value.intent.kind,
+            label: isDestructiveWriteKind(value.intent.kind)
+              ? DESTRUCTIVE_WRITE_LABELS[value.intent.kind]
+              : '这类操作'
+          }
+        : null
+    )
+    // 每次新确认框都从「不记住」开始：上次勾过不该顺延到下一次
+    setRememberSkip(false)
+  }
+
   const {
     pushToolResult,
     compressExecutedCallArgs,
     noteAction,
     applyWriteIntent,
-    setPending,
     commitTurn,
     processQueue
   } = createTurnRuntime({
     changedIdsRef,
     messagesRef,
-    pendingRef,
     queueRef,
     requestIdRef,
     runRoundRef,
@@ -307,14 +336,14 @@ export function useChatLoop({
     dumpDiag,
     update,
     setActivity,
-    setPendingWrite,
     setPlan,
-    setRememberSkip,
     setStreaming,
     // 这三个是 useChatLoop 的解构入参：不随代码搬走，必须显式传进来
     docsRef,
     onBeforeAiWrite,
-    refreshLicense
+    refreshLicense,
+    // A6-4 配方②：定义在本 hook 里，以 deps 传进工厂（见上面 setPending 的说明）
+    setPending
   })
 
   /** 用户对破坏性操作表态后继续（从断点接着处理剩下的调用） */
@@ -756,9 +785,8 @@ export function useChatLoop({
     },
     // setDraft / setAtBottom 是 React 的稳定 setter（拆分前在组件作用域里、lint 视为稳定，
     // 如今作为入参传入，规则要求显式列出）——补进来不改变 send 的身份变化时机。
-    // setPending 恰恰相反：它是工厂返回的普通函数（每渲染重建），补进来会让 send 每渲染换身份；
-    // 而它只写 pendingRef 与两个稳定 setter，不补是安全的。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // setPending 是**本 hook 里的函数字面量**（A6-4 配方② 之后），lint 同样不再要求列进来；
+    // 它只写 pendingRef 与两个稳定 setter，不补是安全的。
     [runRound, update, license, titleIndex, tier, setAtBottom, setDraft]
   )
 

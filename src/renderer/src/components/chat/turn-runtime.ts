@@ -22,11 +22,11 @@
 
 import type { RefObject } from 'react'
 import { claimsAppliedChange, type AiMessage, type ToolCall } from '@shared/ai'
-import { DESTRUCTIVE_WRITE_LABELS, isDestructiveWriteKind, type WriteIntent } from '@shared/agent'
+import { type WriteIntent } from '@shared/agent'
 import { keepDiagArmed, reportCosts } from '../../dev/stage'
 import { viewportActions } from '../../render/viewport'
 import { useEditor } from '../../store/editor'
-import type { ChatDoc, ChatMsg, ChatPlan, PendingWrite } from './types'
+import type { ChatDoc, ChatMsg, ChatPlan } from './types'
 import { createWriteIntentRuntime } from './write-intent-runtime'
 import { createToolQueue } from './tool-queue'
 
@@ -34,7 +34,6 @@ import { createToolQueue } from './tool-queue'
 export interface TurnRuntimeDeps {
   changedIdsRef: RefObject<string[]>
   messagesRef: RefObject<ChatMsg[]>
-  pendingRef: RefObject<{ call: ToolCall; intent: WriteIntent; summary: string } | null>
   queueRef: RefObject<{ calls: ToolCall[]; index: number } | null>
   requestIdRef: RefObject<string | null>
   runRoundRef: RefObject<() => void>
@@ -47,9 +46,7 @@ export interface TurnRuntimeDeps {
   dumpDiag(reason: string, force?: boolean): void
   update(updater: (prev: ChatMsg[]) => ChatMsg[]): void
   setActivity(value: string): void
-  setPendingWrite(value: PendingWrite | null): void
   setPlan(value: ChatPlan | null): void
-  setRememberSkip(value: boolean): void
   setStreaming(value: boolean): void
   /**
    * 下面三个是 `useChatLoop({...}: LoopInput)` 的**解构入参**——它们既不在 hook 的
@@ -62,6 +59,15 @@ export interface TurnRuntimeDeps {
   docsRef: RefObject<ChatDoc[]>
   onBeforeAiWrite(): void
   refreshLicense(): void
+  /**
+   * 回合内的「待确认写操作」状态切换（A6-4 配方②：**定义搬回 hook**、以 deps 传进来）。
+   *
+   * 它只是 `pendingRef` + 两个 React setter 的写入，保持**函数字面量**（不是 `useCallback`）：
+   * `hook` 里那处 effect 与 `send` 才能既不把它列进依赖数组、也不用再挂 `eslint-disable`
+   * ——「不让 lint 变绿去改高频路径的 ref 用法」这条纪律的反向用法（A6-3 当时被迫挂的两条
+   * disable 已在本批去掉）。
+   */
+  setPending(value: { call: ToolCall; intent: WriteIntent; summary: string } | null): void
 }
 
 export function createTurnRuntime(deps: TurnRuntimeDeps): {
@@ -76,7 +82,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): {
   const {
     changedIdsRef,
     messagesRef,
-    pendingRef,
     queueRef,
     requestIdRef,
     runRoundRef,
@@ -89,13 +94,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): {
     dumpDiag,
     update,
     setActivity,
-    setPendingWrite,
     setPlan,
-    setRememberSkip,
     setStreaming,
     docsRef,
     onBeforeAiWrite,
-    refreshLicense
+    refreshLicense,
+    setPending
   } = deps
 
   /* ---- 写意图执行：整块在 chat/write-intent-runtime.ts（本文件只装配） ---- */
@@ -110,25 +114,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): {
     })
 
   /* ---- 回合级动作：写意图执行与队列推进都要用（留在装配点上） ---- */
-
-  const setPending = (
-    value: { call: ToolCall; intent: WriteIntent; summary: string } | null
-  ): void => {
-    pendingRef.current = value
-    setPendingWrite(
-      value
-        ? {
-            summary: value.summary,
-            kind: value.intent.kind,
-            label: isDestructiveWriteKind(value.intent.kind)
-              ? DESTRUCTIVE_WRITE_LABELS[value.intent.kind]
-              : '这类操作'
-          }
-        : null
-    )
-    // 每次新确认框都从「不记住」开始：上次勾过不该顺延到下一次
-    setRememberSkip(false)
-  }
 
   /**
    * 这次破坏性操作是否已被用户「不再询问」？
