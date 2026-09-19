@@ -2,6 +2,26 @@
 
 ---
 
+## 补记（第六次交接，2026-09-19 深夜）—— 一行现状 + 交给谁
+
+> **HEAD：`105a732`**（另有 captain 的文档提交压在它上面）｜工作树里**有成员在飞的改动**（`store/editor.ts`、`App.tsx`、`src/shared/model/editor-ops.ts`、`scripts/make-marker-art.mjs`、4 个 `app/*.tsx?` 新文件）——**接手前先 `git status --short` 与 `agent_teams_status`**。
+
+**这一段在做什么**：用户直接下令「**你直接把剩下的任务全部完成吧**」，于是 §八 剩余项被拆给 **AgentTeams 4 名成员**并行做，captain 只做**独立验收 + 文档同步**（并按新纪律：**成员跑全仓门槛期间队长自己不碰源码**）。分工与在飞状态见 `docs/decoupling-plan.md` §八 顶部那段进行时说明与 §七 最后一行。
+
+**已落盘并经 captain 独立验收**（每条都有"门槛之外的独立证据"，不只是引用成员自述）：
+`9fd3627`（脚本侧 1：CRC32+PNG → `scripts/lib/png.mjs`，产物 sha256 **35/35 一致**）｜`3641c5e`（补记空提交）｜`4d21d08`（E1-(5) overlay 默认样式：数值逐字可映射）｜`5a6830b`（E1-(3) extensionOf）｜`022b0bd`（E1-(12) 资源前缀：三处值都没变）｜`105a732`（E1-(11) 尾巴：清单派生 + 两处改名）｜`e347937`（B1 第二步 A-1：`selectReducer`/`resolveKeyMove`/`navigateTargetOf`，含"`selectedOverlay` 省略字段"这一语义细节）。
+
+**captain 的树级独立门槛**（在含成员在飞编辑的树上亲手跑）：`lint` 0 ｜ `format:check` 0 ｜ `selfcheck` 0（2628 断言）｜ `verify` 0；`typecheck` 曾红 4 条，逐条归因确认是编辑中间态。
+
+**接手须知（本段新增的坑，都是实测）**：
+1. **沙箱**：审批策略 never、不可提权；`npm run selfcheck` 的 esbuild **JS API** 必然 EPERM → 用 esbuild **CLI** 打包再跑 node（命令见本文件第四次补记），且必须**文件重定向**。
+2. **`npm run marker-art` 在 HEAD 上不可复现**：它的唯一产物就是 `src/shared/marker-art.ts` 本身，而生成器用 `prettier.format(text,{filepath})`——**Prettier 3 编程式调用不回读 `.prettierrc`**，产出"双引号+分号"、与仓库风格相反，而该文件在 `format:check` 覆盖范围内。跑完必须 `git checkout -- src/shared/marker-art.ts`。已派任务修（验收＝跑完生成器工作树干净 + `format:check` 仍 0）。
+3. **产物 sha256 基线只含产物行**（`build/**` 10 + `samples/**` 25），**显式排除 `src/**`**；`icon`/`samples` 已实测确定性，**`marker-art` 不在此列**。方向口径：干净版 `CF88B381…`、生成器写回的脏版 `4FCC0D3D…`。
+4. **同文件必须串行**：`store/editor.ts` 一度被两名成员同时动，已协调；`git add` 只用精确路径，提交前后 `git diff -- <自己的路径>` 确认没混入别人的改动。
+5. **流水线纪律**：成员做完**先 `agent_teams_update_task` 标 completed**，否则依赖它的下游任务永远 claim 不到、静默空转（已踩过两次）。
+
+---
+
 ## 补记（第五次交接，2026-09-19 晚）—— 先读这一段
 
 > **HEAD：`7e39e42`**（A8-9）＋ 本次文档提交。工作树干净。
