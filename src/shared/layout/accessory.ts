@@ -147,8 +147,6 @@ export const CODE_FONT_SIZE = 12
 export const CODE_FONT_FAMILY = 'Consolas, "JetBrains Mono", Menlo, "Courier New", monospace'
 /** 单字宽 / 字号 的恒定比率（等宽字体），随「基准字号」变化时按它换算 */
 export const CODE_CHAR_RATIO = 0.6
-/** 等宽字体里一个「宽度单位」对应多少像素（尺寸估算与导出绘制共用） */
-export const CODE_CHAR_WIDTH = CODE_FONT_SIZE * CODE_CHAR_RATIO
 
 /**
  * 代码块的**基准字号**：来自「默认样式」面板的设置（null = 内置 12）。

@@ -20,5 +20,3 @@ export const CODE_LANGUAGES = [
   'html',
   'css'
 ] as const
-
-export type CodeLanguage = (typeof CODE_LANGUAGES)[number]

@@ -170,11 +170,6 @@ export function normalizeRich(rich: RichText): RichText {
   return { paragraphs: paragraphs.length > 0 ? paragraphs : [{ runs: [] }] }
 }
 
-export function richIsEmpty(rich: RichText | undefined): boolean {
-  if (!rich) return true
-  return rich.paragraphs.every((paragraph) => paragraphText(paragraph).length === 0)
-}
-
 /* ------------------------------------------------------------------ */
 /* TipTap(ProseMirror) JSON 互转                                       */
 /* ------------------------------------------------------------------ */
