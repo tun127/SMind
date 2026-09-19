@@ -9,8 +9,23 @@
  *
  * 本文件同时拥有这些成员在 `EditorState` 里的**声明**（接口逐字搬来）。
  */
-import { type AppSettings } from '@shared/ipc'
-import { type OverlayKind, type OverlayTextStylePatch } from '@shared/model/overlay-style'
+import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
+import {
+  withOverlayTextStyle,
+  type OverlayKind,
+  type OverlayTextStylePatch
+} from '@shared/model/overlay-style'
+
+import { createId } from '@shared/model/factory'
+
+import { activeRoot, activeSheet, findTopic } from '@shared/model/tree'
+import { buildRange, parseRange, readCurveOffset, withCurveOffset } from '@shared/layout'
+import { reconcileMarkers, RELATIONSHIP_CURVE_KEY } from '@shared/xmind/constants'
+
+import { findOverlayByRange, findRelationshipBetween } from '@shared/model/editor-ops'
+import type { StateCreator } from 'zustand'
+import type { EditorState } from './types'
+import { NO_EDITING } from './types'
 
 export interface OverlaysSlice {
   /* ---- 画布级元素（关系线 / 边界 / 概要） ---- */
@@ -88,4 +103,264 @@ export interface OverlaysSlice {
   setMarkers(id: string, markerIds: string[]): void
 }
 
-/** 实现（状态初值与动作）随「B1 第二步 B」的对应批次搬入；本文件此刻只有类型声明。 */
+export const createOverlaysSlice: StateCreator<EditorState, [], [], OverlaysSlice> = (
+  set,
+  get
+) => ({
+  /* ------------------------------------------------------------------ */
+  /* 画布级元素                                                          */
+  /* ------------------------------------------------------------------ */
+
+  addRelationship: () => {
+    const { selection, workbook } = get()
+    if (selection.length !== 2) return null
+    const [end1Id, end2Id] = selection
+    if (!end1Id || !end2Id || end1Id === end2Id) return null
+
+    const existing = findRelationshipBetween(activeSheet(workbook).relationships, end1Id, end2Id)
+    // 开关：已经连过就取消，避免同一个位置叠出多条线
+    if (existing) {
+      get().removeRelationship(existing.id)
+      return null
+    }
+
+    const id = createId('rel')
+    get().mutate((draft) => {
+      activeSheet(draft).relationships.push({ id, end1Id, end2Id })
+    }, '添加关系线')
+    return id
+  },
+
+  addBoundary: () => {
+    const { selection, workbook } = get()
+    const range = buildRange(activeRoot(workbook), selection)
+    if (!range) return null
+
+    const existing = findOverlayByRange(activeSheet(workbook).boundaries, range)
+    // 开关：再点一次移除，否则半透明填充会一层层叠加、颜色越来越深
+    if (existing) {
+      get().removeBoundary(existing.id)
+      return null
+    }
+
+    const id = createId('boundary')
+    get().mutate((draft) => {
+      activeSheet(draft).boundaries.push({ id, range })
+    }, '添加边界')
+    return id
+  },
+
+  addSummary: () => {
+    const { selection, workbook } = get()
+    const range = buildRange(activeRoot(workbook), selection)
+    if (!range) return null
+
+    const existing = findOverlayByRange(activeSheet(workbook).summaries, range)
+    if (existing) {
+      get().removeSummary(existing.id)
+      return null
+    }
+
+    const topicId = parseRange(range)?.[0] ?? selection[0]
+    if (!topicId) return null
+    const id = createId('summary')
+    get().mutate((draft) => {
+      activeSheet(draft).summaries.push({ id, topicId, range, title: '概要' })
+    }, '添加概要')
+    return id
+  },
+
+  connectTopics: (end1Id, end2Id) => {
+    if (end1Id === end2Id) return null
+    const root = activeRoot(get().workbook)
+    // 两端都得真实存在：id 是模型给的，不能默认可信
+    if (!findTopic(root, end1Id) || !findTopic(root, end2Id)) return null
+    const existing = findRelationshipBetween(
+      activeSheet(get().workbook).relationships,
+      end1Id,
+      end2Id
+    )
+    if (existing) return existing.id
+    const id = createId('rel')
+    get().mutate((draft) => {
+      activeSheet(draft).relationships.push({ id, end1Id, end2Id })
+    }, '添加关系线')
+    return id
+  },
+
+  addBoundaryFor: (topicIds, title) => {
+    const range = buildRange(activeRoot(get().workbook), topicIds)
+    if (!range) return null
+    const existing = findOverlayByRange(activeSheet(get().workbook).boundaries, range)
+    if (existing) return existing.id
+    const id = createId('boundary')
+    const text = title?.trim()
+    get().mutate((draft) => {
+      activeSheet(draft).boundaries.push(text ? { id, range, title: text } : { id, range })
+    }, '添加边界')
+    return id
+  },
+
+  addSummaryFor: (topicIds, title) => {
+    const range = buildRange(activeRoot(get().workbook), topicIds)
+    if (!range) return null
+    const topicId = parseRange(range)?.[0]
+    if (!topicId) return null
+    const existing = findOverlayByRange(activeSheet(get().workbook).summaries, range)
+    if (existing) return existing.id
+    const id = createId('summary')
+    get().mutate((draft) => {
+      activeSheet(draft).summaries.push({ id, topicId, range, title: title?.trim() || '概要' })
+    }, '添加概要')
+    return id
+  },
+
+  setMarkers: (id, markerIds) => {
+    // 整体替换也按「每行一个」收敛：输入可能带着同一行的多个标记
+    const wanted = reconcileMarkers(markerIds)
+    get().mutate((draft) => {
+      const topic = findTopic(activeRoot(draft), id)
+      if (!topic) return
+      topic.markers = wanted.map((markerId) => ({ markerId }))
+    }, '设置标记')
+  },
+
+  offsetRelationshipCurve: (id, dx, dy) => {
+    get().mutate(
+      (draft) => {
+        const target = activeSheet(draft).relationships.find((item) => item.id === id)
+        if (!target) return
+        const current = readCurveOffset(target.style)
+        target.style = withCurveOffset(target.style, { x: current.x + dx, y: current.y + dy })
+      },
+      '调整关系线弯度',
+      `curve:${id}`
+    )
+  },
+
+  resetRelationshipCurve: (id) => {
+    get().mutate((draft) => {
+      const target = activeSheet(draft).relationships.find((item) => item.id === id)
+      if (!target) return
+      if (!target.style?.properties?.[RELATIONSHIP_CURVE_KEY]) return
+      target.style = withCurveOffset(target.style, { x: 0, y: 0 })
+    }, '恢复关系线弯度')
+  },
+
+  setSelection: (ids) => {
+    const root = activeRoot(get().workbook)
+    const valid = Array.from(new Set(ids)).filter((id) => Boolean(findTopic(root, id)))
+    // 选主题就取消画布元素的选中（两者不同时高亮）
+    set({ selection: valid, ...NO_EDITING, selectedOverlay: null })
+  },
+
+  selectedOverlay: null,
+
+  selectOverlay: (kind, id) => set({ selectedOverlay: { kind, id }, selection: [], ...NO_EDITING }),
+
+  clearOverlaySelection: () => set({ selectedOverlay: null }),
+
+  nodePanelTick: 0,
+
+  requestNodePanel: () => set({ nodePanelTick: get().nodePanelTick + 1 }),
+
+  setOverlayStyle: (kind, id, patch) => {
+    get().mutate((draft) => {
+      const sheet = activeSheet(draft)
+      const list =
+        kind === 'summary'
+          ? sheet.summaries
+          : kind === 'boundary'
+            ? sheet.boundaries
+            : sheet.relationships
+      const target = list.find((item) => item.id === id)
+      if (!target) return
+      const next = withOverlayTextStyle(target.style, patch)
+      if (!next) {
+        if (target.style === undefined) return
+        target.style = undefined
+        return
+      }
+      target.style = next
+    }, '修改画布元素样式')
+  },
+
+  codeFocusTick: 0,
+  requestCodeFocus: () => set((s) => ({ codeFocusTick: s.codeFocusTick + 1 })),
+
+  notesFocusTick: 0,
+  requestNotesFocus: () =>
+    set((s) => ({ nodePanelTick: s.nodePanelTick + 1, notesFocusTick: s.notesFocusTick + 1 })),
+
+  formulaFocusTick: 0,
+  requestFormulaFocus: () => set((s) => ({ formulaFocusTick: s.formulaFocusTick + 1 })),
+
+  appSettings: { ...DEFAULT_APP_SETTINGS },
+  setAppSettings: (next) => set({ appSettings: { ...next } }),
+
+  removeRelationship: (id) => {
+    get().mutate((draft) => {
+      const list = activeSheet(draft).relationships
+      const index = list.findIndex((item) => item.id === id)
+      if (index >= 0) list.splice(index, 1)
+    }, '删除关系线')
+  },
+
+  removeBoundary: (id) => {
+    get().mutate((draft) => {
+      const list = activeSheet(draft).boundaries
+      const index = list.findIndex((item) => item.id === id)
+      if (index >= 0) list.splice(index, 1)
+    }, '删除边界')
+  },
+
+  removeSummary: (id) => {
+    get().mutate((draft) => {
+      const list = activeSheet(draft).summaries
+      const index = list.findIndex((item) => item.id === id)
+      if (index >= 0) list.splice(index, 1)
+    }, '删除概要')
+  },
+
+  setRelationshipEnd: (id, end, topicId) => {
+    get().mutate((draft) => {
+      const target = activeSheet(draft).relationships.find((item) => item.id === id)
+      if (!target) return
+      const other = end === 'end1Id' ? target.end2Id : target.end1Id
+      // 两端不能连到同一个主题，否则连线会退化成零长度
+      if (other === topicId) return
+      if (target[end] === topicId) return
+      target[end] = topicId
+    }, '改接关系线')
+  },
+
+  setRelationshipTitle: (id, title) => {
+    const text = title.trim()
+    get().mutate((draft) => {
+      const target = activeSheet(draft).relationships.find((item) => item.id === id)
+      if (!target) return
+      target.title = text.length > 0 ? text : undefined
+    }, '修改关系线标题')
+  },
+
+  setBoundaryTitle: (id, title) => {
+    const text = title.trim()
+    get().mutate((draft) => {
+      const target = activeSheet(draft).boundaries.find((item) => item.id === id)
+      if (!target) return
+      target.title = text.length > 0 ? text : undefined
+    }, '修改边界标题')
+  },
+
+  setSummaryTitle: (id, title) => {
+    const text = title.trim()
+    get().mutate((draft) => {
+      const target = activeSheet(draft).summaries.find((item) => item.id === id)
+      if (!target) return
+      // 概要文字可能是「没有自带标题、回退显示主题文字」的情况。
+      // 用户主动清空时必须写成空串而不是 undefined，
+      // 否则清空后会立刻回退成主题的文字，看起来就像「改不动」。
+      target.title = text
+    }, '修改概要标题')
+  }
+})
