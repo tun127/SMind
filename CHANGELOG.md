@@ -89,6 +89,11 @@
 
 - `FOLD_SIDE_LABELS`（画布与 AI 写入意图两处逐字节相同）收敛到中立模块 `shared/model/fold-labels.ts`（`0054b68`）；
   **顺手纠正审计建议**——它建议"TopicNode 反正已从 @shared/agent 导入，直接复用"，核实后不成立（该文件没有 @shared/agent 导入），且让画布依赖 AI 层是错误方向的耦合
+- **(1) 组尾巴：实体解码的扫描与分派收敛到 `shared/entities.ts`**（`ddf08ab`）——数值引用的解码早先已统一，
+  本轮把「扫描 + 数字优先 + 解不出保留原文」这段也收成原语（`decodeEntityReferences` / `decodeEntityBody`）；
+  三处**名字表与查表口径按调用点保留**（XML 读取的 `&nbsp;` → U+00A0、纯文本与 Markdown 的 → 普通空格；
+  XML 读取不折叠大小写），并用 12 条新断言逐条钉住（自检 2660 → **2672**）。
+  `refactor-audit.md` §七 的「唯一遗留」至此清零
 
 **过程留痕（含一次危险操作）**：拆分 `styles.css` 的第一版脚本正则被 CRLF 挡掉、**一个区块都没匹配到却照样删了源文件**；
 发现后立即 `git checkout` 恢复，并给脚本补了两道守卫（匹配数为 0 不动源文件；搬走行数必须等于原文件行数）。

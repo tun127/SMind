@@ -127,7 +127,7 @@
 typecheck    零错误（含 strict）
 lint         零 error / 零 warning
 format:check 全部通过
-selfcheck    2660 项断言全绿（拆分中新增 138 条）
+selfcheck    2672 项断言全绿（拆分中新增 150 条）
 verify       21 个样本往返一致
 工作树       干净
 ```
@@ -143,15 +143,24 @@ verify       21 个样本往返一致
 | 死导出 / 虚胖导出面 | 导出符号全仓引用计数（27 候选，export 行上的使用也计入以免假阳性） | 3 个真死（仅剩声明）：`CodeLanguage`、`CODE_CHAR_WIDTH`、`richIsEmpty` —— **已删并提交 `2ffaac1`**；其余 24 个都在自己文件内被真实使用（只是多写了 `export`，可留作模块内 API 形态） |
 | 孤儿文件 | 全仓 import specifier 扫描 | 2 个（`scripts/diag-freeze-child.ts`、`scripts/license-tool.ts`），均为 esbuild 入口，**正常** |
 | 空壳文件 | < 8 行扫描 | **0 个** |
-| 重复实现收敛 | 逐组 grep 定位实现份数 | 见 §四 第 7 项，绝大部分已收敛为单一来源；**仅剩 XML 实体解码 3 份** |
+| 重复实现收敛 | 逐组 grep 定位实现份数 | 见 §四 第 7 项，绝大部分已收敛为单一来源；~~仅剩 XML 实体解码 3 份~~ → **已于 2026-09-19 收口**（见下） |
 | 门面是否纯再导出 | 检查含 `export *` 的文件 | 4 个（`layout/core.ts`、`layout/index.ts`、`export/drawing.ts`、`import/markdown.ts`），均为「聚合再导出」，无实现混入 |
 
-### 唯一遗留（未做，待决策）
+### 唯一遗留 —— ✅ 已收口（2026-09-19，`ddf08ab`）
 
-**XML 实体解码 3 份**：`shared/document/index.ts`、`shared/import/markdown/inline.ts`、`shared/xmind/xml.ts` 各有一套「命名实体 + `&#x` 十六进制」解码。三者语义接近但**服务三种外部格式**（Word XML / Markdown 行内 / Xmind 旧版 XML），合并会同时改动三条**解析用户文件**的路径。
+原结论：`shared/document/index.ts`、`shared/import/markdown/inline.ts`、`shared/xmind/xml.ts`
+各有一套「命名实体 + `&#x` 十六进制」解码；三者服务三种外部格式（Word XML / Markdown 行内 /
+Xmind 旧版 XML），合并会同时改动三条**解析用户文件**的路径。
 
-- 收益：去掉两份重复实现，未来修实体表只改一处；
-- 风险：属行为敏感区（解析外部文件），需按「先加共用实现 + 三处改为调用 + 逐格式回归」的小步走；
-- 兜底：自检 2660 条断言 + 21 样本往返可覆盖主要路径。
+**实际收敛时的实测口径（比原结论更细）**：那三处的**数值引用解码早已统一**（都走 `shared/entities.ts`
+的 `decodeNumericEntity`），真正重复的只有外圈那段「扫描 + 数字优先 + 解不出保留原文」。于是按 E1 的判据
+**抽原语、策略留调用点**：
 
-建议作为**独立一批**执行，不与其它改动混提。
+- 新增 `decodeEntityReferences(text, named)`（扫描整段）与 `decodeEntityBody(body, named)`（单个体）；
+- 三处的**名字表与查表口径一字未动**（`&nbsp;` 在 XML 读取里是 U+00A0、另两处是普通空格；
+  XML 读取不折叠大小写）——那才是有意保留的差异；
+- 等价性**构造性成立**：正则未变；旧代码兜底返回 `whole`，而该正则保证 `whole === '&' + body + ';'`。
+
+**验收**：自检 2660 → **2672**（新增 12 条：原语 3 + 三处口径差异 6 + 三处共同底线 3），
+五道门槛逐门退出码全绿，`verify` 21 样本往返一致。原建议的"小步走"照做了：
+先加共用实现 → 三处改为调用 → 逐格式回归（Xmind 旧版 XML / Word 文本抽取 / Markdown 行内三条都在跑）。
