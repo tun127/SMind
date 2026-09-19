@@ -1,0 +1,1274 @@
+/**
+ * AI 回合的 runtime 状态机（自 ChatPanel.tsx 整块搬出，函数体逐字未改）。
+ *
+ * 为什么整块搬：`runRoundRef` / `processQueueRef` / `commitTurnRef` / `stopRef` 是
+ * 「打破循环引用」的一组 ref（handleEvent ↔ processQueue ↔ runRound ↔ commitTurn 互相调用），
+ * 拆散的瞬间就会变成「用到未初始化」。任务表把这条列为 A6 的最高危点——
+ * **一组相互引用的 ref 当作一个整体搬进同一个模块，禁止跨文件拆**。
+ *
+ * 本 hook 拥有：
+ * - 会话消息（`messages` + `messagesRef` + `update`）与「按文档恢复 / 落盘」两个 effect；
+ * - 全部回合级 ref（wire / 轮数 / 队列 / 待确认 / 写日志 / 改动节点 / 计数器 / 四个环 ref）；
+ * - 工具执行（`processQueue` / `applyWriteIntent` / `resolvePending`）、流式事件（`handleEvent`）、
+ *   回合发起与收尾（`runRound` / `commitTurn`）以及 `send` / `stop` / `clearChat`；
+ * - 订阅流式事件的 effect（**卸载时必须收尾这一回合**）与「每次渲染刷新环 ref」的 effect。
+ *
+ * 视图侧的 state（草稿 / 许可 / 文档 / 提示 / 滚动跟随）仍留在 ChatPanel：
+ * 它们的挂载点与面板一致，搬进来只会让「谁拥有它」变模糊。
+ * hook 的调用位置刻意放在原来「按文档恢复聊天记录」那个 effect 处，
+ * 于是内部几个 effect 的声明顺序与拆分前逐一对应。
+ */
+
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import {
+  addUsage,
+  buildChatSystemPrompt,
+  buildSkeletonDigest,
+  claimsAppliedChange,
+  compressHistory,
+  countTopicTree,
+  digestPreamble,
+  readableIpcError,
+  type AiMessage,
+  type AiStreamEvent,
+  type QualityTier,
+  type ToolCall
+} from '@shared/ai'
+import {
+  canContinueAgentLoop,
+  DESTRUCTIVE_WRITE_LABELS,
+  isDestructiveWriteKind,
+  isMutatingIntent,
+  isReadToolName,
+  planWriteTool,
+  runReadTool,
+  segmentTitleMentions,
+  shortHandleOf,
+  topicPathOf,
+  type buildTitleIndex,
+  type ToolContext,
+  type WriteIntent
+} from '@shared/agent'
+import type { LicenseView } from '@shared/license'
+import { createId } from '@shared/model/factory'
+import { activeRoot, activeSheet, ancestorsOf, findTopic } from '@shared/model/tree'
+import { armDiag, beginCost, keepDiagArmed, reportCosts, setStage } from '../../dev/stage'
+import { viewportActions } from '../../render/viewport'
+import { patchAppSettings, useEditor } from '../../store/editor'
+import { exportFormatOf } from './format'
+import type { ChatDoc, ChatMsg, ChatPlan, PendingWrite } from './types'
+
+interface LoopInput {
+  /** 当前文档路径（null = 尚未保存）：切文档要停回合，并按文档恢复聊天记录 */
+  filePath: string | null
+  /** 许可状态：提示词要如实说明现在能不能改画布 */
+  license: LicenseView | null
+  /** 生成质量档位（写进系统提示词） */
+  tier: QualityTier
+  /** 标题索引：把回复里提到的节点变成可点击引用 */
+  titleIndex: ReturnType<typeof buildTitleIndex>
+  /** 挂在这个会话上的文档（只读工具 readDocument 用它） */
+  docsRef: RefObject<ChatDoc[]>
+  /** AI 要动**第一笔**改动之前调用（App 层用它存一份盘上快照） */
+  onBeforeAiWrite(): void
+  /** 试用次数在主进程里涨的：回合结束后重新读一次 */
+  refreshLicense(): void
+  /** 自己发的消息一定要看得见：即使刚才在上滑看历史，也拉回底部并恢复跟随 */
+  setAtBottom(value: boolean): void
+  /** 发出提问后清空输入框（草稿住在视图侧） */
+  setDraft(value: string): void
+}
+
+export interface ChatLoopApi {
+  messages: ChatMsg[]
+  activity: string
+  streaming: boolean
+  plan: ChatPlan | null
+  pendingWrite: PendingWrite | null
+  rememberSkip: boolean
+  sessionTokens: number
+  send(raw: string): void
+  stop(): void
+  resolvePending(approve: boolean, remember?: boolean): void
+  setRememberSkip(value: boolean): void
+  clearChat(): void
+}
+
+export function useChatLoop({
+  filePath,
+  license,
+  tier,
+  titleIndex,
+  docsRef,
+  onBeforeAiWrite,
+  refreshLicense,
+  setAtBottom,
+  setDraft
+}: LoopInput): ChatLoopApi {
+  const [messages, setMessages] = useState<ChatMsg[]>([])
+
+  /** 本次会话累计的 token 消耗（按服务商回报累计；换会话/清空时归零） */
+  const [sessionTokens, setSessionTokens] = useState(0)
+
+  /**
+   * 正在干什么（「正在思考…」「正在翻看导图…」）。
+   *
+   * 没有它的时候，用户盯着一屏工具条目分不清「它还在想」和「已经答完了」——
+   * 真被投诉过（「我都不知道它干完没有」）。转圈 + 一行字是最便宜、最有效的补偿。
+   */
+  const [activity, setActivity] = useState('')
+  const [streaming, setStreaming] = useState(false)
+  /** 需要用户点头的破坏性操作（删分支等） */
+  const [pendingWrite, setPendingWrite] = useState<PendingWrite | null>(null)
+  /** 确认框里的「以后不再询问这类操作」 */
+  const [rememberSkip, setRememberSkip] = useState(false)
+
+  /**
+   * 这次「用户命令」的标识：一条命令内的每一轮请求都带同一个 id。
+   * 主进程用它做试用计数去重——一条命令跑十几二十轮也只算一个写回合。
+   */
+  const turnIdRef = useRef('')
+  /**
+   * 当前的执行计划（模型用 updatePlan 工具写的）。
+   *
+   * 摆在界面上而不是藏在工具痕迹里：长任务（生成上百节点的详细图）最需要的就是
+   * "现在走到第几步、还剩什么"——这是用户能一眼看出"它有没有跑偏"的唯一地方。
+   */
+  const [plan, setPlan] = useState<ChatPlan | null>(null)
+
+  const messagesRef = useRef<ChatMsg[]>([])
+  const requestIdRef = useRef<string | null>(null)
+
+  /** 发给模型的完整消息线（含本轮的 assistant.toolCalls 与 tool 结果） */
+  const wireRef = useRef<AiMessage[]>([])
+  /** 本轮已进行的模型轮数 / 已执行的工具调用次数 */
+  const roundRef = useRef(0)
+  const toolCallsUsedRef = useRef(0)
+  /** 模型不支持函数调用时置 false，此后不再带工具定义 */
+  const useToolsRef = useRef(true)
+  /** 撞到调用上限后的「最后一轮」：只让它作答，不再给工具 */
+  const forceNoToolsRef = useRef(false)
+  /** 本回合已执行过的调用（同名同参数）：重复的不再执行，免得白烧配额 */
+  const seenCallsRef = useRef<Set<string>>(new Set())
+  /** runRound / processQueue 与 handleEvent 互相需要，用 ref 打破循环引用 */
+  const runRoundRef = useRef<() => void>(() => {})
+  const processQueueRef = useRef<() => void>(() => {})
+  const commitTurnRef = useRef<() => void>(() => {})
+  /** 卸载收尾时要用 stop()，但它定义在下面（同一个「打破循环引用」的理由） */
+  const stopRef = useRef<() => void>(() => {})
+  /** 待处理的工具调用（一次处理一个：破坏性操作要在中间停下来问用户） */
+  const queueRef = useRef<{ calls: ToolCall[]; index: number } | null>(null)
+  /** 待确认的写操作（state 只用于渲染，判定走 ref） */
+  const pendingRef = useRef<{ call: ToolCall; intent: WriteIntent; summary: string } | null>(null)
+  /** 本轮 AI 改了哪些东西（并成撤销标签 + 事后摘要） */
+  const writeLogRef = useRef<string[]>([])
+  /** 本轮 AI 改到/新增了哪些节点：回合结束时闪一下它们 */
+  const changedIdsRef = useRef<string[]>([])
+  /** 本轮**成功落到画布**的写操作数 / 失败数：用来兜住「说改了、其实没落地」 */
+  const writesAppliedRef = useRef(0)
+  const writesFailedRef = useRef(0)
+  /** 本轮是否已经开过事务（只在真有写操作时开） */
+  const turnStartedRef = useRef(false)
+
+  /** state 与 ref 一起更新：发请求要读最新历史，state 是给渲染的 */
+  const update = useCallback((updater: (prev: ChatMsg[]) => ChatMsg[]) => {
+    setMessages((prev) => {
+      const next = updater(prev)
+      messagesRef.current = next
+      return next
+    })
+  }, [])
+
+  /**
+   * 按文档恢复聊天记录。
+   *
+   * key 用**文档路径**；未保存的文档不落盘（只在内存里，关掉即弃）——
+   * 免得应用数据目录里堆一堆「未命名文档」的会话。
+   * 切到别的文档时必须清空，否则会把上一份文档的对话串过去。
+   */
+  useEffect(() => {
+    /**
+     * 文档切换（含第一次保存、恢复、另存为）时，**进行中的回合必须立刻停**。
+     *
+     * 踩过的坑：回合状态（轮数 / 消息线 / 待执行队列）都在本组件的 ref 里，不随文档走——
+     * `filePath` 一变，下面的逻辑会清空/重载消息（新路径的历史往往是空的），
+     * 而回合还在继续跑：界面上就是「对话消失了、但还在第 14 轮」；
+     * 更糟的是写工具作用于**当前激活文档**——继续跑等于可能把改动落到另一份文档上。
+     */
+    if (requestIdRef.current !== null) {
+      window.api.aiChatStreamCancel(requestIdRef.current)
+      requestIdRef.current = null
+      queueRef.current = null
+      setStreaming(false)
+      setActivity('')
+      setPending(null)
+      setPendingWrite(null)
+      if (turnStartedRef.current) {
+        turnStartedRef.current = false
+        useEditor.getState().commitAiTurn('AI · 回合因切换文档中止')
+      }
+      // console.warn 会被主进程转发进应用日志（渲染层没有独立的日志通道）
+      console.warn('[chat] 进行中的回合因切换文档而中止')
+    }
+    if (!filePath) {
+      update(() => [])
+      return
+    }
+    let cancelled = false
+    void window.api
+      .chatHistoryLoad(filePath)
+      .then((entries) => {
+        if (cancelled) return
+        update(() =>
+          entries.map((entry) => ({
+            id: createId(),
+            role: entry.role,
+            content: entry.content,
+            aborted: entry.aborted
+          }))
+        )
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [filePath, update])
+
+  /** 落盘：防抖 800ms；流式过程中不写（逐字保存等于每个字都写一次盘） */
+  useEffect(() => {
+    if (!filePath || streaming || messages.length === 0) return
+    const timer = window.setTimeout(() => {
+      void window.api
+        .chatHistorySave(
+          filePath,
+          messages.map((msg) => ({ role: msg.role, content: msg.content, aborted: msg.aborted }))
+        )
+        .catch(() => undefined)
+    }, 800)
+    return () => window.clearTimeout(timer)
+  }, [filePath, messages, streaming])
+
+  /* ------------------------------------------------------------------ */
+  /* 工具执行                                                            */
+  /* ------------------------------------------------------------------ */
+
+  /** 往消息线里塞一条工具结果（模型下一轮就看得到） */
+  const pushToolResult = (call: ToolCall, content: string): void => {
+    wireRef.current = [...wireRef.current, { role: 'tool', toolCallId: call.id, content }]
+  }
+
+  /**
+   * 已成功执行的调用：把消息线里它的完整参数压成短摘要。
+   *
+   * 轮内每执行完一个调用就把**整条消息线**原样重发给模型——setCode 的整段代码、
+   * insertSubtree 的整段大纲全都原样带着。几十个调用就能把单轮提示词撑到
+   * 60k+ token，光让服务端读一遍就要一两分钟：UI 没死，但像死了（实测单轮往返 125s）。
+   * 执行结果已经在对应的 tool 消息里，参数本体对后续轮次没有用处；
+   * 保留开头一段是为万一模型想引用自己刚才写的内容时还有个抓手。
+   */
+  const compressExecutedCallArgs = (callId: string): void => {
+    const HEAD = 200
+    wireRef.current = wireRef.current.map((msg) => {
+      if (msg.role !== 'assistant' || !msg.toolCalls?.some((c) => c.id === callId)) return msg
+      return {
+        ...msg,
+        toolCalls: msg.toolCalls.map((c) =>
+          c.id === callId && c.argumentsText.length > HEAD
+            ? {
+                ...c,
+                argumentsText: `${c.argumentsText.slice(0, HEAD)}…（此调用已成功执行，参数其余部分省略；执行结果见下方对应的工具消息）`
+              }
+            : c
+        )
+      }
+    })
+  }
+
+  /* ---- 卡死取证转储：AI 回合期间把现场节流落盘 ----
+   * 曾经的 freeze 全部发生在「写意图落盘后」的渲染阶段，而未命名文档没有自动存档、
+   * 聊天历史也不落盘——强杀进程会把毒内容一起带走，下一轮只能从零猜。
+   * 有了这份转储，任何一次冻结之后 `%APPDATA%/smind/diag/last-state.json` 里
+   * 都有完整的 wire（含全部工具参数）与 workbook，可用 scripts/run-diag-freeze.mjs
+   * 对真实内容逐块复现定位。 */
+  const lastDumpAtRef = useRef(0)
+  /** 上一次转储的序列化耗时：决定「强制转储」还要不要每次都跑 */
+  const dumpCostRef = useRef(0)
+  const dumpDiag = useCallback((reason: string, force = false): void => {
+    const now = performance.now()
+    // 节流 2 秒。强制转储（每个写调用一次）本来是取证必需的——冻结就发生在
+    // 某次写入之后，晚一步的转储可能永远跑不到。但**大文档**下它每次都要
+    // 同步序列化整份 workbook，会变成新的负担；所以实测超过 25ms 就退回节流模式，
+    // 牺牲一点现场新度、换掉这条新的卡顿来源。
+    const heavy = dumpCostRef.current > 25
+    if ((!force || heavy) && now - lastDumpAtRef.current < 2000) return
+    lastDumpAtRef.current = now
+    try {
+      const startedAt = performance.now()
+      const payload = JSON.stringify({
+        at: new Date().toISOString(),
+        reason,
+        round: roundRef.current,
+        wire: wireRef.current,
+        messages: messagesRef.current,
+        workbook: useEditor.getState().workbook
+      })
+      dumpCostRef.current = performance.now() - startedAt
+      // 必须 catch：invoke 的失败是**异步**的，外层 try/catch 抓不到，
+      // 否则会在控制台刷「Uncaught (in promise)」并污染错误边界
+      void window.api.diagDump(payload).catch(() => undefined)
+    } catch {
+      /* 取证绝不能把正常流程弄崩 */
+    }
+  }, [])
+
+  /** 把「AI 干了什么」记到界面与日志上 */
+  const noteAction = (summary: string, counts: boolean): void => {
+    if (counts) writeLogRef.current = [...writeLogRef.current, summary]
+    update((prev) => {
+      const last = prev[prev.length - 1]
+      if (!last || last.role !== 'assistant') return prev
+      return [...prev.slice(0, -1), { ...last, toolNotes: [...(last.toolNotes ?? []), summary] }]
+    })
+  }
+
+  /**
+   * 把一条写意图落到 store 上。
+   *
+   * 这里是**唯一**执行写操作的地方：撤销事务、快照、摘要都在这一处收口，
+   * 免得以后新增工具时漏掉某一步安全网。
+   */
+  const applyWriteIntent = (intent: WriteIntent): { ok: boolean; note: string } => {
+    const store = useEditor.getState()
+
+    if (!turnStartedRef.current) {
+      turnStartedRef.current = true
+      store.beginAiTurn()
+      onBeforeAiWrite()
+    }
+
+    // AI 动手前，先把用户**正在输入**的标题按正常流程提交掉：不提交的话，
+    // 输入框里的字会被这次写入冲掉——那是数据丢失，不是体验问题。
+    // 提交在 AI 事务**之外**，于是 Ctrl+Z 先撤 AI 的改动、再撤这次提交，顺序对得上。
+    if (store.editingId !== null && isMutatingIntent(intent)) store.commitEdit()
+
+    /** 记下这次动过的节点：回合结束时闪一下（「看得见」是放手让 AI 干的前提） */
+    const touched = (ids: Array<string | null | undefined>): void => {
+      for (const id of ids)
+        if (typeof id === 'string' && id.length > 0) changedIdsRef.current.push(id)
+    }
+
+    switch (intent.kind) {
+      case 'rename':
+        store.setTitle(intent.id, intent.title)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'insert': {
+        // 可能是多个并列的新主题（解析器套的壳已经在规划阶段剥掉了）
+        const before = new Set(
+          findTopic(activeRoot(store.workbook), intent.id)?.children.map((child) => child.id) ?? []
+        )
+        let added = 0
+        for (const node of intent.nodes) added += store.applyOutlineTree(intent.id, node)
+        if (added === 0) return { ok: false, note: '目标主题已不存在，插入没有生效。' }
+        // 新增完比原来多出来的那批就是新节点，顺手也闪它们本人
+        const after = findTopic(activeRoot(store.workbook), intent.id)
+        touched([
+          intent.id,
+          ...(after?.children ?? []).filter((child) => !before.has(child.id)).map((c) => c.id)
+        ])
+        return { ok: true, note: '' }
+      }
+      case 'delete': {
+        // 被删的节点已经没了、闪不了，就闪它的父级——用户至少知道「这一片被动过」
+        const chain = ancestorsOf(activeRoot(store.workbook), intent.id)
+        const parentId = chain[chain.length - 1]
+        const removed = store.deleteTopic(intent.id)
+        if (removed) touched([parentId])
+        return removed
+          ? { ok: true, note: '' }
+          : { ok: false, note: '目标主题已不存在，删除没有生效。' }
+      }
+      case 'move': {
+        const moved = store.moveNode(intent.id, intent.targetId, intent.index ?? undefined)
+        if (moved) touched([intent.id, intent.targetId])
+        return moved
+          ? { ok: true, note: '' }
+          : { ok: false, note: '移动没有生效：目标位置不合法。' }
+      }
+      case 'moveMany': {
+        // 批量移动：一次写入落完（都在同一步撤销里）。逐条调 moveNode 时，
+        // 每条都要扫一遍全树清失效的边界/概要——一次最多 200 条就是 200 遍全树，
+        // 终态一样但成本差一个数量级。
+        // 个别条目可能因为前面条目改变了结构而落空——如实把比例回喂给模型
+        const appliedMoves = store.moveNodes(intent.moves)
+        for (const move of appliedMoves) touched([move.id, move.targetId])
+        const movedCount = appliedMoves.length
+        if (movedCount === 0) return { ok: false, note: '一个都没有移动成功：目标位置可能不合法。' }
+        return {
+          ok: true,
+          note:
+            movedCount < intent.requested
+              ? `成功 ${movedCount}/${intent.requested}，其余目标位置不合法`
+              : ''
+        }
+      }
+      case 'collapse':
+        // 带 side = 平衡图中心主题的「按侧收起」（幂等设置值，重试不会来回翻）
+        if (intent.side) store.setFoldSide(intent.id, intent.side, intent.collapsed)
+        else store.setCollapsed(intent.id, intent.collapsed)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'structure':
+        // 结构是整张画布的属性：只改中心主题（intent.id 由规划层保证就是根节点）
+        store.setStructure(intent.structureClass)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'sortChildren': {
+        store.sortChildren(intent.id, intent.orderedIds, intent.renumber)
+        touched([intent.id, ...intent.orderedIds])
+        return { ok: true, note: intent.renumber ? '顺序与编号都已更新' : '顺序已更新' }
+      }
+      case 'dedupe': {
+        const merged = store.mergeTopics(intent.groups)
+        if (merged === 0) return { ok: false, note: '没有可合并的（组内可能存在父子包含关系）。' }
+        touched(intent.groups.map((group) => group.keepId))
+        return { ok: true, note: `共删除 ${merged} 个重复节点` }
+      }
+      case 'notes':
+        store.setNotes(intent.id, intent.text)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'code':
+        store.setCode(intent.id, intent.code)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'formula':
+        store.setFormula(intent.id, intent.formula)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      /* ---- 第二批：画布元素（关系线 / 边界 / 概要）与标记、标签 ---- */
+      case 'relationship': {
+        const created = store.connectTopics(intent.ends[0], intent.ends[1])
+        if (!created) return { ok: false, note: '连关系线没有生效：两端主题可能已不存在。' }
+        if (intent.title !== null) store.setRelationshipTitle(created, intent.title)
+        touched([intent.ends[0], intent.ends[1]])
+        return { ok: true, note: '' }
+      }
+      case 'boundary': {
+        const created = store.addBoundaryFor(intent.topicIds, intent.title ?? undefined)
+        if (!created) return { ok: false, note: '这些主题不是同级相邻，圈不成一个范围。' }
+        touched(intent.topicIds)
+        return { ok: true, note: '' }
+      }
+      case 'summary': {
+        const created = store.addSummaryFor(intent.topicIds, intent.title ?? undefined)
+        if (!created) return { ok: false, note: '这些主题不是同级相邻，加不了概要。' }
+        touched(intent.topicIds)
+        return { ok: true, note: '' }
+      }
+      case 'attachmentTitle':
+        if (intent.target === 'relationship') store.setRelationshipTitle(intent.id, intent.title)
+        else if (intent.target === 'boundary') store.setBoundaryTitle(intent.id, intent.title)
+        else store.setSummaryTitle(intent.id, intent.title)
+        return { ok: true, note: '' }
+      case 'attachmentRemove':
+        if (intent.target === 'relationship') store.removeRelationship(intent.id)
+        else if (intent.target === 'boundary') store.removeBoundary(intent.id)
+        else store.removeSummary(intent.id)
+        return { ok: true, note: '' }
+      case 'markers':
+        store.setMarkers(intent.id, intent.markerIds)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'label':
+        if (intent.add) store.addLabel(intent.id, intent.label)
+        else store.removeLabel(intent.id, intent.label)
+        touched([intent.id])
+        return { ok: true, note: '' }
+      case 'ask':
+        return { ok: true, note: '' }
+      default:
+        return { ok: false, note: '未知操作。' }
+    }
+  }
+
+  const setPending = (
+    value: { call: ToolCall; intent: WriteIntent; summary: string } | null
+  ): void => {
+    pendingRef.current = value
+    setPendingWrite(
+      value
+        ? {
+            summary: value.summary,
+            kind: value.intent.kind,
+            label: isDestructiveWriteKind(value.intent.kind)
+              ? DESTRUCTIVE_WRITE_LABELS[value.intent.kind]
+              : '这类操作'
+          }
+        : null
+    )
+    // 每次新确认框都从「不记住」开始：上次勾过不该顺延到下一次
+    setRememberSkip(false)
+  }
+
+  /**
+   * 这次破坏性操作是否已被用户「不再询问」？
+   *
+   * 从 store **现读**，不用组件里的值：一个回合里的写操作是在同一次回调里连续跑完的，
+   * 用闭包里的旧值会让「刚勾过不再询问」在本回合内不生效。
+   */
+  const skipConfirmFor = (kind: WriteIntent['kind']): boolean =>
+    useEditor.getState().appSettings.aiConfirmSkip.includes(kind)
+
+  /** 结束本轮：把 AI 的改动并成一步撤销，并把「改了什么」留在气泡里 */
+  const commitTurn = (): void => {
+    /**
+     * 回合收尾先落一行**耗时归属**——这一行直接回答「刚才这十几秒花在哪了」。
+     * 例如：`AI 回合结束：画布布局×12 共 3400ms(最慢 900) · 应用写意图×12 共 210ms(最慢 30)
+     * · 代码块渲染×288 · 代码块 span 共 45 万`。
+     */
+    reportCosts('AI 回合结束')
+    // 不关：实测冻结发生在**回合结束后用户开始滚动画布**那一段（写入侧只用了几毫秒），
+    // 关掉就等于把唯一能取证的两分钟丢掉了
+    keepDiagArmed(120_000)
+    const log = writeLogRef.current
+    if (turnStartedRef.current) {
+      const label = log.length > 0 ? `AI · ${log.slice(0, 2).join('、')}` : 'AI · 修改导图'
+      useEditor.getState().commitAiTurn(label)
+    }
+
+    // 试用次数在主进程里涨的：回合结束后重新读一次，面板上的数字才不会落后
+    refreshLicense()
+
+    // 兜住「说改了、其实没落地」：本轮**零写操作**、但话里带着结果声明 → 如实标注。
+    // 这类事故用户最难判断（画布没变，话却说得很确定），必须在气泡上戳破。
+    const lastMsg = messagesRef.current[messagesRef.current.length - 1]
+    if (
+      writesAppliedRef.current === 0 &&
+      lastMsg !== undefined &&
+      lastMsg.role === 'assistant' &&
+      claimsAppliedChange(lastMsg.content)
+    ) {
+      update((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant') return prev
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            warning:
+              writesFailedRef.current > 0
+                ? `本轮没有任何改动落到画布上：${writesFailedRef.current} 个写操作都没成功（见上方「未执行」条目）。`
+                : '本轮没有任何改动落到画布上——上面说的只是计划或说明，不是已经执行的改动。'
+          }
+        ]
+      })
+    }
+
+    // 改完**看得见**：闪一下动过的节点，并把视口带到第一处改动。
+    // 直接操作省掉了「预览确认」，信任全靠这一眼——没这一下，画布静悄悄地变了。
+    const changed = [...new Set(changedIdsRef.current)]
+    if (changed.length > 0) {
+      viewportActions.flash(changed)
+      // 等下一帧：布局要等这次写入渲染完才更新，立刻滚会滚到旧位置
+      window.requestAnimationFrame(() => {
+        const first = changed[0]
+        if (first) viewportActions.ensureVisible(first)
+      })
+    }
+    if (log.length > 0) {
+      const text = log.length > 6 ? `${log.slice(0, 6).join('；')}…` : log.join('；')
+      // 已保存的文档在动手前存过版本快照；把它写出来，用户才知道「重启之后怎么回去」
+      const hasSnapshot = useEditor.getState().filePath !== null
+      update((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant') return prev
+        const undoLine = hasSnapshot
+          ? '撤销：按一次 Ctrl+Z 全部回退；动手前的状态已存进「版本快照」（Ctrl+H），应用重启过也能回到那里。'
+          : '撤销：按一次 Ctrl+Z 全部回退（未保存的文档没有版本快照，应用重启后无从回退）。'
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            content: `${last.content}\n\n——\n已改动：${text}（共 ${log.length} 处）\n${undoLine}`
+          }
+        ]
+      })
+    }
+    writeLogRef.current = []
+    turnStartedRef.current = false
+    setPending(null)
+  }
+
+  /**
+   * 依次处理这一轮的工具调用。
+   *
+   * **一次只处理一个**：破坏性操作要在中间停下来问用户，不能一口气执行完
+   * （用户点完「执行」再从断点继续）。读工具没有副作用，直接跑。
+   */
+  const processQueue = (): void => {
+    /**
+     * 让出一帧再处理下一个调用。
+     *
+     * 以前这里是**同步递归**（`queue.index += 1; step()`）：模型一次批量发几十个调用时，
+     * 全部画布写入 + 重排会在一次调用栈里跑完，渲染进程的主线程几分钟不回——
+     * 表现就是「卡死了，点击任何键都没反应、关也关不掉」（真事）。
+     * 让出一帧后，界面能持续重绘、Esc 与「停止」也能真正生效。
+     */
+    const yieldThen = (): void => {
+      window.setTimeout(step, 0)
+    }
+    function step(): void {
+      const queue = queueRef.current
+      if (!queue) return
+      const call = queue.calls[queue.index]
+      if (!call) {
+        queueRef.current = null
+        runRoundRef.current()
+        return
+      }
+      setStage(`执行工具 ${call.name}`)
+
+      // 同一回合里重复问同一件事：不重复执行（白烧配额，模型还会原地打转），
+      // 直接把「问过了」告诉它，逼它换个策略
+      const callKey = `${call.name}|${call.argumentsText}`
+      if (seenCallsRef.current.has(callKey)) {
+        pushToolResult(
+          call,
+          `（这个调用本回合已经执行过，结果见上面那条 ${call.name} 的返回。请换个关键词或换个分支再试，不要重复同一个调用。）`
+        )
+        noteAction(`跳过重复调用：${call.name}`, false)
+        queue.index += 1
+        yieldThen()
+        return
+      }
+      seenCallsRef.current.add(callKey)
+
+      if (isReadToolName(call.name)) {
+        const state = useEditor.getState()
+        const context: ToolContext = {
+          root: activeRoot(state.workbook),
+          selectedId: state.selection[0] ?? null,
+          sheetCount: state.workbook.sheets.length,
+          // 第二批工具（关系线/边界/概要）挂在画布上，不在主题树里
+          sheet: activeSheet(state.workbook),
+          // 挂在这个会话上的文档：readDocument 工具靠它把文档变成可问答的上下文
+          documents: docsRef.current
+        }
+        setActivity(`正在翻看导图…（${queue.index + 1}/${queue.calls.length}）`)
+        /**
+         * 导出大纲：要弹系统的「保存到…」对话框，属于**宿主动作**（纯逻辑层做不了），
+         * 所以在这里执行；结果如实回喂——用户可能在对话框里点了取消。
+         * 队列在这里暂停（`index` 在 finally 里才前进）：对话没选完就继续跑别的事会很怪。
+         */
+        if (call.name === 'exportOutline') {
+          const format = exportFormatOf(call.argumentsText)
+          setActivity('等待你选择保存位置…')
+          void window.api
+            .exportOutline(useEditor.getState().workbook, format)
+            .then((path) => {
+              pushToolResult(
+                call,
+                path ? `已导出到：${path}` : '用户在保存对话框里取消了，没有导出。'
+              )
+              noteAction(path ? `已导出大纲（${format}）` : '导出被取消', Boolean(path))
+            })
+            .catch((error: unknown) => {
+              pushToolResult(call, `导出失败：${(error as Error).message}`)
+              noteAction('导出大纲失败', false)
+            })
+            .finally(() => {
+              queue.index += 1
+              yieldThen()
+            })
+          return
+        }
+        /**
+         * 计划工具：把它的产物**显示出来**。
+         * 解析参数（steps / done）而不是去猜回显文字——参数才是模型的原始意图。
+         */
+        if (call.name === 'updatePlan') {
+          try {
+            const parsed = JSON.parse(call.argumentsText) as { steps?: unknown; done?: unknown }
+            const steps = Array.isArray(parsed.steps)
+              ? parsed.steps.filter(
+                  (step): step is string => typeof step === 'string' && step.trim().length > 0
+                )
+              : []
+            if (steps.length > 0) {
+              const rawDone =
+                typeof parsed.done === 'number' && Number.isFinite(parsed.done) ? parsed.done : 0
+              setPlan({
+                steps,
+                done: Math.max(0, Math.min(steps.length, Math.round(rawDone)))
+              })
+            }
+          } catch {
+            /* 参数不是合法 JSON：工具会把错误回喂给模型，这里不额外处理 */
+          }
+        }
+        const result = runReadTool(call.name, call.argumentsText, context)
+        pushToolResult(call, result.content)
+        noteAction(result.summary, false)
+        queue.index += 1
+        yieldThen()
+        return
+      }
+
+      const plan = planWriteTool(
+        call.name,
+        call.argumentsText,
+        activeRoot(useEditor.getState().workbook)
+      )
+      if (!plan.ok) {
+        // 规划失败：把原因回喂给模型让它自己纠正，不打断整轮
+        pushToolResult(call, plan.error)
+        noteAction(plan.summary, false)
+        queue.index += 1
+        yieldThen()
+        return
+      }
+
+      if (plan.intent.kind === 'ask') {
+        // 模型主动提问：呈现问题、本轮到此为止（等用户回答）
+        queueRef.current = null
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          const options =
+            plan.intent.kind === 'ask' && plan.intent.options.length > 0
+              ? `\n可选：${plan.intent.options.join(' / ')}`
+              : ''
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...last,
+              content: `${last.content}\n\n${plan.intent.kind === 'ask' ? plan.intent.question : ''}${options}`
+            }
+          ]
+        })
+        requestIdRef.current = null
+        setStreaming(false)
+        commitTurn()
+        return
+      }
+
+      if (plan.destructive && !skipConfirmFor(plan.intent.kind)) {
+        // 破坏性操作：停下来等用户点头（这一步就是「确认分级」）
+        // 用户勾过「不再询问这类操作」时直接执行——但**第一次一定要问**
+        setPending({ call, intent: plan.intent, summary: plan.summary })
+        return
+      }
+
+      setActivity(`正在改画布…（${queue.index + 1}/${queue.calls.length}）`)
+      // 进这一阶段先落一行：真卡死时它就是日志里最后一条（案发现场）
+      const endWrite = beginCost('应用写意图', plan.intent.kind)
+      const applied = applyWriteIntent(plan.intent)
+      endWrite()
+      // 强制转储：冻结就发生在某次应用之后的渲染里，这份就是「案发前的最后现场」
+      dumpDiag(`已应用 ${plan.intent.kind}（${queue.index + 1}/${queue.calls.length}）`, true)
+      if (applied.ok) writesAppliedRef.current += 1
+      else writesFailedRef.current += 1
+      const written = applied.ok
+        ? `已执行：${plan.summary}${applied.note ? `（${applied.note}）` : ''}`
+        : applied.note
+      // 失败也要在面板上留一行痕迹：否则用户只在气泡里看到它"说要改"，
+      // 却没有任何地方告诉他这一步**没执行**
+      if (!applied.ok) noteAction(`未执行：${plan.summary}`, false)
+      // 有些模型（qwen-plus 这类）一次回复只发**一个**工具调用：搬几十个节点要几十轮，
+      // 用户感受就是「走一步推一步」。在工具结果里**就地**提醒它改用批量——
+      // 比在系统提示词里讲一遍更贴近它当下的决策点
+      const nudge =
+        queue.calls.length === 1 && (call.name === 'moveTopic' || call.name === 'renameTopic')
+          ? '（提示：剩下的同类操作请用 moveTopics 一次批量发出来——一次回复里可以包含多个工具调用，' +
+            '也可以用一条 moveTopics 带很多项；不要一次只搬一个。）'
+          : ''
+      pushToolResult(call, written + nudge)
+      if (applied.ok) {
+        noteAction(plan.summary, true)
+        compressExecutedCallArgs(call.id)
+      }
+      queue.index += 1
+      yieldThen()
+    }
+
+    step()
+  }
+
+  /** 用户对破坏性操作表态后继续（从断点接着处理剩下的调用） */
+  const resolvePending = useCallback((approve: boolean, remember = false): void => {
+    const pending = pendingRef.current
+    setPending(null)
+    if (!pending) return
+
+    if (approve && remember) {
+      /**
+       * 记住「这类操作以后不再询问」。
+       *
+       * 落进 settings.json（`patchAppSettings` 同时更新内存与磁盘）——
+       * 只记在组件 state 里的话，下次开窗口又会问一遍，用户会以为"勾了没用"。
+       * 写入失败不影响这次执行：确认框已经点过了。
+       */
+      void patchAppSettings({
+        aiConfirmSkip: Array.from(
+          new Set([...useEditor.getState().appSettings.aiConfirmSkip, pending.intent.kind])
+        )
+      })
+    }
+
+    if (approve) {
+      const endWrite = beginCost('应用写意图', pending.intent.kind)
+      const applied = applyWriteIntent(pending.intent)
+      endWrite()
+      if (applied.ok) writesAppliedRef.current += 1
+      else writesFailedRef.current += 1
+      pushToolResult(
+        pending.call,
+        applied.ok
+          ? `已执行：${pending.summary}${applied.note ? `（${applied.note}）` : ''}`
+          : applied.note
+      )
+      if (applied.ok) {
+        noteAction(pending.summary, true)
+        compressExecutedCallArgs(pending.call.id)
+      } else noteAction(`未执行：${pending.summary}`, false)
+    } else {
+      // 拒绝也要如实回喂：否则模型以为删掉了，后面的判断全错
+      pushToolResult(
+        pending.call,
+        '用户拒绝了这次操作，没有执行。请不要重试同一个操作，改为向用户说明你原本打算做什么。'
+      )
+      noteAction(`已跳过：${pending.summary}`, false)
+    }
+
+    const queue = queueRef.current
+    if (queue) {
+      queue.index += 1
+      processQueueRef.current()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* ------------------------------------------------------------------ */
+  /* 流式事件                                                            */
+  /* ------------------------------------------------------------------ */
+
+  const handleEvent = useCallback(
+    (event: AiStreamEvent): void => {
+      if (event.requestId !== requestIdRef.current) return
+
+      /** 往最后一条助手消息上补字段（工具痕迹 / 收尾文案） */
+      const patchLast = (patch: Partial<ChatMsg>): void => {
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          const merged: ChatMsg = { ...last }
+          if (patch.content !== undefined) merged.content = patch.content
+          if (patch.thinking !== undefined) merged.thinking = patch.thinking
+          if (patch.aborted !== undefined) merged.aborted = patch.aborted
+          if (patch.toolNotes !== undefined) merged.toolNotes = patch.toolNotes
+          return [...prev.slice(0, -1), merged]
+        })
+      }
+
+      if (event.kind === 'chunk') {
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          return [...prev.slice(0, -1), { ...last, content: last.content + event.text }]
+        })
+        return
+      }
+
+      if (event.kind === 'reasoning') {
+        // 思维链直播：边想边显示，正文一开始就自动收起（界面在渲染层做）
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          return [...prev.slice(0, -1), { ...last, thinking: (last.thinking ?? '') + event.text }]
+        })
+        return
+      }
+
+      if (event.kind === 'error') {
+        // 模型不支持函数调用（各家报错文案不一）→ 关掉工具重试一次，别把错误丢给用户
+        if (useToolsRef.current && /tool|function/i.test(event.message)) {
+          useToolsRef.current = false
+          requestIdRef.current = null
+          update((prev) => {
+            const last = prev[prev.length - 1]
+            if (!last || last.role !== 'assistant') return prev
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                toolNotes: [...(last.toolNotes ?? []), '当前模型不支持工具调用，已切换为纯对话模式']
+              }
+            ]
+          })
+          runRoundRef.current()
+          return
+        }
+        patchLast({ content: `出错了：${event.message}` })
+        requestIdRef.current = null
+        setStreaming(false)
+        commitTurnRef.current()
+        return
+      }
+
+      // token 消耗按服务商回报记账：每一轮请求都有一次（工具循环一轮 = 一次请求），
+      // 既累计到会话总数，也并到这条回答上（所以多轮的回答显示的是**总和**）
+      const usage = event.usage
+      if (usage) {
+        setSessionTokens((prev) => prev + usage.totalTokens)
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          return [...prev.slice(0, -1), { ...last, usage: addUsage(last.usage, usage) }]
+        })
+      }
+
+      if (event.aborted) {
+        // 用户主动停止：已生成的部分保留；工具调用多半残缺，一律不执行。
+        // 内容为空时**不要**再往里塞「（已停止）」——气泡上本来就会渲染这个标记，
+        // 两处都写会出现「（已停止）（已停止）」
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          return [...prev.slice(0, -1), { ...last, aborted: true }]
+        })
+        requestIdRef.current = null
+        setStreaming(false)
+        queueRef.current = null
+        commitTurnRef.current()
+        return
+      }
+
+      /**
+       * 输出被服务商的**输出上限**截断（`finish_reason = length`）。
+       *
+       * 以前这个信息被丢掉：解析出来了、没人用，于是「被服务商掐断」和「正常说完」
+       * 在应用里长得一模一样——用户看到的是"AI 怎么只写了一点点"，
+       * 既不知道是模型懒、还是被截断，也无从下手。
+       * 现在如实说明并给出下一步（这是"只写粗分"最常见的原因）。
+       */
+      if (event.truncated) {
+        patchLast({
+          warning:
+            '本回合的输出被服务商的**输出上限**截断了（剩余内容没有发出），所以看起来"只写了一半"。' +
+            '回复「继续」可以接着写完；想一次写更多，去「AI 设置」把「单次输出上限」调大。'
+        })
+      }
+
+      // 思维链全文兜底：流式期间已逐片拼过，这里以完整版为准（防丢片）
+      if (event.kind === 'done' && event.reasoning && event.reasoning.length > 0) {
+        patchLast({ thinking: event.reasoning })
+      }
+
+      // 退化熔断：如实告知并给下一步（这是模型退化，不是用户做错了什么）
+      if (event.kind === 'done' && event.degenerated) {
+        patchLast({
+          warning:
+            '模型输出陷入**自我重复**（退化循环），已自动熔断止损、裁掉复读部分。' +
+            '重试通常可恢复；反复出现请换更强的模型（如 deepseek-chat），或新开一个会话减小上下文。'
+        })
+      }
+
+      const calls = event.toolCalls
+      if (calls.length === 0) {
+        update((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+          const content =
+            last.content.trim().length > 0
+              ? last.content
+              : '（模型没有返回内容，换个说法或换个模型再试）'
+          return [...prev.slice(0, -1), { ...last, content }]
+        })
+        requestIdRef.current = null
+        setStreaming(false)
+        commitTurnRef.current()
+        return
+      }
+
+      roundRef.current += 1
+
+      // 先算还有没有预算：不够就**不要**把这轮的 tool_calls 记进消息线——
+      // 助手消息带 tool_calls 却没有对应的工具结果，服务端会直接报 400。
+      const gate = canContinueAgentLoop(roundRef.current, toolCallsUsedRef.current + calls.length)
+      if (!gate.ok) {
+        toolCallsUsedRef.current += calls.length
+
+        // 已经是「不带工具的决胜轮」了，模型居然还在要工具：必须**硬停**。
+        // 以前这里会再问一次、模型再要一次……于是「已达上限」的小标签叠了三层，
+        // 用户最后什么都没等到。
+        if (forceNoToolsRef.current) {
+          update((prev) => {
+            const last = prev[prev.length - 1]
+            if (!last || last.role !== 'assistant') return prev
+            const content =
+              last.content.trim().length > 0
+                ? last.content
+                : `（${gate.reason}，模型仍在尝试调用工具，本次已停止。可以换个说法再问一次。）`
+            return [...prev.slice(0, -1), { ...last, content }]
+          })
+          requestIdRef.current = null
+          setStreaming(false)
+          queueRef.current = null
+          commitTurnRef.current()
+          return
+        }
+
+        // 撞上限 ≠ 不回答：去掉工具再问**一次**，让它把已经看到的东西讲清楚
+        patchLast({
+          toolNotes: [
+            ...(messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? []),
+            gate.reason
+          ]
+        })
+        forceNoToolsRef.current = true
+        wireRef.current = [
+          ...wireRef.current,
+          {
+            role: 'user',
+            content:
+              '（工具调用次数已达本次上限。请立刻停止调用工具，向用户**总结**：你已经完成了哪些改动、' +
+              '哪些还没来得及做、建议用户接下来怎么办——比如让他再发一句「继续」。）'
+          }
+        ]
+        runRoundRef.current()
+        return
+      }
+
+      /**
+       * 把这一轮的解说（计划 / 每步反馈）**移进步骤时间线**：正文只保留最后一轮的
+       * （= 最终自检与总结）。阅读顺序因此是用户要的样子：
+       * **计划 → 工具步骤 → 每步反馈 → … → 最终自检**，
+       * 而不是"一堆工具痕迹在上、一段不知道属于哪一步的正文在下"。
+       * （wire 不受影响：协议里的 assistant.content 照旧，这里只动界面展示。）
+       */
+      update((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant') return prev
+        const narration = last.content.trim()
+        if (narration.length === 0) return prev
+        return [
+          ...prev.slice(0, -1),
+          { ...last, content: '', toolNotes: [...(last.toolNotes ?? []), `💬 ${narration}`] }
+        ]
+      })
+
+      // 有工具调用：把助手这一轮记进消息线（协议要求带上 tool_calls），然后逐个处理
+      wireRef.current = [
+        ...wireRef.current,
+        { role: 'assistant', content: event.content, toolCalls: calls }
+      ]
+      // 工具调用即将开跑：打开取证输出。卡死正好都发生在这条路径上，
+      // 所以只有这里开——用户自己的日常编辑不会产生任何诊断日志
+      armDiag(`AI 回合：${calls.length} 个工具调用`)
+      dumpDiag(`收到 ${calls.length} 个工具调用`)
+      toolCallsUsedRef.current += calls.length
+      queueRef.current = { calls, index: 0 }
+      processQueueRef.current()
+    },
+    [update, dumpDiag]
+  )
+
+  const runRound = useCallback((): void => {
+    const requestId = createId()
+    requestIdRef.current = requestId
+    setStreaming(true)
+    dumpDiag(`发起第 ${roundRef.current + 1} 轮模型请求`, true)
+    setActivity(
+      roundRef.current === 0
+        ? '正在思考…'
+        : `正在思考…（第 ${roundRef.current + 1} 轮，还在翻资料）`
+    )
+    setStage(`AI 第 ${roundRef.current + 1} 轮`)
+    // 上下文体积观测：退化循环与「越聊越贵」都和它有关——先有数据，再谈压缩
+    console.warn(
+      `[chat] 本轮上下文：${wireRef.current.length} 条消息 / ${
+        JSON.stringify(wireRef.current).length
+      } 字符`
+    )
+    void window.api
+      .aiChatStream(requestId, wireRef.current, {
+        useTools: useToolsRef.current && !forceNoToolsRef.current,
+        turnId: turnIdRef.current
+      })
+      .catch((error: unknown) => {
+        // invoke 被拒（参数无效 / 没配 Key）：同样以事件形式收尾，只有一条代码路径。
+        // 顺手剥掉 Electron 那层「Error invoking remote method …」包装，只留人话
+        handleEvent({
+          requestId,
+          kind: 'error',
+          message: readableIpcError((error as Error).message)
+        })
+      })
+  }, [handleEvent, dumpDiag])
+
+  useEffect(() => {
+    runRoundRef.current = runRound
+    processQueueRef.current = processQueue
+    commitTurnRef.current = commitTurn
+    stopRef.current = stop
+  })
+
+  /**
+   * 订阅流式事件。
+   *
+   * **卸载时必须收尾这一回合**——以前只做了「取消订阅」，
+   * 而面板是 `{sidePanel === 'chat' && <ChatPanel/>}` 挂载的（切到别的抽屉就整个卸载）：
+   * 正在跑的回合没人收尾，store 里的 `aiTurn` 永远留着，于是
+   * `undo` / `redo` 被**静默**挡住（Ctrl+Z 彻底失灵，用户看不出原因），
+   * 画布还会因为 `aiTurnActive` 一直为真而持续节流（连自己打字都慢半拍）。
+   */
+  useEffect(() => {
+    const off = window.api.onAiStreamEvent(handleEvent)
+    return () => {
+      off()
+      stopRef.current()
+      // 队列是自己"接着跑"的，不会有模型事件来收尾，这里同样要自己收干净
+      commitTurnRef.current()
+    }
+  }, [handleEvent])
+
+  const send = useCallback(
+    (raw: string): void => {
+      const text = raw.trim()
+      if (text.length === 0 || requestIdRef.current !== null) return
+
+      const state = useEditor.getState()
+      const root = activeRoot(state.workbook)
+      const selectedId = state.selection[0] ?? null
+      // 选区路径（根 → 当前节点）是模型最需要的「用户指着哪」
+      const selectedTitles = selectedId
+        ? [...ancestorsOf(root, selectedId), selectedId]
+            .map((id) => findTopic(root, id)?.title ?? '')
+            .filter((title) => title.length > 0)
+        : []
+
+      // 用户这句话里提到的节点：应用先按标题匹配好（带句柄）——
+      // 这样模型可以直接动手，不用反过来要求用户「先去画布上选中」
+      const mentioned = new Map<string, { title: string; handle: string; path: string }>()
+      for (const segment of segmentTitleMentions(text, titleIndex)) {
+        const id = segment.topicId
+        if (id === null) continue
+        const topic = findTopic(root, id)
+        const path = topicPathOf(root, id)
+        if (topic && path) {
+          mentioned.set(id, {
+            title: topic.title,
+            handle: shortHandleOf(id),
+            path: path.join(' → ')
+          })
+        }
+      }
+
+      const system = buildChatSystemPrompt({
+        skeleton: buildSkeletonDigest(root),
+        selectedTitles,
+        totalNodes: countTopicTree(root),
+        sheetCount: state.workbook.sheets.length,
+        // 生成规格按用户的档位走（min 省 token / mid 80 分 / max 90 分）
+        tier,
+        // 用户这一轮的原话：用来粗判任务类型，决定注入「生成规格 / 编辑模块 / 未判定兜底」
+        latestRequest: text,
+        // 能不能改，以主进程的许可判定为准：写工具没下发时，提示词也必须如实说
+        canWrite: license?.canWrite ?? true,
+        writeHint: license?.writeHint ?? null,
+        // 上一轮实际做过的改动：不注入的话，用户说「继续」时模型会从零开始
+        // 重新读取、重新规划——大导图上就是把同一种折腾重复一遍
+        previousTurnNotes: messagesRef.current[messagesRef.current.length - 1]?.toolNotes ?? [],
+        mentionedNodes: [...mentioned.values()].slice(0, 5)
+      })
+
+      // 上下文压缩（三期）：最近几轮原文 + 更早轮次折叠成「此前做过什么」。
+      // 工具条目（toolNotes）参与摘要——它是"我做过什么"最可靠的来源
+      // （模型可能把结论说错，执行记录不会）。
+      const compressed = compressHistory(
+        messagesRef.current.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+          toolNotes: msg.toolNotes
+        }))
+      )
+      const history: AiMessage[] = [
+        ...(compressed.digest.length > 0
+          ? [{ role: 'user' as const, content: digestPreamble(compressed.digest) }]
+          : []),
+        ...compressed.recent
+          .filter((msg) => msg.content.trim().length > 0)
+          .map((msg): AiMessage => ({ role: msg.role, content: msg.content })),
+        { role: 'user', content: text }
+      ]
+
+      // 每轮提问重建消息线：上一轮的 tool 结果不能跨轮复用（导图可能已经变了）
+      wireRef.current = [{ role: 'system', content: system }, ...history]
+      // 新的一次用户命令 = 新的 turnId：主进程靠它做试用计数去重
+      // （一条命令跑多少轮都只算一个写回合，见 markTrialTurnSeen）
+      turnIdRef.current = createId()
+      setPlan(null)
+      roundRef.current = 0
+      toolCallsUsedRef.current = 0
+      writeLogRef.current = []
+      changedIdsRef.current = []
+      writesAppliedRef.current = 0
+      writesFailedRef.current = 0
+      turnStartedRef.current = false
+      queueRef.current = null
+      forceNoToolsRef.current = false
+      seenCallsRef.current = new Set()
+      setPending(null)
+      setPendingWrite(null)
+
+      update((prev) => [
+        ...prev,
+        { id: createId(), role: 'user', content: text },
+        { id: createId(), role: 'assistant', content: '' }
+      ])
+      setDraft('')
+      // 自己发的消息一定要看得见：即使刚才在上滑看历史，也拉回底部并恢复跟随
+      setAtBottom(true)
+      runRound()
+    },
+    // setDraft / setAtBottom 是 React 的稳定 setter（拆分前在组件作用域里、lint 视为稳定，
+    // 如今作为入参传入，规则要求显式列出）——补进来不改变 send 的身份变化时机。
+    [runRound, update, license, titleIndex, tier, setAtBottom, setDraft]
+  )
+
+  const stop = (): void => {
+    const id = requestIdRef.current
+    if (id) window.api.aiChatStreamCancel(id)
+    // 工具队列也要停：以前只取消了网络请求，已经排好队的调用还会继续改画布——
+    // 用户按了「停止」而画布还在变，比不给停更让人生气。
+    if (queueRef.current) {
+      queueRef.current = null
+      // 队列是自己「接着跑」的，不会有模型事件来收尾，所以这里得自己把回合收干净
+      setStreaming(false)
+      setActivity('')
+      commitTurnRef.current()
+    }
+  }
+
+  /** 清空对话：内存与落盘那份都要清（否则下次打开这份文档对话又"复活"了） */
+  const clearChat = (): void => {
+    update(() => [])
+    setSessionTokens(0)
+    if (filePath) void window.api.chatHistoryClear(filePath).catch(() => undefined)
+  }
+  return {
+    messages,
+    activity,
+    streaming,
+    plan,
+    pendingWrite,
+    rememberSkip,
+    sessionTokens,
+    send,
+    stop,
+    resolvePending,
+    setRememberSkip,
+    clearChat
+  }
+}
