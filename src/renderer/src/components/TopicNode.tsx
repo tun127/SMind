@@ -12,13 +12,13 @@ import {
 } from '@shared/layout/accessory'
 import { nodePaddingOf } from '../render/measure'
 import { CODE_LANGUAGES } from '@shared/code-language'
+import { FOLD_SIDE_LABELS } from '@shared/model/fold-labels'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
 import {
   countDescendants,
   foldedSidesOf,
   hiddenCountOfSide,
-  splitFoldSidesOf,
-  type FoldSide
+  splitFoldSidesOf
 } from '@shared/model/tree'
 import { useEditor } from '../store/editor'
 import { count, isDiagArmed, noteAmount } from '../dev/stage'
@@ -33,14 +33,6 @@ import RichTextEditor from './RichTextEditor'
 import type { TopicNodeProps } from './topic/props'
 import { segmentStyle } from './topic/segment-style'
 export type { TopicNodeProps } from './topic/props'
-
-/** 按侧收起时的方向名（徽标文案与提示用） */
-const FOLD_SIDE_LABELS: Record<FoldSide, string> = {
-  left: '左',
-  right: '右',
-  up: '上',
-  down: '下'
-}
 
 function TopicNodeInner({
   node,

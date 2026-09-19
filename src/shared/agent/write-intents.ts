@@ -66,12 +66,10 @@ export type WriteIntent =
  * up / down 目前**不对外提供**（时间轴 / 鱼骨图不按侧收起，见 `splitFoldSidesOf`），
  * 留在这里是为了读出旧文件里可能带着的方向标记时不至于显示成空白。
  */
-export const FOLD_SIDE_LABELS: Record<FoldSide, string> = {
-  left: '左',
-  right: '右',
-  up: '上',
-  down: '下'
-}
+import { FOLD_SIDE_LABELS } from '../model/fold-labels'
+
+/** 方向名的唯一来源在 `shared/model/fold-labels`；这里原样再导出，保持旧引用路径可用 */
+export { FOLD_SIDE_LABELS }
 
 /**
  * 「执行前必须先问用户一次」的破坏性操作种类（**唯一来源**）。
