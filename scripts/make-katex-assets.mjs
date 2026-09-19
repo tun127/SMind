@@ -10,6 +10,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import prettier from 'prettier'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -67,7 +68,18 @@ export const KATEX_INLINE_CSS = ${JSON.stringify(css)}
 export const KATEX_INLINED_FONTS: string[] = ${JSON.stringify(fontNames, null, 2)}
 `
 
-writeFileSync(outFile, banner, 'utf8')
+// 直接按项目的 Prettier 规则出格式：生成物不必再被 `format:check` 追着改一遍。
+// ⚠️ Prettier 3 的程序化调用**不会自己读配置文件**（要用 resolveConfig 显式取一次），
+// 只传 filepath 会落回默认值 `semi: true / singleQuote: false`——与仓库的 .prettierrc 相反。
+// 少了这一步的后果（2026-09-19 实测）：本脚本写出的 katex-assets.ts 是"未格式化版"，
+// 别人一跑 `npm run fonts` 就会把 src 下的产物弄脏、并且踩红 `format:check`
+// （该文件在 `prettier --check "src/**/*.{ts,tsx,css}"` 覆盖范围内，仓库没有 .prettierignore）。
+const prettierOptions = await prettier.resolveConfig(outFile)
+writeFileSync(
+  outFile,
+  await prettier.format(banner, { ...prettierOptions, filepath: outFile }),
+  'utf8'
+)
 console.log(`已生成 ${outFile}`)
 console.log(
   `内联字体 ${fontNames.length} 个、替换 url() ${inlined} 处，CSS 体积 ${Math.round(css.length / 1024)} KB`
