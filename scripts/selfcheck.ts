@@ -3935,6 +3935,25 @@ function testWriteToolsAndTurn(): void {
   const destructiveOf = (p: ReturnType<typeof planWriteTool>): boolean =>
     p.ok ? p.destructive : false
 
+  /**
+   * 自由摆放的子主题**也算子孙**。
+   *
+   * plan-write 原来用的是本文件私有的 `subtreeContains`（只走 `topic.children`），
+   * 于是"把主题移进它自己的浮动子主题下面"会被放行，而 store 与拖拽那边一律拦住
+   * （它们用共用的 `isSelfOrDescendant`）——AI 写路径成了唯一缺口，真执行下去会把树接成环。
+   */
+  {
+    const floating = createTopic('浮动想法')
+    cost.detachedChildren.push(floating)
+    const intoFloating = plan('moveTopic', { address: '成本', toAddress: '成本/浮动想法' })
+    check(
+      '不能把主题移进自己的浮动子主题下（口径与 store / 拖拽统一）',
+      intoFloating.ok === false && intoFloating.error.includes('子孙'),
+      intoFloating.ok ? '竟然通过了' : intoFloating.error
+    )
+    cost.detachedChildren.length = 0
+  }
+
   group('Agent：同级排序（sortSiblings）')
 
   {

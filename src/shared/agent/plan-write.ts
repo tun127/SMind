@@ -20,11 +20,6 @@ import {
   type WritePlan
 } from './write-intents'
 
-function subtreeContains(node: Topic, id: string): boolean {
-  if (node.id === id) return true
-  return node.children.some((child) => subtreeContains(child, id))
-}
-
 /**
  * 把写工具的调用解析成一条「操作意图」。
  *
@@ -159,7 +154,14 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     const destination = resolve('toAddress')
     if ('problem' in destination) return destination.problem
     if (source.topic.id === destination.topic.id) return fail('不能把一个主题移到它自己下面。')
-    if (subtreeContains(source.topic, destination.topic.id)) {
+    /**
+     * 用共用的 `isSelfOrDescendant`，别自己数孩子。
+     * 原来这里是本文件私有的 `subtreeContains`，只走 `topic.children`——
+     * **自由摆放的主题不算后代**，于是"把主题移进自己的浮动子孙下面"这条会被放行，
+     * 而 store 与拖拽那边（都用这个共用函数）一律拦住：AI 写路径成了唯一的缺口，
+     * 真执行下去就把树接成了环。口径统一到一个函数，才不会各自漂移。
+     */
+    if (isSelfOrDescendant(root, source.topic.id, destination.topic.id)) {
       return fail('不能把一个主题移到它自己的子孙下面。')
     }
     // 自由摆放的地盘：用户手动摆过位置的主题默认不动（改动别人的版面比改内容更招人烦，
@@ -236,7 +238,8 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
         skipped.push(`moves[${position}]（目标是它自己）`)
         continue
       }
-      if (subtreeContains(source.resolved.topic, destination.resolved.topic.id)) {
+      // 与单条 moveTopic 同一判据（含自由摆放的后代，见上面的说明）
+      if (isSelfOrDescendant(root, source.resolved.topic.id, destination.resolved.topic.id)) {
         skipped.push(`moves[${position}]（目标是它自己的子孙）`)
         continue
       }
