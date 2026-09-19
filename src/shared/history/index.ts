@@ -155,13 +155,27 @@ export function relativeTime(at: number, now = Date.now()): string {
   if (diff < 0) return '刚刚'
   const minute = 60_000
   const hour = 60 * minute
-  const day = 24 * hour
 
   if (diff < minute) return '刚刚'
   if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`
-  if (diff < day) return `${Math.floor(diff / hour)} 小时前`
-  if (diff < 2 * day) return '昨天'
-  if (diff < 30 * day) return `${Math.floor(diff / day)} 天前`
+
+  /**
+   * 「昨天 / N 天前」按**日历日**算，不按流逝时长算。
+   *
+   * 以前是 `diff < 2 * day → 昨天`：于是一小时前刚过午夜的人看到"昨天"（其实才 1 小时），
+   * 而前天晚上（比如现在 01:00、时间是前天 19:00）却被叫"昨天"——两者都是错的。
+   * 按日期差算才对：跨过午夜一次就是昨天，跨两次就是前天。
+   * 用「当地零点」的毫秒差再取整，夏令时那种 23/25 小时的日子也不会算歪。
+   */
+  const startOfDay = (value: number): number => {
+    const date = new Date(value)
+    date.setHours(0, 0, 0, 0)
+    return date.getTime()
+  }
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(at)) / (24 * hour))
+  if (dayDiff <= 0) return `${Math.floor(diff / hour)} 小时前`
+  if (dayDiff === 1) return '昨天'
+  if (dayDiff < 30) return `${dayDiff} 天前`
 
   const date = new Date(at)
   const pad = (value: number): string => String(value).padStart(2, '0')

@@ -113,6 +113,7 @@ import {
   licenseViewOf,
   markTrialTurnSeen,
   normalizeLicenseKey,
+  normalizeLicensePayload,
   remainingTrialTurns,
   TRIAL_TURN_LIMIT,
   unknownLicenseView
@@ -2897,6 +2898,27 @@ function testLicenseHelpers(): void {
   }
   const segment = licensePayloadSegment(payload)
   const key = encodeLicenseKey(payload, 'SIGSEG')
+
+  /**
+   * payload 字段校验：光"非空"不算校验。
+   * `issuedAt: "abc"` 会让日期逻辑静默失效（Date.parse → NaN），
+   * 10 万字的 holder 则能灌爆界面与日志——两者以前都能过"非空"这一关。
+   */
+  group('许可：payload 字段校验')
+  {
+    const good = { v: 1, edition: 'pro', holder: '张三', issuedAt: '2026-09-15', order: 'A-001' }
+    check('正常 payload 通过', normalizeLicensePayload(good) !== null)
+    eq('日期-only 也收（签发工具就写这个格式）', normalizeLicensePayload(good)?.issuedAt, '2026-09-15')
+    check('完整 ISO（带毫秒与 Z）也收', normalizeLicensePayload({ ...good, issuedAt: '2026-09-15T08:30:00.000Z' }) !== null)
+    check('issuedAt 不是日期 → 拒绝', normalizeLicensePayload({ ...good, issuedAt: 'abc' }) === null)
+    check('不存在的日期（2026-02-31）→ 拒绝', normalizeLicensePayload({ ...good, issuedAt: '2026-02-31' }) === null)
+    check('holder 超长 → 拒绝', normalizeLicensePayload({ ...good, holder: 'x'.repeat(121) }) === null)
+    check('holder 带控制字符 → 拒绝', normalizeLicensePayload({ ...good, holder: '张\u0000三' }) === null)
+    check('order 超长 → 拒绝', normalizeLicensePayload({ ...good, order: 'x'.repeat(81) }) === null)
+    check('order 可以缺省（可选字段）', normalizeLicensePayload({ v: 1, edition: 'pro', holder: '李四', issuedAt: '2026-09-15' }) !== null)
+    check('版本不是 1 → 拒绝', normalizeLicensePayload({ ...good, v: 2 }) === null)
+    check('版别不是 pro → 拒绝', normalizeLicensePayload({ ...good, edition: 'free' }) === null)
+  }
 
   eq('许可码是三段式', key.split('.').length, 3)
   check('带产品前缀', key.startsWith('SMIND1.'))
@@ -11267,6 +11289,36 @@ function testHistory(): void {
 
   const longAgo = relativeTime(now - 40 * 86_400_000, now)
   check('超过 30 天显示具体日期', /^\d{4}-\d{2}-\d{2}$/.test(longAgo), longAgo)
+
+  /**
+   * 「昨天」按**日历日**算，不按流逝时长算（用本地时间构造，任何时区都确定）。
+   * 老代码是 `diff < 2 天 → 昨天`，两个方向都会错。
+   */
+  {
+    // 2026-09-18 01:00（本地）
+    const midnightish = new Date(2026, 8, 18, 1, 0, 0).getTime()
+    eq(
+      '前天晚上（才 30 小时前）不该叫「昨天」',
+      relativeTime(midnightish - 30 * 3_600_000, midnightish),
+      '2 天前'
+    )
+    eq(
+      '昨天下午（才 10 小时前）按日历日就是「昨天」',
+      relativeTime(midnightish - 10 * 3_600_000, midnightish),
+      '昨天'
+    )
+    eq(
+      '跨过午夜就是「昨天」（哪怕只过了 2 小时）',
+      relativeTime(midnightish - 2 * 3_600_000, midnightish),
+      '昨天'
+    )
+    const evening = new Date(2026, 8, 18, 23, 0, 0).getTime()
+    eq(
+      '同一天内仍按小时数显示',
+      relativeTime(evening - 2 * 3_600_000, evening),
+      '2 小时前'
+    )
+  }
 }
 
 /* ------------------------------------------------------------------ */

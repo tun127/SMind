@@ -118,17 +118,65 @@ export function normalizeLicensePayload(raw: unknown): LicensePayload | null {
   if (record.v !== 1 || record.edition !== 'pro') return null
   if (typeof record.holder !== 'string' || record.holder.trim().length === 0) return null
   if (typeof record.issuedAt !== 'string' || record.issuedAt.trim().length === 0) return null
+
+  /**
+   * 光"非空"不算校验：签发时间要**能当成日期读出来**，字段还要有长度上限。
+   *
+   * 为什么值得管：这些字段会被显示、会被存进许可文件、将来还可能参与续期判断，
+   * 一个 `issuedAt: "abc"` 或 10 万字的 holder 都能通过"非空"这一关——
+   * 前者让日期逻辑静默失效（`Date.parse` 得到 NaN），后者能让界面/日志被灌爆。
+   * 格式上宽容一些：日期-only 与完整 ISO 都收（签发工具改过格式也不至于全废），
+   * 但必须是**真的能解析**的日期。
+   */
+  const holder = record.holder.trim()
+  if (holder.length > HOLDER_MAX || hasControlChars(holder)) return null
+  const issuedAt = record.issuedAt.trim()
+  if (issuedAt.length > ISSUED_AT_MAX || !isIsoLikeDate(issuedAt)) return null
+
   const order =
     typeof record.order === 'string' && record.order.trim().length > 0
       ? record.order.trim()
       : undefined
-  return {
-    v: 1,
-    edition: 'pro',
-    holder: record.holder.trim(),
-    issuedAt: record.issuedAt.trim(),
-    order
+  if (order !== undefined && (order.length > ORDER_MAX || hasControlChars(order))) return null
+
+  return { v: 1, edition: 'pro', holder, issuedAt, order }
+}
+
+/** 持有人名字的长度上限（正常姓名/公司名远小于它，超了就是脏数据） */
+const HOLDER_MAX = 120
+/** 签发时间字符串长度上限（ISO 8601 最长也就 30 上下） */
+const ISSUED_AT_MAX = 40
+/** 订单号长度上限 */
+const ORDER_MAX = 80
+
+function hasControlChars(text: string): boolean {
+  return /[\u0000-\u001f\u007f]/.test(text)
+}
+
+/**
+ * 像日期的日期：`YYYY-MM-DD` 或 ISO 8601（可带时间、毫秒、Z/±HH:MM），
+ * 且 `Date.parse` 必须给出有限值——只匹配形状的话 `2026-02-31` 这种假日期也会混进来。
+ */
+function isIsoLikeDate(value: string): boolean {
+  if (
+    !/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(
+      value
+    )
+  ) {
+    return false
   }
+  if (!Number.isFinite(Date.parse(value))) return false
+  // 日期-only 形式还要防"JS 帮你滚"：`2026-02-31` 解析出来是 03-03，
+  // 形状看着合法、日期其实不存在。逐项比回来才算数
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (dateOnly) {
+    const year = Number(dateOnly[1])
+    const month = Number(dateOnly[2])
+    const day = Number(dateOnly[3])
+    const date = new Date(year, month - 1, day)
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+  }
+  return true
 }
 
 /**
