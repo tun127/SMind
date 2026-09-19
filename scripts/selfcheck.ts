@@ -325,64 +325,8 @@ import {
 import type { LayoutResult, MeasureResult, NodeLayout } from '../src/shared/layout/types'
 import type { MindPackage, RichText, Topic, Workbook } from '../src/shared/model/types'
 
-/* ------------------------------------------------------------------ */
-/* 断言工具                                                            */
-/* ------------------------------------------------------------------ */
-
-let passed = 0
-const failures: string[] = []
-let currentGroup = ''
-
-function group(name: string): void {
-  currentGroup = name
-  console.log(`\n【${name}】`)
-}
-
-function check(name: string, condition: boolean, detail = ''): void {
-  if (condition) {
-    passed += 1
-    console.log(`  ✓ ${name}`)
-  } else {
-    failures.push(`${currentGroup} > ${name}${detail ? ` —— ${detail}` : ''}`)
-    console.log(`  ✗ ${name}${detail ? ` —— ${detail}` : ''}`)
-  }
-}
-
-/** 深比较：对象键排序后比较，避免键顺序造成误判 */
-function normalize(value: unknown, indent = 0): string {
-  return JSON.stringify(
-    value,
-    (_key, val) => {
-      if (val === undefined) return undefined
-      if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
-        const sorted: Record<string, unknown> = {}
-        for (const key of Object.keys(val as Record<string, unknown>).sort()) {
-          sorted[key] = (val as Record<string, unknown>)[key]
-        }
-        return sorted
-      }
-      return val
-    },
-    indent
-  )
-}
-
-/** 逐行找出首个差异，方便定位「哪个字段丢了」 */
-function firstDiff(before: string, after: string): string {
-  const linesA = before.split('\n')
-  const linesB = after.split('\n')
-  for (let i = 0; i < Math.max(linesA.length, linesB.length); i += 1) {
-    if (linesA[i] !== linesB[i]) {
-      return `首个差异在第 ${i + 1} 行\n      前: ${String(linesA[i]).trim()}\n      后: ${String(linesB[i]).trim()}`
-    }
-  }
-  return '无差异'
-}
-
-function eq(name: string, actual: unknown, expected: unknown): void {
-  const same = normalize(actual) === normalize(expected)
-  check(name, same, same ? '' : `实际=${normalize(actual)} 期望=${normalize(expected)}`)
-}
+/* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
+import { check, eq, firstDiff, group, normalize, stats } from './selfcheck/harness'
 
 /* ------------------------------------------------------------------ */
 /* 便捷访问                                                            */
@@ -2285,7 +2229,11 @@ async function testSafetyHelpers(): Promise<void> {
   group('拖入文件的路径还原（file:// → 本机路径）')
 
   eq('Windows 盘符：砍掉开头斜杠', pathFromFileUrl('file:///D:/a/b.xmind'), 'D:/a/b.xmind')
-  eq('中文与空格做百分号解码', pathFromFileUrl('file:///D:/%E6%88%90%E6%9C%AC%20a.xmind'), 'D:/成本 a.xmind')
+  eq(
+    '中文与空格做百分号解码',
+    pathFromFileUrl('file:///D:/%E6%88%90%E6%9C%AC%20a.xmind'),
+    'D:/成本 a.xmind'
+  )
   /**
    * UNC 共享盘：主机名在 `host`、pathname 只有 `/share/...`，必须拼回 `\\server\share\...`。
    * 以前只取 pathname 再砍斜杠 → 得到相对路径 `share/a.xmind`，被当非法路径丢掉，
@@ -2949,14 +2897,37 @@ function testLicenseHelpers(): void {
   {
     const good = { v: 1, edition: 'pro', holder: '张三', issuedAt: '2026-09-15', order: 'A-001' }
     check('正常 payload 通过', normalizeLicensePayload(good) !== null)
-    eq('日期-only 也收（签发工具就写这个格式）', normalizeLicensePayload(good)?.issuedAt, '2026-09-15')
-    check('完整 ISO（带毫秒与 Z）也收', normalizeLicensePayload({ ...good, issuedAt: '2026-09-15T08:30:00.000Z' }) !== null)
-    check('issuedAt 不是日期 → 拒绝', normalizeLicensePayload({ ...good, issuedAt: 'abc' }) === null)
-    check('不存在的日期（2026-02-31）→ 拒绝', normalizeLicensePayload({ ...good, issuedAt: '2026-02-31' }) === null)
-    check('holder 超长 → 拒绝', normalizeLicensePayload({ ...good, holder: 'x'.repeat(121) }) === null)
-    check('holder 带控制字符 → 拒绝', normalizeLicensePayload({ ...good, holder: '张\u0000三' }) === null)
+    eq(
+      '日期-only 也收（签发工具就写这个格式）',
+      normalizeLicensePayload(good)?.issuedAt,
+      '2026-09-15'
+    )
+    check(
+      '完整 ISO（带毫秒与 Z）也收',
+      normalizeLicensePayload({ ...good, issuedAt: '2026-09-15T08:30:00.000Z' }) !== null
+    )
+    check(
+      'issuedAt 不是日期 → 拒绝',
+      normalizeLicensePayload({ ...good, issuedAt: 'abc' }) === null
+    )
+    check(
+      '不存在的日期（2026-02-31）→ 拒绝',
+      normalizeLicensePayload({ ...good, issuedAt: '2026-02-31' }) === null
+    )
+    check(
+      'holder 超长 → 拒绝',
+      normalizeLicensePayload({ ...good, holder: 'x'.repeat(121) }) === null
+    )
+    check(
+      'holder 带控制字符 → 拒绝',
+      normalizeLicensePayload({ ...good, holder: '张\u0000三' }) === null
+    )
     check('order 超长 → 拒绝', normalizeLicensePayload({ ...good, order: 'x'.repeat(81) }) === null)
-    check('order 可以缺省（可选字段）', normalizeLicensePayload({ v: 1, edition: 'pro', holder: '李四', issuedAt: '2026-09-15' }) !== null)
+    check(
+      'order 可以缺省（可选字段）',
+      normalizeLicensePayload({ v: 1, edition: 'pro', holder: '李四', issuedAt: '2026-09-15' }) !==
+        null
+    )
     check('版本不是 1 → 拒绝', normalizeLicensePayload({ ...good, v: 2 }) === null)
     check('版别不是 pro → 拒绝', normalizeLicensePayload({ ...good, edition: 'free' }) === null)
   }
@@ -11384,11 +11355,7 @@ function testHistory(): void {
       '昨天'
     )
     const evening = new Date(2026, 8, 18, 23, 0, 0).getTime()
-    eq(
-      '同一天内仍按小时数显示',
-      relativeTime(evening - 2 * 3_600_000, evening),
-      '2 小时前'
-    )
+    eq('同一天内仍按小时数显示', relativeTime(evening - 2 * 3_600_000, evening), '2 小时前')
   }
 }
 
@@ -11829,6 +11796,7 @@ async function main(): Promise<void> {
   await testUnknownPassthrough()
 
   console.log('\n' + '='.repeat(56))
+  const { passed, failures } = stats()
   if (failures.length === 0) {
     console.log(`全部通过：${passed} 项断言`)
   } else {
