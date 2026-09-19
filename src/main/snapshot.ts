@@ -163,6 +163,14 @@ export async function createSnapshot(input: {
   return snapshotsOf(next, docKey)
 }
 
+/** 某个版本属于哪份文档（按索引查，查不到返回 null）。恢复前用它做**归属校验** */
+export async function snapshotOwnerKey(id: string): Promise<string | null> {
+  const safe = safeId(id)
+  if (safe.length === 0) return null
+  const index = await loadIndex()
+  return index.items.find((item) => item.id === safe)?.docKey ?? null
+}
+
 /** 读出某个版本的字节（恢复时用），不存在返回 null */
 export async function readSnapshotBytes(id: string): Promise<Uint8Array | null> {
   const safe = safeId(id)

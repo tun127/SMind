@@ -82,7 +82,7 @@ import { serializeXmind } from '@shared/xmind/serialize'
 import { buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
 import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
 import type { HistoryEntry } from '@shared/history'
-import type { SnapshotItem, SnapshotReason } from '@shared/snapshot'
+import { documentKeyOf, type SnapshotItem, type SnapshotReason } from '@shared/snapshot'
 import {
   clearAllHistory,
   currentSaveDir,
@@ -97,7 +97,8 @@ import {
   createSnapshot,
   listSnapshots,
   readSnapshotBytes,
-  removeSnapshotById
+  removeSnapshotById,
+  snapshotOwnerKey
 } from './snapshot'
 import { imageExportFormatDef, type ImageExportFormat } from '@shared/export/types'
 import { normalizeThemeDefinition, type ThemeDefinition } from '@shared/theme'
@@ -2199,13 +2200,27 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.snapshotRestore,
     async (e, docId: string, id: string): Promise<SnapshotRestoreResult> => {
+      const state = stateOf(e.sender)
+      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
+      /**
+       * **恢复前必须校验这个版本属于当前文档**。
+       *
+       * 以前只按 id 取字节：id 是渲染层递过来的，一旦它来自另一份文档（切换文档后对话框
+       * 还留着旧 id、列表渲染出错、或渲染层被改坏），就会把**别的文档的内容**恢复进来，
+       * 用户接着一保存就把自己当前的文件写坏——而版本库本来是"兜底"的东西，不能反过来毁数据。
+       * 而且列表本身就是用同一个路径查出来的（`snapshotList(path)`），所以两者不一致时
+       * 说明链路已经错了，此时**拒绝**比"照着恢复"安全。
+       */
+      const owner = await snapshotOwnerKey(id)
+      const current = documentKeyOf(doc?.docPath ?? null)
+      if (!owner || owner !== current) {
+        throw new Error('这个版本不属于当前文档，已阻止恢复（避免把别的文档内容写进当前文件）')
+      }
       const bytes = await readSnapshotBytes(id)
       if (!bytes) throw new Error('这个版本的文件已经不在了，可能被清理过')
       const parsed = await parseXmind(bytes)
       // 与打开文件一致：资源必须留在主进程，否则「恢复后再保存」会把图片丢掉
-      const state = stateOf(e.sender)
-      if (state && typeof docId === 'string') {
-        const doc = docOf(state, docId)
+      if (doc && typeof docId === 'string') {
         doc.resources = parsed.resources
         doc.inserted.clear()
       }
