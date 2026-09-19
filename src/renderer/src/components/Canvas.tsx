@@ -32,6 +32,9 @@ import { useFlashNodes } from './canvas/use-flash-nodes'
 import { useFoldAnchor } from './canvas/use-fold-anchor'
 import { useViewFollow } from './canvas/use-view-follow'
 import { useWheelPanZoom } from './canvas/use-wheel-pan-zoom'
+import { useMarqueeSelect } from './canvas/use-marquee-select'
+import { useRelationshipDrag } from './canvas/use-relationship-drag'
+import { useTitleEdit } from './canvas/use-title-edit'
 import { useNodeDrag } from './canvas/use-node-drag'
 
 export default function Canvas(): ReactElement {
@@ -77,33 +80,6 @@ export default function Canvas(): ReactElement {
     /** 整群被拖时，用来把「点谁拖谁」说明白 */
     group: number
   } | null>(null)
-  /** 左键框选：矩形用容器内的局部坐标，便于直接定位 */
-  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(
-    null
-  )
-
-  /** 双击画布上的边界/概要/关系线标题后，就地编辑文字 */
-  const [titleEdit, setTitleEdit] = useState<{
-    kind: 'boundary' | 'summary' | 'relationship'
-    id: string
-    x: number
-    y: number
-    anchor: 'start' | 'middle' | 'end'
-    value: string
-  } | null>(null)
-  /** Esc 取消时置位，避免失焦又把取消的内容写回去 */
-  const cancelTitleRef = useRef(false)
-
-  /** 正在拖拽的关系线端点（拖到别的主题上即可改接） */
-  const [handleDrag, setHandleDrag] = useState<{
-    relationshipId: string
-    end: 'end1Id' | 'end2Id'
-    /** 不动的那一端（世界坐标），用来画预览线 */
-    anchor: { x: number; y: number }
-    pointer: { x: number; y: number }
-    targetId: string | null
-  } | null>(null)
-
   /* ---- 供原生事件处理器读取的最新值 ---- */
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
@@ -364,73 +340,13 @@ export default function Canvas(): ReactElement {
     setPan,
     setDragVisual
   })
-  /* ---- 拖动关系线的端点改接 ---- */
-  const handleRelationshipPointerDown = useCallback(
-    (
-      e: ReactPointerEvent<SVGCircleElement>,
-      relationshipId: string,
-      end: 'end1Id' | 'end2Id',
-      anchor: { x: number; y: number }
-    ): void => {
-      if (e.button !== 0) return
-      // 必须阻止冒泡，否则画布会把这次按下当成「拖拽平移」
-      e.stopPropagation()
-      const store = useEditor.getState()
-      if (store.editingId) store.commitEdit()
-
-      const origin = screenToWorld(e.clientX, e.clientY)
-      setHandleDrag({ relationshipId, end, anchor, pointer: origin, targetId: null })
-
-      const onMove = (ev: PointerEvent): void => {
-        const world = screenToWorld(ev.clientX, ev.clientY)
-        setHandleDrag((current) =>
-          current ? { ...current, pointer: world, targetId: hitTest(world.x, world.y) } : current
-        )
-      }
-      const detach = (): void => {
-        window.removeEventListener('pointermove', onMove)
-        window.removeEventListener('pointerup', onUp)
-        window.removeEventListener('pointercancel', onCancel)
-      }
-      const onCancel = (): void => {
-        detach()
-        setHandleDrag(null)
-      }
-      const onUp = (ev: PointerEvent): void => {
-        detach()
-        const world = screenToWorld(ev.clientX, ev.clientY)
-        const target = hitTest(world.x, world.y)
-        setHandleDrag(null)
-        if (target) useEditor.getState().setRelationshipEnd(relationshipId, end, target)
-      }
-
-      window.addEventListener('pointermove', onMove)
-      window.addEventListener('pointerup', onUp)
-      window.addEventListener('pointercancel', onCancel)
-    },
-    [hitTest, screenToWorld]
-  )
-
-  /* ---- 双击标题就地编辑 ---- */
-  const commitTitleEdit = useCallback((): void => {
-    const target = titleEditRef.current
-    if (!target) return
-    if (cancelTitleRef.current) {
-      cancelTitleRef.current = false
-      setTitleEdit(null)
-      return
-    }
-    const store = useEditor.getState()
-    if (target.kind === 'boundary') store.setBoundaryTitle(target.id, target.value)
-    else if (target.kind === 'summary') store.setSummaryTitle(target.id, target.value)
-    else store.setRelationshipTitle(target.id, target.value)
-    setTitleEdit(null)
-  }, [])
-
-  // 编辑过程中输入框的值是最新来源，用 ref 保证失焦提交读到的是最新内容
-  const titleEditRef = useRef(titleEdit)
-  titleEditRef.current = titleEdit
-
+  /* ---- 拖动关系线的端点改接 + 线身移动 + 元素选中：整块搬进 canvas/use-relationship-drag.ts ---- */
+  // 注意：state setter 没有解构出来（画布不再需要它——更新函数写法随处理器一起进了 hook），
+  // 它仍由 hook 返回（`Dispatch<SetStateAction<…>>`），将来要用直接解构即可
+  const { handleDrag, pickOverlay, handleRelationshipPointerDown, handleCurvePointerDown } =
+    useRelationshipDrag({ zoomRef, screenToWorld, hitTest })
+  /* ---- 双击标题就地编辑：整块搬进 canvas/use-title-edit.ts ---- */
+  const { titleEdit, setTitleEdit, cancelTitleRef, commitTitleEdit } = useTitleEdit()
   /**
    * 落点预览，**两种落点各用一套、绝不混用**：
    *
@@ -601,59 +517,6 @@ export default function Canvas(): ReactElement {
     }
   }, [dragVisual, layout])
 
-  /** 选中画布元素（概要 / 边界 / 关系线）并打开属性面板：文字、字体、删除都在面板里 */
-  const pickOverlay = useCallback(
-    (
-      event: ReactPointerEvent<SVGElement>,
-      kind: 'summary' | 'boundary' | 'relationship',
-      id: string
-    ): void => {
-      event.stopPropagation()
-      const store = useEditor.getState()
-      store.selectOverlay(kind, id)
-      store.requestNodePanel()
-    },
-    []
-  )
-
-  /* ---- 拖动关系线的线身：整体移动弧线（弯度偏移） ---- */
-  const handleCurvePointerDown = useCallback(
-    (e: ReactPointerEvent<SVGPathElement>, relationshipId: string): void => {
-      if (e.button !== 0) return
-      e.stopPropagation()
-      const store = useEditor.getState()
-      // 点线身 = 选中这条关系线（顺手把属性面板打开），拖才改弯度：
-      // 否则「点一下线上什么都没有发生」，看起来就像这条线选不中
-      store.selectOverlay('relationship', relationshipId)
-      store.requestNodePanel()
-      if (store.editingId) store.commitEdit()
-
-      let lastX = e.clientX
-      let lastY = e.clientY
-
-      const onMove = (ev: PointerEvent): void => {
-        const z = zoomRef.current
-        const dx = (ev.clientX - lastX) / z
-        const dy = (ev.clientY - lastY) / z
-        lastX = ev.clientX
-        lastY = ev.clientY
-        if (dx === 0 && dy === 0) return
-        useEditor.getState().offsetRelationshipCurve(relationshipId, dx, dy)
-      }
-      const detach = (): void => {
-        window.removeEventListener('pointermove', onMove)
-        window.removeEventListener('pointerup', onUp)
-        window.removeEventListener('pointercancel', onUp)
-      }
-      const onUp = (): void => detach()
-
-      window.addEventListener('pointermove', onMove)
-      window.addEventListener('pointerup', onUp)
-      window.addEventListener('pointercancel', onUp)
-    },
-    []
-  )
-
   /* ---- 节点回调：全部只走 useEditor.getState() / ref 拿最新值，引用永远稳定 ---- */
   /**
    * TopicNode 有 memo，但只要这里传进去的回调每次渲染都是新函数，
@@ -727,119 +590,15 @@ export default function Canvas(): ReactElement {
     })
   }, [])
 
-  /* ---- 空白处：右键/中键拖动平移；左键拖动框选 ---- */
-  const handleBackgroundPointerDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>): void => {
-      const store = useEditor.getState()
-      if (store.editingId) store.commitEdit()
-      if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
-
-      // 与 Xmind 一致：右键（或中键）拖动平移画布
-      if (e.button === 1 || e.button === 2) {
-        e.preventDefault()
-        // 手动拖画布＝接管视角（与滚轮同一条规则）
-        viewGestureAtRef.current += 1
-        const startX = e.clientX
-        const startY = e.clientY
-        const startPan = { ...panRef.current }
-        // pointermove 同样是每秒上百次的高频事件：累进局部变量，每帧最多落账一次
-        let raf = 0
-        let targetX = startPan.x
-        let targetY = startPan.y
-        const flush = (): void => {
-          raf = 0
-          setStage('拖拽平移')
-          setPan({ x: targetX, y: targetY })
-        }
-        const onMove = (ev: PointerEvent): void => {
-          targetX = startPan.x + (ev.clientX - startX)
-          targetY = startPan.y + (ev.clientY - startY)
-          if (raf === 0) raf = window.requestAnimationFrame(flush)
-        }
-        const detach = (): void => {
-          window.removeEventListener('pointermove', onMove)
-          window.removeEventListener('pointerup', onUp)
-          window.removeEventListener('pointercancel', onCancel)
-          if (raf !== 0) window.cancelAnimationFrame(raf)
-        }
-        const onCancel = (): void => detach()
-        // 右键原地点击不应清空选择
-        const onUp = (): void => detach()
-        window.addEventListener('pointermove', onMove)
-        window.addEventListener('pointerup', onUp)
-        window.addEventListener('pointercancel', onCancel)
-        return
-      }
-
-      // 左键：框选
-      const rect = containerRef.current?.getBoundingClientRect()
-      const baseLeft = rect?.left ?? 0
-      const baseTop = rect?.top ?? 0
-      const startClient = { x: e.clientX, y: e.clientY }
-      const startLocal = { x: e.clientX - baseLeft, y: e.clientY - baseTop }
-      let moved = false
-
-      const onMove = (ev: PointerEvent): void => {
-        const localX = ev.clientX - baseLeft
-        const localY = ev.clientY - baseTop
-        if (!moved && Math.hypot(localX - startLocal.x, localY - startLocal.y) < 3) return
-        moved = true
-        setMarquee({ x0: startLocal.x, y0: startLocal.y, x1: localX, y1: localY })
-      }
-      const detach = (): void => {
-        window.removeEventListener('pointermove', onMove)
-        window.removeEventListener('pointerup', onUp)
-        window.removeEventListener('pointercancel', onCancel)
-      }
-      const onCancel = (): void => {
-        detach()
-        setMarquee(null)
-      }
-      const onUp = (ev: PointerEvent): void => {
-        detach()
-        setMarquee(null)
-        const state = useEditor.getState()
-
-        // 只是点了一下空白：取消选择
-        if (!moved) {
-          state.select(null)
-          return
-        }
-
-        const z = zoomRef.current
-        const pan = panRef.current
-        const toWorld = (client: { x: number; y: number }): { x: number; y: number } => ({
-          x: (client.x - baseLeft - pan.x) / z,
-          y: (client.y - baseTop - pan.y) / z
-        })
-        const from = toWorld(startClient)
-        const to = toWorld({ x: ev.clientX, y: ev.clientY })
-        const minX = Math.min(from.x, to.x)
-        const maxX = Math.max(from.x, to.x)
-        const minY = Math.min(from.y, to.y)
-        const maxY = Math.max(from.y, to.y)
-
-        // 与拖动中的高亮共用同一套判定（`topicsInBox`）：亮了就一定会选中
-        const hits = topicsInBox(
-          (layoutRef.current?.nodes ?? []).map((node) => ({
-            id: node.id,
-            rect: { x: node.x, y: node.y, width: node.width, height: node.height }
-          })),
-          { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
-        )
-
-        // 按住 Ctrl 拖动是「追加选择」
-        const base = ev.ctrlKey || ev.metaKey ? state.selection : []
-        state.setSelection([...base, ...hits])
-      }
-
-      window.addEventListener('pointermove', onMove)
-      window.addEventListener('pointerup', onUp)
-      window.addEventListener('pointercancel', onCancel)
-    },
-    [setPan]
-  )
-
+  /* ---- 空白处：右键/中键拖动平移、左键拖动框选：整块搬进 canvas/use-marquee-select.ts ---- */
+  const { marquee, handleBackgroundPointerDown } = useMarqueeSelect({
+    containerRef,
+    layoutRef,
+    zoomRef,
+    panRef,
+    viewGestureAtRef,
+    setPan
+  })
   /* ---- 视口裁剪：只渲染可见范围内的节点 ---- */
   const visibleNodes = useMemo(() => {
     if (size.width === 0 || size.height === 0) return layout.nodes
