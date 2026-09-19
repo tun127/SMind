@@ -6,6 +6,40 @@
 
 ## [未发布]
 
+### 修复 · 本轮代码审计（2026-09-18，分批各自过五道门槛）
+
+> 来源：`docs/shared-audit.md`（83 文件 / 18k 行的 `src/shared/**` 审计）+ 应用层实测。
+> 每批都跑 typecheck / lint / format:check / selfcheck / verify 并单独提交；自检 2522 → 2624 项。
+
+- **P1 导出装饰失真**（`export/svg.ts`、`export/raster.ts`、`export/drawing.ts`）：SVG 把删除线写成下划线、
+  PNG 与位图 PDF **完全没画**下划线与删除线、缺失图片的占位与画布不一致（现统一为虚线框 + 「图片缺失」）、
+  标记条分列处有死三元。修法：装饰统一由 `decorationOf` 产出，位图侧补齐两条装饰线与虚线支持，
+  `RectOp.dash` 与 `PathOp.dash` 用同一种写法。
+- **多窗口关不掉**（`main/index.ts`、`shared/ipc.ts`、`preload/index.ts`）：退出流程中确认后**仍会关掉这个窗口**
+  （以前无条件 `return`，窗口留在原地像卡死）；新增 `window:close-cancel` 通道，取消关闭时复位
+  `quitRequested` 与 `allowClose`（此前只能置真，于是之后每次关窗都误走退出分支）。通道总数 70，两侧逐条核对无缺失。
+- **关 AI 面板后撤销被锁死**（`components/ChatPanel.tsx`、`store/editor.ts`）：面板随抽屉卸载时只取消订阅、
+  **没有收尾回合**，于是 `aiTurn` 永远留着，`undo`/`redo` 被静默挡住（Ctrl+Z 完全没反应），画布还因
+  `aiTurnActive` 恒真而一直节流。修法：卸载时取消流并 `commitAiTurn`；`newDocument`/`loadDocument`/`restoreDocument`
+  一律复位 `aiTurn`；`usePacedWorkbook` 记住"屏幕上那一份"，进入节流的第一帧直接用最新值。
+- **P2 IPC 契约与主进程健壮性**：`aiChatStream` 的 `turnId` 补进 preload（此前被窄化掉，许可层拿不到它，
+  一条命令会被按轮计费）；附件只生成一个 id；流式请求用完摘掉 `sender` 的 destroyed 监听（工具循环一轮一个，会攒到上限）；
+  设置 / 自定义主题 / AI 配置 / 自动保存元信息 / 打开历史索引 / 快照索引**全部改原子写**（`writeJsonAtomic`）；
+  快照索引改为「先落索引、再删文件」；导出临时 HTML 与副本文件改用 `randomUUID`（毫秒时间戳会撞名）；
+  拖入文件的 `file://` → 路径还原支持 UNC 与 POSIX（`pathFromFileUrl`，UNC 以前被当相对路径丢掉）；
+  `openSheetWindow` 失败落日志。
+- **P3 重复实现与卫生**：`plan-write` 自造的 `subtreeContains` 并入 `isSelfOrDescendant`（**顺带修掉**"把主题移进自己
+  浮动子主题下面"被放行的缺口——store 与拖拽早已拦住，只有 AI 写路径漏了）；`undo` 不再就地改 store 里的历史条目；
+  `App.tsx` 死依赖、`NodePanel` 错位 import、`tabs.ts` 硬编码行号等清理；`_audit 结论逐条复核`，
+  并记录四处**经核对不成立**的建议（见 `docs/known-issues.md`）。
+- **shared 层正确性**（`tree.ts`、`search/index.ts`、`import/markdown.ts`、`outline/index.ts`、`ai/stream.ts`、
+  `xmind/xml.ts`、`code/lexer.ts`、`license.ts`、`document/index.ts`）：自由摆放的主题之前**删不掉也移不动**（`allChildrenOf`
+  口径统一）；大小写不敏感匹配用字面量正则（`İ` 类字符导致下标错位、替换删错字）；Markdown 开头水平线不再吞掉全文、
+  未闭合围栏不再整块丢弃；导出标题按 Markdown 转义（`3*4` 曾被读成斜体）；合并提示词不再缺规格与质量判据；
+  搜索/计数/替换统一 `normalizeQuery` 口径；XML 闭标签**对名字弹栈**（错位嵌套不再把节点挂错父级）；
+  zip 解压前按**声明的**未压缩大小拦压缩炸弹；SSE 分割器补 `flush()`（末尾不带换行的 `data:` 行会整段丢正文）；
+  CSS 字符串认转义（`content: "a\"b"` 不再腰斩串色）；许可 payload 校验日期格式与长度上限；「昨天」按日历日算。
+
 ### 文档 · 清理过时与无用文书（只动文档，不碰代码）
 
 - **删除 `docs/structure-specs.md`**：其主参考是那篇被证伪的 CSDN 文章（层级方向做反的根源），

@@ -10,6 +10,48 @@
 
 ---
 
+## 处理结果（2026-09-18 · 本轮代码审计）
+
+来源：`docs/shared-audit.md`（对 `src/shared/**` 83 文件 / 18k 行的三遍独立审计）+ 用户实测报障。
+分 8 批落地，每批各自过**五道门槛**（typecheck / lint / format:check / selfcheck / verify）后单独提交，
+自检断言 2522 → 2624 项。下表用**符号名**而不是行号（行号一改就假，本轮已因此踩过）。
+
+| 项 | 结果 | 落地位置 |
+|---|---|---|
+| 悬浮/浮动主题删不掉、移不动（`store` 谎报成功） | **已修**：子节点遍历统一到 `allChildrenOf` | `shared/model/tree.ts`、`store/editor.ts`、`agent/address.ts`、`layout/core.ts` |
+| 数字字符引用越界抛 `RangeError` | **已修**：抽成 `entities.ts` 带上下界守卫；三处名字表**有意保留差异**（XML/纯文本/Markdown 口径不同） | `shared/entities.ts` |
+| Markdown 开头 `---` 吞掉全文、未闭合围栏丢整块 | **已修**：front-matter 需有闭合行；EOF 冲刷未闭合围栏 | `shared/import/markdown.ts` |
+| 大小写不敏感匹配下标错位、替换删错字 | **已修**：改用字面量正则；`normalizeQuery` 统一口径 | `shared/search/index.ts` |
+| 导出标题未转义（`3*4` 被读成斜体） | **已修**：`escapeMarkdownText` | `shared/markdown-escape.ts`、`shared/outline/index.ts` |
+| 合并提示词缺规格与两条质量判据 | **已修**：`documentSpecLines(depth, 4)` | `shared/ai/prompts.ts` |
+| XML 闭标签不校验名字（错位嵌套挂错父级） | **已修**：对名字弹栈，找不到当野闭标签忽略 | `shared/xmind/xml.ts` |
+| 压缩炸弹（解压后才判上限） | **已修**：解压前读**声明的**未压缩大小直接跳过 | `main/document.ts` |
+| SSE 末尾不带换行的 `data:` 行丢正文 | **已修**：`createSseLineSplitter` 补 `flush()`，主进程收尾接上 | `shared/ai/stream.ts`、`main/index.ts` |
+| CSS 字符串不认转义（`"a\"b"` 腰斩串色） | **已修**：带转义识别的扫描循环 | `shared/code/lexer.ts` |
+| 许可 payload 只判"非空" | **已修**：`issuedAt` 必须是真日期（`2026-02-31` 这类"JS 会帮忙滚"的也要拒），holder/order 限长并拒控制字符 | `shared/license.ts` |
+| 「昨天」按流逝时长算 | **已修**：改按**日历日差**（跨午夜即昨天） | `shared/history/index.ts` |
+| 吸附半径边界口径不一 | **已修**：`closestNodeWithin` 起点 `maxDistance + 1`（"**超过**才算空白"与其文档、与 `nearestSiblingGap` 的 `<=` 统一；保留"同距先到先得"） | `shared/model/drop.ts` |
+| 非法落点原因与路径不匹配 | **已修**：多选约束优先说出；非 child 落点给出具体规则 | `shared/model/drop.ts` |
+
+### 经**核对不成立**的审计建议（记录在此，避免以后重复立案）
+
+| 建议 | 为什么不改 |
+|---|---|
+| "拖到中心主题前/后应报错" | 行为**有意**：被自检断言钉住（"目标是根主题 → 只能成为它的子主题"），改成拒绝反而像卡死 |
+| "`stop()` 应清 `requestIdRef`" | 清掉会让主进程随后发来的终止 `aborted` 事件被 `handleEvent` 过滤掉——「已停止」标记与回合收尾一起消失 |
+| "`runsToHtml` 是死代码，删掉" | **不是死代码**：`scripts/selfcheck.ts` 的行内语法断言在用它（审计只 grep 了 `src/**`，漏了 `scripts/**`） |
+| "两个节点计数器口径不一致，应合并" | **有意不同**：`countTopicTree` 只走 `children`（给模型报分支规模，与实体层级一致），`countTopics` 走 `walk`（含自由摆放主题，界面用）；`ai/context.ts` 的注释已写明"别把两者合并" |
+
+### 明确不改（附理由）
+
+| 项 | 理由 |
+|---|---|
+| `stackDirection` 的"平局造序" | 只有两个节点中心**完全重合**（退化情形）时才出现；改成别的任意选择没有依据 |
+| `font` 串两处实现 | 签名不同（一处收 style 对象、一处收 4 个标量），合并的改动面大于收益 |
+| 大纲面板列浮动主题 | **产品口径问题**：`shared/layout` 除分支配色外不遍历 `detachedChildren`，没有画布行为可对齐；注释已按实际行为写清，想改只需一处（见 `outline/index.ts` 的说明） |
+
+---
+
 ## 处理结果（2026-09-15）
 
 | 项 | 结果 | 落地位置 |
