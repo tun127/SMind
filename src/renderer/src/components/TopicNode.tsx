@@ -9,14 +9,8 @@ import {
   imageBoxSize
 } from '@shared/layout/accessory'
 import { nodePaddingOf } from '../render/measure'
-import { FOLD_SIDE_LABELS } from '@shared/model/fold-labels'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
-import {
-  countDescendants,
-  foldedSidesOf,
-  hiddenCountOfSide,
-  splitFoldSidesOf
-} from '@shared/model/tree'
+import { foldedSidesOf, splitFoldSidesOf } from '@shared/model/tree'
 import { count, isDiagArmed, noteAmount } from '../dev/stage'
 import { richFromPlain } from '@shared/richtext'
 import { formulaSize } from '../render/formula'
@@ -33,6 +27,7 @@ import { TopicImageBlock } from './topic/image-block'
 import { TopicFormulaBlock } from './topic/formula-block'
 import { TopicCodeBlock } from './topic/code-block'
 import { TopicResizeHandle } from './topic/resize-handle'
+import { TopicCollapseBadges } from './topic/collapse-badges'
 export type { TopicNodeProps } from './topic/props'
 
 function TopicNodeInner({
@@ -292,52 +287,16 @@ function TopicNodeInner({
         minNodeHeight={minNodeHeight}
       />
 
-      {/* 双向展开的结构：每个方向一根徽标，分别收起（各贴自己那一侧的边） */}
-      {splitSides.map((side) => (
-        <button
-          key={side}
-          type="button"
-          className={`topic__collapse topic__collapse--${side}`}
-          title={
-            foldedSides.has(side)
-              ? `已收起${FOLD_SIDE_LABELS[side]}侧 ${hiddenCountOfSide(node.topic, side)} 个子主题，点击展开`
-              : `收起${FOLD_SIDE_LABELS[side]}侧分支`
-          }
-          style={{ background: color }}
-          onPointerDown={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={(event) => {
-            event.stopPropagation()
-            onToggleFoldSide(node.id, side)
-          }}
-        >
-          {/* 收起时显示这一侧藏了多少个节点，展开时是 −（与整体折叠的徽标同一套样式） */}
-          {foldedSides.has(side) ? hiddenCountOfSide(node.topic, side) : '−'}
-        </button>
-      ))}
-
-      {splitSides.length === 0 && canCollapse && (
-        <button
-          type="button"
-          className={`topic__collapse topic__collapse--${collapseSide}`}
-          title={
-            node.topic.collapsed
-              ? `折叠了 ${countDescendants(node.topic)} 个子主题，点击展开`
-              : '折叠子主题'
-          }
-          // 平面样式：只有分支配色的底，不再描白圈/投影（那圈白边看着像高光，用户反馈去掉）
-          style={{ background: color }}
-          onPointerDown={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={(event) => {
-            event.stopPropagation()
-            onToggleCollapse(node.id)
-          }}
-        >
-          {/* 折叠时显示折叠的后代数量，展开时是 −（XMind 式圆形简约徽标） */}
-          {node.topic.collapsed ? countDescendants(node.topic) : '−'}
-        </button>
-      )}
+      <TopicCollapseBadges
+        node={node}
+        splitSides={splitSides}
+        foldedSides={foldedSides}
+        color={color}
+        canCollapse={canCollapse}
+        collapseSide={collapseSide}
+        onToggleFoldSide={onToggleFoldSide}
+        onToggleCollapse={onToggleCollapse}
+      />
     </div>
   )
 }
