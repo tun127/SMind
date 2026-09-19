@@ -7,19 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement
 } from 'react'
-import {
-  Bot,
-  ClipboardPaste,
-  Eraser,
-  Paperclip,
-  ArrowDown,
-  Send,
-  Settings2,
-  Sparkles,
-  Square,
-  TriangleAlert,
-  X
-} from 'lucide-react'
+import { ArrowDown, Settings2 } from 'lucide-react'
 import {
   addUsage,
   buildChatSystemPrompt,
@@ -29,17 +17,12 @@ import {
   countTopicTree,
   digestPreamble,
   readableIpcError,
-  formatTokenCount,
   DEFAULT_QUALITY_TIER,
-  normalizeQualityTier,
-  QUALITY_TIERS,
   type AiMessage,
   type AiStreamEvent,
   type QualityTier,
-  type TokenUsage,
   type ToolCall
 } from '@shared/ai'
-import type { OutlineFormat } from '@shared/outline'
 import type { ExtractedDocument } from '@shared/document'
 import {
   buildTitleIndex,
@@ -62,6 +45,14 @@ import { activeRoot, activeSheet, ancestorsOf, findTopic } from '@shared/model/t
 import { viewportActions } from '../render/viewport'
 import { armDiag, beginCost, keepDiagArmed, reportCosts, setStage } from '../dev/stage'
 import { patchAppSettings, useEditor } from '../store/editor'
+import ChatHeader from './chat/chat-header'
+import ChatInput from './chat/chat-input'
+import ConfirmBar from './chat/confirm-bar'
+import DocChips from './chat/doc-chips'
+import { exportFormatOf, QUICK_PROMPTS } from './chat/format'
+import LicenseBar from './chat/license-bar'
+import MessageList from './chat/message-list'
+import type { ChatDoc, ChatMsg, ChatPlan, PendingWrite } from './chat/types'
 interface Props {
   onClose(): void
   /** 面板自己不做配置界面，只负责把用户送去「AI 设置」 */
@@ -73,50 +64,10 @@ interface Props {
   onBeforeAiWrite(): void
 }
 
-interface ChatMsg {
-  /** 用作 React key：列表只会追加，但用下标做 key 在插入场景会错位 */
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  /** 这条回答被用户手动停止——标注出来，别让人以为说完了 */
-  aborted?: boolean
-  /**
-   * 思维链（推理模型的思考过程，可折叠展示）。
-   * 只用于界面直播：**不进历史存档**（normalizeChatHistory 只留 role/content）。
-   */
-  thinking?: string
-  /** 这一轮里 AI 做过什么（工具调用摘要），让用户看得见它干的事 */
-  toolNotes?: string[]
-  /** 这条回答花了多少 token（多轮工具调用会累计；服务商没回报就没有） */
-  usage?: TokenUsage
-  /** 诚实标注：模型说改了、实际零改动（或写操作没落实）时显示 */
-  warning?: string
-}
-
 /**
  * 历史不再用「截断 N 条」处理：截断会让模型忘掉之前干过什么，用户说"继续"时它从零重读一遍导图。
  * 现在走 `compressHistory`（三期）：最近几轮保留原文，更早的折叠成「此前做过什么」。
  */
-
-/**
- * 导出格式：从工具参数里取，非法值一律回退 md。
- *
- * 放在这里而不是 shared 层：这是**界面侧**的决定（要调哪个导出通道），
- * 纯逻辑层只管把 format 原样带给渲染层。
- */
-function exportFormatOf(argumentsText: string): OutlineFormat {
-  try {
-    const parsed = JSON.parse(argumentsText) as { format?: unknown }
-    const raw = typeof parsed.format === 'string' ? parsed.format.trim().toLowerCase() : ''
-    if (raw === 'txt' || raw === 'opml' || raw === 'md') return raw
-  } catch {
-    /* 参数坏了就用默认格式 */
-  }
-  return 'md'
-}
-
-/** 快捷提问：只跟 AI 聊，不动画布 */
-const QUICK_PROMPTS = ['总结这页导图的主要内容', '指出这个导图结构上薄弱的地方']
 
 /**
  * AI 聊天面板（三期）。
@@ -164,13 +115,7 @@ export default function ChatPanel({
   const [activity, setActivity] = useState('')
   const [streaming, setStreaming] = useState(false)
   /** 需要用户点头的破坏性操作（删分支等） */
-  const [pendingWrite, setPendingWrite] = useState<{
-    summary: string
-    /** 这次操作的种类：决定「不再询问」记住什么 */
-    kind: WriteIntent['kind']
-    /** 给人看的种类名（清单见 DESTRUCTIVE_WRITE_LABELS） */
-    label: string
-  } | null>(null)
+  const [pendingWrite, setPendingWrite] = useState<PendingWrite | null>(null)
   /** 确认框里的「以后不再询问这类操作」 */
   const [rememberSkip, setRememberSkip] = useState(false)
   /**
@@ -184,16 +129,16 @@ export default function ChatPanel({
    * 摆在界面上而不是藏在工具痕迹里：长任务（生成上百节点的详细图）最需要的就是
    * "现在走到第几步、还剩什么"——这是用户能一眼看出"它有没有跑偏"的唯一地方。
    */
-  const [plan, setPlan] = useState<{ steps: string[]; done: number } | null>(null)
+  const [plan, setPlan] = useState<ChatPlan | null>(null)
   /**
    * 挂在这个会话上的文档（拖进面板 / 点 📎 选进来的）。
    *
    * 只有正文，没有路径——读取与解析都在主进程做完了。AI 用 `readDocument` 工具
    * 按关键词或分段读它，于是"这份文档讲了什么"可以在对话里问，而不必先出一张图。
    */
-  const [docs, setDocs] = useState<Array<{ name: string; text: string }>>([])
+  const [docs, setDocs] = useState<ChatDoc[]>([])
   /** 工具上下文要读它（回调里拿得到最新的），所以另存一份 ref */
-  const docsRef = useRef<Array<{ name: string; text: string }>>([])
+  const docsRef = useRef<ChatDoc[]>([])
   useEffect(() => {
     docsRef.current = docs
   }, [docs])
@@ -1469,27 +1414,12 @@ export default function ChatPanel({
     window.requestAnimationFrame(() => viewportActions.centerOn(topicId))
   }
 
-  /**
-   * 助手回复按「节点引用 / 纯文本」渲染。
-   * 只有标题原文才算引用——这正是 system 提示词要求模型的引用方式。
-   */
-  const renderAssistantText = (content: string): ReactElement[] =>
-    segmentTitleMentions(content, titleIndex).map((segment, index) => {
-      const key = `${segment.topicId ?? 'plain'}-${index}`
-      if (segment.topicId === null) return <span key={key}>{segment.text}</span>
-      const id = segment.topicId
-      return (
-        <button
-          key={key}
-          type="button"
-          className="chat-msg__link"
-          title="在画布中定位这个主题"
-          onClick={() => goToNode(id)}
-        >
-          {segment.text}
-        </button>
-      )
-    })
+  /** 清空对话：内存与落盘那份都要清（否则下次打开这份文档对话又"复活"了） */
+  const clearChat = (): void => {
+    update(() => [])
+    setSessionTokens(0)
+    if (filePath) void window.api.chatHistoryClear(filePath).catch(() => undefined)
+  }
 
   return (
     <div
@@ -1514,74 +1444,15 @@ export default function ChatPanel({
         attachDocumentFile(picked)
       }}
     >
-      <div className="side-panel__header">
-        <span className="chat-panel__title">
-          <Bot size={15} />
-          AI 助手
-        </span>
-        {license && (
-          /* 徽标本身就是**激活入口**：点它直接跳到 AI 设置的许可区。
-             以前输入框只在试用用完后才出现，想提前激活的人找不到地方 */
-          <button
-            type="button"
-            className={
-              license.pro ? 'chat-panel__badge chat-panel__badge--pro' : 'chat-panel__badge'
-            }
-            title={
-              license.pro
-                ? `Pro${license.holder ? `（${license.holder}）` : ''}：AI 可以直接改画布（点击查看 / 取消激活）`
-                : `免费试用：还能让 AI 改 ${license.remaining} 次（只读聊天不限次）。点击可查看许可、提前激活`
-            }
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={onOpenSettings}
-          >
-            {license.pro ? 'Pro' : `试用剩 ${license.remaining} 次`}
-          </button>
-        )}
-        {sessionTokens > 0 && (
-          <span
-            className="chat-panel__badge"
-            title="本次会话累计的 token 消耗（按服务商回报累计；清空对话时归零）"
-          >
-            {formatTokenCount(sessionTokens)} tok
-          </span>
-        )}
-        <div className="chat-panel__actions">
-          <button
-            type="button"
-            className="tool-btn"
-            title="清空对话"
-            disabled={streaming || messages.length === 0}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              update(() => [])
-              setSessionTokens(0)
-              // 落盘的那份也要清：否则下次打开这份文档对话又"复活"了
-              if (filePath) void window.api.chatHistoryClear(filePath).catch(() => undefined)
-            }}
-          >
-            <Eraser size={15} />
-          </button>
-          <button
-            type="button"
-            className="tool-btn"
-            title="AI 设置（BaseURL / Key / 模型）"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={onOpenSettings}
-          >
-            <Settings2 size={15} />
-          </button>
-          <button
-            type="button"
-            className="tool-btn"
-            title="关闭"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </div>
+      <ChatHeader
+        license={license}
+        sessionTokens={sessionTokens}
+        streaming={streaming}
+        messagesLength={messages.length}
+        onOpenSettings={onOpenSettings}
+        onClose={onClose}
+        onClear={clearChat}
+      />
 
       {hasKey === false ? (
         <div className="side-panel__body">
@@ -1596,128 +1467,15 @@ export default function ChatPanel({
         </div>
       ) : (
         <>
-          <div className="chat-panel__list" ref={listRef}>
-            {messages.length === 0 && (
-              <div className="chat-panel__hint">
-                <Sparkles size={16} />
-                <p>
-                  用自然语言聊这页导图，也可以直接让它改图。
-                  <br />
-                  它会自己翻看结构；删分支这类操作会<strong>先问你</strong>， 改完按一次{' '}
-                  <strong>Ctrl+Z</strong> 可以整体撤销。
-                </p>
-              </div>
-            )}
-            {messages.map((msg, index) => (
-              <div
-                key={msg.id}
-                className={msg.role === 'user' ? 'chat-msg chat-msg--user' : 'chat-msg'}
-              >
-                <div className="chat-msg__bubble">
-                  {msg.role === 'user' ? (
-                    msg.content
-                  ) : (
-                    <>
-                      {/* 执行计划：挂在最后一条助手消息上（一个回合一份，回合结束仍留着可回看） */}
-                      {plan && index === messages.length - 1 && (
-                        <div className="chat-plan">
-                          <div className="chat-plan__head">
-                            执行计划（{plan.done}/{plan.steps.length}）
-                          </div>
-                          <ol className="chat-plan__list">
-                            {plan.steps.map((step, stepIndex) => (
-                              <li
-                                key={`${stepIndex}-${step}`}
-                                className={
-                                  stepIndex < plan.done
-                                    ? 'chat-plan__item chat-plan__item--done'
-                                    : stepIndex === plan.done
-                                      ? 'chat-plan__item chat-plan__item--current'
-                                      : 'chat-plan__item'
-                                }
-                              >
-                                {stepIndex < plan.done ? '✓' : stepIndex === plan.done ? '▶' : '·'}{' '}
-                                {step}
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      )}
-                      {/* 过程在上、结论在下：先看见它干了什么，AI 的回答压轴——
-                          以前回答在最上面、被工具条目和上限提示压在下面，用户根本找不到「回复」在哪儿 */}
-                      {msg.toolNotes && msg.toolNotes.length > 0 && (
-                        <div className="chat-msg__tools">
-                          {msg.toolNotes.map((note, index) => (
-                            <span
-                              key={`${note}-${index}`}
-                              className={
-                                note.startsWith('💬')
-                                  ? 'chat-msg__tool chat-msg__tool--note'
-                                  : 'chat-msg__tool'
-                              }
-                            >
-                              {note}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {msg.thinking && msg.thinking.trim().length > 0 && (
-                        /**
-                         * 思维链展示（对齐 DeepSeek 网页的体验）：
-                         * 思考中 → 展开直播；正文一开始 → 自动收起成一行，可点开回看。
-                         */
-                        <details
-                          className="chat-think"
-                          open={
-                            streaming &&
-                            msg.id === messages[messages.length - 1]?.id &&
-                            msg.content.trim().length === 0
-                          }
-                        >
-                          <summary className="chat-think__summary">
-                            {streaming &&
-                            msg.id === messages[messages.length - 1]?.id &&
-                            msg.content.trim().length === 0
-                              ? '思考中…（展开看过程）'
-                              : '已深度思考（点击展开）'}
-                          </summary>
-                          <div className="chat-think__body">{msg.thinking}</div>
-                        </details>
-                      )}
-                      {renderAssistantText(msg.content)}
-                      {msg.warning && <div className="chat-msg__warning">{msg.warning}</div>}
-                      {msg.usage && (
-                        <div
-                          className="chat-msg__usage"
-                          title="按服务商回报统计（问 + 答），多轮工具调用已累计"
-                        >
-                          tokens {formatTokenCount(msg.usage.totalTokens)}（问{' '}
-                          {msg.usage.promptTokens.toLocaleString()} · 答{' '}
-                          {msg.usage.completionTokens.toLocaleString()}）
-                        </div>
-                      )}
-                    </>
-                  )}
-                  {/* 还在写：末尾一个闪烁光标，一眼看出「这条还没完」 */}
-                  {streaming &&
-                    msg.role === 'assistant' &&
-                    msg.id === messages[messages.length - 1]?.id && (
-                      <span className="chat-msg__caret" aria-hidden="true" />
-                    )}
-                  {msg.aborted && <span className="chat-msg__stop">（已停止）</span>}
-                </div>
-              </div>
-            ))}
-
-            {/* 正在工作：转圈 + 一行说明。
-                没有它的时候，用户盯着一屏工具条目分不清「它还在想」和「已经答完了」 */}
-            {streaming && (
-              <div className="chat-thinking" role="status" aria-live="polite">
-                <span className="chat-thinking__spinner" aria-hidden="true" />
-                <span>{activity || '正在思考…'}</span>
-              </div>
-            )}
-          </div>
+          <MessageList
+            messages={messages}
+            plan={plan}
+            streaming={streaming}
+            activity={activity}
+            listRef={listRef}
+            titleIndex={titleIndex}
+            onGoToNode={goToNode}
+          />
 
           <div className="chat-panel__quick">
             {QUICK_PROMPTS.map((prompt) => (
@@ -1734,112 +1492,34 @@ export default function ChatPanel({
           </div>
 
           {pendingWrite && (
-            <div className="chat-panel__confirm">
-              <div className="chat-panel__confirm-text">
-                <TriangleAlert size={14} />
-                <span>{pendingWrite.summary}</span>
-              </div>
-              <label className="chat-panel__confirm-remember">
-                <input
-                  type="checkbox"
-                  checked={rememberSkip}
-                  onChange={(event) => setRememberSkip(event.target.checked)}
-                />
-                <span>以后「{pendingWrite.label}」不再询问（可在 AI 设置里恢复）</span>
-              </label>
-              <div className="chat-panel__confirm-actions">
-                <button type="button" className="btn" onClick={() => resolvePending(false)}>
-                  跳过
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => resolvePending(true, rememberSkip)}
-                >
-                  执行
-                </button>
-              </div>
-            </div>
+            <ConfirmBar
+              pendingWrite={pendingWrite}
+              rememberSkip={rememberSkip}
+              onRememberSkipChange={setRememberSkip}
+              onResolve={resolvePending}
+            />
           )}
 
           {license && !license.canWrite && (
-            <div className="chat-panel__limits">
-              <div className="chat-panel__limits-text">
-                <TriangleAlert size={14} />
-                <span>{license.writeHint}</span>
-              </div>
-              {activateOpen ? (
-                <div className="chat-panel__activate">
-                  <textarea
-                    value={licenseKey}
-                    rows={3}
-                    placeholder="把购买时拿到的许可码整串粘进来（可以带换行）"
-                    onChange={(event) => setLicenseKey(event.target.value)}
-                  />
-                  {licenseMessage && (
-                    <div className="chat-panel__activate-msg">{licenseMessage}</div>
-                  )}
-                  <div className="chat-panel__activate-actions">
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setActivateOpen(false)
-                        setLicenseMessage(null)
-                      }}
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      disabled={licenseKey.trim().length === 0}
-                      onClick={() => {
-                        void window.api.licenseActivate(licenseKey).then((result) => {
-                          setLicense(result.view)
-                          setLicenseMessage(result.message)
-                          if (result.ok) {
-                            setActivateOpen(false)
-                            setLicenseKey('')
-                          }
-                        })
-                      }}
-                    >
-                      激活
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button type="button" className="btn" onClick={() => setActivateOpen(true)}>
-                  输入许可码
-                </button>
-              )}
-            </div>
+            <LicenseBar
+              license={license}
+              activateOpen={activateOpen}
+              licenseKey={licenseKey}
+              licenseMessage={licenseMessage}
+              setActivateOpen={setActivateOpen}
+              setLicenseKey={setLicenseKey}
+              setLicenseMessage={setLicenseMessage}
+              setLicense={setLicense}
+            />
           )}
 
           {hint && <div className="chat-panel__activate-msg chat-panel__hint">{hint}</div>}
 
           {docs.length > 0 && (
-            <div className="chat-panel__docs">
-              {docs.map((doc) => (
-                <span
-                  key={doc.name}
-                  className="chat-panel__doc"
-                  title={`${doc.text.length.toLocaleString()} 字 · 只在本次会话有效`}
-                >
-                  <Paperclip size={11} />
-                  {doc.name}
-                  <button
-                    type="button"
-                    className="chat-panel__doc-remove"
-                    title="移除这份文档"
-                    onClick={() => setDocs((prev) => prev.filter((item) => item.name !== doc.name))}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
+            <DocChips
+              docs={docs}
+              onRemove={(name) => setDocs((prev) => prev.filter((item) => item.name !== name))}
+            />
           )}
 
           {!atBottom && (
@@ -1858,94 +1538,24 @@ export default function ChatPanel({
             </button>
           )}
 
-          <div className="chat-panel__input">
-            <textarea
-              ref={inputRef}
-              value={draft}
-              rows={4}
-              title="Enter 发送 · Shift+Enter 换行"
-              placeholder={streaming ? 'AI 正在回答…' : '问点什么，Enter 发送'}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={onKeyDown}
-              onPaste={(event) => {
-                // 粘进来的是图片（截图）：textarea 会静默什么都不发生，用户只会觉得「粘贴坏了」。
-                // 明确说一句，并告诉他图片该粘到哪儿。
-                const data = event.clipboardData
-                const hasImage = Array.from(data.items).some((item) =>
-                  item.type.startsWith('image/')
-                )
-                if (hasImage && data.getData('text/plain').trim().length === 0) {
-                  event.preventDefault()
-                  setHint(
-                    '剪贴板里是图片：聊天目前只能发文字。图片可以直接粘到画布的主题上，文字请用截图里的文字或直接描述。'
-                  )
-                }
-              }}
-            />
-            {/* 功能按钮移到输入框**下方**独立一行：输入区更大，文字不再和按钮挤在一起 */}
-            <div className="chat-panel__input-actions">
-              <label
-                className="chat-panel__tier"
-                title={
-                  (QUALITY_TIERS.find((item) => item.id === tier)?.hint ?? '') +
-                  '。档位只改「要求的规模与深度」，不改单次输出上限；下一轮请求立即生效'
-                }
-              >
-                <span>思考强度</span>
-                <select
-                  value={tier}
-                  disabled={streaming}
-                  onChange={(event) => changeTier(normalizeQualityTier(event.target.value))}
-                >
-                  {QUALITY_TIERS.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {/* 右侧按钮组：窄面板装不下时整组换行，不会把「发送」挤出可视区 */}
-              <div className="chat-panel__input-right">
-                <button
-                  type="button"
-                  className="btn"
-                  title="挂一份文档（docx / xlsx / pptx / md / txt / csv …）：挂上后可以直接问它里面的内容。也可以直接把文件拖到这里"
-                  disabled={streaming}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={pickDocument}
-                >
-                  <Paperclip size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  title="粘贴剪贴板文本（保留换行，粘到光标处）"
-                  disabled={streaming}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={pasteFromClipboard}
-                >
-                  <ClipboardPaste size={14} />
-                </button>
-                {streaming ? (
-                  <button type="button" className="btn" title="停止生成" onClick={stop}>
-                    <Square size={14} />
-                    停止
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    title="发送"
-                    disabled={draft.trim().length === 0}
-                    onClick={() => send(draft)}
-                  >
-                    <Send size={14} />
-                    发送
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          <ChatInput
+            draft={draft}
+            setDraft={setDraft}
+            inputRef={inputRef}
+            streaming={streaming}
+            tier={tier}
+            onKeyDown={onKeyDown}
+            onImagePaste={() =>
+              setHint(
+                '剪贴板里是图片：聊天目前只能发文字。图片可以直接粘到画布的主题上，文字请用截图里的文字或直接描述。'
+              )
+            }
+            onChangeTier={changeTier}
+            onPickDocument={pickDocument}
+            onPasteFromClipboard={pasteFromClipboard}
+            onStop={stop}
+            onSend={() => send(draft)}
+          />
         </>
       )}
     </div>
