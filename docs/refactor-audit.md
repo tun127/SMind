@@ -127,7 +127,7 @@
 typecheck    零错误（含 strict）
 lint         零 error / 零 warning
 format:check 全部通过
-selfcheck    2672 项断言全绿（拆分中新增 150 条）
+selfcheck    2694 项断言全绿（拆分中新增 172 条）
 verify       21 个样本往返一致
 工作树       干净
 ```

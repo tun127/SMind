@@ -34,6 +34,15 @@
   再生产物（90.3 MB → 1.0 MB，清单 `.tmp-check/cleanup-manifest.txt`）；`out/` 删除后重新构建；
   可达性分析确认源码树**无孤儿文件**；自检 2628 → **2660** 项。
 
+### 测试 · 主进程回归网（2026-09-19）
+
+- `selfcheck` 此前只覆盖主进程的 `atomic-write.ts`。本轮纳入两个**不依赖 Electron** 的模块并加 22 条断言
+  （`fb4adbd`）：`main/doc-resources.ts`（按 docId 隔离图片/附件；`pruneForSave` 只清"新插入且已不再被引用"的
+  资源、**文件里原有的资源一律不动**）与 `main/document.ts`（扩展名清单 ↔ 识别口径一致、PDF/未知格式/空内容
+  给人话原因、**GBK 回退**、超 32MB 拒绝、docx zip 解包、超 30 万字如实截断、zip 里抽不到文字给专门原因）。
+  自检 2672 → **2694 项**。仍依赖 Electron 的模块（`files.ts` / `windows.ts` / `ipc/*` / `license/index.ts` /
+  `update/index.ts`）要纳入得先把纯判定抽出来，属后续批次。
+
 ### 修复 · 本轮代码审计（2026-09-18，分批各自过五道门槛）
 
 > 来源：`docs/shared-audit.md`（83 文件 / 18k 行的 `src/shared/**` 审计）+ 应用层实测。

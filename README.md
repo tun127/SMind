@@ -472,7 +472,7 @@ npm run dist         # 构建 + 打包 → release/（安装版 + 免安装版�
 
 npm run typecheck    # TypeScript 全量类型检查
 npm run lint         # ESLint（基线是零 error / 零 warning）
-npm run selfcheck    # 自检断言（当前 2628 项）
+npm run selfcheck    # 自检断言（当前 2694 项）
 npm run verify       # .xmind / .emmx 解析 → 序列化 → 再解析 的往返一致性
 npm run samples      # 重新生成 examples 样本
 npm run icon         # 重新生成自绘图标

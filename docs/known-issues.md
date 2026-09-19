@@ -92,6 +92,24 @@ ref-vs-state / 回调身份与 `React.memo` 浅比较面 / 事件绑定 / zustan
 
 ---
 
+## 主进程回归网（2026-09-19 补）
+
+**背景**：`selfcheck` 长期只覆盖主进程的 `atomic-write.ts` 一个文件（C1 把 `main/index.ts` 拆成
+14 个 IPC 域之后，这块全靠 `npm run build` + 手工冒烟）。本轮把两个**不依赖 Electron**、
+因此能直接进自检的模块纳入（`fb4adbd`，+22 条断言，自检 2672 → **2694**）：
+
+| 模块 | 已钉住的语义 |
+|---|---|
+| `main/doc-resources.ts` | `docOf` 第一次建 / 再取**同一对象**（否则会把已收集的资源丢掉）/ 两份文档互不串；`DOC_ID_MAX = 120`；`pruneForSave`：仍被引用的保留、**新插入且已不再被引用的清掉**、**文件里原本带着的资源一律不动**（可能有本软件尚未建模的引用）、清掉的要从 `inserted` 一并移除 |
+| `main/document.ts` | 导入扩展名清单 ↔ `classifyDocument` 口径一致（防"对话框能选、真读时说读不了"）；PDF / 未知格式 / 空内容各给**人话原因**；纯文本按排版清洗；**GBK 回退**（`[D6 D0 CE C4]` → 「中文」）；超 32MB 拒绝并说清上限；docx zip 解包并还原实体；超 30 万字**如实截断**且 note 写明"只取了前"；zip 里抽不到文字给专门原因 |
+
+**仍未覆盖（如实登记，不假装覆盖）**：`files.ts`、`windows.ts`、`menu.ts`、`lifecycle.ts`、
+`resource-protocol.ts`、`ipc/*`、`license/index.ts`、`update/index.ts` 等——它们**依赖 Electron 或
+electron-updater**，纳入前需要先像 `shared/update-policy.ts` 那样把**纯判定**抽成不依赖 Electron 的函数
+（窗口归属、参数校验、吊销名单判定、IPC 注册完整性…），属后续可做的批次。
+
+---
+
 ## E1 剩项的个人复核结论（2026-09-19 · E1 收口批次）
 
 来源：`shared-audit.md` §5 的第 (2)(3)(4)(5)(10)(12)(15) 组。判据仍是**抽原语、调用点各自保留策略**，
