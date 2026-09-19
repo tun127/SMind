@@ -8,6 +8,7 @@
 import { app } from 'electron'
 import { promises as fs, existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { writeJsonAtomic } from './atomic-write'
 import {
   clearHistory as clearHistoryPure,
   emptyHistory,
@@ -46,7 +47,8 @@ export async function loadHistory(): Promise<HistoryFile> {
 
 async function saveHistory(file: HistoryFile): Promise<void> {
   try {
-    await fs.writeFile(historyFile(), JSON.stringify(file, null, 2), 'utf8')
+    // 原子写：历史索引被截断就整份读不出来（用户看到"打开历史空了"）
+    await writeJsonAtomic(historyFile(), file)
   } catch {
     // 历史写不进去不该影响正常使用
   }

@@ -11,7 +11,7 @@ import {
 } from 'electron'
 import { isInstanceAlive, isRecord, isSelfNavigation } from '../shared/guards'
 import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
-import { writeFileAtomic } from './atomic-write'
+import { writeFileAtomic, writeJsonAtomic } from './atomic-write'
 import { logDirectory, logMain } from './log'
 import { DOCUMENT_EXTENSIONS, extractDocumentFromBytes, extractDocumentFromPath } from './document'
 import type { ExtractedDocument } from '@shared/document'
@@ -385,7 +385,8 @@ async function readThemes(): Promise<ThemeDefinition[]> {
 }
 
 async function writeThemes(themes: ThemeDefinition[]): Promise<void> {
-  await fs.writeFile(themesFile(), JSON.stringify({ version: 1, themes }, null, 2))
+  // 用户自定义主题是**唯一副本**：断在半路就没了，必须原子写（见 writeJsonAtomic）
+  await writeJsonAtomic(themesFile(), { version: 1, themes })
 }
 
 /* ------------------------------------------------------------------ */
@@ -449,7 +450,8 @@ async function writeAiConfig(config: AiConfig): Promise<void> {
   const { apiKey, ...rest } = config
   // 注意 apiKey 被摘出去了：有安全存储时文件里**不会**再出现明文 Key
   const stored = { version: 1, ...rest, ...packApiKey(apiKey) }
-  await fs.writeFile(aiConfigFile(), JSON.stringify(stored, null, 2), 'utf8')
+  // 原子写：AI 配置被写坏，用户看到的是"Key 和模型全丢了"
+  await writeJsonAtomic(aiConfigFile(), stored)
 }
 
 /**
@@ -1277,7 +1279,9 @@ function registerIpc(): void {
         title: title || '未命名导图',
         savedAt: Date.now()
       }
-      await fs.writeFile(autosaveMeta(state.slot), JSON.stringify(meta))
+      // 元信息也要原子写：它是"这次自动保存对应哪份原稿"的唯一凭证，
+      // 半截 JSON 会让恢复功能读不出标题与原路径（正文却好端端地在那儿）
+      await writeJsonAtomic(autosaveMeta(state.slot), meta)
     }
   )
 
@@ -1429,7 +1433,7 @@ function registerIpc(): void {
       // 只认清单里认识的破坏性种类：脏数据不许把确认框永久关掉
       aiConfirmSkip: normalizeConfirmSkip(settings?.aiConfirmSkip)
     }
-    await fs.writeFile(settingsFile(), JSON.stringify(next, null, 2), 'utf8')
+    await writeJsonAtomic(settingsFile(), next)
   })
 
   /* ---- 主题 ---- */

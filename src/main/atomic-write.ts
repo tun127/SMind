@@ -33,3 +33,15 @@ export async function writeFileAtomic(path: string, bytes: Uint8Array): Promise<
     throw error
   }
 }
+
+/**
+ * 写一份 JSON（缩进 2 格，与各处既有格式一致）。
+ *
+ * 存在的意义是让"用户偏好类数据"也有原子写：设置、自定义主题、AI 配置、
+ * 打开历史索引、快照索引以前都是直接 `fs.writeFile` 就地覆盖——断在半路就留下
+ * 半截 JSON，下次启动直接读不出来（用户看到的是"设置全没了 / 主题不见了 / 快照列表空了"）。
+ * 而受保护的反倒是崩溃恢复用的数据，方向正好反了。
+ */
+export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  await writeFileAtomic(path, Buffer.from(JSON.stringify(value, null, 2), 'utf8'))
+}

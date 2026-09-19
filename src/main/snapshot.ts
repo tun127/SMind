@@ -13,6 +13,7 @@ import { app } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
+import { writeJsonAtomic } from './atomic-write'
 import { collectResourceRefs } from '@shared/model/resources'
 import type { Workbook } from '@shared/model/types'
 import {
@@ -68,7 +69,8 @@ async function loadIndex(): Promise<SnapshotIndex> {
 async function saveIndex(index: SnapshotIndex): Promise<void> {
   try {
     await fs.mkdir(rootDir(), { recursive: true })
-    await fs.writeFile(indexFile(), JSON.stringify(index, null, 2), 'utf8')
+    // 原子写：索引被截断就整份读不出来（用户看到"快照列表空了"，文件却都还在）
+    await writeJsonAtomic(indexFile(), index)
   } catch {
     // 快照写不进去不该影响正常使用
   }
@@ -151,8 +153,13 @@ export async function createSnapshot(input: {
   }
 
   const { index: next, dropped } = addSnapshot(index, item)
-  await removeFiles(dropped.filter((id) => id !== item.id))
+  /**
+   * 顺序很重要：**先落新索引，再删被挤掉的文件**。
+   * 反过来的话，两句之间被打断就会留下"索引里还列着、文件已经没了"的悬空条目——
+   * 用户点恢复直接失败。现在最坏情况是留下几个没人引用的文件（占点空间，无害）。
+   */
   await saveIndex(next)
+  await removeFiles(dropped.filter((id) => id !== item.id))
   return snapshotsOf(next, docKey)
 }
 
@@ -171,8 +178,9 @@ export async function readSnapshotBytes(id: string): Promise<Uint8Array | null> 
 export async function removeSnapshotById(id: string, path: string | null): Promise<SnapshotItem[]> {
   const index = await loadIndex()
   const { index: next, dropped } = removeSnapshot(index, id)
-  await removeFiles(dropped)
+  // 同 saveSnapshot：先落索引再删文件，避免"索引列着但文件没了"的悬空条目
   await saveIndex(next)
+  await removeFiles(dropped)
   return listSnapshots(path)
 }
 

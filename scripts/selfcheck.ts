@@ -48,7 +48,7 @@ import { createSheet, createTopic, createWorkbook } from '../src/shared/model/fa
 import { coerceCode, coerceRichText } from '../src/shared/model/coerce'
 import { checkImagePayload, isPlausibleFilePath, MAX_IMAGE_BYTES } from '../src/shared/ipc-args'
 import { isInstanceAlive, isSelfNavigation } from '../src/shared/guards'
-import { writeFileAtomic } from '../src/main/atomic-write'
+import { writeFileAtomic, writeJsonAtomic } from '../src/main/atomic-write'
 import {
   buildChatSystemPrompt,
   buildSkeletonDigest,
@@ -2100,6 +2100,35 @@ async function testSafetyHelpers(): Promise<void> {
     // 已在上一条断言覆盖
   }
   eq('失败的写入不会碰到别的文件', readFileSync(target, 'utf8'), 'keep-me')
+
+  /**
+   * `writeJsonAtomic`：设置 / 自定义主题 / AI 配置 / 打开历史 / 快照索引都改走它。
+   * 这些文件被截断就等于用户数据消失，所以要钉住"内容格式不变 + 原子 + 不留残渣"。
+   */
+  const settingsPath = `${dir}/settings.json`
+  writeFileSync(settingsPath, '{"version":1,"stale":true}')
+  await writeJsonAtomic(settingsPath, { version: 1, fontFamily: 'serif', toolbarHidden: ['a'] })
+  eq(
+    'JSON 原子写：内容与既有格式一致（缩进 2 格）',
+    readFileSync(settingsPath, 'utf8'),
+    JSON.stringify({ version: 1, fontFamily: 'serif', toolbarHidden: ['a'] }, null, 2)
+  )
+  eq('JSON 原子写：能覆盖旧文件', JSON.parse(readFileSync(settingsPath, 'utf8')).stale, undefined)
+  eq('JSON 原子写：不留下临时文件', leftover(), 0)
+  await writeJsonAtomic(`${dir}/themes.json`, { version: 1, themes: [] })
+  eq(
+    'JSON 原子写：目标不存在时直接创建',
+    readFileSync(`${dir}/themes.json`, 'utf8'),
+    JSON.stringify({ version: 1, themes: [] }, null, 2)
+  )
+  let jsonFailed = false
+  try {
+    await writeJsonAtomic(`${dir}/no-such-dir/z.json`, { a: 1 })
+  } catch {
+    jsonFailed = true
+  }
+  check('JSON 原子写：失败照样抛错（调用方能据此决定是否提示）', jsonFailed)
+  eq('JSON 原子写：失败也不留下临时文件', leftover(), 0)
 
   group('外部数据收敛：富文本')
 
