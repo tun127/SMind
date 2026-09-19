@@ -59,6 +59,9 @@
   `domains/{edit,canvas,layout,ai,agent,io,ui,xmind}.ts` 8 个域文件。**入口契约不变**：`run-selfcheck.mjs` 一行未改，
   断言仍 **2628 项**，`main()` 调用顺序一字未动（`a40bce9`…`dcacfb4`）
 
+- `FOLD_SIDE_LABELS`（画布与 AI 写入意图两处逐字节相同）收敛到中立模块 `shared/model/fold-labels.ts`（`0054b68`）；
+  **顺手纠正审计建议**——它建议"TopicNode 反正已从 @shared/agent 导入，直接复用"，核实后不成立（该文件没有 @shared/agent 导入），且让画布依赖 AI 层是错误方向的耦合
+
 **过程留痕（含一次危险操作）**：拆分 `styles.css` 的第一版脚本正则被 CRLF 挡掉、**一个区块都没匹配到却照样删了源文件**；
 发现后立即 `git checkout` 恢复，并给脚本补了两道守卫（匹配数为 0 不动源文件；搬走行数必须等于原文件行数）。
 其后所有搬运脚本都带这两道守卫。
