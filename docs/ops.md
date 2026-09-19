@@ -5,12 +5,18 @@
 > 支付 / 开店 / 发布）由用户执行，agent 备好材料与步骤。
 > 规则：做完一项就更新状态；新增事项随手登记。
 >
-> **环境限制（2026-09-18 实测，影响本账能做的事）**：本会话沙箱内 **git 与 curl 建不了 TLS**
+> **环境限制（2026-09-18 / 09-19 实测，影响本账能做的事）**：本会话沙箱内 **git 与 curl 建不了 TLS**
 > （curl/schannel 报 `SEC_E_NO_CREDENTIALS`，git 换 openssl 后端也连不上 github.com:443），
 > 而 **Node 的 fetch 可用**（实测 smindapp.cn 200、api.github.com 403 限流、npmmirror 200）。
 > 结论：**代码可读、可改、可本地提交；但「推送 GitHub」「用 API 管 Release」当前做不到**——
 > 需要用户提供 PAT / 由用户侧执行 push，或放行沙箱网络。另：站点仓库 `tun127/smind-site`
 > **本机没有检出**，改官网文案前需要先 clone。
+>
+> **五道门槛里，本会话能独立跑通的只有四道**（2026-09-19 亲手复核）：
+> `typecheck`（含 strict）✅ exit 0｜`lint --max-warnings 0` ✅ exit 0｜`format:check` ✅ exit 0｜
+> `verify` ✅ exit 0（21 个 `.xmind` + 4 个 `.emmx` 全部往返一致）｜**`selfcheck` ⛔ 跑不了**——
+> 它经 esbuild 起子进程，受限沙箱下 spawn `EPERM`（**不是断言失败，是环境限制**；
+> 连「改用文件重定向避开管道」的绕法也无效）。所以自检那一项只能采信代码 agent 的实测声明。
 
 ## 一、发版事务
 
@@ -20,6 +26,7 @@
 | 2 | **0.9.1 发版** | ⬜ 等 PDF 验收 | 用户人工验收 PDF（导出 → 选中文字 → 放大 400% 看锐利）→ `npm version 0.9.1` → `dist` → `mirror` → Release（agent 代跑，说明用户过目） | #6 验收通过 |
 | 3 | 自动更新首跑 | ⬜ 随 0.9.1 | 需求见 `docs/auto-update-and-license-delivery.md` §3。Release 页上传 exe + `latest.yml` + blockmap，且必须是**已发布**（非 draft/prerelease）。⚠️ **已实测风险**：GitHub API 匿名限流（本机出口 IP 调 api.github.com 已 403），github provider 会随机静默失效 → 建议更新源改为 **generic provider 指向 `dl.smindapp.cn`**（R2 无 API 无限流），`npm run mirror` 需顺带传 `latest.yml` + blockmap | #2 |
 | 4 | README 已知限制随 0.9.1 更新 | ⬜ | PDF 改矢量、自动更新渠道就绪——发 0.9.1 时一并改写 | #2 |
+| 20 | **渲染层人肉验收**（阻塞 0.9.1 打包） | ⬜ **用户执行**（代码侧积压） | 解耦战役把约 40 个界面文件拆开了，而**自检不渲染 React**（只覆盖 shared/store）→ 所有界面行为都属「未验证」。清单见 `docs/handover.md` §五：A8 四批（整轮 AI 对话／面板三分支／工具栏收纳与禁用提示／菜单·快捷键·拖文件／拖拽吸附／折叠锚点／视角锁定／滚轮缩放）、A7-3 关窗链路 12 条、A6-3 回合收尾、A4–A7 更早各批。**当前 `release/` 仍是 09-18 打出的 0.9.0，此后 107 个提交没再打包过** → 现在直接发 0.9.1 等于把一批"只过了静态检查、没上过手"的界面改动发给用户 | #2、代码 agent |
 
 ## 二、分发与官网
 
@@ -53,6 +60,15 @@
 
 ## 五、已完成存档
 
+- ✅ **2026-09-19 状态复核（文书侧亲手实测，非转述）**：四道门槛自跑全绿——`typecheck`（含 strict）／
+  `lint --max-warnings 0`／`format:check`／`verify`（21 `.xmind` + 4 `.emmx` 往返一致）；
+  `selfcheck` 因沙箱 EPERM 跑不了（见页首环境限制）。**官网复抓：仍是 v0.9.0、仍无任何购买入口、
+  下载页仍指向 v0.9.0** → **商业化侧 24 小时内零进展**，全部待办原地不动。
+  代码侧同期很猛：当日 93 个提交、累计 **107 个未推送**；`release/` 仍是 09-18 打出的 0.9.0
+  （此后 107 个提交没再打包过）。
+- ✅ **口径核对：IPC 通道数「66 vs 70」两者都对**，量的不是一回事——`shared/ipc.ts` 有 **70 条通道常量**
+  （＝preload 侧调用点也是 70），主进程侧 `ipcMain.handle/on` 注册是 **66 条**，差的 4 条是**主→渲染方向**
+  （`fileOpenRequest`／`menuCommand`／`closeRequest`／`aiStreamEvent`）。登记以免后续谁把其中一个"改错"。
 - ✅ **线上状态核查（2026-09-18，实测非推测）**：官网 smindapp.cn 返回 200，首页挂牌 **v0.9.0**；
   `/download/portable/` 与 `/download/setup/` 两页均指向 **v0.9.0** 的 GitHub Release 资产
   （`SMind-0.9.0-x64-portable/setup.exe`）并带镜像址 `dl.smindapp.cn`——与 #5 / #8 登记一致。
