@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -44,21 +43,9 @@ import { DROP_HYSTERESIS, DROP_HYSTERESIS_TARGET, SNAP_PREFILTER } from './canva
 import { useCanvasGeometry } from './canvas/use-canvas-geometry'
 import { useCanvasViewport } from './canvas/use-canvas-viewport'
 import { useFlashNodes } from './canvas/use-flash-nodes'
-
-/**
- * 视角锁定的异常告警：**同一类只报一次**。
- *
- * 这些告警在排查「视角不跟随 / 抽动」时救过场，不能删；但渲染层的 `console.warn`
- * 会被主进程转发进应用日志（同步落盘），而它们都处在「每帧」的路径上——
- * 一旦某个状态持续异常（几何每帧都变、尺寸在震荡），就是每秒几十次 IPC + 写盘，
- * 告警自己会变成新的卡顿来源。保留首次现场，后续同类记数即可。
- */
-const viewLockWarned = new Set<string>()
-function warnViewLock(key: string, message: string, extra?: unknown): void {
-  if (viewLockWarned.has(key)) return
-  viewLockWarned.add(key)
-  console.warn(`[viewlock] ${message}`, extra)
-}
+import { useFoldAnchor } from './canvas/use-fold-anchor'
+import { useViewFollow } from './canvas/use-view-follow'
+import { useWheelPanZoom } from './canvas/use-wheel-pan-zoom'
 
 export default function Canvas(): ReactElement {
   // 每秒渲染次数：数字爆表就是「重渲染风暴」，是这类卡死最常见的形态
@@ -399,222 +386,26 @@ export default function Canvas(): ReactElement {
     viewLock
   })
 
-  /**
-   * 视角锁定要盯住的那个主题。
-   *
-   * - 选择为空（点了画布空白处）→ **跟中心主题**：开锁的瞬间视角立即有明确反馈
-   *   （居中到中心主题）。以前这里是"什么都不做"，结果就是用户看到的
-   *   「锁定开着却不锁」——没有目标时静默不跟随，看起来像功能坏了；
-   * - 选择指向一个**已经不存在的主题**（刚删完、撤销回到另一个版本）→ 退回中心主题，
-   *   而不是"盯不到就彻底不动"——那正是用户看到的「删除后视角不跟随」；
-   * - 选择指向一个**被折叠收进去的主题** → 同样退回中心主题。
-   *   折叠不会删节点（模型里还在，`findTopic` 找得到），但布局对折叠的子树返回空
-   *   （`visibleChildren`），它已经**不在 nodeMap 里**了——不回退的话 focusId
-   *   会一直指向一个永远等不到的目标，跟随循环空等 90 帧后静默放弃，
-   *   镜头就此失去中心（用户看到的「折叠之后视角不居中了」）。
-   * - 其余情况就是当前选中的主题。
-   */
-  const focus = useMemo(() => {
-    const rootTopic = activeRoot(workbook)
-    const picked = selection[0]
-    // 「真正的选中项」＝ 存在、且**在布局里看得见**（被折叠收进去的不在 nodeMap 里）
-    if (picked && findTopic(rootTopic, picked) && layout.nodeMap.has(picked)) {
-      return { id: picked, fromSelection: true }
-    }
-    return { id: rootTopic.id, fromSelection: false }
-  }, [selection, workbook, layout])
-  const focusId = focus.id
-  /** 盯的是不是"真正的选中项"（不是则为回退目标：中心主题） */
-  const focusFromSelection = focus.fromSelection
-
-  /**
-   * 被盯住的主题在布局里的**位置与尺寸**（拼成字符串，方便直接当依赖）。
-   *
-   * 用它而不是"布局对象变了"来驱动镜头：删掉一整条主题、改文字让节点变大变小、
-   * 拖拽重排、撤销重做……只要**被选中的主题自己动了**，镜头就跟上；
-   * 跟它无关的布局变化（别的分支在动）则不会带着镜头乱跑。
-   */
-  const focusKey = useMemo(() => {
-    if (!focusId) return ''
-    const node = layout.nodeMap.get(focusId)
-    if (!node) return `${focusId}|?`
-    return (
-      `${focusId}|${Math.round(node.x)},${Math.round(node.y)},` +
-      `${Math.round(node.width)},${Math.round(node.height)}`
-    )
-  }, [focusId, layout])
-
-  /* ---- 视角锁定：把选中的主题稳稳按在视口中央 ---- */
-  /** 这个 effect 最近一秒重跑了几次：用来抓「有东西在震荡 → 每帧重跑 → 死循环」 */
-  const followRunsRef = useRef<number[]>([])
-
-  /**
-   * 用户刚把视角锁定**打开**的那一下：允许镜头居中一次中心主题。
-   *
-   * 为什么要这个例外：锁定开着但**没有选中项**时，如果什么都不做，用户看到的是
-   * 「开了锁却没反应」——这是以前修过的问题。但反过来，把它做成"只要没选中就回中心主题"
-   * 又走到另一个极端：点一下画布空白处、或折叠把选中的主题藏起来，镜头就被拽走
-   * （用户明确不要这个）。所以只认"刚打开锁定"这一次。
-   */
-  const lockJustOnRef = useRef(false)
-  const prevViewLockRef = useRef(viewLock)
-
-  useEffect(() => {
-    if (viewLock && !prevViewLockRef.current) lockJustOnRef.current = true
-    prevViewLockRef.current = viewLock
-  }, [viewLock])
-
-  useEffect(() => {
-    // 正在拖主题时不跟：镜头要是同时在移，指针下的画面会跟着滑，落点就抓不准了。
-    // 松手（dragVisual 归零）后视野再咬住它。
-    // `nodePointerHeldRef` 还要更早一步：按下就已经算"手上按着"，那一刻也不能动镜头。
-    if (!viewLock || nodePointerHeldRef.current || dragVisual || !focusId || !focusKey) return
-    /**
-     * 盯的目标**不是选中项**（选择为空 / 选中项已被删掉 / 被折叠藏起来）时不动镜头。
-     * 只有"刚打开锁定"那一次例外（见 `lockJustOnRef`）。
-     */
-    if (!focusFromSelection) {
-      if (!lockJustOnRef.current) return
-      lockJustOnRef.current = false
-    }
-
-    // 每秒重跑 60 次以上 = 依赖里有东西每帧都在变（几何/尺寸震荡）。
-    // 这时再跟随下去就是**永久烧 CPU**：每次重跑都 setPan → 重渲染 → 重新测量 → 依赖又变。
-    // 停手比卡死好：用户只是失去「镜头自动跟随」，还能正常用。
-    const now = performance.now()
-    const recent = followRunsRef.current.filter((at) => now - at < 1000)
-    recent.push(now)
-    followRunsRef.current = recent
-    if (recent.length > 60) {
-      warnViewLock('thrash', '依赖每秒变化 60 次以上（有东西在震荡），已暂停跟随', { focusKey })
-      return
-    }
-    const id = focusId
-    const el = containerRef.current
-    if (!el) return
-    if (el.clientWidth === 0 || el.clientHeight === 0) return
-
-    /** 本轮跟随开始时的「用户接管次数」：中途一变就说明用户自己在动镜头，立刻让位 */
-    const gestureAtStart = viewGestureAtRef.current
-    let raf = 0
-    /** 目标一时还没出现在布局里（刚删完、刚打开）就先等几帧，别急着放弃 */
-    let misses = 0
-    mark('镜头跟随开始', `节点 ${id}`)
-    const MAX_MISSES = 90
-    /**
-     * 跟随循环必须**有止损**。
-     *
-     * panic 来源：目标是「每帧逼近」，只要有一处不收敛（几何每帧都变、尺寸在震荡、
-     * 或者 pan/zoom 变成 NaN），`Math.abs(dx) < 0.5` 就永远为假——循环会一直跑下去，
-     * 渲染进程主线程被烧满、窗口连关闭都点不动（真事：日志里连着 `unresponsive`）。
-     */
-    let frames = 0
-    const MAX_FRAMES = 240
-
-    /**
-     * 逐帧向"该有的平移量"收敛，而不是一步跳过去：
-     * 一步到位时整张图会「啪」地闪一下，眼睛跟不住到底是哪个主题被选中了；
-     * 缓动过去才像镜头跟着走。收敛到亚像素就停手，不再空转。
-     *
-     * 依赖里带上 `zoom`：按住 Ctrl 滚轮缩放时视角会钉在选中的主题上（以它为中心缩放），
-     * 而不是把主题缩放跑出屏幕。手动拖动画布则不会触发这里——想让镜头暂停跟随时
-     * 直接拖就是了，下一次选择或位置变化它才重新咬住。
-     */
-    const step = (): void => {
-      if (viewGestureAtRef.current !== gestureAtStart) {
-        // 用户接管了视角（滚轮/拖拽/缩放）：让位，本轮跟随到此为止。
-        // 这里必须**立刻**返回而不是继续缓动——否则就是跟用户的手抢镜头（抽动的根因）。
-        count('跟随让位')
-        return
-      }
-      count('镜头跟随帧')
-      setStage('镜头跟随')
-      const node = layoutRef.current?.nodeMap.get(id)
-      const width = el.clientWidth
-      const height = el.clientHeight
-      if (width === 0 || height === 0) return
-      if (!node) {
-        if (misses < MAX_MISSES) {
-          misses += 1
-          raf = window.requestAnimationFrame(step)
-        }
-        return
-      }
-      const z = zoomRef.current
-      const wantX = width / 2 - (node.x + node.width / 2) * z
-      const wantY = height / 2 - (node.y + node.height / 2) * z
-      if (!Number.isFinite(wantX) || !Number.isFinite(wantY)) {
-        // 几何或缩放变成了 NaN/Infinity：再算下去只会每帧写一堆 NaN 进 store
-        warnViewLock('nan', '目标位置不是有限数，已停止跟随', { focusKey })
-        return
-      }
-      frames += 1
-      if (frames > MAX_FRAMES) {
-        warnViewLock('no-converge', '跟随循环未在 240 帧内收敛，已停止（防止烧死主线程）', {
-          focusKey,
-          pan: panRef.current,
-          want: { x: wantX, y: wantY }
-        })
-        return
-      }
-      const current = panRef.current
-      const dx = wantX - current.x
-      const dy = wantY - current.y
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-        setPan({ x: wantX, y: wantY })
-        return
-      }
-      setPan({ x: current.x + dx * 0.22, y: current.y + dy * 0.22 })
-      raf = window.requestAnimationFrame(step)
-    }
-
-    raf = window.requestAnimationFrame(step)
-    return () => window.cancelAnimationFrame(raf)
-    // focusKey 里已经含了被盯主题的 id 与几何，用它做依赖即可（不写进函数体会被 lint 挑刺）
-  }, [
+  /* ---- 视角锁定：整块搬进 canvas/use-view-follow.ts（两条 effect 的次序不变） ---- */
+  useViewFollow({
+    selection,
+    workbook,
+    layout,
     viewLock,
     dragVisual,
-    focusId,
-    focusFromSelection,
-    focusKey,
+    nodePointerHeldRef,
     editingId,
     zoom,
-    size.width,
-    size.height,
-    setPan
-  ])
-
-  /* ---- 折叠 / 展开：以「被折叠的那个节点」为锚点，别让视角丢失 ---- */
-  /**
-   * 折叠会让整张图重排，被折叠的节点自己也会挪位置——用户看到的就是"视角丢失"。
-   * 这里**补偿平移量**，让那个节点在屏幕上原地不动；而不是把镜头拉去居中中心主题
-   * （用户明确说过那不是他要的）。
-   *
-   * 同时给跟随循环一个"让位"信号：折叠常伴随"选择被挪到折叠节点"，
-   * 不说一声的话跟随循环下一帧就把镜头拉过去居中了，锚点等于白做。
-   *
-   * 用 `useLayoutEffect`：要在**绘制前**把平移量补回来，否则会先闪一帧跳位。
-   */
-  const prevLayoutRef = useRef<LayoutResult | null>(null)
-  const consumedFoldRef = useRef(0)
-
-  useLayoutEffect(() => {
-    const prev = prevLayoutRef.current
-    prevLayoutRef.current = layout
-    const signal = lastFold
-    if (!signal || consumedFoldRef.current === signal.at || !prev) return
-    consumedFoldRef.current = signal.at
-    const before = prev.nodeMap.get(signal.id)
-    const after = layout.nodeMap.get(signal.id)
-    if (!before || !after) return
-    const z = zoomRef.current
-    const dx = (before.x - after.x) * z
-    const dy = (before.y - after.y) * z
-    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
-    setPan({ x: panRef.current.x + dx, y: panRef.current.y + dy })
-    viewGestureAtRef.current = performance.now()
-  }, [layout, lastFold, setPan])
-
+    size,
+    setPan,
+    containerRef,
+    layoutRef,
+    zoomRef,
+    panRef,
+    viewGestureAtRef
+  })
+  /* ---- 折叠锚点：整块搬进 canvas/use-fold-anchor.ts ---- */
+  useFoldAnchor({ layout, lastFold, setPan, zoomRef, panRef, viewGestureAtRef })
   /* ---- 新文档打开后居中 ---- */
   const centeredSeqRef = useRef(-1)
   useEffect(() => {
@@ -624,67 +415,8 @@ export default function Canvas(): ReactElement {
     centerRoot()
   }, [size.width, size.height, docSeq, centerRoot])
 
-  /* ---- 滚轮：平移 / Ctrl 缩放 ---- */
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    /**
-     * 触控板/滚轮每个物理事件都会触发一次 wheel（实测 120–160 次/秒）。
-     * 以前这里是逐事件 setPan：每次都把整棵画布重渲染一遍，滚动时主线程被打满，
-     * 同期运行的 AI 批量写入会被活活饿死（归因探针实锤的渲染风暴）。
-     * 现在把位移累进局部变量，requestAnimationFrame 每帧最多写一次 store——
-     * 帧间累加、最后一次落账，落点与逐事件处理完全一致。
-     */
-    let raf = 0
-    let pendingDx = 0
-    let pendingDy = 0
-    let pendingZoomDelta = 0
-    let pendingZoomClient: { x: number; y: number } | null = null
-    const flush = (): void => {
-      raf = 0
-      // 阶段名一定要在**真正干活之前**设好：停顿看门狗就是靠它说出「卡在哪一步」
-      setStage('滚轮平移')
-      count('滚轮合帧')
-      if (pendingZoomDelta !== 0 && pendingZoomClient) {
-        const rect = el.getBoundingClientRect()
-        const px = pendingZoomClient.x - rect.left
-        const py = pendingZoomClient.y - rect.top
-        const oldZoom = zoomRef.current
-        const z = Math.max(0.1, Math.min(4, oldZoom * Math.exp(-pendingZoomDelta * 0.0015)))
-        const wx = (px - panRef.current.x) / oldZoom
-        const wy = (py - panRef.current.y) / oldZoom
-        setZoom(z)
-        setPan({ x: px - wx * z, y: py - wy * z })
-      }
-      if (pendingDx !== 0 || pendingDy !== 0) {
-        const currentPan = panRef.current
-        setPan({ x: currentPan.x - pendingDx, y: currentPan.y - pendingDy })
-      }
-      pendingDx = 0
-      pendingDy = 0
-      pendingZoomDelta = 0
-      pendingZoomClient = null
-    }
-    const onWheel = (ev: WheelEvent): void => {
-      ev.preventDefault()
-      // 滚轮＝用户接管视角：跟随循环要立刻让位（否则就是跟用户的手抢镜头）
-      viewGestureAtRef.current += 1
-      if (ev.ctrlKey || ev.metaKey) {
-        pendingZoomDelta += ev.deltaY
-        pendingZoomClient = { x: ev.clientX, y: ev.clientY }
-      } else {
-        pendingDx += ev.deltaX
-        pendingDy += ev.deltaY
-      }
-      if (raf === 0) raf = window.requestAnimationFrame(flush)
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => {
-      el.removeEventListener('wheel', onWheel)
-      if (raf !== 0) window.cancelAnimationFrame(raf)
-    }
-  }, [setPan, setZoom])
-
+  /* ---- 滚轮：整块搬进 canvas/use-wheel-pan-zoom.ts ---- */
+  useWheelPanZoom({ containerRef, zoomRef, panRef, viewGestureAtRef, setPan, setZoom })
   /* ---- 命中测试与坐标换算 / 落点几何：整块搬进 canvas/，此处按名字解构 ---- */
   const {
     dropIndex,
