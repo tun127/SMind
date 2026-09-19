@@ -26,6 +26,19 @@ const MAX_UNZIP_CHARS = 48 * 1024 * 1024
 const MAX_DOC_CHARS = 300_000
 
 /**
+ * 条目**声明的**未压缩大小（JSZip 把它放在 `_data`（CompressedObject）上，公开 API 不暴露）。
+ *
+ * 为什么要读它：`total` 那道上限是**解压之后**才检查的，而压缩炸弹的特征正是
+ * "压缩后很小、解开后极大"——等 `entry.async('string')` 把几 GB 读进内存再判断就晚了。
+ * 这个数字可信：JSZip 解压时会校验真实长度与声明值一致（不一致直接抛错，见
+ * `compressedObject.js` 的 `data_length !== uncompressedSize`），所以谎报大小的炸弹过不了它自己这关。
+ */
+function declaredUncompressedSize(entry: JSZip.JSZipObject): number {
+  const data = (entry as unknown as { _data?: { uncompressedSize?: number } })._data
+  return typeof data?.uncompressedSize === 'number' ? data.uncompressedSize : 0
+}
+
+/**
  * 解码文本：优先 UTF-8；出现替换符（说明不是 UTF-8）时试 GBK/GB18030。
  *
  * 为什么值得做：Windows 上的中文 txt / csv / 老式 ppt 导出的文本大量是 GBK，
@@ -59,6 +72,8 @@ async function unzipTextEntries(
   for (const name of names.slice(0, 400)) {
     const entry = zip.file(name)
     if (!entry) continue
+    // 先看声明的未压缩大小：超大条目**不解压**直接跳过（压缩炸弹的防线在这里，见上面说明）
+    if (declaredUncompressedSize(entry) > MAX_UNZIP_CHARS) continue
     const text = await entry.async('string')
     total += text.length
     if (total > MAX_UNZIP_CHARS) break

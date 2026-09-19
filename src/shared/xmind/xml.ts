@@ -120,7 +120,31 @@ export function parseXml(source: string): XmlNode | null {
     if (source.startsWith('</', pos)) {
       const end = findTagEnd(source, pos)
       if (end < 0) break
-      stack.pop()
+      /**
+       * 闭标签必须**对名字**再弹栈。以前是无条件 `stack.pop()`：
+       * 遇到错位嵌套（`<a><b></a></b>`，或者某个 `<content>` 里又套了一个同名标签）
+       * 会把栈顶误当成"刚闭合的那个"，后续节点于是挂到错误的父级上——
+       * 导入出来表现为"层级不对/内容跑到别处"，还很难复现。
+       *
+       * 宽容但不再错位：名字与栈顶一致就弹；不一致就在栈里找最近的同名开标签、
+       * 弹到它为止（中间那些没闭合的标签一并算闭合）；找不到就当野闭标签忽略。
+       */
+      const closing = localName(source.slice(pos + 2, end).trim())
+      if (closing.length > 0) {
+        const top = stack[stack.length - 1]
+        if (top && top.local === closing) {
+          stack.pop()
+        } else {
+          let at = -1
+          for (let k = stack.length - 1; k >= 0; k -= 1) {
+            if (stack[k]?.local === closing) {
+              at = k
+              break
+            }
+          }
+          if (at >= 0) stack.length = at
+        }
+      }
       pos = end + 1
       continue
     }

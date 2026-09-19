@@ -8983,6 +8983,23 @@ async function testLegacy(): Promise<void> {
   eq('未知命名实体原样保留', parseXml('<a>&unknown;</a>')!.text, '&unknown;')
   check('只有声明时返回 null', parseXml('<?xml version="1.0"?>') === null)
 
+  /**
+   * 闭标签必须**对名字**弹栈。
+   * 以前是无条件 `stack.pop()`：错位嵌套时栈顶被误当成"刚闭合的那个"，
+   * 后续节点就挂到错误的父级上（导入出来"层级不对"，很难复现）。
+   * 用例 `<r><x><y></x><z/></r>`：`</x>` 该闭掉的是 x（y 是它没闭合的子节点），
+   * 修复前 `z` 会挂到 x 下，修复后挂到 r 下。
+   */
+  {
+    const malformed = parseXml('<r><x><y></x><z/></r>')!
+    eq('错位嵌套：根仍是 r', malformed.local, 'r')
+    eq('x 还在 r 下', childOf(malformed, 'x')?.local, 'x')
+    eq('y 在 x 下（没被误闭合）', childOf(childOf(malformed, 'x')!, 'y')?.local, 'y')
+    eq('z 挂在 r 下（不是错挂到 x 下）', childOf(malformed, 'z')?.local, 'z')
+    check('z 不该出现在 x 的孩子里', childOf(childOf(malformed, 'x')!, 'z') === null)
+  }
+  check('野闭标签被忽略（不破坏已有层级）', parseXml('<r><a/></b></r>')!.children.length === 1)
+
   group('Xmind 8 旧版：读取')
 
   const legacy = parseLegacyContent(tree)
