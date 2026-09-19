@@ -1,9 +1,11 @@
-# 持续集成：每次推送与 PR 都跑一遍「类型 + 自检 + 样本往返」。
+# 持续集成：每次推送与 PR 都跑一遍「类型 + 规范 + 自检 + 样本往返」。
 #
-# 为什么是这三样：它们是这个项目最值钱、也最容易悄悄退化的三道防线——
-#   - tsc       ：类型是这次改动的第一道网
-#   - selfcheck ：1515 项断言，覆盖编辑器内核、布局、导入导出、拖拽裁决等纯逻辑
-#   - verify    ：用仓库里的真实 .xmind / .emmx 样本做往返比对，防止"另存后丢数据"
+# 为什么是这几样：它们是这个项目最值钱、也最容易悄悄退化的几道防线——
+#   - tsc          ：类型是这次改动的第一道网（含 tsconfig.strict.json）
+#   - lint         ：--max-warnings 0，基线锁死在零告警
+#   - format:check ：仓库风格（Prettier）；漏了它，生成物与手写代码会各写各的
+#   - selfcheck    ：2628 项断言，覆盖编辑器内核、布局、导入导出、拖拽裁决等纯逻辑
+#   - verify       ：用仓库里的真实 .xmind / .emmx 样本做往返比对，防止"另存后丢数据"
 # 全部是纯 Node 环境，不需要图形界面，所以在 ubuntu 上跑即可，比 Windows runner 快得多。
 name: CI
 
@@ -31,6 +33,9 @@ jobs:
 
       - name: 代码规范
         run: npm run lint
+
+      - name: 格式检查
+        run: npm run format:check
 
       - name: 内核自检
         run: npm run selfcheck
