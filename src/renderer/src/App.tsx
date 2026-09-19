@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
-import type { OpenResult, RecoveryInfo } from '@shared/ipc'
+import type { OpenResult } from '@shared/ipc'
 import type { OutlineFormat } from '@shared/outline'
 import { activeRoot } from '@shared/model/tree'
 import { defaultDocumentName, defaultFileName, fileNameOf } from '@shared/model/naming'
-import {
-  inlineRunsToRich,
-  looksLikeMarkdown,
-  parseInlineMarkdown,
-  parseMarkdownOutline
-} from '@shared/import/markdown'
-import { outlineToTopic, readableIpcError, type OutlineNode } from '@shared/ai'
+import { parseMarkdownOutline } from '@shared/import/markdown'
+import { outlineToTopic, type OutlineNode } from '@shared/ai'
 import type { ExtractedDocument } from '@shared/document'
 import { createWorkbookFromRoot } from '@shared/model/factory'
 import { parseOpmlOutline } from '@shared/import/opml'
+import { useAutosave } from './app/use-autosave'
+import { useFileDrop } from './app/use-file-drop'
+import { useKeyboardShortcuts } from './app/use-keyboard-shortcuts'
+import { useMenuCommands } from './app/use-menu-commands'
+import { useRecovery } from './app/use-recovery'
+import { useThemeLibrary } from './app/use-theme-library'
+import { useWindowTitle } from './app/use-window-title'
 import Canvas from './components/Canvas'
 import NodePanel from './components/NodePanel'
 import OutlinePanel from './components/OutlinePanel'
@@ -27,14 +29,11 @@ import ChatPanel from './components/ChatPanel'
 import AiSettingsDialog from './components/AiSettingsDialog'
 import ExportDialog from './components/ExportDialog'
 import HistoryDialog from './components/HistoryDialog'
-import { viewportActions } from './render/viewport'
 import { bumpMeasureEpoch } from './render/measure'
 import { setDefaultTextAlign } from './render/defaults'
 import { setCodeFontSizeBase } from '@shared/layout/accessory'
-import { stageTypedChar } from './editor/typedChar'
 import { setStage } from './dev/stage'
 import { patchAppSettings, snapshotForSave, useEditor } from './store/editor'
-import { beginCost } from './dev/stage'
 import { activeDocId, tabTitleOf, useTabs } from './store/tabs'
 import TabBar from './components/TabBar'
 import { type AppSettings } from '@shared/ipc'
@@ -53,52 +52,6 @@ function applyRenderDefaults(settings: AppSettings): void {
   useEditor.getState().bumpRenderEpoch()
 }
 
-/** 用户是否在页面里真的选中了文字（画布节点不可选中，所以有选区就是面板/输入框里的文字） */
-function hasDomTextSelection(): boolean {
-  const selection = window.getSelection()
-  return selection !== null && selection.toString().trim().length > 0
-}
-
-interface PastedImage {
-  path: string
-  width: number
-  height: number
-}
-
-/**
- * 读取系统剪贴板里的图片。
- *
- * 优先走渲染进程的标准异步剪贴板 API（navigator.clipboard.read）——它读的就是
- * 系统剪贴板，截图 / 复制的图都能拿到；读不到（权限或实现差异）再退回
- * 主进程的 paste-image。两条路都没有图片就返回 null，由调用方按「粘贴节点」处理。
- */
-async function readClipboardImage(): Promise<PastedImage | null> {
-  try {
-    const items = await navigator.clipboard.read()
-    for (const item of items) {
-      const mime = item.types.find((type) => type.startsWith('image/'))
-      if (!mime) continue
-      const blob = await item.getType(mime)
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      if (bytes.byteLength === 0) continue
-      const picked = await window.api.addImage(
-        activeDocId(),
-        mime === 'image/jpeg' ? '剪贴板图片.jpg' : '剪贴板图片.png',
-        bytes
-      )
-      if (picked) return { path: picked.path, width: picked.width, height: picked.height }
-    }
-  } catch {
-    /* 渲染进程读不到就走主进程 */
-  }
-  try {
-    const picked = await window.api.pasteImage(activeDocId())
-    return picked ? { path: picked.path, width: picked.width, height: picked.height } : null
-  } catch {
-    return null
-  }
-}
-
 export default function App(): ReactElement {
   const filePath = useEditor((s) => s.filePath)
   const dirty = useEditor((s) => s.dirty)
@@ -108,7 +61,6 @@ export default function App(): ReactElement {
   const toolbarHidden = useEditor((s) => s.appSettings.toolbarHidden)
 
   const [toast, setToast] = useState<string | null>(null)
-  const [recovery, setRecovery] = useState<RecoveryInfo | null>(null)
   /** 未保存确认：run＝确认后的动作；fileName＝被确认的文档名；discard＝「不保存」的额外动作 */
   const [pending, setPending] = useState<{
     run: () => void
@@ -309,27 +261,7 @@ export default function App(): ReactElement {
     )
   }, [])
 
-  /* 启动时读一次应用设置与主题库：默认参数影响新建文档、主题下拉可选项 */
-  useEffect(() => {
-    void (async () => {
-      try {
-        const loaded = await window.api.settingsLoad()
-        useEditor.getState().setAppSettings(loaded)
-        applyRenderDefaults(loaded)
-      } catch {
-        /* 读不到就用内置默认值 */
-      }
-      try {
-        themesRef.current = await window.api.themesList()
-      } catch {
-        themesRef.current = []
-      }
-      // 启动这一份空白文档也按「默认主题」起手。
-      // 必须等主题库读完再套，否则自定义主题还查不到。
-      const theme = resolveTheme(useEditor.getState().appSettings.defaultThemeId)
-      if (theme) useEditor.getState().primeTheme(theme)
-    })()
-  }, [resolveTheme])
+  useThemeLibrary({ resolveTheme, themesRef, applyRenderDefaults })
 
   /** 「默认样式」改动后的统一收尾：渲染兜底值失效 */
   const onDefaultStyleChanged = useCallback((): void => {
@@ -512,96 +444,7 @@ export default function App(): ReactElement {
     [commitPending, showToast]
   )
 
-  /* ------------------------------------------------------------------ */
-  /* 菜单命令                                                            */
-  /* ------------------------------------------------------------------ */
-
-  useEffect(() => {
-    const off = window.api.onMenuCommand((command) => {
-      const store = useEditor.getState()
-      switch (command) {
-        case 'file:new':
-          // 新标签不动当前文档，不需要未保存确认
-          newDocument()
-          break
-        case 'file:open':
-          void openDocument()
-          break
-        case 'file:save':
-          void saveDocument(false)
-          break
-        case 'file:save-as':
-          void saveDocument(true)
-          break
-        case 'file:open-sheet-window':
-          openCopyWindow()
-          break
-        case 'edit:undo':
-          store.undo()
-          break
-        case 'edit:redo':
-          store.redo()
-          break
-        case 'edit:delete':
-          store.deleteSelection()
-          break
-        case 'edit:copy':
-          store.copySelection()
-          break
-        case 'edit:paste':
-          store.paste()
-          break
-        case 'view:zoom-in':
-          viewportActions.zoomTo(store.zoom * 1.2)
-          break
-        case 'view:zoom-out':
-          viewportActions.zoomTo(store.zoom / 1.2)
-          break
-        case 'view:zoom-reset':
-          viewportActions.zoomTo(1)
-          break
-        case 'view:fit':
-          viewportActions.fit()
-          break
-        case 'view:lock':
-          // 视角锁定：开着的时候视角始终把选中的主题按在视口正中
-          showToast(
-            store.toggleViewLock() ? '视角锁定：已开启，视角会跟住选中的主题' : '视角锁定：已关闭'
-          )
-          break
-        case 'help:shortcuts':
-          setShowShortcuts(true)
-          break
-        case 'file:import-theme':
-          void importTheme()
-          break
-        case 'file:import-markdown':
-          void importOutlineFile('markdown')
-          break
-        case 'file:import-opml':
-          void importOutlineFile('opml')
-          break
-        case 'file:export-image':
-          setShowExport(true)
-          break
-        case 'file:export-txt':
-          void exportOutlineAs('txt')
-          break
-        case 'file:export-md':
-          void exportOutlineAs('md')
-          break
-        case 'file:export-opml':
-          void exportOutlineAs('opml')
-          break
-        case 'file:history':
-          setShowHistory(true)
-          break
-        default:
-          break
-      }
-    })
-    return off
-  }, [
+  useMenuCommands({
     newDocument,
     openDocument,
     saveDocument,
@@ -609,8 +452,11 @@ export default function App(): ReactElement {
     importOutlineFile,
     exportOutlineAs,
     openCopyWindow,
-    showToast
-  ])
+    showToast,
+    setShowShortcuts,
+    setShowExport,
+    setShowHistory
+  })
 
   /**
    * 从文件管理器打开本地文档。
@@ -693,120 +539,14 @@ export default function App(): ReactElement {
     return off
   }, [closeWindowFlow])
 
-  /* ------------------------------------------------------------------ */
-  /* 自动保存                                                            */
-  /* ------------------------------------------------------------------ */
+  useAutosave({ showToast })
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const store = useEditor.getState()
-      if (!store.dirty) return
-      // 用快照而不是直接落库：把正在输入但还没提交的文本也写进去，
-      // 同时不打断用户的输入（不会退出编辑态）
-      // 取证：这一跳每 30 秒一次，正好落在「冻结发生在回合之后」的时间窗里，必须计时
-      const endSave = beginCost('自动存档快照')
-      void window.api
-        .autosave(
-          activeDocId(),
-          snapshotForSave(store),
-          store.filePath,
-          fileNameOf(store.filePath) ?? '未命名导图'
-        )
-        .catch((error: unknown) => {
-          // 自动保存失败必须让用户知道：最坏的情况不是"存不上"，
-          // 而是用户以为存上了、其实没有
-          const detail = error instanceof Error ? error.message : String(error)
-          showToast(`自动保存失败：${detail}（请尽快手动保存一次）`)
-        })
-      endSave()
-    }, 30000)
-    return () => window.clearInterval(timer)
-  }, [showToast])
+  const { recovery, handleRestore, handleDiscardRecovery } = useRecovery({
+    recoveryPendingRef,
+    showToast
+  })
 
-  /* ------------------------------------------------------------------ */
-  /* 自动版本快照                                                        */
-  /* ------------------------------------------------------------------ */
-
-  useEffect(() => {
-    // 每 10 分钟留一个版本；内容与上一份相同（或距上次太近）时
-    // 主进程会按内容指纹直接忽略，不会白写盘。
-    // 只对「已保存过的文档」记录：还没有路径的文档由自动保存与崩溃恢复兜底。
-    const timer = window.setInterval(() => {
-      const store = useEditor.getState()
-      if (!store.filePath) return
-      void window.api
-        .snapshotCreate(activeDocId(), {
-          workbook: snapshotForSave(store),
-          path: store.filePath,
-          title: defaultDocumentName(store.workbook),
-          reason: 'auto'
-        })
-        .catch(() => undefined)
-    }, 600000)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  /* ------------------------------------------------------------------ */
-  /* 崩溃恢复                                                            */
-  /* ------------------------------------------------------------------ */
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const info = await window.api.recoveryCheck()
-        if (info) {
-          recoveryPendingRef.current = true
-          setRecovery(info)
-        }
-      } catch {
-        /* 忽略 */
-      }
-    })()
-  }, [])
-
-  const handleRestore = useCallback(async (): Promise<void> => {
-    setRecovery(null)
-    try {
-      // 分步打点：「点恢复就卡死」这类问题必须能看出卡在哪一步
-      // （否则只能看到"卡住了"，连是读存档还是画布渲染都不知道）
-      setStage('恢复：读取存档')
-      const result = await window.api.recoveryLoad(activeDocId())
-      if (result) {
-        setStage('恢复：载入工作簿')
-        useTabs.getState().openWorkbook(result.workbook, result.path || null)
-        setStage('恢复：完成')
-        showToast('已恢复未保存的内容')
-      }
-    } catch (err) {
-      // 存档读不出来（多半已损坏），清掉它，否则每次启动都会再问一次
-      void window.api.recoveryDiscard()
-      showToast(`恢复失败：${(err as Error).message}`)
-    } finally {
-      recoveryPendingRef.current = false
-    }
-  }, [showToast])
-
-  const handleDiscardRecovery = useCallback((): void => {
-    recoveryPendingRef.current = false
-    setRecovery(null)
-    void window.api.recoveryDiscard()
-  }, [])
-
-  /* ------------------------------------------------------------------ */
-  /* 窗口标题                                                            */
-  /* ------------------------------------------------------------------ */
-
-  useEffect(() => {
-    // 未保存过的新文件，标题也用中心主题的名字，和保存时的默认文件名保持一致
-    const name = filePath
-      ? (fileNameOf(filePath) ?? '未命名导图')
-      : defaultDocumentName(useEditor.getState().workbook)
-    window.api.setTitle(`${dirty ? '● ' : ''}${name} - SMind`)
-    // 告诉主进程「这个标签开着哪个文件」：多标签/多窗口下双击同一个 .xmind 时，
-    // 主进程会聚焦对应窗口，由渲染层切到那个标签（同一文件开两份会互相覆盖）
-    window.api.reportDocument(activeDocId(), filePath)
-    // rootTitle 参与依赖：改名后标题栏要立刻跟着变
-  }, [filePath, dirty, rootTitle])
+  useWindowTitle({ filePath, dirty, rootTitle })
 
   /**
    * 画布上选中了画布元素（概要 / 边界 / 关系线）时把节点属性面板打开：
@@ -821,283 +561,9 @@ export default function App(): ReactElement {
     if (nodePanelTick > 0) setSidePanel('node')
   }, [nodePanelTick])
 
-  /* ------------------------------------------------------------------ */
-  /* 键盘快捷键                                                          */
-  /* ------------------------------------------------------------------ */
+  useKeyboardShortcuts({ showToast, setSidePanel })
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      // 已经被内层处理掉的按键不再重复处理（例如富文本编辑器自己的快捷键）
-      if (e.defaultPrevented) return
-      // 输入法组词过程中的按键交给输入法处理
-      if (e.isComposing || e.keyCode === 229) return
-
-      const target = e.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return
-      }
-
-      const store = useEditor.getState()
-      const selectedId = store.selection[0]
-
-      /**
-       * 仍在编辑态时（焦点可能因为点了底部格式栏而离开编辑器），**单键动作一律不接管**：
-       * 否则"想输入空格"会被当成折叠主题、想输入字符会被当成删除/新建节点。
-       * Ctrl 组合键（保存、撤销、搜索…）照旧放行。
-       */
-      if (store.editingId && !(e.ctrlKey || e.metaKey)) return
-
-      // Alt+↑ / ↓：同级上移 / 下移（知犀的写法，和 Ctrl+Shift+方向键等价）
-      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault()
-        store.moveSelectionByKey(e.key)
-        return
-      }
-
-      // Alt+C：给选中主题打开代码块编辑（面板聚焦到代码输入框）
-      if (e.altKey && (e.key === 'c' || e.key === 'C')) {
-        e.preventDefault()
-        if (selectedId) {
-          setSidePanel('node')
-          useEditor.getState().requestCodeFocus()
-        }
-        return
-      }
-
-      if (e.ctrlKey || e.metaKey) {
-        const key = e.key.toLowerCase()
-        if (key === 'z') {
-          e.preventDefault()
-          if (e.shiftKey) store.redo()
-          else store.undo()
-        } else if (key === 'y') {
-          e.preventDefault()
-          store.redo()
-        } else if (key === 'c') {
-          /**
-           * 面板里真的选中了文字（聊天回答、节点详情…）→ 把 Ctrl+C **交还给浏览器**。
-           *
-           * 画布上的节点是 `user-select: none`，所以「有 DOM 选区」就等于「用户选的是面板里的文字」。
-           * 以前这里无条件 preventDefault，结果从聊天里复制不出任何东西——
-           * 用户报的「无法从会话粘贴东西」根因就在这里（复制不出，当然粘不了）。
-           */
-          if (hasDomTextSelection()) return
-          e.preventDefault()
-          store.copySelection()
-        } else if (key === 'v') {
-          e.preventDefault()
-          // 依次试：剪贴板图片 → 带 Markdown 标记的文本 → 内部复制的节点
-          void (async () => {
-            if (!store.editingId && selectedId) {
-              const image = await readClipboardImage()
-              if (image) {
-                useEditor.getState().setImage(selectedId, {
-                  path: image.path,
-                  width: image.width,
-                  height: image.height
-                })
-                showToast(
-                  image.width > 0
-                    ? `已把剪贴板图片贴到选中的主题（${image.width}×${image.height}）`
-                    : '已把剪贴板图片贴到选中的主题（未取到像素尺寸，按默认大小显示）'
-                )
-                return
-              }
-
-              // 文本里带 Markdown 标记（`==高亮==`、`^上标^`、`A[^1]`…）→ 建成带格式的子主题。
-              // 编辑器内粘贴由 RichTextEditor 自己处理；这里是"选中节点、没在编辑"时的路径。
-              const text = await window.api.readClipboardText().catch(() => '')
-              const lines = text
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter((line) => line.length > 0 && looksLikeMarkdown(line))
-              if (lines.length > 0) {
-                const items = lines.map((line) => {
-                  const inline = parseInlineMarkdown(line)
-                  return { title: inline.text, rich: inlineRunsToRich(inline.runs) }
-                })
-                const count = useEditor.getState().addRichChildren(selectedId, items)
-                showToast(`已按 Markdown 粘贴 ${count} 个带格式的子主题（可用 Ctrl+Z 撤回）`)
-                return
-              }
-            }
-            useEditor.getState().paste()
-          })()
-        } else if (key === 'f') {
-          // Ctrl+F：打开搜索面板（与 Xmind 一致）
-          e.preventDefault()
-          setSidePanel('search')
-        } else if (e.key === '/') {
-          // Ctrl+/：折叠 / 展开。空格已经让给"直接输入空格"（选中后直接打字即进入编辑）
-          e.preventDefault()
-          if (selectedId) store.toggleCollapse(selectedId)
-        } else if (
-          // 编辑态里 Ctrl+Shift+方向键交给浏览器/编辑器（选词），不要去挪节点
-          !store.editingId &&
-          e.shiftKey &&
-          (e.key === 'ArrowUp' ||
-            e.key === 'ArrowDown' ||
-            e.key === 'ArrowLeft' ||
-            e.key === 'ArrowRight' ||
-            e.key === 'Home' ||
-            e.key === 'End')
-        ) {
-          // Ctrl+Shift+方向键：选中主题的精确移动（与亿图脑图一致）
-          e.preventDefault()
-          store.moveSelectionByKey(e.key)
-        }
-        return
-      }
-
-      switch (e.key) {
-        case 'Tab':
-          e.preventDefault()
-          store.addChild(selectedId)
-          break
-        case 'Enter':
-          e.preventDefault()
-          store.addSibling(selectedId)
-          break
-        case 'F2':
-          if (selectedId) {
-            e.preventDefault()
-            store.beginEdit(selectedId)
-          }
-          break
-        case 'Delete':
-        case 'Backspace':
-          e.preventDefault()
-          store.deleteSelection()
-          break
-        case 'ArrowUp':
-        case 'ArrowDown':
-        case 'ArrowLeft':
-        case 'ArrowRight':
-          e.preventDefault()
-          store.navigateSelection(e.key)
-          break
-        default:
-          /**
-           * 选中主题后**直接打字就进入编辑**（Xmind 的手感）。
-           *
-           * 两条防呆：
-           * 1. 空格只用来"进入编辑"，**不落字**——输入法用空格选词、用户也可能只是
-           *    习惯性按一下，在空白框里留下一个前导空格没有任何意义；
-           * 2. 其它字符落字后**寄存**一笔（`stageTypedChar`）：它可能只是拼音的第一个
-           *    字母（输入法组词时的第一个 keydown 完全看不出组词迹象），
-           *    编辑器发现真正的组词开始后会把这个字符让给输入法，避免空框里冒出 `w` 这种怪字符。
-           */
-          if (selectedId && !e.altKey && e.key.length === 1) {
-            e.preventDefault()
-            if (e.key === ' ') {
-              store.beginEdit(selectedId)
-            } else {
-              store.beginEdit(selectedId, e.key)
-              stageTypedChar(selectedId, e.key)
-            }
-          }
-          break
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-    // showToast 是 useCallback([]) 出来的稳定引用，列进来只是为了让依赖完整
-  }, [showToast])
-
-  /* ------------------------------------------------------------------ */
-  /* 拖拽图片文件到窗口：贴到选中的主题                                     */
-  /* ------------------------------------------------------------------ */
-
-  useEffect(() => {
-    /**
-     * 拖文件进来有三种去处：
-     * - `.xmind / .emmx / .emm`：**不拦**，让 Chromium 的默认导航发生，
-     *   主进程的 will-navigate 拦截器接住并走「打开文档」流程（既有行为）；
-     * - 图片：贴到选中的主题（既有行为）；
-     * - 其它文档（docx / xlsx / pptx / md / txt / csv / json / 代码 …）：
-     *   读成文本交给 AI，**按文档内容生成导图**。
-     *
-     * 不支持的格式（如 PDF）也要拦下默认导航：否则整个界面会被替换成那个文件，
-     * 看起来就像"软件坏了"；这里给一句人话提示（提示文案由主进程按格式给出）。
-     */
-    const MINDMAP_RE = /\.(xmind|emmx|emm)$/i
-    const IMAGE_RE = /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i
-    /** 混着导图文件时整体交给「打开文档」流程（既有语义，保持不变） */
-    const hasMindmap = (files: FileList | null): boolean =>
-      files ? Array.from(files).some((file) => MINDMAP_RE.test(file.name)) : false
-    const firstFile = (files: FileList | null, match: (file: File) => boolean): File | null => {
-      if (!files) return null
-      for (const file of Array.from(files)) if (match(file)) return file
-      return null
-    }
-    const isImage = (file: File): boolean =>
-      file.type.startsWith('image/') || IMAGE_RE.test(file.name)
-    const pickImageFile = (files: FileList | null): File | null =>
-      hasMindmap(files) ? null : firstFile(files, isImage)
-    const pickDocumentFile = (files: FileList | null): File | null =>
-      hasMindmap(files) ? null : firstFile(files, (file) => !isImage(file))
-
-    const onDragOver = (event: DragEvent): void => {
-      const files = event.dataTransfer?.files ?? null
-      // 导图文件放行（交给主进程打开），其余一律拦下——不能让 Chromium 导航过去
-      if (files && files.length > 0 && !hasMindmap(files)) event.preventDefault()
-    }
-    const onDrop = (event: DragEvent): void => {
-      const files = event.dataTransfer?.files ?? null
-      if (hasMindmap(files)) return
-      const documentFile = pickDocumentFile(files)
-      if (documentFile) {
-        event.preventDefault()
-        void (async () => {
-          try {
-            showToast(`正在读取《${documentFile.name}》…`)
-            const bytes = new Uint8Array(await documentFile.arrayBuffer())
-            const extracted = await window.api.documentExtract(documentFile.name, bytes)
-            setDocToMap(extracted)
-          } catch (error) {
-            showToast(readableIpcError((error as Error).message))
-          }
-        })()
-        return
-      }
-      const file = pickImageFile(files)
-      if (!file) return
-      event.preventDefault()
-      void (async () => {
-        try {
-          const bytes = new Uint8Array(await file.arrayBuffer())
-          const image = await window.api.addImage(activeDocId(), file.name, bytes)
-          const store = useEditor.getState()
-          const id = store.selection[0]
-          if (!image || !id) {
-            showToast('请先选中一个主题，再把图片拖进来')
-            return
-          }
-          store.setImage(id, { path: image.path, width: image.width, height: image.height })
-          showToast(
-            image.width > 0
-              ? `已插入图片 ${file.name}（${image.width}×${image.height}）`
-              : `已插入图片 ${file.name}（未取到像素尺寸，按默认大小显示）`
-          )
-        } catch (error) {
-          showToast(`插入图片失败：${(error as Error).message}`)
-        }
-      })()
-    }
-    window.addEventListener('dragover', onDragOver)
-    window.addEventListener('drop', onDrop)
-    return () => {
-      window.removeEventListener('dragover', onDragOver)
-      window.removeEventListener('drop', onDrop)
-    }
-  }, [showToast])
+  useFileDrop({ showToast, setDocToMap })
 
   /* ------------------------------------------------------------------ */
 
