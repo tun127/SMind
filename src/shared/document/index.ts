@@ -13,6 +13,7 @@
  */
 
 import { decodeNumericEntity } from '../entities'
+import { extensionOf } from '../model/resources'
 
 export type DocumentKind = 'text' | 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'unsupported'
 
@@ -105,12 +106,6 @@ const OFFICE_LABELS: Record<string, string> = {
   docx: 'Word 文档',
   xlsx: 'Excel 表格',
   pptx: 'PowerPoint 演示'
-}
-
-function extensionOf(name: string): string {
-  const base = name.split(/[\\/]/).pop() ?? name
-  const at = base.lastIndexOf('.')
-  return at < 0 ? '' : base.slice(at + 1).toLowerCase()
 }
 
 /** 这份文件能不能读？读成什么？ */
