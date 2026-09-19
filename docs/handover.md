@@ -1,5 +1,71 @@
 # 交接文档：解耦战役（给新 agent 的提示词与现态总结）
 
+---
+
+## 补记（第五次交接，2026-09-19 晚）—— 先读这一段
+
+> **HEAD：`7e39e42`**（A8-9）＋ 本次文档提交。工作树干净。
+> 本补记覆盖第四版之后的进展；**第四版正文（下面全部内容）仍然有效**，只有"现态数字"与"A8 剩余配方"被本补记更新。
+
+**这一段做完的（4 个提交，全部五道门槛逐条打印退出码全绿）：**
+
+| 批次 | 提交 | 结果 |
+|---|---|---|
+| A8-6 | `25d00ff` | 展示层派生值（4 段 294 行）→ `canvas/use-canvas-display.ts`(395)；`Canvas.tsx` 1480 → 1216 |
+| A8-7 | `76c6eb4` | 四个 JSX 层（5 段 621 行）→ `canvas-edges-layer.tsx`(317) / `canvas-overlay-layer.tsx`(338) / `canvas-nodes-layer.tsx`(123) / `canvas-relationship-hit-layer.tsx`(49)；1216 → 644 |
+| A8-8 | `b30c78d` | 节点回调一族(66) → `canvas/use-node-callbacks.ts`(130)；标题编辑框(51) → `canvas-title-editor.tsx`(81)；底部提示层(36) → `canvas-hints.tsx`(68)；644 → 514 |
+| A8-9 | `7e39e42` | 布局与测量(134) → `canvas/use-canvas-layout.ts`(186)；514 → **385** |
+
+**`Canvas.tsx` 2951 → 385（−87%）**，`canvas/` 从 13 个文件涨到 **22 个**（新增 9 个：`use-canvas-display` 395 /
+`use-canvas-layout` 186 / `use-node-callbacks` 130 / `canvas-edges-layer` 317 / `canvas-overlay-layer` 338 /
+`canvas-nodes-layer` 123 / `canvas-relationship-hit-layer` 49 / `canvas-title-editor` 81 / `canvas-hints` 68）。
+全部子模块都在 DoD 400 行以内。
+
+**A8 的残留（重要，不是遗漏）**：入口 385 行 > DoD 250，剩下的是**画布顶部的 state / 选择器 / ref 与十二处 hook 装配**
+（`useFlashNodes` / `useCanvasLayout` / `useCanvasViewport` / `useViewFollow` / `useFoldAnchor` / `useWheelPanZoom` /
+`useCanvasGeometry` / `useNodeDrag` / `useRelationshipDrag` / `useTitleEdit` / `useNodeCallbacks` / `useMarqueeSelect` /
+`useCanvasDisplay` 的调用与入参表）＋ JSX 外壳。**再往下压只剩两种做法**：①把这十二处装配整体收进一个组合 hook
+（把"谁在什么顺序被装配"藏一层）；②把 `dragVisual` 与各 ref 也下沉（会动到"指针跟手"的前提）。两者都超出
+「只搬代码」的配方范围 → 记为**入口刻意保留的装配代码**。要接着做，请先在计划表 §八 把这条决定写清楚。
+
+**本轮的硬经验（下一批照做能省一次事故）：**
+
+1. **沙箱变了：审批策略是 never，不能提权。** `npm run selfcheck` 的 esbuild JS API 会 spawn 服务进程（管道 stdio）
+   → 受限沙箱下**必然 EPERM**（`ensureServiceIsRunning`），不要再试提权。**等价跑法（已实测同 2628 项断言、exit 0）**：
+   ```
+   node_modules\@esbuild\win32-x64\esbuild.exe scripts/selfcheck.ts --bundle --platform=node --format=cjs `
+     --target=node20 --sourcemap=inline --log-level=warning --tsconfig=tsconfig.json `
+     "--alias:@shared=./src/shared" "--alias:@=./src/renderer/src" --outfile=.tmp-check\selfcheck-cli.cjs *> 日志
+   node .tmp-check\selfcheck-cli.cjs *> 日志
+   ```
+   （**必须文件重定向**，管道会 EPERM。）
+2. **node 里 `execFileSync('git', …)` 也 EPERM** → 行多重集守卫改成"旧快照先落成 UTF-8 文件、脚本只读文件"：
+   `node .tmp-check/msguard2.mjs <旧快照.txt> <新文件1,新文件2,…>`（**通用版，可直接复用**）。落快照的正确姿势：
+   `[Console]::OutputEncoding = [Text.Encoding]::UTF8` 后用 `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))`
+   —— 直接用 `>` 重定向会写成 **UTF-16**，读出来全是 `\u0000`。
+3. **抽 JSX 层时，子组件的 prop 名必须与父作用域名同名**（§四.3 第 3 条不是形式主义）：A8-7 第一次把 10 个
+   节点回调改名成 `onPointerDown` 等，块体立刻 10 处 TS2304，按 §六 纪律整块回退重做。
+4. **lint 对"从参数进来的 `RefObject`"一律要求列进依赖数组**（A8-8 两处、A8-9 一处 `[] → [containerRef, …]`）：
+   身份恒定，列进去不改变重建时机，这是等价改写，写进提交信息即可。
+5. **搬迁脚本的括号/注释配平守卫不能跨文件比总数**（新模块骨架自带括号）：改成"**每个文本各自配平**"
+   （旧画布 / 新画布 / 被搬文本 / 新模块各算一次）。A8-6 第一次用总数比，误报 46 个括号差。
+
+**待用户人眼验收（自检不渲染 React，agent 无法自证）——在第四版那一串之外新增：**
+A8-6/A8-7 是渲染层重构，请走一遍：**画布正常显示**（装饰线 / 边界 / 概要 / 树上连线 / 关系线 / 节点 / 覆盖层
+逐层都在，层次没变）；**拖拽**：三种落点提示（成为子主题的空位框＋「将成为『X』的子主题」文案、同级插入线、
+Alt 自由摆放）+ 多选徽标 + 左右对调预览 + 端点改接；**搜索命中与筛选**染色；**框选**高亮与橡皮筋；
+**双击改标题**（边界 / 概要 / 关系线：Enter 换行、Esc 取消、Ctrl+Enter 提交、失焦提交）；**底部图例三段高亮**；
+**滚动缩放后节点裁剪正常**（可见节点/连线裁剪没有因为搬层而失效）。
+
+**下一步建议顺序（沿用第四版，未变）**：B1 第二步（内联纯逻辑 ~188 行 + 切片，§3.4 有归属表）
+→ A6-4（可选）→ E1 剩 7 组（先做 (5)）→ `refactor-audit.md` §2.4 的两条脚本侧待办。
+
+---
+
+## 第四版正文（现态数字以本补记为准）
+
+# 交接文档：解耦战役（给新 agent 的提示词与现态总结）
+
 > 更新：2026-09-19（**第四次交接**）｜ 仓库：`D:\Mind`（产品名 SMind）｜ 已提交的 HEAD：**`2444758`**（+ 本次文档提交）
 > **本文件是自包含的**：新 agent 只读它 + `docs/decoupling-plan.md` + 仓库本身即可继续。
 > 上一版（第三次交接，HEAD `a87ff82`）见 `git show a87ff82:docs/handover.md`。
