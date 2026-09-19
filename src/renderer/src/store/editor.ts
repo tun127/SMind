@@ -1,22 +1,10 @@
 import { create } from 'zustand'
 import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } from 'immer'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
-import {
-  withOverlayTextStyle,
-  type OverlayKind,
-  type OverlayTextStylePatch
-} from '@shared/model/overlay-style'
-import type {
-  Attachment,
-  RichText,
-  ThemeColors,
-  Topic,
-  TopicCode,
-  TopicImage,
-  Workbook
-} from '@shared/model/types'
+import { withOverlayTextStyle } from '@shared/model/overlay-style'
+import type { Workbook } from '@shared/model/types'
 import { createId, createTopic, createWorkbook } from '@shared/model/factory'
-import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
+import { countOutlineNodes, outlineToTopic } from '@shared/ai'
 import {
   appendToRich,
   hasFormatting,
@@ -29,9 +17,7 @@ import {
   countOccurrences,
   countTitleMatches,
   normalizeQuery,
-  replaceInText,
-  type SearchOptions,
-  type TopicFilter
+  replaceInText
 } from '@shared/search'
 import { DEFAULT_THEME } from '@shared/theme'
 import { BLOCK_GAP, codeMinNodeSize } from '@shared/layout/accessory'
@@ -65,9 +51,8 @@ import {
   withMarkerToggled
 } from '@shared/xmind/constants'
 import { notesHtmlFrom } from '@shared/richtext'
-import { resolveDrop, type DropMode } from '@shared/model/drop'
+import { resolveDrop } from '@shared/model/drop'
 import {
-  clampZoom,
   editingContent,
   liveSelection,
   pruneOverlays,
@@ -91,427 +76,31 @@ import {
   selectReducer,
   selectionAfterDelete
 } from '@shared/model/editor-ops'
+import type { EditorState, SearchState } from './slices/types'
+import { createViewSlice } from './slices/view'
+import { NO_EDITING } from './slices/types'
+import { readPersistedViewLock } from './slices/view'
+import type { HistoryEntry } from './slices/types'
 
 /**
  * 公开面：`themeColorsOf` / `overlayToggleOf` 已下沉到 `@shared/model/editor-pure`。
  * 这里再导出一次，Canvas / export/index / ThemePanel / overlay-group 的调用点一行都不用改。
  */
+export type { EditorState, SearchState } from './slices/types'
 export { overlayToggleOf, themeColorsOf } from '@shared/model/editor-pure'
 
 enablePatches()
 
 const HISTORY_LIMIT = 200
 
-interface HistoryEntry {
-  label: string
-  patches: Patch[]
-  inverse: Patch[]
-  /** 连续同类操作（例如拖动调色）合并为一步撤销 */
-  coalesceKey?: string
-  time: number
-  /** 这次修改**之前**的选择（框选/多选）。撤销时恢复它，框选才不会凭空丢掉 */
-  selectionBefore?: string[]
-  /** 撤销那一刻的选择，重做时恢复 */
-  selectionAtUndo?: string[]
-}
-
 /** 合并窗口：同一个 coalesceKey 在此时间内的连续操作算作一步 */
 const COALESCE_WINDOW_MS = 1500
-
-/** 搜索状态：条件放在 store 里，画布与搜索面板才能用同一份条件算命中 */
-export interface SearchState {
-  query: string
-  replacement: string
-  options: Required<SearchOptions>
-}
 
 const EMPTY_SEARCH: SearchState = {
   query: '',
   replacement: '',
   options: { caseSensitive: false, inNotes: false, inLabels: false }
 }
-
-export interface EditorState {
-  workbook: Workbook
-  filePath: string | null
-  dirty: boolean
-  /** 文档代次，每次新建/打开自增，用于触发画布重新居中 */
-  docSeq: number
-
-  selection: string[]
-  editingId: string | null
-  /** 正在编辑的纯文本镜像，用于比较与统计 */
-  editingText: string
-  /** 正在编辑的富文本内容 */
-  editingRich: RichText | null
-  /**
-   * 渲染默认值（默认对齐 / 代码块基准字号）的变更计数。
-   *
-   * 这些默认值作用于**没有显式样式**的节点，改了会让测量结果变化，所以布局必须依赖它——
-   * 否则改了设置要等到别的操作才生效（画布上表现为"设置似乎没起作用"）。
-   */
-  renderEpoch: number
-  clipboard: Topic | null
-
-  zoom: number
-  pan: { x: number; y: number }
-
-  /** 搜索条件：面板与画布共用，保证两边看到的命中完全一致 */
-  search: SearchState
-  /** 按标记 / 标签筛选 */
-  filter: TopicFilter
-
-  undoStack: HistoryEntry[]
-  redoStack: HistoryEntry[]
-  /** 进行中的 AI 回合（null = 不在 AI 操作中；此时禁止撤销，见 undo 的说明） */
-  aiTurn: { depth: number; selectionBefore: string[] } | null
-
-  /* ---- 检索（P7） ---- */
-  setSearchQuery(query: string): void
-  setSearchReplacement(replacement: string): void
-  setSearchOption(key: keyof SearchOptions, value: boolean): void
-  resetSearch(): void
-  /** 把标题里的关键词全部替换掉，返回替换处数 */
-  replaceAllInTitles(): number
-  /** 替换某一个节点标题里的关键词，返回替换处数 */
-  replaceInTopic(topicId: string): number
-
-  /* ---- 筛选（P7） ---- */
-  toggleFilterMarker(markerId: string): void
-  toggleFilterLabel(label: string): void
-  clearFilter(): void
-
-  /* ---- AI 结果落地（P8） ---- */
-  /** 给某个主题一次性追加若干子主题（AI 扩写用，整批算一步撤销） */
-  addChildTitles(parentId: string, titles: string[]): number
-  /** 追加若干**带格式**的子主题（粘贴 Markdown 片段用；整批一步撤销） */
-  addRichChildren(parentId: string, items: Array<{ title: string; rich?: RichText }>): number
-  /**
-   * 把 AI 生成的整棵大纲挂到指定主题下面。
-   *
-   * 「生成新导图」不再走这里——那会往当前文档里塞内容；改成在新窗口里成为独立文档
-   * （见 App 的 `openGeneratedInNewWindow`）。
-   */
-  applyOutlineTree(parentId: string, root: OutlineNode): number
-
-  /** 把当前「默认文字样式」（字体/字号/颜色）一次性应用到全部现有节点（一步撤销） */
-  applyDefaultsToAll(): void
-
-  /* ---- 视图 ---- */
-  setZoom(zoom: number): void
-  setPan(pan: { x: number; y: number }): void
-  /**
-   * 视角锁定：开启后画布始终把**选中的主题**按在视口中央。
-   *
-   * 方向键在主题间移动、点大纲、搜索跳转、拖完重排……视角都会跟过去，
-   * 长导图里不必再手动拖画布去找"现在到底选到哪了"。
-   */
-  viewLock: boolean
-  setViewLock(on: boolean): void
-  /** 切换视角锁定，返回切换后的状态（提示语要用） */
-  toggleViewLock(): boolean
-  /**
-   * 最近一次折叠 / 展开的是哪个节点（`at` 是时间戳，用来去重）。
-   *
-   * 画布据此做**镜头锚点补偿**：折叠会让整张图重排，被折叠的那个节点会跟着挪位置，
-   * 于是"视角丢失"（用户原话）。锚定它、让它在屏幕上原地不动，才符合直觉——
-   * 而不是把镜头拉去居中中心主题。所有折叠入口（工具栏 / 菜单 / 空格 / 按侧徽标 / AI）
-   * 都走 `setCollapsed` / `setFoldSide`，所以这个信号在 store 里记一次就全覆盖。
-   */
-  lastFold: { id: string; at: number } | null
-
-  /* ---- 文档 ---- */
-  newDocument(): void
-  loadDocument(workbook: Workbook, path: string | null): void
-  /**
-   * 把当前文档的内容换成某个历史版本。
-   * 刻意**保留 filePath**（恢复的是「当前文档的旧内容」，不该把文档换成别的文件），
-   * 并标记为未保存——恢复出来的内容与磁盘上的还不一样。
-   */
-  restoreDocument(workbook: Workbook): void
-  markSaved(path: string): void
-
-  /* ---- 编辑 ---- */
-  /**
-   * @param coalesceKey 传入后，短时间内同 key 的连续修改会合并成一步撤销。
-   *                    适用于拖动调色这类高频小改动。
-   */
-  mutate(recipe: (draft: Workbook) => void, label: string, coalesceKey?: string): boolean
-  undo(): void
-  redo(): void
-  /**
-   * 开始一个 AI 回合。
-   *
-   * AI 一次命令可能改几十个节点——每个改动各记一步撤销等于没有撤销。
-   * 从 begin 到 commit 之间的所有改动会在结束时**并成一步**，用户按一下 `Ctrl+Z` 全回来。
-   */
-  beginAiTurn(): void
-  /** 结束 AI 回合并合并；返回这一步是否真的产生了改动 */
-  commitAiTurn(label: string): boolean
-
-  /* ---- 选择与编辑态 ---- */
-  select(id: string | null, additive?: boolean): void
-  /**
-   * 进入编辑。
-   * `insertText` 用于「选中主题后直接打字」：把这一下敲的字符**接到末尾**再进入编辑
-   * （是追加不是覆盖——误按一个字母就把整句标题冲掉太危险）。
-   */
-  beginEdit(id: string, insertText?: string): void
-  updateEditingText(text: string): void
-  updateEditingRich(rich: RichText): void
-  /**
-   * 提交当前正在编辑的内容。
-   * @param forId 只有当前编辑中的正是这个节点时才提交。
-   *              用于避免「新建节点后旧输入框失焦」把新节点的编辑态误关掉。
-   */
-  commitEdit(forId?: string): void
-  cancelEdit(): void
-  /** 提交编辑并新建子主题（编辑中按 Tab） */
-  commitAndAddChild(): void
-  /** 提交编辑并新建同级主题（编辑中按 Enter） */
-  commitAndAddSibling(): void
-
-  /* ---- 结构操作 ---- */
-  addChild(parentId?: string): string
-  addSibling(id?: string): string
-  deleteSelection(): void
-  /**
-   * 删除指定主题（连同子树）。
-   *
-   * AI 写工具用：`deleteSelection` 是给键盘操作的，会连带改用户的选择；
-   * AI 不该有这种副作用，所以按 id 删、只在必要时把选择挪到父级。
-   */
-  deleteTopic(id: string): boolean
-  setTitle(id: string, title: string): void
-  setRichText(id: string, rich: RichText | null): void
-  toggleCollapse(id: string): void
-  /**
-   * 直接指定折叠状态。拖拽时用它把落点那个折叠着的主题**展开**——
-   * 不展开就看不见新子主题会落在哪，落点预览成了空谈。
-   */
-  setCollapsed(id: string, collapsed: boolean): void
-  /**
-   * 平衡思维导图的中心主题：**按侧收起 / 展开**（左右分开收）。
-   *
-   * 只在「中心主题 + 平衡结构 + 该侧确实挂着分支」时生效；
-   * 一般主题的收起走 `toggleCollapse`（那里是整体收起）。
-   *
-   * 刻意做成**设置值**而不是开关（与 `setCollapsed` 同一口径）：AI 重试一次
-   * 不会把刚收起来的那一侧又翻回去。
-   */
-  setFoldSide(id: string, side: FoldSide, folded: boolean): void
-  /** 界面上点徽标用：切换某一侧的收起状态（转发到 `setFoldSide`） */
-  toggleFoldSide(id: string, side: FoldSide): void
-  /** 渲染默认值变更后调用：让布局与画布重算 */
-  bumpRenderEpoch(): void
-  /**
-   * 切换**整张画布**的结构。
-   *
-   * 刻意的签名（没有 targetId）：结构是画布级属性，只住在中心主题上。
-   * 以前它接一个可选目标，于是能在分支上写 `structureClass`——布局随即把那一支
-   * 交给别的家族排，画面变成"主干对、下面那截乱"。数据字段仍保留（导入的文件里
-   * 可能带着它，另存时原样写回），但**不再参与布局**。
-   */
-  setStructure(structureClass: string): void
-  /**
-   * 移动主题。
-   *
-   * 刻意**没有** coalesceKey：移动会重排 children 数组，
-   * 而撤销是基于 immer patch 的，数组重排的 patch 带下标——
-   * 把连续两步的 inverse 合成一个再套到"后来的状态"上会下标错位、改坏数组
-   * （自检里抓到过 `["甲","乙","甲"]` 这种结果）。
-   * 合并只对「替换某个值」类操作安全：折叠、调色、拉伸尺寸。
-   */
-  moveNode(id: string, targetId: string, index?: number): boolean
-  /**
-   * 批量移动（AI 的 `moveTopics` 工具走这里）：一次写入落完，返回**实际成功**的条目。
-   *
-   * 逐条调 `moveNode` 终态相同，但每条都要跑一次 `settleAfterMove` → `pruneOverlays`
-   * 的**全树扫描**——一次最多 200 条就是 200 遍全树（O(k×N)），
-   * 正是「AI 批量整理大导图」时的固定放大器。
-   */
-  moveNodes(moves: Array<{ id: string; targetId: string; index: number | null }>): Array<{
-    id: string
-    targetId: string
-  }>
-  /**
-   * 同级排序（AI 的 `sortSiblings` 走这里）：按给定顺序重排某个主题的子主题。
-   * `renumber` 为真时顺便加「1. 2. 」编号（先去掉旧编号，避免「1. 1. xxx」）。
-   */
-  sortChildren(parentId: string, orderedIds: string[], renumber: boolean): void
-  /**
-   * 合并同名主题（AI 的 `mergeDuplicates` 走这里）。
-   *
-   * 每组保留 keepId，把 mergeIds 的**子主题搬过来、缺的备注/代码/公式/标签/标记补上**，
-   * 然后删掉那些多余节点。整批算**一步撤销**（`mutate` 一次）。
-   */
-  mergeTopics(groups: Array<{ keepId: string; mergeIds: string[] }>): number
-  /**
-   * 用快捷键微调选中主题（与亿图脑图一致，适合结构复杂时精确挪动）：
-   * - `↑` / `↓`：在同级里上移 / 下移一位
-   * - `Home` / `End`：移到同级的最前 / 最后
-   * - `←`：升级，成为父级的后一个兄弟
-   * - `→`：降级，成为前一个兄弟的最后一个子主题
-   */
-  moveSelectionByKey(
-    key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End'
-  ): boolean
-  /**
-   * 按方向键在主题之间移动**选择**（← 父级、→ 第一个子级、↑↓ 同级）。
-   *
-   * 抽到 store 里是因为**编辑态**也要用它：刚建出来的空主题里按方向键，
-   * 应当退出编辑并移到相邻主题，而不是把光标在一个空格子里挪来挪去（看起来像"方向键失灵"）。
-   * 另外它有兜底：选择指向已不存在的主题时自动回到根，键盘永远不会"死掉"。
-   */
-  navigateSelection(key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'): void
-  /**
-   * 把一级主题对调到中心主题的另一侧（知犀 / Xmind 的「左右位置调整」）。
-   * 平衡结构默认按顺序交替分配左右，这里写入的是显式覆盖。
-   */
-  setTopicSide(id: string, side: 'left' | 'right'): void
-  /** 手动拉伸节点尺寸；传 null 恢复自动尺寸（拖拽过程中会合并成一步撤销） */
-  setSizeOverride(id: string, size: { width: number; height: number } | null): void
-  /**
-   * 拖拽节点释放。落点一律由 `resolveDrop` 裁决（在 shared/model/drop 里，
-   * 与画布上的落点预览共用同一套规则）：
-   * - `child` → 成为目标的**最后一个子主题**；
-   * - `before` / `after` → 插到目标**前面 / 后面**、与它同级；
-   * - 落点非法（自己 / 自己的后代 / 原地不动）→ 返回 false，不做改动。
-   * 因为判定只看"目标是谁 + 指针在它的哪个分区"，所以**任意两个节点之间**都能拖。
-   */
-  dropNode(id: string, targetId: string, mode: DropMode): boolean
-  offsetPosition(id: string, dx: number, dy: number): void
-  /**
-   * 一次写完多个主题的自由位置（多选拖拽用）。
-   * 走一次 mutate，所以整群移动在撤销里是**一步**，而不是一堆零碎记录。
-   */
-  offsetPositions(moves: Array<{ id: string; dx: number; dy: number }>): void
-  /**
-   * 恢复自动布局：把**选中的自由摆放主题**放回自动位置；选中里没有这样的主题就整张画布一起恢复。
-   * 返回实际恢复的个数（0 = 没什么可恢复）。
-   *
-   * 为什么只留一个入口：以前「选中」「全部」各有按钮、菜单里还各有一条名字几乎一样的项
-   * （三个入口、两种实现，其中两个完全相同），用户面对的是"我该点哪个"。
-   * 现在范围交给选择决定、结果用提示条说清：想只恢复一个，先选中它。
-   */
-  restoreAutoLayout(): number
-  copySelection(): void
-  paste(): void
-
-  /* ---- 节点附加元素 ---- */
-  toggleMarker(id: string, markerId: string): void
-  addLabel(id: string, label: string): void
-  removeLabel(id: string, label: string): void
-  setNotes(id: string, notes: string): void
-  setHref(id: string, href: string): void
-  /** 设置 LaTeX 公式源码（传空字符串即移除） */
-  setFormula(id: string, formula: string): void
-  /** 设置/移除节点里的代码块（language + text 都为空即移除） */
-  setCode(id: string, code: TopicCode | null): void
-  /** 设置/移除节点内图片（字节由主进程存进包内资源） */
-  setImage(id: string, image: TopicImage | null): void
-  addAttachment(id: string, attachment: Attachment): void
-  removeAttachment(id: string, attachmentId: string): void
-
-  /* ---- 画布级元素（关系线 / 边界 / 概要） ---- */
-  /**
-   * 这三个都是「开关」：选中状态已经存在对应元素时再点一次是移除，
-   * 避免同一个范围被反复叠加出多个元素（叠加会让颜色越来越深）。
-   * @returns 新建元素的 id；本次是移除则返回 null
-   */
-  addRelationship(): string | null
-  addBoundary(): string | null
-  addSummary(): string | null
-  removeRelationship(id: string): void
-  removeBoundary(id: string): void
-  removeSummary(id: string): void
-  /** 拖动线身调整弧线位置（偏移量累加，连续拖动合并为一步撤销） */
-  offsetRelationshipCurve(id: string, dx: number, dy: number): void
-  /** 把弧线弯度恢复到自动计算的位置 */
-  resetRelationshipCurve(id: string): void
-  /** 框选用：一次性设置选中集合 */
-  setSelection(ids: string[]): void
-  /**
-   * 画布级元素（概要 / 边界 / 关系线）的选中态。
-   *
-   * 选中它们就能在面板里改文字与字体样式——概要因此成为「一等公民」：
-   * 空文字时也点得到、选得中，不再是「删空就只能删掉重建」。
-   */
-  selectedOverlay: { kind: OverlayKind; id: string } | null
-  selectOverlay(kind: OverlayKind, id: string): void
-  clearOverlaySelection(): void
-  /**
-   * 「请打开节点属性面板」的信号（自增计数）。
-   *
-   * 画布在选中画布元素（概要/边界/关系线）时发一次：那些元素的文字、字体与删除
-   * 全在面板里，选中了却不显示面板，用户会以为「选中没生效」。
-   */
-  nodePanelTick: number
-  requestNodePanel(): void
-  /** 「备注」聚焦信号（自增值），NodePanel 监听它 */
-  notesFocusTick: number
-  /** 请求节点面板聚焦到备注输入框（画布上的备注指示图标点击用）；面板会随之自动打开 */
-  requestNotesFocus(): void
-  /** 改画布级元素标题样式（字号 / 加粗 / 斜体 / 颜色），一步撤销 */
-  setOverlayStyle(kind: OverlayKind, id: string, patch: OverlayTextStylePatch): void
-  /** 请求节点面板聚焦到代码输入框（Alt+C 用）；面板未打开时会随打开自动聚焦 */
-  requestCodeFocus(): void
-  /** 代码聚焦信号（自增值），NodePanel 监听它 */
-  codeFocusTick: number
-  /** 公式聚焦信号（自增值），NodePanel 监听它 */
-  formulaFocusTick: number
-  /** 请求节点面板聚焦到公式输入框（快捷栏 / 快捷键用） */
-  requestFormulaFocus(): void
-  /** 应用级默认设置（默认视角锁定 / 主题 / 对齐），由「设置」对话框读写 */
-  appSettings: AppSettings
-  setAppSettings(next: AppSettings): void
-  /** 把关系线的某一端改接到另一个主题（拖拽端点用） */
-  setRelationshipEnd(id: string, end: 'end1Id' | 'end2Id', topicId: string): void
-  setRelationshipTitle(id: string, title: string): void
-  setBoundaryTitle(id: string, title: string): void
-  setSummaryTitle(id: string, title: string): void
-
-  /* ---- 画布元素：给 AI 用的「不依赖选中」版本 ---- */
-  /**
-   * 连一条关系线（按 id，不读用户当前选中）。
-   *
-   * 为什么不复用上面的 `addRelationship`：那个读的是**选择**，AI 自己改选中会把用户
-   * 的选区搅乱；而且它是**开关**语义（再点一次是删除）——模型重试一次就把线删了。
-   * 这里一律**幂等**：已经连过就返回原 id，不增不减。
-   */
-  connectTopics(end1Id: string, end2Id: string): string | null
-  /** 给这些同级主题加边界（幂等；title 可省略） */
-  addBoundaryFor(topicIds: string[], title?: string): string | null
-  /** 给这些同级主题加概要（幂等；title 省略时为「概要」） */
-  addSummaryFor(topicIds: string[], title?: string): string | null
-  /** 直接设置标记集合（不用 toggle：对模型来说「已存在就删掉」是个陷阱） */
-  setMarkers(id: string, markerIds: string[]): void
-
-  /* ---- 主题 ---- */
-  /** 应用一整套主题（会把配色写进当前画布） */
-  applyTheme(theme: { id: string; name: string; colors: ThemeColors }): void
-  /**
-   * 把主题直接烤进当前文档，**不写撤销历史、不改「未保存」状态**。
-   * 用于「新建文档时套用设置里的默认主题」：那一步是初始化而不是用户的编辑动作，
-   * 走 `applyTheme`（内部是 mutate）会让新文档一建出来就顶着未保存标记。
-   */
-  primeTheme(theme: { id: string; name: string; colors: ThemeColors }): void
-  /** 微调当前画布的配色 */
-  updateThemeColors(patch: Partial<ThemeColors>, coalesceKey?: string): void
-}
-
-/**
- * 「编辑态」的空值。
- * 编辑态＝ editingId + 纯文本 + 富文本三项，而纯文本与富文本本质上是
- * **同一份内容的两种表示**——以前这里有十几处各自手写这三行，漏一处就会漂移。
- */
-const NO_EDITING = { editingId: null, editingText: '', editingRich: null }
-
-/**
- * 空标题是**有意允许**的（自检里有两条断言钉着：清空标题能提交、空标题提交不写历史）。
- * 由此推出的一条规矩：**任何"顺手把空标题补成默认名"的改动都是错的**——
- * 用户可能就是想把标题清掉再重新打，或者那个节点只是暂时没名字。
- */
 
 /**
  * 改应用设置：写进 store 并落盘。所有「默认值」入口（格式栏默认样式面板 /
@@ -528,33 +117,8 @@ export async function patchAppSettings(patch: Partial<AppSettings>): Promise<App
   return next
 }
 
-/* ---- 视角锁定的会话间持久化 ----
- * viewLock 原来是纯会话状态：每次重启 / 新开文档都回到设置里的默认值——
- * 用户刚把开关打开，窗口一重启就"消失"了（关闭态不显眼，看起来像功能坏了）。
- * 这里用 localStorage 记住最近一次的开关选择：启动、新开文档、打开文档都恢复它；
- * 「启动默认视角锁定」设置只在用户从未动过开关时作为初值。 */
-const VIEW_LOCK_KEY = 'smind.viewLock'
-
-function readPersistedViewLock(): boolean | null {
-  try {
-    const raw = localStorage.getItem(VIEW_LOCK_KEY)
-    if (raw === '1') return true
-    if (raw === '0') return false
-    return null
-  } catch {
-    return null
-  }
-}
-
-function persistViewLock(on: boolean): void {
-  try {
-    localStorage.setItem(VIEW_LOCK_KEY, on ? '1' : '0')
-  } catch {
-    /* 存不了就算了，只是下次不记忆 */
-  }
-}
-
-export const useEditor = create<EditorState>()((set, get) => ({
+export const useEditor = create<EditorState>()((set, get, store) => ({
+  ...createViewSlice(set, get, store),
   workbook: createWorkbook(),
   filePath: null,
   dirty: false,
@@ -565,38 +129,12 @@ export const useEditor = create<EditorState>()((set, get) => ({
   renderEpoch: 0,
   clipboard: null,
 
-  zoom: 1,
-  pan: { x: 0, y: 0 },
-  // 上次会话的开关选择优先；从未动过开关才用设置默认值
-  viewLock: readPersistedViewLock() ?? false,
-  lastFold: null,
-
   search: { ...EMPTY_SEARCH },
   filter: { ...EMPTY_FILTER },
 
   undoStack: [],
   redoStack: [],
   aiTurn: null,
-
-  /* ------------------------------------------------------------------ */
-  /* 视图                                                                */
-  /* ------------------------------------------------------------------ */
-
-  setZoom: (zoom) => set({ zoom: clampZoom(zoom) }),
-
-  setPan: (pan) => set({ pan }),
-
-  setViewLock: (on) => {
-    persistViewLock(on)
-    set({ viewLock: on })
-  },
-
-  toggleViewLock: () => {
-    const next = !get().viewLock
-    persistViewLock(next)
-    set({ viewLock: next })
-    return next
-  },
 
   /* ------------------------------------------------------------------ */
   /* 检索与筛选                                                          */
