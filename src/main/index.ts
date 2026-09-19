@@ -14,7 +14,7 @@ import { checkImagePayload, isPlausibleFilePath } from '@shared/ipc-args'
 import { writeFileAtomic, writeJsonAtomic } from './atomic-write'
 import { logDirectory, logMain } from './log'
 import { DOCUMENT_EXTENSIONS, extractDocumentFromBytes, extractDocumentFromPath } from './document'
-import type { ExtractedDocument } from '@shared/document'
+import { pathFromFileUrl, type ExtractedDocument } from '@shared/document'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
@@ -1010,9 +1010,11 @@ function createWindow(
     event.preventDefault()
     if (!url.startsWith('file://')) return
     try {
-      const pathname = decodeURIComponent(new URL(url).pathname)
-      const target = pickDocumentArg([pathname.replace(/^\//, '')], existsSync)
-      if (target && !win.isDestroyed()) win.webContents.send(IPC.fileOpenRequest, target)
+      // 路径还原（含 UNC 共享盘、POSIX 绝对路径）统一走这个纯函数，它有自己的断言
+      const target = pathFromFileUrl(url)
+      if (target === null) return
+      const picked = pickDocumentArg([target], existsSync)
+      if (picked && !win.isDestroyed()) win.webContents.send(IPC.fileOpenRequest, picked)
     } catch {
       /* 解析不了就当作普通拖拽，忽略 */
     }

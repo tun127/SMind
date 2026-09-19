@@ -234,6 +234,7 @@ import {
   extractXlsxText,
   isZipDocument,
   normalizeDocumentText,
+  pathFromFileUrl,
   splitDocument,
   zipEntryPrefixesFor
 } from '../src/shared/document'
@@ -2238,6 +2239,25 @@ async function testSafetyHelpers(): Promise<void> {
   )
   check('跳到别的站点 → 拦下', !isSelfNavigation('http://localhost:5173/', 'https://example.com/'))
   check('当前地址为空 → 拦下（保守处理）', !isSelfNavigation('', 'https://example.com/'))
+
+  group('拖入文件的路径还原（file:// → 本机路径）')
+
+  eq('Windows 盘符：砍掉开头斜杠', pathFromFileUrl('file:///D:/a/b.xmind'), 'D:/a/b.xmind')
+  eq('中文与空格做百分号解码', pathFromFileUrl('file:///D:/%E6%88%90%E6%9C%AC%20a.xmind'), 'D:/成本 a.xmind')
+  /**
+   * UNC 共享盘：主机名在 `host`、pathname 只有 `/share/...`，必须拼回 `\\server\share\...`。
+   * 以前只取 pathname 再砍斜杠 → 得到相对路径 `share/a.xmind`，被当非法路径丢掉，
+   * 用户看到的是"拖共享盘上的文件没反应"。
+   */
+  {
+    const unc = pathFromFileUrl('file://nas/share/成本.xmind')
+    eq('UNC：主机名拼回去（反斜杠形式）', unc, '\\\\nas\\share\\成本.xmind')
+    check('UNC 还原出来的路径能过合法性校验（拖入链路靠它）', isPlausibleFilePath(unc))
+  }
+  // POSIX 绝对路径不能被砍成相对路径（只有盘符形式才该砍）
+  eq('POSIX 绝对路径原样保留', pathFromFileUrl('file:///home/u/a.xmind'), '/home/u/a.xmind')
+  eq('不是 file URL → null', pathFromFileUrl('https://example.com/a.xmind'), null)
+  eq('空路径 → null', pathFromFileUrl('file://'), null)
 
   group('单实例心跳：残留锁与活实例要分得清')
 

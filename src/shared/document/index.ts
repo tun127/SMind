@@ -381,3 +381,34 @@ export function splitDocument(
   const dropped = chunks.slice(chunkLimit).join('\n').length
   return { chunks: kept, droppedChars: dropped + consumed }
 }
+
+/**
+ * 把 `file://` URL 还原成本机路径；不是 file URL 就返回 null。
+ *
+ * 拖文件进窗口走的是 Chromium 的 `will-navigate`，给过来的就是这个 URL。
+ * 三种情形必须分开处理（以前只做了第一种，第二、三种都是错的）：
+ *
+ * 1. Windows 盘符 `file:///D:/a.xmind` → pathname `/D:/a.xmind`，砍掉开头斜杠得到 `D:/a.xmind`；
+ * 2. **UNC 共享盘** `file://server/share/a.xmind` → 主机名在 `host`、pathname 只有
+ *    `/share/a.xmind`。必须拼回 `\\server\share\a.xmind`：以前同样只取 pathname 再砍斜杠，
+ *    得到的是相对路径 `share/a.xmind`，被当非法路径丢掉——用户看到"拖共享盘上的文件没反应"；
+ * 3. POSIX `file:///home/u/a.xmind` → 砍掉开头斜杠就毁了绝对路径，**只有盘符形式才该砍**。
+ */
+export function pathFromFileUrl(url: string): string | null {
+  if (!url.startsWith('file://')) return null
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'file:') return null
+  const pathname = decodeURIComponent(parsed.pathname)
+  if (pathname.length === 0) return null
+  const host = parsed.hostname
+  if (host.length > 0) return `\\\\${host}${pathname.replace(/\//g, '\\')}`
+  const stripped = pathname.replace(/^\//, '')
+  // `file://` 这种没有真实路径的（pathname 只有 `/`）当作无效：返回根目录没有意义
+  if (stripped.length === 0) return null
+  return /^[A-Za-z]:[\\/]/.test(stripped) ? stripped : pathname
+}
