@@ -49,7 +49,7 @@ import { usePacedWorkbook } from '../hooks/usePacedWorkbook'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { clearFormulaCache } from '../render/formula'
 import { branchColorOf } from '../render/theme'
-import { viewportActions } from '../render/viewport'
+import { NOOP_VIEWPORT_ACTIONS, viewportActions } from '../render/viewport'
 import { attrTranslate, cssTranslate } from '../render/transform'
 import { themeColorsOf, useEditor } from '../store/editor'
 import TopicNode from './TopicNode'
@@ -598,6 +598,15 @@ export default function Canvas(): ReactElement {
     viewportActions.ensureVisible = ensureVisible
     viewportActions.centerOn = centerOn
     viewportActions.flash = flashNodes
+    /**
+     * **卸载必须复位**：`viewportActions` 是模块级单例（见 render/viewport.ts 的说明）。
+     * 画布换掉/关掉之后若还留着这里的闭包，工具栏、搜索面板、AI 面板再触发
+     * 「适应画布 / 跳到命中 / 闪一下」就是在操作一个已经不存在的画布——
+     * 那些闭包读的是旧组件的 ref 与旧 DOM。复位成空实现，最坏是"什么也不做"。
+     */
+    return () => {
+      Object.assign(viewportActions, NOOP_VIEWPORT_ACTIONS)
+    }
   }, [fit, centerRoot, zoomTo, ensureVisible, centerOn, flashNodes])
 
   /* ---- 进入编辑态时保证节点可见（新建主题可能超出视口） ---- */

@@ -22,7 +22,15 @@ export interface ViewportActions {
   flash(ids: string[]): void
 }
 
-export const viewportActions: ViewportActions = {
+/**
+ * 空实现：既是**画布挂载前**的初始值，也是**画布卸载后**的复位值。
+ *
+ * 为什么要有复位：这个对象是**模块级单例**，由 Canvas 在挂载时把自己的闭包挂上来。
+ * 卸载时若不复位，工具栏 / 搜索面板 / AI 面板再点「适应画布」「跳到命中」就会去调用
+ * 一个已经不在的画布——那些闭包读的是旧组件的 ref 与旧 DOM，轻则什么也不做，
+ * 重则在已卸载的组件上做事。空实现比"以为还能用"诚实。
+ */
+export const NOOP_VIEWPORT_ACTIONS: ViewportActions = {
   fit: () => {},
   centerRoot: () => {},
   zoomTo: () => {},
@@ -30,3 +38,5 @@ export const viewportActions: ViewportActions = {
   centerOn: () => {},
   flash: () => {}
 }
+
+export const viewportActions: ViewportActions = { ...NOOP_VIEWPORT_ACTIONS }
