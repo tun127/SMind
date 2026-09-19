@@ -13,10 +13,10 @@
  * 运行：npm run icon
  */
 
-import { deflateSync } from 'node:zlib'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pngFromRaw } from './lib/png.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(root, 'build')
@@ -301,35 +301,13 @@ function downsample(canvas, size, SS) {
 }
 
 /* ------------------------------------------------------------------ */
-/* PNG 编码                                                            */
+/* PNG 编码（CRC32 与 chunk 装订是 scripts/lib/png.mjs 的原语）          */
 /* ------------------------------------------------------------------ */
 
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256)
-  for (let n = 0; n < 256; n += 1) {
-    let c = n
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-    table[n] = c
-  }
-  return table
-})()
-
-function crc32(buffer) {
-  let c = 0xffffffff
-  for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8)
-  return (c ^ 0xffffffff) >>> 0
-}
-
-function pngChunk(type, data) {
-  const length = Buffer.alloc(4)
-  length.writeUInt32BE(data.length, 0)
-  const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
-  const crc = Buffer.alloc(4)
-  crc.writeUInt32BE(crc32(body), 0)
-  return Buffer.concat([length, body, crc])
-}
-
-/** 把 RGBA 像素编码成 PNG（真彩 + alpha，过滤器全用 0） */
+/**
+ * 把 RGBA 像素编码成 PNG（真彩 + alpha，过滤器全用 0）。
+ * 本脚本自己的策略：画布是正方形（边长即尺寸）、每行 4 字节 RGBA、颜色类型 6。
+ */
 function encodePng(rgba, size) {
   const stride = size * 4
   const raw = Buffer.alloc((stride + 1) * size)
@@ -338,21 +316,7 @@ function encodePng(rgba, size) {
     rgba.copy(raw, y * (stride + 1) + 1, y * stride, y * stride + stride)
   }
 
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(size, 0)
-  ihdr.writeUInt32BE(size, 4)
-  ihdr[8] = 8 // 位深
-  ihdr[9] = 6 // 真彩 + alpha
-  ihdr[10] = 0
-  ihdr[11] = 0
-  ihdr[12] = 0
-
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk('IHDR', ihdr),
-    pngChunk('IDAT', deflateSync(raw, { level: 9 })),
-    pngChunk('IEND', Buffer.alloc(0))
-  ])
+  return pngFromRaw({ width: size, height: size, colorType: 6, raw })
 }
 
 /* ------------------------------------------------------------------ */
