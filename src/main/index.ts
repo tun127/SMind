@@ -80,17 +80,8 @@ import { parseXmind } from '@shared/xmind/parse'
 import { serializeXmind } from '@shared/xmind/serialize'
 import { buildOutline, outlineFormatDef, type OutlineFormat } from '@shared/outline'
 import { defaultDocumentName, defaultFileName } from '@shared/model/naming'
-import type { HistoryEntry } from '@shared/history'
 import { documentKeyOf, type SnapshotItem, type SnapshotReason } from '@shared/snapshot'
-import {
-  clearAllHistory,
-  currentSaveDir,
-  listHistory,
-  recordVisit,
-  rememberSaveDir,
-  removeEntry,
-  togglePin
-} from './history'
+import { currentSaveDir, recordVisit, rememberSaveDir } from './history'
 import {
   clearSnapshotsFor,
   createSnapshot,
@@ -107,6 +98,9 @@ import { CODE_LANGUAGES } from '@shared/code-language'
 import { buildAppMenu } from './menu'
 import { checkForUpdateInteractive, startAutoUpdate } from './update'
 import { createMainContext, type DocWindow } from './context'
+import { showOpenIn, showSaveIn } from './dialogs'
+import { ensureXmindExt, firstPathOf } from './files'
+import { registerHistoryIpc } from './ipc/history'
 
 /** 应用名：与 electron-builder 的 productName、窗口标题保持一致 */
 const APP_NAME = 'SMind'
@@ -206,21 +200,6 @@ async function pruneStaleCopies(): Promise<void> {
  */
 const ctx = createMainContext()
 
-/** 对话框挂在发起窗口上（多窗口下不能只认「主窗口」） */
-async function showOpenIn(
-  win: BrowserWindow | null,
-  options: Electron.OpenDialogOptions
-): Promise<Electron.OpenDialogReturnValue> {
-  return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
-}
-
-async function showSaveIn(
-  win: BrowserWindow | null,
-  options: Electron.SaveDialogOptions
-): Promise<Electron.SaveDialogReturnValue> {
-  return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)
-}
-
 /* ------------------------------------------------------------------ */
 /* 文件读写                                                            */
 /* ------------------------------------------------------------------ */
@@ -268,22 +247,6 @@ async function writeDocument(
   await rememberSaveDir(dirname(path)).catch(() => undefined)
   await recordVisit(path, defaultDocumentName(workbook)).catch(() => undefined)
   return { path }
-}
-
-/**
- * 从「打开 / 保存对话框」的结果里取用户选中的第一个路径。
- *
- * 各处原本都写成「先判 `filePaths.length === 0`、再取 `filePaths[0]`」——
- * 逻辑没错，但取下标那一步没有类型保证，于是这段判断在每个调用点都重复了一遍。
- * 收成一个函数：判断只写一次，也不会再出现"忘了判"的新代码。
- */
-function firstPathOf(result: { canceled: boolean; filePaths: string[] }): string | null {
-  if (result.canceled) return null
-  return result.filePaths[0] ?? null
-}
-
-function ensureXmindExt(p: string): string {
-  return p.toLowerCase().endsWith('.xmind') ? p : `${p}.xmind`
 }
 
 /* ------------------------------------------------------------------ */
@@ -2051,34 +2014,7 @@ function registerIpc(): void {
   )
 
   /* ---- 历史记录与常用（P9+） ---- */
-
-  ipcMain.handle(IPC.historyList, async (): Promise<HistoryEntry[]> => listHistory())
-
-  ipcMain.handle(IPC.historyTogglePin, async (_e, path: string): Promise<HistoryEntry[]> =>
-    togglePin(path)
-  )
-
-  ipcMain.handle(IPC.historyRemove, async (_e, path: string): Promise<HistoryEntry[]> =>
-    removeEntry(path)
-  )
-
-  ipcMain.handle(IPC.historyClear, async (): Promise<HistoryEntry[]> => clearAllHistory())
-
-  ipcMain.handle(IPC.historySaveDir, async (): Promise<string> => currentSaveDir())
-
-  ipcMain.handle(IPC.historyChooseSaveDir, async (e): Promise<string | null> => {
-    const result = await showOpenIn(ctx.winOf(e.sender), {
-      title: '选择默认保存位置',
-      defaultPath: await currentSaveDir(),
-      properties: ['openDirectory', 'createDirectory']
-    })
-    const dir = firstPathOf(result)
-    return dir ? rememberSaveDir(dir) : null
-  })
-
-  ipcMain.handle(IPC.historyReveal, async (_e, path: string): Promise<void> => {
-    if (isPlausibleFilePath(path) && existsSync(path)) shell.showItemInFolder(path)
-  })
+  registerHistoryIpc(ctx)
 
   /* ---- 文档版本快照（P9+） ---- */
 
