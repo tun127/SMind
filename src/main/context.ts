@@ -1,26 +1,5 @@
 import { BrowserWindow } from 'electron'
-import type { Workbook } from '@shared/model/types'
-import { pruneSessionResources } from '@shared/model/resources'
-
-/**
- * 一个窗口可以开着**多个文档标签**（浏览器式多文件），
- * 所以资源与文档归属再往下分一层——按 docId（标签）隔离。
- *
- * 不分的话：A 标签保存时会把 B 标签的图片打进包里，A 删掉图片会把 B 的资源一起清掉。
- * 自动存档槽位与未保存确认仍然按窗口（一次只存/问激活的那个标签）。
- */
-export interface DocResources {
-  /** 这份文档携带的图片/附件资源；保存时只打自己这一份 */
-  resources: Record<string, Uint8Array>
-  /**
-   * 本次会话新插入的资源路径。
-   * 保存时只清理「新插入过、后来又被删掉」的资源，
-   * 文件里原本带着的资源一律不动（可能有本软件尚未建模的引用）。
-   */
-  inserted: Set<string>
-  /** 这份文档当前打开的文件路径（新文档＝null） */
-  docPath: string | null
-}
+import type { DocResources } from './doc-resources'
 
 export interface DocWindow {
   /** webContents.id */
@@ -58,15 +37,13 @@ export interface DocWindow {
  *    之后 `quitRequested = true` 写的是局部变量、容器里根本没变——
  *    而「退出 → 取消 → 再点 X」这条链路正是靠这个标记区分「退出整个应用」与「关一个窗口」，
  *    快照化会让窗口再也关不掉（这类 bug 之前真出现过，见 `IPC.closeCancel` 的注释）。
- * 2. 这里**只放状态**。无状态的助手（文件读写、主题读写、AI 配置读写…）走各自的模块，
+ * 2. 这里**只放状态**。无状态的助手（文档资源表、文件读写、主题读写、AI 配置读写…）走各自的模块，
  *    由 `index.ts` 与各域一起 import，不必绕道 ctx。
  */
 export interface MainContext {
   /** 窗口表（键＝webContents.id） */
   readonly windows: Map<number, DocWindow>
 
-  docOf(state: DocWindow, docId: string): DocResources
-  pruneForSave(doc: DocResources, workbook: Workbook): void
   stateOf(sender: Electron.WebContents): DocWindow | null
   focusedState(): DocWindow | null
   winOf(sender: Electron.WebContents): BrowserWindow | null
@@ -96,23 +73,6 @@ export function createMainContext(): MainContext {
   let quitRequested = false
   /** 所有窗口都确认过未保存内容，可以真正退出 */
   let quitApproved = false
-
-  /** 取（或建）某个文档的资源记录：渲染进程开新标签后第一次用到时才真正建起来 */
-  function docOf(state: DocWindow, docId: string): DocResources {
-    let doc = state.docs.get(docId)
-    if (!doc) {
-      doc = { resources: {}, inserted: new Set(), docPath: null }
-      state.docs.set(docId, doc)
-    }
-    return doc
-  }
-
-  function pruneForSave(doc: DocResources, workbook: Workbook): void {
-    const { resources, removed } = pruneSessionResources(doc.resources, doc.inserted, workbook)
-    if (removed.length === 0) return
-    doc.resources = resources
-    for (const path of removed) doc.inserted.delete(path)
-  }
 
   /** 取发起请求的窗口状态；实在拿不到就退回聚焦窗口 */
   function stateOf(sender: Electron.WebContents): DocWindow | null {
@@ -150,8 +110,6 @@ export function createMainContext(): MainContext {
 
   return {
     windows,
-    docOf,
-    pruneForSave,
     stateOf,
     focusedState,
     winOf,

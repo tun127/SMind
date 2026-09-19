@@ -100,6 +100,7 @@ import { checkForUpdateInteractive, startAutoUpdate } from './update'
 import { createMainContext, type DocWindow } from './context'
 import { showOpenIn, showSaveIn } from './dialogs'
 import { ensureXmindExt, firstPathOf } from './files'
+import { docOf, pruneForSave } from './doc-resources'
 import { registerHistoryIpc } from './ipc/history'
 
 /** 应用名：与 electron-builder 的 productName、窗口标题保持一致 */
@@ -216,7 +217,7 @@ async function readDocumentInto(
   const isCopy = Boolean(state && state.copySource && state.copySource === path)
   if (state && typeof docId === 'string') {
     // 资源记在**这个文档**名下：别的标签保存时不会把它们打进去
-    const doc = ctx.docOf(state, docId)
+    const doc = docOf(state, docId)
     doc.resources = parsed.resources
     doc.inserted.clear()
     doc.docPath = isCopy ? null : path
@@ -238,8 +239,8 @@ async function writeDocument(
   path: string,
   workbook: Workbook
 ): Promise<SaveResult> {
-  const doc = state && typeof docId === 'string' ? ctx.docOf(state, docId) : null
-  if (doc) ctx.pruneForSave(doc, workbook)
+  const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
+  if (doc) pruneForSave(doc, workbook)
   const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
   await writeFileAtomic(path, bytes)
   if (doc) doc.docPath = path
@@ -1039,7 +1040,7 @@ function registerIpc(): void {
   ipcMain.on(IPC.documentPath, (e, docId: string, path: string | null) => {
     const state = ctx.stateOf(e.sender)
     if (!state || typeof docId !== 'string') return
-    ctx.docOf(state, docId).docPath = typeof path === 'string' && path.length > 0 ? path : null
+    docOf(state, docId).docPath = typeof path === 'string' && path.length > 0 ? path : null
   })
 
   /** 释放一个文档（标签关闭）：丢掉它的资源表；自动存档槽位不归它管 */
@@ -1070,8 +1071,8 @@ function registerIpc(): void {
       if (!state) return 'failed'
       try {
         await fs.mkdir(copyDir(), { recursive: true })
-        const doc = typeof docId === 'string' ? ctx.docOf(state, docId) : null
-        if (doc) ctx.pruneForSave(doc, workbook)
+        const doc = typeof docId === 'string' ? docOf(state, docId) : null
+        if (doc) pruneForSave(doc, workbook)
         const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
         const copyPath = join(copyDir(), `${state.slot}-copy-${randomUUID()}.xmind`)
         await fs.writeFile(copyPath, Buffer.from(bytes))
@@ -1157,10 +1158,10 @@ function registerIpc(): void {
       title: string
     ): Promise<void> => {
       const state = ctx.stateOf(e.sender)
-      const doc = state && typeof docId === 'string' ? ctx.docOf(state, docId) : null
+      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
       if (!state) return
       await fs.mkdir(autosaveDir(), { recursive: true })
-      if (doc) ctx.pruneForSave(doc, workbook)
+      if (doc) pruneForSave(doc, workbook)
       const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
       // 存档也走原子写：半截的存档在恢复时会被判为损坏，等于白存一份
       await writeFileAtomic(autosaveFile(state.slot), bytes)
@@ -1222,7 +1223,7 @@ function registerIpc(): void {
       // 存档里同样带着图片/附件：不还原资源的话，恢复后一保存就全丢了。
       // 资源记到**恢复到的那份文档**名下（多标签之间互不沾染）
       if (typeof docId === 'string') {
-        const doc = ctx.docOf(state, docId)
+        const doc = docOf(state, docId)
         doc.resources = parsed.resources
         doc.inserted.clear()
         doc.docPath = meta?.originalPath ?? null
@@ -1434,7 +1435,7 @@ function registerIpc(): void {
     }
 
     if (state && typeof docId === 'string') {
-      const doc = ctx.docOf(state, docId)
+      const doc = docOf(state, docId)
       doc.resources[path] = new Uint8Array(buf)
       doc.inserted.add(path)
     }
@@ -1492,7 +1493,7 @@ function registerIpc(): void {
     const path = resourcePathFor(id, file)
     const state = ctx.stateOf(e.sender)
     if (state && typeof docId === 'string') {
-      const doc = ctx.docOf(state, docId)
+      const doc = docOf(state, docId)
       doc.resources[path] = new Uint8Array(buf)
       doc.inserted.add(path)
     }
@@ -2036,7 +2037,7 @@ function registerIpc(): void {
       }
     ): Promise<SnapshotItem[]> => {
       const state = ctx.stateOf(e.sender)
-      const doc = state && typeof docId === 'string' ? ctx.docOf(state, docId) : null
+      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
       return createSnapshot({
         workbook: input.workbook,
         // 资源留在主进程，直接取**这份文档**的那一份
@@ -2053,7 +2054,7 @@ function registerIpc(): void {
     IPC.snapshotRestore,
     async (e, docId: string, id: string): Promise<SnapshotRestoreResult> => {
       const state = ctx.stateOf(e.sender)
-      const doc = state && typeof docId === 'string' ? ctx.docOf(state, docId) : null
+      const doc = state && typeof docId === 'string' ? docOf(state, docId) : null
       /**
        * **恢复前必须校验这个版本属于当前文档**。
        *
