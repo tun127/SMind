@@ -7,9 +7,26 @@
  * 本文件同时拥有这些成员在 `EditorState` 里的**声明**（接口逐字搬来）。
  */
 
-import { type SearchOptions, type TopicFilter } from '@shared/search'
+import {
+  EMPTY_FILTER,
+  countOccurrences,
+  countTitleMatches,
+  normalizeQuery,
+  replaceInText,
+  type SearchOptions,
+  type TopicFilter
+} from '@shared/search'
+import { activeRoot, findTopic, walk } from '@shared/model/tree'
 
+import type { StateCreator } from 'zustand'
+import type { EditorState } from './types'
 import type { SearchState } from './types'
+
+const EMPTY_SEARCH: SearchState = {
+  query: '',
+  replacement: '',
+  options: { caseSensitive: false, inNotes: false, inLabels: false }
+}
 
 export interface SearchSlice {
   /** 搜索条件：面板与画布共用，保证两边看到的命中完全一致 */
@@ -33,4 +50,97 @@ export interface SearchSlice {
   clearFilter(): void
 }
 
-/** 实现（状态初值与动作）随「B1 第二步 B」的对应批次搬入；本文件此刻只有类型声明。 */
+export const createSearchSlice: StateCreator<EditorState, [], [], SearchSlice> = (set, get) => ({
+  search: { ...EMPTY_SEARCH },
+  filter: { ...EMPTY_FILTER },
+
+  /* ------------------------------------------------------------------ */
+  /* 检索与筛选                                                          */
+  /* ------------------------------------------------------------------ */
+
+  setSearchQuery: (query) => set((s) => ({ search: { ...s.search, query } })),
+
+  setSearchReplacement: (replacement) => set((s) => ({ search: { ...s.search, replacement } })),
+
+  setSearchOption: (key, value) =>
+    set((s) => ({ search: { ...s.search, options: { ...s.search.options, [key]: value } } })),
+
+  resetSearch: () => set({ search: { ...EMPTY_SEARCH } }),
+
+  replaceAllInTitles: () => {
+    const { search, workbook } = get()
+    // 与搜索用同一个归一后的关键词：否则列表有命中、替换报 0 处
+    const query = normalizeQuery(search.query)
+    if (query.length === 0) return 0
+
+    // 先按当前条件数出总处数（mutate 不返回值），再统一替换
+    const total = countTitleMatches(workbook, query, search.options)
+    if (total === 0) return 0
+
+    get().mutate((draft) => {
+      for (const sheet of draft.sheets) {
+        walk(sheet.rootTopic, (topic) => {
+          const result = replaceInText(
+            topic.title,
+            query,
+            search.replacement,
+            search.options.caseSensitive
+          )
+          if (result.count === 0) return
+          topic.title = result.text
+          // 文本长度变了，原来的富文本区间就对不上了，必须一并清掉
+          topic.titleRich = undefined
+        })
+      }
+    }, '替换全部')
+    return total
+  },
+
+  replaceInTopic: (topicId) => {
+    const { search, workbook } = get()
+    const query = normalizeQuery(search.query)
+    if (query.length === 0) return 0
+
+    const root = activeRoot(workbook)
+    const topic = findTopic(root, topicId)
+    if (!topic) return 0
+    const count = countOccurrences(topic.title, query, search.options.caseSensitive)
+    if (count === 0) return 0
+
+    get().mutate((draft) => {
+      const target = findTopic(activeRoot(draft), topicId)
+      if (!target) return
+      const result = replaceInText(
+        target.title,
+        query,
+        search.replacement,
+        search.options.caseSensitive
+      )
+      target.title = result.text
+      target.titleRich = undefined
+    }, '替换文本')
+    return count
+  },
+
+  toggleFilterMarker: (markerId) =>
+    set((s) => ({
+      filter: {
+        ...s.filter,
+        markers: s.filter.markers.includes(markerId)
+          ? s.filter.markers.filter((id) => id !== markerId)
+          : [...s.filter.markers, markerId]
+      }
+    })),
+
+  toggleFilterLabel: (label) =>
+    set((s) => ({
+      filter: {
+        ...s.filter,
+        labels: s.filter.labels.includes(label)
+          ? s.filter.labels.filter((item) => item !== label)
+          : [...s.filter.labels, label]
+      }
+    })),
+
+  clearFilter: () => set({ filter: { ...EMPTY_FILTER } })
+})

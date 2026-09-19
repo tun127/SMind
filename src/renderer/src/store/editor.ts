@@ -4,7 +4,6 @@ import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
 import { withOverlayTextStyle } from '@shared/model/overlay-style'
 import type { Workbook } from '@shared/model/types'
 import { createId, createTopic, createWorkbook } from '@shared/model/factory'
-import { countOutlineNodes, outlineToTopic } from '@shared/ai'
 import {
   appendToRich,
   hasFormatting,
@@ -12,13 +11,7 @@ import {
   plainTextOf,
   richFromPlain
 } from '@shared/richtext'
-import {
-  EMPTY_FILTER,
-  countOccurrences,
-  countTitleMatches,
-  normalizeQuery,
-  replaceInText
-} from '@shared/search'
+
 import { DEFAULT_THEME } from '@shared/theme'
 import { BLOCK_GAP, codeMinNodeSize } from '@shared/layout/accessory'
 import type { Size } from '@shared/layout/types'
@@ -39,7 +32,6 @@ import {
   isSelfOrDescendant,
   moveTopic,
   splitFoldSidesOf,
-  walk,
   withFoldedSides,
   type FoldSide
 } from '@shared/model/tree'
@@ -59,8 +51,7 @@ import {
   sameRich,
   settleAfterMove,
   stampNodeDefaults,
-  stampRichDefaults,
-  walkStampDefaults
+  stampRichDefaults
 } from '@shared/model/editor-pure'
 import {
   clampSizeToContent,
@@ -76,7 +67,7 @@ import {
   selectReducer,
   selectionAfterDelete
 } from '@shared/model/editor-ops'
-import type { EditorState, SearchState } from './slices/types'
+import type { EditorState } from './slices/types'
 import { createViewSlice } from './slices/view'
 import { NO_EDITING } from './slices/types'
 import { readPersistedViewLock } from './slices/view'
@@ -91,16 +82,12 @@ export { overlayToggleOf, themeColorsOf } from '@shared/model/editor-pure'
 
 enablePatches()
 
+import { createSearchSlice } from './slices/search'
+import { createOutlineSlice } from './slices/outline'
 const HISTORY_LIMIT = 200
 
 /** 合并窗口：同一个 coalesceKey 在此时间内的连续操作算作一步 */
 const COALESCE_WINDOW_MS = 1500
-
-const EMPTY_SEARCH: SearchState = {
-  query: '',
-  replacement: '',
-  options: { caseSensitive: false, inNotes: false, inLabels: false }
-}
 
 /**
  * 改应用设置：写进 store 并落盘。所有「默认值」入口（格式栏默认样式面板 /
@@ -119,6 +106,9 @@ export async function patchAppSettings(patch: Partial<AppSettings>): Promise<App
 
 export const useEditor = create<EditorState>()((set, get, store) => ({
   ...createViewSlice(set, get, store),
+  ...createSearchSlice(set, get, store),
+  ...createOutlineSlice(set, get, store),
+  ...createViewSlice(set, get, store),
   workbook: createWorkbook(),
   filePath: null,
   dirty: false,
@@ -129,176 +119,9 @@ export const useEditor = create<EditorState>()((set, get, store) => ({
   renderEpoch: 0,
   clipboard: null,
 
-  search: { ...EMPTY_SEARCH },
-  filter: { ...EMPTY_FILTER },
-
   undoStack: [],
   redoStack: [],
   aiTurn: null,
-
-  /* ------------------------------------------------------------------ */
-  /* 检索与筛选                                                          */
-  /* ------------------------------------------------------------------ */
-
-  setSearchQuery: (query) => set((s) => ({ search: { ...s.search, query } })),
-
-  setSearchReplacement: (replacement) => set((s) => ({ search: { ...s.search, replacement } })),
-
-  setSearchOption: (key, value) =>
-    set((s) => ({ search: { ...s.search, options: { ...s.search.options, [key]: value } } })),
-
-  resetSearch: () => set({ search: { ...EMPTY_SEARCH } }),
-
-  replaceAllInTitles: () => {
-    const { search, workbook } = get()
-    // 与搜索用同一个归一后的关键词：否则列表有命中、替换报 0 处
-    const query = normalizeQuery(search.query)
-    if (query.length === 0) return 0
-
-    // 先按当前条件数出总处数（mutate 不返回值），再统一替换
-    const total = countTitleMatches(workbook, query, search.options)
-    if (total === 0) return 0
-
-    get().mutate((draft) => {
-      for (const sheet of draft.sheets) {
-        walk(sheet.rootTopic, (topic) => {
-          const result = replaceInText(
-            topic.title,
-            query,
-            search.replacement,
-            search.options.caseSensitive
-          )
-          if (result.count === 0) return
-          topic.title = result.text
-          // 文本长度变了，原来的富文本区间就对不上了，必须一并清掉
-          topic.titleRich = undefined
-        })
-      }
-    }, '替换全部')
-    return total
-  },
-
-  replaceInTopic: (topicId) => {
-    const { search, workbook } = get()
-    const query = normalizeQuery(search.query)
-    if (query.length === 0) return 0
-
-    const root = activeRoot(workbook)
-    const topic = findTopic(root, topicId)
-    if (!topic) return 0
-    const count = countOccurrences(topic.title, query, search.options.caseSensitive)
-    if (count === 0) return 0
-
-    get().mutate((draft) => {
-      const target = findTopic(activeRoot(draft), topicId)
-      if (!target) return
-      const result = replaceInText(
-        target.title,
-        query,
-        search.replacement,
-        search.options.caseSensitive
-      )
-      target.title = result.text
-      target.titleRich = undefined
-    }, '替换文本')
-    return count
-  },
-
-  toggleFilterMarker: (markerId) =>
-    set((s) => ({
-      filter: {
-        ...s.filter,
-        markers: s.filter.markers.includes(markerId)
-          ? s.filter.markers.filter((id) => id !== markerId)
-          : [...s.filter.markers, markerId]
-      }
-    })),
-
-  toggleFilterLabel: (label) =>
-    set((s) => ({
-      filter: {
-        ...s.filter,
-        labels: s.filter.labels.includes(label)
-          ? s.filter.labels.filter((item) => item !== label)
-          : [...s.filter.labels, label]
-      }
-    })),
-
-  clearFilter: () => set({ filter: { ...EMPTY_FILTER } }),
-
-  /* ------------------------------------------------------------------ */
-  /* AI 结果落地                                                         */
-  /* ------------------------------------------------------------------ */
-
-  addChildTitles: (parentId, titles) => {
-    const cleaned = titles.map((title) => title.trim()).filter((title) => title.length > 0)
-    if (cleaned.length === 0) return 0
-
-    const created: string[] = []
-    get().mutate((draft) => {
-      const parent = findTopic(activeRoot(draft), parentId) ?? activeRoot(draft)
-      for (const title of cleaned) {
-        const node = createTopic(title)
-        stampNodeDefaults(node, get().appSettings)
-        parent.children.push(node)
-        created.push(node.id)
-      }
-      ensureExpanded(parent)
-    }, 'AI 扩写子主题')
-
-    if (created.length > 0) set({ selection: created })
-    return created.length
-  },
-
-  /**
-   * 追加若干**带格式**的子主题（粘贴 Markdown 片段用）。
-   * 与 `addChildTitles` 的区别：标题之外还能带上富文本（高亮/上下标/加粗…），
-   * 而且不进编辑态——粘贴完就能继续操作。
-   */
-  addRichChildren: (parentId, items) => {
-    const cleaned = items.filter((item) => item.title.trim().length > 0)
-    if (cleaned.length === 0) return 0
-
-    const created: string[] = []
-    get().mutate((draft) => {
-      const parent = findTopic(activeRoot(draft), parentId) ?? activeRoot(draft)
-      for (const item of cleaned) {
-        const node = createTopic(item.title.trim())
-        if (item.rich) node.titleRich = item.rich
-        stampNodeDefaults(node, get().appSettings)
-        parent.children.push(node)
-        created.push(node.id)
-      }
-      ensureExpanded(parent)
-    }, '粘贴 Markdown')
-
-    if (created.length > 0) set({ selection: created, ...NO_EDITING })
-    return created.length
-  },
-
-  applyOutlineTree: (parentId, root) => {
-    const count = countOutlineNodes(root)
-    if (count === 0) return 0
-
-    // 挂到已有主题下：根节点的文字成为新的子主题
-    const childTopic = outlineToTopic(root)
-    walkStampDefaults(childTopic, get().appSettings)
-    get().mutate((draft) => {
-      const parent = findTopic(activeRoot(draft), parentId)
-      if (!parent) return
-      parent.children.push(childTopic)
-      ensureExpanded(parent)
-    }, 'AI 生成子主题')
-    set({ selection: [childTopic.id] })
-    return count
-  },
-
-  applyDefaultsToAll: () => {
-    const settings = get().appSettings
-    get().mutate((draft) => {
-      for (const sheet of draft.sheets) walkStampDefaults(sheet.rootTopic, settings)
-    }, '应用默认样式到全部节点')
-  },
 
   /* ------------------------------------------------------------------ */
   /* 文档                                                                */

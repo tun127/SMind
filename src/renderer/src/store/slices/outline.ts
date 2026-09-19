@@ -8,7 +8,16 @@
  */
 
 import type { RichText } from '@shared/model/types'
-import { type OutlineNode } from '@shared/ai'
+import { createTopic } from '@shared/model/factory'
+import { countOutlineNodes, outlineToTopic, type OutlineNode } from '@shared/ai'
+
+import { activeRoot, ensureExpanded, findTopic } from '@shared/model/tree'
+
+import { stampNodeDefaults, walkStampDefaults } from '@shared/model/editor-pure'
+
+import type { StateCreator } from 'zustand'
+import type { EditorState } from './types'
+import { NO_EDITING } from './types'
 
 export interface OutlineSlice {
   /* ---- AI 结果落地（P8） ---- */
@@ -28,4 +37,78 @@ export interface OutlineSlice {
   applyDefaultsToAll(): void
 }
 
-/** 实现（状态初值与动作）随「B1 第二步 B」的对应批次搬入；本文件此刻只有类型声明。 */
+export const createOutlineSlice: StateCreator<EditorState, [], [], OutlineSlice> = (set, get) => ({
+  /* ------------------------------------------------------------------ */
+  /* AI 结果落地                                                         */
+  /* ------------------------------------------------------------------ */
+
+  addChildTitles: (parentId, titles) => {
+    const cleaned = titles.map((title) => title.trim()).filter((title) => title.length > 0)
+    if (cleaned.length === 0) return 0
+
+    const created: string[] = []
+    get().mutate((draft) => {
+      const parent = findTopic(activeRoot(draft), parentId) ?? activeRoot(draft)
+      for (const title of cleaned) {
+        const node = createTopic(title)
+        stampNodeDefaults(node, get().appSettings)
+        parent.children.push(node)
+        created.push(node.id)
+      }
+      ensureExpanded(parent)
+    }, 'AI 扩写子主题')
+
+    if (created.length > 0) set({ selection: created })
+    return created.length
+  },
+
+  /**
+   * 追加若干**带格式**的子主题（粘贴 Markdown 片段用）。
+   * 与 `addChildTitles` 的区别：标题之外还能带上富文本（高亮/上下标/加粗…），
+   * 而且不进编辑态——粘贴完就能继续操作。
+   */
+  addRichChildren: (parentId, items) => {
+    const cleaned = items.filter((item) => item.title.trim().length > 0)
+    if (cleaned.length === 0) return 0
+
+    const created: string[] = []
+    get().mutate((draft) => {
+      const parent = findTopic(activeRoot(draft), parentId) ?? activeRoot(draft)
+      for (const item of cleaned) {
+        const node = createTopic(item.title.trim())
+        if (item.rich) node.titleRich = item.rich
+        stampNodeDefaults(node, get().appSettings)
+        parent.children.push(node)
+        created.push(node.id)
+      }
+      ensureExpanded(parent)
+    }, '粘贴 Markdown')
+
+    if (created.length > 0) set({ selection: created, ...NO_EDITING })
+    return created.length
+  },
+
+  applyOutlineTree: (parentId, root) => {
+    const count = countOutlineNodes(root)
+    if (count === 0) return 0
+
+    // 挂到已有主题下：根节点的文字成为新的子主题
+    const childTopic = outlineToTopic(root)
+    walkStampDefaults(childTopic, get().appSettings)
+    get().mutate((draft) => {
+      const parent = findTopic(activeRoot(draft), parentId)
+      if (!parent) return
+      parent.children.push(childTopic)
+      ensureExpanded(parent)
+    }, 'AI 生成子主题')
+    set({ selection: [childTopic.id] })
+    return count
+  },
+
+  applyDefaultsToAll: () => {
+    const settings = get().appSettings
+    get().mutate((draft) => {
+      for (const sheet of draft.sheets) walkStampDefaults(sheet.rootTopic, settings)
+    }, '应用默认样式到全部节点')
+  }
+})
