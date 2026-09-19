@@ -205,8 +205,16 @@ export const ICON_ART: Record<IconName, readonly IconShape[]> = ${JSON.stringify
 `
 
 const target = path.join(root, 'src/shared/marker-art.ts')
-// 直接按项目的 Prettier 规则出格式：生成物不必再被 `format:check` 追着改一遍
-writeFileSync(target, await prettier.format(header, { filepath: target }), 'utf8')
+// 直接按项目的 Prettier 规则出格式：生成物不必再被 `format:check` 追着改一遍。
+// ⚠️ Prettier 3 的程序化调用**不会自己读配置文件**（要用 resolveConfig 显式取一次），
+// 只传 filepath 会落回默认值 `semi: true / singleQuote: false`——与仓库的 .prettierrc 相反，
+// 于是"重新生成一次"就会把 src/shared/marker-art.ts 改成另一种风格并踩红 `format:check`。
+const prettierOptions = await prettier.resolveConfig(target)
+writeFileSync(
+  target,
+  await prettier.format(header, { ...prettierOptions, filepath: target }),
+  'utf8'
+)
 console.log(`已生成 ${path.relative(root, target)}：${Object.keys(art).length} 个图形`)
 for (const [glyph, shapes] of Object.entries(art)) {
   console.log(`  ${glyph.padEnd(12)} ${shapes.length} 个图元`)
