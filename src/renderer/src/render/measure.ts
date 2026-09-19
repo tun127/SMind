@@ -5,10 +5,9 @@ import type {
   MarkerStrip,
   MeasureResult,
   MeasuredLabel,
-  MeasuredLine,
-  StyledSegment
+  MeasuredLine
 } from '@shared/layout/types'
-import type { RichText, RichTextParagraph, RichTextRun, Topic } from '@shared/model/types'
+import type { RichText, RichTextParagraph, Topic } from '@shared/model/types'
 import {
   BLOCK_GAP,
   // 指示图标行的尺寸/间距：测量、画布、导出三处共用一份（见 accessory.ts）
@@ -21,14 +20,25 @@ import {
   type Size
 } from '@shared/layout/accessory'
 import { fitLabelText } from '@shared/layout/label-fit'
-import { SCRIPT_FONT_RATIO, richFromPlain } from '@shared/richtext'
-import { splitInlineMath } from '@shared/formula'
+import { richFromPlain } from '@shared/richtext'
 import { formulaSize } from './formula'
 import { defaultTextAlignOf } from './defaults'
 import { evictOldest } from '@shared/cache'
 
-export const FONT_FAMILY =
-  '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Segoe UI", system-ui, sans-serif'
+/* ---- 子模块（A1 拆分：入口只保留同名再导出，调用点零改动） ---- */
+import {
+  FONT_FAMILY,
+  cssFontOf,
+  inlineFormulaSize,
+  widthOf,
+  type BaseStyle,
+  type ResolvedStyle
+} from './measure/text-metrics'
+import { wrapChars } from './measure/wrap'
+import { groupSegments } from './measure/segments'
+import { charsOfParagraph } from './measure/style'
+/** 公开面不动：这两个名字一直由本文件对外导出（export/svg.ts、export/raster.ts 直接引这里） */
+export { FONT_FAMILY, cssFontOf }
 
 export const NODE_FONT_SIZES = [19, 15, 14] as const
 const NODE_FONT_WEIGHTS = [700, 600, 500] as const
@@ -43,8 +53,6 @@ const PADDING_X = 14
 const PADDING_Y_ROOT = 15
 const PADDING_Y = 9
 const LINE_HEIGHT_RATIO = 1.5
-/** 项目符号的前缀，参与测量也参与渲染，保证所见即所得 */
-const BULLET_PREFIX = '•  '
 
 /* ---- 图标行与标签行的排版常量（与 styles.css 保持一致） ---- */
 const LABEL_FONT_SIZE = 11
@@ -188,43 +196,6 @@ function accessoryKey(topic: Topic): string {
   ].join('|')
 }
 
-interface BaseStyle {
-  fontSize: number
-  weight: number
-  paddingX: number
-  paddingY: number
-  maxTextWidth: number
-  minWidth: number
-}
-
-interface ResolvedStyle {
-  bold: boolean
-  italic: boolean
-  underline: boolean
-  strike: boolean
-  color?: string
-  fontSize: number
-  weight: number
-  fontFamily: string
-  highlight?: boolean
-  script?: 'super' | 'sub'
-}
-
-interface StyledChar {
-  ch: string
-  style: ResolvedStyle
-  /** 行内公式（`$…$`）：整段作为一个「原子」参与断行，宽度取 KaTeX 的实测值 */
-  formula?: string
-  /** 行内公式的实测宽高（有公式时用，避免再走单字测量） */
-  formulaWidth?: number
-  formulaHeight?: number
-}
-
-/** 行内公式的实测尺寸（拿不到 DOM 时退回估算） */
-function inlineFormulaSize(source: string, fontSize: number): Size {
-  return formulaSize(source, fontSize)
-}
-
 /**
  * 某层级的节点内边距。
  * 拉伸时的「最小尺寸」要按它算（框不能小于内容），所以对外暴露，
@@ -250,219 +221,12 @@ function baseOf(depth: number): BaseStyle {
 }
 
 /* ------------------------------------------------------------------ */
-/* Canvas 文本测量                                                     */
-/* ------------------------------------------------------------------ */
-
-let measureCtx: CanvasRenderingContext2D | null = null
-let lastFont = ''
-
-function getCtx(): CanvasRenderingContext2D {
-  if (!measureCtx) {
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('当前环境不支持 Canvas 文本测量')
-    measureCtx = ctx
-  }
-  return measureCtx
-}
-
-/**
- * 统一的字体串：粗斜体 + 字号 + 字体栈。
- *
- * **画布测量与位图导出共用这一份**：以前 `measure.ts` 与 `export/raster.ts` 各写一份，
- * 两处一旦不一致（比如一处漏了 `italic ` 的尾随空格），量出来的宽度与画出来的就不一样，
- * 表现为文字挤在一行或提前折行——而且往往只在导出图里看得见，极难定位。
- */
-export function cssFontOf(
-  size: number,
-  weight: number,
-  italic = false,
-  family = FONT_FAMILY
-): string {
-  return `${italic ? 'italic ' : ''}${weight} ${size}px ${family}`
-}
-
-function fontOf(style: ResolvedStyle): string {
-  return cssFontOf(style.fontSize, style.weight, style.italic, style.fontFamily)
-}
-
-/** 单字符宽度缓存：富文本逐字符测量时必须缓存，否则 2000 节点会明显卡顿 */
-const charWidthCache = new Map<string, number>()
-const CHAR_CACHE_LIMIT = 60000
-
-function widthOf(char: StyledChar): number {
-  if (char.formula)
-    return char.formulaWidth ?? inlineFormulaSize(char.formula, char.style.fontSize).width
-  const ch = char.ch
-  const style = char.style
-  const font = fontOf(style)
-  const key = `${font}\u0000${ch}`
-  const cached = charWidthCache.get(key)
-  if (cached !== undefined) return cached
-
-  const ctx = getCtx()
-  if (lastFont !== font) {
-    ctx.font = font
-    lastFont = font
-  }
-  const width = ctx.measureText(ch).width
-  evictOldest(charWidthCache, CHAR_CACHE_LIMIT)
-  charWidthCache.set(key, width)
-  return width
-}
-
-/* ------------------------------------------------------------------ */
 /* 断行                                                                */
 /* ------------------------------------------------------------------ */
-
-/**
- * 贪心断行，优先在空白处折行。
- * 逐字符测量而不是逐词，是因为中文没有词边界。
- */
-function wrapChars(chars: StyledChar[], maxWidth: number): StyledChar[][] {
-  if (chars.length === 0) return [[]]
-  const lines: StyledChar[][] = []
-  let start = 0
-  let index = 0
-  let width = 0
-  let lastSpace = -1
-
-  while (index < chars.length) {
-    const char = chars[index]
-    if (!char) break
-    const charWidth = widthOf(char)
-    if (width + charWidth > maxWidth && index > start) {
-      const breakAt = lastSpace > start ? lastSpace + 1 : index
-      lines.push(chars.slice(start, breakAt))
-      start = breakAt
-      // 行首空格不参与排版
-      while (start < chars.length && chars[start]?.ch === ' ') start += 1
-      index = start
-      width = 0
-      lastSpace = -1
-      continue
-    }
-    if (char.ch === ' ') lastSpace = index
-    width += charWidth
-    index += 1
-  }
-
-  if (start < chars.length) lines.push(chars.slice(start))
-  return lines.length > 0 ? lines : [[]]
-}
-
-function sameStyle(segment: StyledSegment, style: ResolvedStyle): boolean {
-  return (
-    segment.weight === style.weight &&
-    Boolean(segment.italic) === style.italic &&
-    Boolean(segment.underline) === style.underline &&
-    Boolean(segment.strike) === style.strike &&
-    Boolean(segment.highlight) === Boolean(style.highlight) &&
-    segment.script === style.script &&
-    segment.color === style.color &&
-    segment.fontSize === style.fontSize &&
-    segment.fontFamily === style.fontFamily
-  )
-}
-
-function segmentOf(text: string, style: ResolvedStyle): StyledSegment {
-  return {
-    text,
-    weight: style.weight,
-    italic: style.italic || undefined,
-    underline: style.underline || undefined,
-    strike: style.strike || undefined,
-    color: style.color,
-    fontSize: style.fontSize,
-    fontFamily: style.fontFamily,
-    highlight: style.highlight,
-    script: style.script
-  }
-}
-
-function groupSegments(chars: StyledChar[]): StyledSegment[] {
-  const segments: StyledSegment[] = []
-  for (const char of chars) {
-    // 行内公式自成一个段（不与前后文字合并，渲染时要整块交给 KaTeX）
-    if (char.formula) {
-      segments.push({ ...segmentOf(char.ch, char.style), formula: char.formula })
-      continue
-    }
-    const previous = segments[segments.length - 1]
-    if (previous && !previous.formula && sameStyle(previous, char.style)) previous.text += char.ch
-    else segments.push(segmentOf(char.ch, char.style))
-  }
-  return segments
-}
 
 /* ------------------------------------------------------------------ */
 /* 测量主流程                                                          */
 /* ------------------------------------------------------------------ */
-
-function baseResolved(base: BaseStyle): ResolvedStyle {
-  return {
-    bold: false,
-    italic: false,
-    underline: false,
-    strike: false,
-    fontSize: base.fontSize,
-    weight: base.weight,
-    fontFamily: FONT_FAMILY
-  }
-}
-
-function resolveRun(run: RichTextRun, base: BaseStyle): ResolvedStyle {
-  const bold = Boolean(run.bold)
-  const raw = run.fontSize && run.fontSize > 0 ? run.fontSize : base.fontSize
-  return {
-    bold,
-    italic: Boolean(run.italic),
-    underline: Boolean(run.underline),
-    strike: Boolean(run.strike),
-    // 上下标按比例缩小字号参与排版：渲染端直接画这个字号，只是再上下偏移
-    fontSize: run.script ? Math.max(8, Math.round(raw * SCRIPT_FONT_RATIO)) : raw,
-    weight: bold ? Math.max(base.weight, 700) : base.weight,
-    fontFamily: run.fontFamily && run.fontFamily.length > 0 ? run.fontFamily : FONT_FAMILY,
-    highlight: run.highlight || undefined,
-    script: run.script,
-    /**
-     * 字体颜色必须**带进测量结果**：画布不是画 tiptap 的 DOM，而是按
-     * `node.lines[].segments` 自己渲染（`segmentStyle` 直接用 `segment.color`）。
-     * 这里以前漏了这一行，于是 `segmentOf` 写出的永远是 `color: undefined`——
-     * 表现就是用户报的：「编辑态里颜色是对的，Enter 一提交就恢复黑色」
-     * （编辑态是 tiptap 在渲染，只有它认识这个颜色），导出 SVG/PNG 同样丢色。
-     * 没显式颜色的 run 保持 undefined，好让 DOM 继承主题的节点文字颜色。
-     */
-    color: run.color || undefined
-  }
-}
-
-function charsOfParagraph(paragraph: RichTextParagraph, base: BaseStyle): StyledChar[] {
-  const chars: StyledChar[] = []
-  if (paragraph.bullet) {
-    const style = baseResolved(base)
-    for (const ch of BULLET_PREFIX) chars.push({ ch, style })
-  }
-  for (const run of paragraph.runs) {
-    const style = resolveRun(run, base)
-    // 行内公式（`$…$`）拆成独立的「原子块」，宽度按 KaTeX 实测
-    for (const segment of splitInlineMath(run.text)) {
-      if (segment.formula) {
-        const size = inlineFormulaSize(segment.formula, style.fontSize)
-        chars.push({
-          ch: `$${segment.formula}$`,
-          style,
-          formula: segment.formula,
-          formulaWidth: size.width,
-          formulaHeight: size.height
-        })
-        continue
-      }
-      for (const ch of segment.text ?? '') chars.push({ ch, style })
-    }
-  }
-  return chars
-}
 
 function compute(topic: Topic, depth: number): MeasureResult {
   const base = baseOf(depth)
