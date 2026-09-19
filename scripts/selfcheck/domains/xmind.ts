@@ -15,6 +15,8 @@
  * 运行：npm run selfcheck
  */
 import { defaultTextAlignOf, setDefaultTextAlign } from '../../../src/renderer/src/render/defaults'
+import { DEFAULT_APP_SETTINGS } from '../../../src/shared/ipc'
+import { baseNameOf } from '../../../src/shared/model/path-text'
 
 import { activeRoot, activeSheet, countTopics, findTopic } from '../../../src/shared/model/tree'
 
@@ -528,6 +530,8 @@ export async function testMediaElements(): Promise<void> {
 
   group('默认对齐：渲染兜底值')
 
+  // 渲染层兜底值与设置项默认值**同源**：改一处另一处跟着变，不会再各自写死一个 'center'
+  eq('渲染兜底值＝设置项默认值', defaultTextAlignOf(), DEFAULT_APP_SETTINGS.defaultAlign)
   eq('初始默认是居中', defaultTextAlignOf(), 'center')
   setDefaultTextAlign('left')
   eq('设置后立即生效', defaultTextAlignOf(), 'left')
@@ -916,6 +920,13 @@ export async function testMediaElements(): Promise<void> {
   eq('jpg 的 MIME', mimeOfPath('resources/a.jpeg'), 'image/jpeg')
   eq('未知扩展名给通用类型', mimeOfPath('resources/a.zzz'), 'application/octet-stream')
   eq('无扩展名给通用类型', mimeOfPath('resources/abc'), 'application/octet-stream')
+
+  // baseNameOf 是「从整条路径取最后一段」的唯一原语；空串 / 尾分隔符 / 空输入的策略留在调用点
+  eq('取最后一段（反斜杠）', baseNameOf('C:\\Users\\me\\图片\\照片.png'), '照片.png')
+  eq('取最后一段（正斜杠）', baseNameOf('a/b/c.pdf'), 'c.pdf')
+  eq('没有分隔符时返回它自己', baseNameOf('照片.png'), '照片.png')
+  eq('尾分隔符给出空串（回退策略由调用点决定）', baseNameOf('C:\\docs\\'), '')
+  eq('空路径给出空串', baseNameOf(''), '')
 
   const packPath = resourcePathFor('img-abc', '照片.png')
   check('资源路径带 id 前缀并落在 resources/', packPath === 'resources/img-abc-照片.png', packPath)

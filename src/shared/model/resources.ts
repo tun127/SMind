@@ -6,6 +6,7 @@
  */
 
 import type { Topic, Workbook } from './types'
+import { baseNameOf } from './path-text'
 
 /**
  * 包内资源目录前缀：**唯一来源**。
@@ -64,7 +65,7 @@ export function pruneSessionResources(
 
 /** 去掉路径里的目录部分与不安全字符，得到可放进 resources/ 的文件名 */
 export function safeResourceName(name: string): string {
-  const base = name.split(/[\\/]/).pop() ?? ''
+  const base = baseNameOf(name)
   const cleaned = base
     .replace(/[\u0000-\u001f<>:"|?*]/g, '_')
     .replace(/^\.+/, '')
@@ -90,7 +91,7 @@ const MIME_BY_EXT: Record<string, string> = {
 }
 
 export function extensionOf(path: string): string {
-  const base = path.split(/[\\/]/).pop() ?? ''
+  const base = baseNameOf(path)
   const dot = base.lastIndexOf('.')
   return dot >= 0 ? base.slice(dot + 1).toLowerCase() : ''
 }

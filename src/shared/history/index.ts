@@ -9,6 +9,7 @@
  */
 
 import { isRecord } from '../guards'
+import { baseNameOf } from '../model/path-text'
 
 export interface HistoryEntry {
   /** 绝对路径 */
@@ -69,7 +70,7 @@ export function normalizeHistory(raw: unknown): HistoryFile {
     const rawName = typeof item.name === 'string' ? item.name.trim() : ''
     entries.push({
       path,
-      name: rawName.length > 0 ? rawName : (path.split(/[\\/]/).pop() ?? path),
+      name: rawName.length > 0 ? rawName : baseNameOf(path),
       title: typeof item.title === 'string' ? item.title.trim() : '',
       openedAt:
         typeof item.openedAt === 'number' && Number.isFinite(item.openedAt) ? item.openedAt : 0,
@@ -101,7 +102,7 @@ export function recordVisit(
 
   const at = visit.at ?? Date.now()
   const rawName = visit.name?.trim() ?? ''
-  const name = rawName.length > 0 ? rawName : (path.split(/[\\/]/).pop() ?? path)
+  const name = rawName.length > 0 ? rawName : baseNameOf(path)
   const rawTitle = visit.title?.trim() ?? ''
   const existing = file.entries.find((entry) => entry.path.toLowerCase() === path.toLowerCase())
 

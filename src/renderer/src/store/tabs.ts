@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { sameDocPath } from '@shared/window'
 import { defaultDocumentName } from '@shared/model/naming'
+import { baseNameOf } from '@shared/model/path-text'
 import type { EditorState } from './editor'
 import { useEditor } from './editor'
 
@@ -121,8 +122,7 @@ function commitEditing(): void {
 /** 标签上显示的名字：有文件用文件名，没有用中心主题名 */
 export function tabTitleOf(tab: Pick<DocTab, 'filePath' | 'workbook'>): string {
   if (tab.filePath) {
-    const parts = tab.filePath.split(/[\\/]/)
-    const name = parts[parts.length - 1]
+    const name = baseNameOf(tab.filePath)
     if (name) return name
   }
   return defaultDocumentName(tab.workbook)
