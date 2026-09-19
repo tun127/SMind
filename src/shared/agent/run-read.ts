@@ -6,9 +6,9 @@
  */
 import type { Sheet, Topic } from '../model/types'
 import { countHiddenNodes, findTopic, foldedSidesOf, titlePathOf, walk } from '../model/tree'
-import { isRecord } from '../guards'
 import { parseRange } from '../layout'
 import { MARKER_LABELS } from '../xmind/constants'
+import { parseToolArguments } from './args'
 import { FOLD_SIDE_LABELS } from './write-intents'
 import { resolveTopicAddress, shortHandleOf, topicPathOf } from './address'
 
@@ -190,24 +190,19 @@ export function intArg(
  * 而模型看到「没找到 X，标题里包含它的是 Y」才能自我纠正。
  */
 function executeReadTool(name: string, argumentsText: string, context: ToolContext): ToolResult {
-  let args: Record<string, unknown> = {}
-  const trimmed = argumentsText.trim()
-  if (trimmed.length > 0) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(trimmed)
-    } catch (error) {
-      return {
-        ok: false,
-        content: `参数不是合法 JSON（${(error as Error).message}）。请重新调用 ${name} 并传入合法参数。`,
-        summary: `${name}：参数错误`
-      }
+  const parsedArgs = parseToolArguments(argumentsText)
+  if (!parsedArgs.ok) {
+    // 文案与收敛前逐字一致：读侧带上工具名
+    return {
+      ok: false,
+      content:
+        parsedArgs.kind === 'not-json'
+          ? `参数不是合法 JSON（${parsedArgs.message}）。请重新调用 ${name} 并传入合法参数。`
+          : '参数必须是 JSON 对象。',
+      summary: `${name}：参数错误`
     }
-    if (!isRecord(parsed)) {
-      return { ok: false, content: '参数必须是 JSON 对象。', summary: `${name}：参数错误` }
-    }
-    args = parsed
   }
+  const args: Record<string, unknown> = parsedArgs.args
 
   if (name === 'getSelection') {
     const id = context.selectedId

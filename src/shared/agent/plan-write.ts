@@ -11,6 +11,7 @@ import { isRecord } from '../guards'
 import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { MARKER_LABELS, STRUCTURES, markerGroupOf } from '../xmind/constants'
 import { resolveTopicAddress } from './address'
+import { parseToolArguments } from './args'
 import { duplicateGroups, normalizeTopicTitle, stringArg } from './run-read'
 import {
   ATTACHMENT_LABEL,
@@ -33,18 +34,16 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
     summary: `${name}：${error.length > 30 ? `${error.slice(0, 30)}…` : error}`
   })
 
-  let args: Record<string, unknown> = {}
-  const trimmed = argumentsText.trim()
-  if (trimmed.length > 0) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(trimmed)
-    } catch (error) {
-      return fail(`参数不是合法 JSON（${(error as Error).message}）。请重新调用并传入合法参数。`)
-    }
-    if (!isRecord(parsed)) return fail('参数必须是 JSON 对象。')
-    args = parsed
+  const parsedArgs = parseToolArguments(argumentsText)
+  if (!parsedArgs.ok) {
+    // 文案与收敛前逐字一致：写侧只说"请重新调用"，不带工具名
+    return fail(
+      parsedArgs.kind === 'not-json'
+        ? `参数不是合法 JSON（${parsedArgs.message}）。请重新调用并传入合法参数。`
+        : '参数必须是 JSON 对象。'
+    )
   }
+  const args: Record<string, unknown> = parsedArgs.args
 
   /** 解析 address 并给出「找到的那个节点」 */
   const resolve = (key: string): { topic: Topic } | { problem: WritePlan } => {
