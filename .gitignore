@@ -17,6 +17,8 @@ lint.json
 # 若要把它们纳入版本管理（比如放私有仓库），删掉这一行即可。
 commercialization/
 .dsh-meow
+# AgentTeams 的运行期状态目录（团队成员邮箱/任务快照）：属于本机运行态，不进版本库
+.agent-teams
 # 许可签发的私钥：永远不进仓库（默认落在仓库之外，这里是第二道保险）
 license-private.pem
 *.license-key
