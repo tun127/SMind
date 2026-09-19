@@ -1,12 +1,4 @@
-import {
-  memo,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
-  type ReactElement
-} from 'react'
-import type { LayoutResult, NodeLayout, StyledSegment } from '@shared/layout/types'
+import { memo, useMemo, useState, type CSSProperties, type ReactElement } from 'react'
 import { collapseBadgeSide } from '@shared/layout/core'
 import {
   BLOCK_GAP,
@@ -21,7 +13,6 @@ import {
 import { nodePaddingOf } from '../render/measure'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import { CODE_TOKEN_COLORS, highlightCode } from '@shared/code/highlight'
-import { HIGHLIGHT_BG } from '@shared/richtext'
 import {
   countDescendants,
   foldedSidesOf,
@@ -31,7 +22,6 @@ import {
 } from '@shared/model/tree'
 import { useEditor } from '../store/editor'
 import { count, isDiagArmed, noteAmount } from '../dev/stage'
-import type { RichText, ThemeColors } from '@shared/model/types'
 import { richFromPlain } from '@shared/richtext'
 import { formulaHtml, formulaSize } from '../render/formula'
 import { resourceUrl } from '../render/resource'
@@ -39,64 +29,10 @@ import { branchColorOf, visualFor } from '../render/theme'
 import MarkerIcon, { IndicatorIcon } from './MarkerIcon'
 import RichTextEditor from './RichTextEditor'
 
-export interface TopicNodeProps {
-  node: NodeLayout
-  layout: LayoutResult
-  colors: ThemeColors
-  selected: boolean
-  editing: boolean
-  editingRich: RichText | null
-  /**
-   * 落点高亮：
-   * - `child`：松手后成为它的子主题（绿色虚线）；
-   * - `sibling`：松手后插到它前面 / 后面（蓝色虚线）——只标**参照的那个主题本身**。
-   *   绝不标它的父级：把父级框出来会让用户误以为"要落到父级上"（尤其父级是中心主题时）。
-   */
-  highlight: 'child' | 'sibling' | null
-  /** 命中当前搜索关键词 */
-  searchHit: boolean
-  /**
-   * 框选中「**将要**被选中」（还没松手）。
-   * 先亮起来，用户不用等松手才知道圈到了谁。
-   */
-  marqueeHit: boolean
-  /** AI 刚改过这个节点：闪一下（「直接操作」的信任全靠事后看得见） */
-  flash: boolean
-  /**
-   * 淡出显示：`true` = 被筛选排除（很淡）；`'soft'` = 拖拽时的无关枝叶（轻淡，
-   * 仍看得见用来定位）。两者共用一条通路，避免再开一套状态。
-   */
-  dimmed: boolean | 'soft'
-  dragOffset: { dx: number; dy: number } | null
-  /** 是否是「手里正抓着的那一个」（它随之移动的后代不算），用于区分抬起的手感 */
-  dragPrimary: boolean
-  /** 正被拖着（含跟着走的子树）。拖动中不再显示落点高亮，免得和"抓着的东西"打架 */
-  dragged: boolean
-  /**
-   * 是否可拖动。中心主题是整张图的锚点，不能拖走，
-   * 所以它不显示「抓取」光标——光标本身就是最省事的操作提示。
-   */
-  draggable: boolean
-  onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, id: string) => void
-  onDoubleClick: (id: string) => void
-  onRichChange: (id: string, rich: RichText) => void
-  onCancelEdit: () => void
-  /** 提交编辑并退出（编辑中按 Enter）——只退出，不新建 */
-  onCommitEdit: () => void
-  onCommitAndAddChild: () => void
-  onCommitAndAddSibling: () => void
-  /**
-   * 空主题里按方向键：交给上层「提交本次编辑 + 移动选择」。
-   * 不做这件事的话，刚建出来的空节点上按方向键会"像失灵一样"毫无反应。
-   */
-  onNavigateEdit: (key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight') => void
-  onToggleCollapse: (id: string) => void
-  /**
-   * 平衡思维导图的中心主题：按侧收起 / 展开（左右各一根徽标）。
-   * 其余节点走 `onToggleCollapse`（整体收起）。
-   */
-  onToggleFoldSide: (id: string, side: FoldSide) => void
-}
+/* ---- A3 拆分：props 契约与行内样式函数搬进 ./topic/，入口保留同名再导出 ---- */
+import type { TopicNodeProps } from './topic/props'
+import { segmentStyle } from './topic/segment-style'
+export type { TopicNodeProps } from './topic/props'
 
 /** 按侧收起时的方向名（徽标文案与提示用） */
 const FOLD_SIDE_LABELS: Record<FoldSide, string> = {
@@ -104,31 +40,6 @@ const FOLD_SIDE_LABELS: Record<FoldSide, string> = {
   right: '右',
   up: '上',
   down: '下'
-}
-
-function segmentStyle(segment: StyledSegment): CSSProperties {
-  const decoration = [segment.underline ? 'underline' : '', segment.strike ? 'line-through' : '']
-    .filter(Boolean)
-    .join(' ')
-  const style: CSSProperties = {
-    fontWeight: segment.weight,
-    fontSize: segment.fontSize
-  }
-  if (segment.italic) style.fontStyle = 'italic'
-  if (decoration) style.textDecoration = decoration
-  if (segment.color) style.color = segment.color
-  if (segment.fontFamily) style.fontFamily = segment.fontFamily
-  // 高亮：底色（与自检里的 HIGHLIGHT_BG 一致，导出也用同一份颜色）
-  if (segment.highlight) {
-    style.background = HIGHLIGHT_BG
-    style.borderRadius = 2
-  }
-  // 上下标：字号已经在测量里缩小过，这里只做上下偏移（line-height: 1 避免把行高撑开）
-  if (segment.script === 'super' || segment.script === 'sub') {
-    style.verticalAlign = segment.script === 'super' ? 'super' : 'sub'
-    style.lineHeight = 1
-  }
-  return style
 }
 
 function TopicNodeInner({
