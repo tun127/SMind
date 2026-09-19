@@ -1,14 +1,23 @@
 appId: com.smind.local
 productName: SMind
 # ---- 自动更新（electron-updater）----
-# 更新渠道 = GitHub Releases（与开源发布是同一个地方）。
-# 仓库已定（tun127/SMind），发布产物时 electron-builder 会顺带生成 latest.yml——
-# 把它和 exe 一起传到 Release，客户端「检查更新」即可用。
+# **更新源 = 自己的镜像（generic provider）**，不是 GitHub API。
+#
+# 为什么换掉 github provider（实测依据）：它走 GitHub API，匿名额度 60 次/小时/**IP**，
+# 国内共享出口 IP 实测已返回 403 `API rate limit exceeded`——而更新检查**失败是静默的**，
+# 失效了你根本不会知道。generic provider 只是对一个 URL 做 GET，指向 Cloudflare R2
+# （无 API、无速率限制、国内快），稳定性完全在自己手里。
+#
+# ⚠️ 两个前提，缺一个更新链路就不通：
+#   1. `npm run mirror` 必须把 **latest.yml + *.blockmap** 一起传上去（脚本已支持，缺了会打警告）；
+#   2. Release 正文写清这版改了什么（latest.yml 的 releaseNotes 会显示在「发现新版本」对话框里）。
+# 若某次要临时回到 GitHub：把下面两行换成
+#   provider: github / owner: tun127 / repo: SMind
+# 即可——客户端不用改，electron-updater 原生支持两种 provider（配置由打包时生成的
+# app-update.yml 决定，所以**改了这里必须重新打包**才会生效）。
 publish:
-  provider: github
-  owner: tun127
-  repo: SMind
-  releaseType: release
+  provider: generic
+  url: https://dl.smindapp.cn/
 # ---- 代码签名（Azure Trusted Signing，商业化计划选定的方案）----
 # 证书开通后设三个环境变量再打包即可，**不用改这份文件**：
 #   AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET

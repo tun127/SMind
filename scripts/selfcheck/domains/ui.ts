@@ -47,6 +47,11 @@ import {
   MAX_IMAGE_BYTES
 } from '../../../src/shared/ipc-args'
 import { isInstanceAlive, isSelfNavigation } from '../../../src/shared/guards'
+import {
+  isPortableBuild,
+  shouldRecheck,
+  UPDATE_RECHECK_INTERVAL_MS
+} from '../../../src/shared/update-policy'
 import { writeFileAtomic, writeJsonAtomic } from '../../../src/main/atomic-write'
 
 import { evictOldest } from '../../../src/shared/cache'
@@ -140,6 +145,28 @@ import {
 export async function testSafetyHelpers(): Promise<void> {
   /** 对象比较统一转 JSON 串，避免依赖断言器的深比较行为 */
   const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined'
+
+  group('自动更新策略（免安装版与复查节奏）')
+
+  // 免安装版**不能**自更新：它把自己解压到临时目录再启动，装进去的新版下次启动就没了（A4）
+  eq('普通安装版：不拦', isPortableBuild({}), false)
+  eq(
+    '免安装版：命中标记（electron-builder 的 portable target 注入）',
+    isPortableBuild({ PORTABLE_EXECUTABLE_FILE: 'D:/SMind-0.9.1-x64-portable.exe' }),
+    true
+  )
+  eq('标记是空串 → 不算（防误判）', isPortableBuild({ PORTABLE_EXECUTABLE_FILE: '' }), false)
+
+  // 长期开着的窗口：重新获得焦点、且距上次检查够久才再查一次（A5）
+  eq('还没查过 → 该查', shouldRecheck(null, 1_000), true)
+  eq('刚查过 → 不查', shouldRecheck(1_000, 1_000 + 60_000), false)
+  eq(
+    '差一分钟到间隔 → 不查',
+    shouldRecheck(1_000, 1_000 + UPDATE_RECHECK_INTERVAL_MS - 60_000),
+    false
+  )
+  eq('正好到间隔 → 查', shouldRecheck(1_000, 1_000 + UPDATE_RECHECK_INTERVAL_MS), true)
+  eq('隔了一整天 → 查', shouldRecheck(1_000, 1_000 + 24 * 60 * 60 * 1000), true)
 
   group('原子写文件')
 
