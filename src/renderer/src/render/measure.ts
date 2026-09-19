@@ -14,6 +14,12 @@ import {
   ACCESSORY_ICON_GAP as ICON_GAP,
   ACCESSORY_ICON_SIZE as ICON_SIZE,
   ACCESSORY_ROW_GAP as ROW_GAP,
+  // 标签行的排版常量同理（E1 收敛：以前测量与导出各写一份，导出那份字号还是裸的 11）
+  LABEL_FONT_SIZE,
+  LABEL_GAP,
+  LABEL_HEIGHT,
+  LABEL_MAX_WIDTH,
+  LABEL_PADDING_X,
   codeBlockMetrics,
   imageBoxSize,
   markerStripSize,
@@ -53,13 +59,6 @@ const PADDING_X = 14
 const PADDING_Y_ROOT = 15
 const PADDING_Y = 9
 const LINE_HEIGHT_RATIO = 1.5
-
-/* ---- 图标行与标签行的排版常量（与 styles.css 保持一致） ---- */
-const LABEL_FONT_SIZE = 11
-const LABEL_HEIGHT = 18
-const LABEL_PADDING_X = 7
-const LABEL_GAP = 4
-const LABEL_MAX_WIDTH = 170
 
 /** 一行放不下时换行，返回需要几行 */
 function rowCount(widths: number[], gap: number, maxWidth: number): number {

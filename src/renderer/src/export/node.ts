@@ -18,6 +18,10 @@ import {
   MARKER_PER_COLUMN,
   MARKER_SIZE,
   MARKER_STRIP_GAP,
+  // 标签行的排版常量与测量共用一份（E1 收敛，见 accessory.ts）
+  LABEL_FONT_SIZE,
+  LABEL_GAP,
+  LABEL_HEIGHT,
   imageBoxSize
 } from '@shared/layout/accessory'
 import type { ThemeColors, Topic } from '@shared/model/types'
@@ -29,9 +33,6 @@ import { markerVisualOf } from '../render/markers'
 import { INDICATOR_OPACITY, INDICATOR_STROKE_WIDTH, type IconName } from '@shared/marker-art'
 import { branchColorOf, visualFor } from '../render/theme'
 import type { BuildDrawingInput, DrawOp } from './ops'
-
-const LABEL_GAP = 4
-const LABEL_HEIGHT = 18
 
 /** 图片资源缺失时的占位提示：文案、字号与颜色都对齐画布 `.topic__image-missing` */
 const MISSING_IMAGE_LABEL = '图片缺失'
@@ -439,7 +440,7 @@ export function nodeOps(
         x: x + label.width / 2,
         y: y + LABEL_HEIGHT / 2,
         text: label.text,
-        fontSize: 11,
+        fontSize: LABEL_FONT_SIZE,
         fontWeight: 600,
         fill: visual.color,
         anchor: 'middle',
