@@ -103,6 +103,13 @@ export function notesHtmlFrom(text: string): string {
  * 用途：把 Markdown 行内语法**粘贴进节点**时，先转成 HTML 再交给编辑器，
  * 编辑器（TipTap）会按自己的 schema 解析成带 mark 的文本。
  * 与编辑器里注册的 mark 名字一一对应（mark/strong/em/s/code/sup/sub）。
+ *
+ * ⚠️ 参数类型与真实模型**不完全一致**：这里的 `mono?: boolean` 在 `RichTextRun`
+ * （`model/types.ts`）里并不存在——代码库里"等宽"的唯一表示是 `fontFamily`
+ * （`import/markdown.ts` 写入、`outline/index.ts` 用 `/mono/i` 嗅探）。也就是说
+ * `<code>` 那条分支**不可能被真实的 `RichTextRun` 触发**，它只服务调用方现造的临时对象
+ * （自检就是这么用的）。审计建议删掉这个函数，但**自检里有断言在用它**，故保留；
+ * 哪天真要走到 `<code>`，先把类型对齐到 `fontFamily` 口径，别再凭空多一个 `mono`。
  */
 export function runsToHtml(
   runs: Array<{
