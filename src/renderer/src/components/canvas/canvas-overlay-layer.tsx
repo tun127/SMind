@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import type { LayoutResult } from '@shared/layout/types'
+import { OVERLAY_TITLE_DEFAULTS } from '@shared/model/overlay-style'
 import type { ThemeColors } from '@shared/model/types'
 import { branchColorOf } from '../../render/theme'
 import type { EditorState } from '../../store/editor'
@@ -115,7 +116,7 @@ export function CanvasOverlayLayer({
                   className="overlay-title"
                   x={relationship.label.x}
                   y={relationship.label.y}
-                  fontSize={12}
+                  fontSize={OVERLAY_TITLE_DEFAULTS.relationship.fontSize}
                   fontWeight={600}
                   fill={color}
                   textAnchor="middle"

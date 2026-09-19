@@ -24,6 +24,28 @@ export interface OverlayTextStyle {
 export type OverlayKind = 'summary' | 'boundary' | 'relationship'
 
 /**
+ * 标题的**默认样式**：唯一来源。
+ *
+ * 同一组数字此前散在四处，且写法不同：
+ *   - 布局按常量预留白（`layout/overlays/metrics.ts` 的 `*_FONT_SIZE`）；
+ *   - 画布绘制、导出绘制各写一份字面量（`{ fontSize: 12, bold: true }` / `{ fontSize: 13, … }`）；
+ *   - 属性面板再写一份同款三元表达式。
+ * 四处一致纯属巧合：改一处就会出现「留出来的白」与「画出来的字」不匹配
+ * （概要是括号外那块留白 + 160px 的估算宽度，字号一漂移就压邻居或者留一大块空）。
+ *
+ * 所以数字只在这里写一次：`metrics.ts` 的字号常量由本表派生（名字保留，调用点零改动），
+ * 画布 / 导出 / 面板直接取表里的值当 `readOverlayTextStyle` 的兜底。
+ * `relationship` 的 `bold` 目前只有面板读（画布与导出给关系线标题用的是硬编码 600 字重）。
+ */
+export const OVERLAY_TITLE_DEFAULTS: Readonly<
+  Record<OverlayKind, { fontSize: number; bold: boolean }>
+> = {
+  summary: { fontSize: 13, bold: true },
+  boundary: { fontSize: 12, bold: true },
+  relationship: { fontSize: 12, bold: true }
+}
+
+/**
  * 样式改动。
  *
  * 显式给 `undefined` 表示「恢复元素默认」——对应属性键会被删掉；

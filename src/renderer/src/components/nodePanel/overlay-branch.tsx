@@ -9,7 +9,11 @@
 import { Bold, Eraser, Italic, X } from 'lucide-react'
 import type { ReactElement } from 'react'
 import { activeSheet } from '@shared/model/tree'
-import { readOverlayTextStyle, type OverlayKind } from '@shared/model/overlay-style'
+import {
+  OVERLAY_TITLE_DEFAULTS,
+  readOverlayTextStyle,
+  type OverlayKind
+} from '@shared/model/overlay-style'
 import { useEditor } from '../../store/editor'
 import { PanelHeader } from './panel-parts'
 
@@ -49,10 +53,7 @@ export default function OverlayBranch({
 
   const kind: OverlayKind = selectedOverlay.kind
   const label = kind === 'summary' ? '概要' : kind === 'boundary' ? '边界' : '关系线'
-  const styleText = readOverlayTextStyle(
-    overlayItem.style,
-    kind === 'summary' ? { fontSize: 13, bold: true } : { fontSize: 12, bold: true }
-  )
+  const styleText = readOverlayTextStyle(overlayItem.style, OVERLAY_TITLE_DEFAULTS[kind])
   const setTitle =
     kind === 'summary'
       ? setSummaryTitle

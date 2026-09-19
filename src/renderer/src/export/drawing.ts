@@ -12,7 +12,7 @@
  */
 
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
-import { readOverlayTextStyle } from '@shared/model/overlay-style'
+import { readOverlayTextStyle, OVERLAY_TITLE_DEFAULTS } from '@shared/model/overlay-style'
 import { branchColorOf } from '../render/theme'
 
 /* ---- A2 拆分：类型与节点绘制搬进子模块；入口保留同名再导出，调用点零改动 ---- */
@@ -71,7 +71,7 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
         strokeOpacity: 0.6
       })
       if (boundary.title) {
-        const boundaryStyle = readOverlayTextStyle(boundary.style, { fontSize: 12, bold: true })
+        const boundaryStyle = readOverlayTextStyle(boundary.style, OVERLAY_TITLE_DEFAULTS.boundary)
         ops.push({
           kind: 'text',
           x: boundary.label.x,
@@ -102,7 +102,7 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
       if (summary.title) {
         // 多行标题逐行画，整体以 label.y 为中线居中（与画布上的 tspan 排法一致）
         const lines = overlayTitleLines(summary.title)
-        const textStyle = readOverlayTextStyle(summary.style, { fontSize: 13, bold: true })
+        const textStyle = readOverlayTextStyle(summary.style, OVERLAY_TITLE_DEFAULTS.summary)
         const startY = summary.label.y - ((lines.length - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2
         lines.forEach((line, index) => {
           if (line.length === 0) return
@@ -148,7 +148,7 @@ export function buildDrawing(input: BuildDrawingInput): Drawing {
           x: relationship.label.x,
           y: relationship.label.y,
           text: relationship.title,
-          fontSize: 12,
+          fontSize: OVERLAY_TITLE_DEFAULTS.relationship.fontSize,
           fontWeight: 600,
           fill: color,
           anchor: 'middle',

@@ -1,7 +1,7 @@
 import type { PointerEvent as ReactPointerEvent, ReactElement, RefObject } from 'react'
 import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
 import type { LayoutResult } from '@shared/layout/types'
-import { readOverlayTextStyle } from '@shared/model/overlay-style'
+import { OVERLAY_TITLE_DEFAULTS, readOverlayTextStyle } from '@shared/model/overlay-style'
 import type { ThemeColors } from '@shared/model/types'
 import { branchColorOf } from '../../render/theme'
 import type { EditorState } from '../../store/editor'
@@ -148,7 +148,7 @@ export function CanvasEdgesLayer({
 
         {/* 边界标题单独画，保证文字在填充之上 */}
         {layout.boundaries.map((boundary) => {
-          const boundaryText = readOverlayTextStyle(boundary.style, { fontSize: 12, bold: true })
+          const boundaryText = readOverlayTextStyle(boundary.style, OVERLAY_TITLE_DEFAULTS.boundary)
           return boundary.title ? (
             <text
               key={`boundary-title-${boundary.id}`}
@@ -197,7 +197,7 @@ export function CanvasEdgesLayer({
           const color = summary.branchId
             ? branchColorOf(colors, layout, summary.branchId)
             : colors.deepText
-          const text = readOverlayTextStyle(summary.style, { fontSize: 13, bold: true })
+          const text = readOverlayTextStyle(summary.style, OVERLAY_TITLE_DEFAULTS.summary)
           const selected = selectedOverlay?.kind === 'summary' && selectedOverlay.id === summary.id
           const labelSize = summary.labelSize ?? { width: 48, height: OVERLAY_TITLE_LINE_HEIGHT }
           const labelLeft =
