@@ -5,7 +5,7 @@
  * 这里的字体、行宽测量与画布测量用同一套字体栈，导出的文字不会跑位。
  */
 
-import { FONT_FAMILY } from '../render/measure'
+import { cssFontOf } from '../render/measure'
 import { HIGHLIGHT_BG } from '@shared/richtext'
 import { ICON_ART, ICON_VIEWBOX, MARKER_STROKE_WIDTH, type IconShape } from '@shared/marker-art'
 import type { Drawing, DrawOp, LineTextOp } from './drawing'
@@ -61,10 +61,7 @@ function traceIconShape(ctx: CanvasRenderingContext2D, shape: IconShape): void {
   }
 }
 
-/** 统一的字体串：粗斜体 + 字号 + 字体栈 */
-function fontOf(size: number, weight: number, italic = false, family?: string): string {
-  return `${italic ? 'italic ' : ''}${weight} ${size}px ${family ?? FONT_FAMILY}`
-}
+/** 字体串统一走 render/measure 的 cssFontOf：测量与导出共用一份，两处写法不会再漂移 */
 
 /** 预先解码所有位图（图片与公式位图），避免边画边等 */
 async function loadImages(hrefs: string[]): Promise<Map<string, HTMLImageElement>> {
@@ -125,7 +122,7 @@ function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
   // 没有（老数据/兜底）才自己量——以前这里先量一遍算 total、再逐段重量一遍，白做一次排版
   const widths = op.segments.map((segment) => {
     if (typeof segment.width === 'number') return segment.width
-    ctx.font = fontOf(
+    ctx.font = cssFontOf(
       segment.fontSize,
       segment.weight ?? 400,
       Boolean(segment.italic),
@@ -158,7 +155,7 @@ function drawLineText(ctx: CanvasRenderingContext2D, op: LineTextOp): void {
           ? segment.fontSize * 0.15
           : 0
 
-    ctx.font = fontOf(
+    ctx.font = cssFontOf(
       segment.fontSize,
       segment.weight ?? 400,
       Boolean(segment.italic),
@@ -241,7 +238,7 @@ function drawOp(
 
     case 'text': {
       ctx.save()
-      ctx.font = fontOf(op.fontSize, op.fontWeight, Boolean(op.italic), op.fontFamily)
+      ctx.font = cssFontOf(op.fontSize, op.fontWeight, Boolean(op.italic), op.fontFamily)
       ctx.textAlign = op.anchor === 'middle' ? 'center' : op.anchor === 'end' ? 'right' : 'left'
       ctx.textBaseline = op.baseline === 'middle' ? 'middle' : 'alphabetic'
       // 描边先画（等价于 SVG 的 paint-order: stroke），文字压在别的内容上也读得清
@@ -274,7 +271,7 @@ function drawOp(
       if (op.kind === 'formula') {
         // 没拿到公式位图时退化成源码
         ctx.save()
-        ctx.font = fontOf(Math.max(10, op.fontSize - 2), 400, false, 'Consolas, monospace')
+        ctx.font = cssFontOf(Math.max(10, op.fontSize - 2), 400, false, 'Consolas, monospace')
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillStyle = op.color
@@ -291,7 +288,7 @@ function drawOp(
       ctx.arc(op.x + radius, op.y + radius, radius, 0, Math.PI * 2)
       ctx.fillStyle = op.color
       ctx.fill()
-      ctx.font = fontOf(op.fontSize, 700)
+      ctx.font = cssFontOf(op.fontSize, 700)
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillStyle = '#ffffff'

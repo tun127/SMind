@@ -266,8 +266,24 @@ function getCtx(): CanvasRenderingContext2D {
   return measureCtx
 }
 
+/**
+ * 统一的字体串：粗斜体 + 字号 + 字体栈。
+ *
+ * **画布测量与位图导出共用这一份**：以前 `measure.ts` 与 `export/raster.ts` 各写一份，
+ * 两处一旦不一致（比如一处漏了 `italic ` 的尾随空格），量出来的宽度与画出来的就不一样，
+ * 表现为文字挤在一行或提前折行——而且往往只在导出图里看得见，极难定位。
+ */
+export function cssFontOf(
+  size: number,
+  weight: number,
+  italic = false,
+  family = FONT_FAMILY
+): string {
+  return `${italic ? 'italic ' : ''}${weight} ${size}px ${family}`
+}
+
 function fontOf(style: ResolvedStyle): string {
-  return `${style.italic ? 'italic ' : ''}${style.weight} ${style.fontSize}px ${style.fontFamily}`
+  return cssFontOf(style.fontSize, style.weight, style.italic, style.fontFamily)
 }
 
 /** 单字符宽度缓存：富文本逐字符测量时必须缓存，否则 2000 节点会明显卡顿 */
