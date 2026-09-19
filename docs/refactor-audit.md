@@ -88,12 +88,12 @@
 
 1. ✅ **死代码清理**（§2）——提交 `8b7908a`
 2. **`shared` 层** ✅ 全部完成：`layout/core`（`6eeab2f`）→ `overlays`（`6c2f7ee`）→ `graphic`（`a7b01ec`）→ `agent`（`db46ffd`）→ `highlight` → `ai`
-3. 渲染层：`measure` → `drawing` → `TopicNode` → `NodePanel` → `Toolbar` → `ChatPanel` → `App` → `Canvas`
-4. `store/editor.ts` 切片 + 纯逻辑下沉（撤销/排序/移动/派生值）
-5. `main/index.ts` 按 IPC 域拆分（注入 `ctx`，通道名不动）
-6. `selfcheck.ts` 按域拆分（harness 先落地，再逐域搬）
-7. 重复实现收敛（§2.4 剩余项）+ `styles.css` 拆分
-8. 文档与门槛收口（CHANGELOG / known-issues 状态更新）
+3. 渲染层：🟡 `measure` ✅（`9b5f077`）→ `drawing` ✅（`8fdc8d6`）→ `TopicNode` 🟡（A3-1 纯搬动 `64ed49e`；A3-2 抽子组件未做）→ `NodePanel` ⬜ → `Toolbar` ⬜ → `ChatPanel` ⬜ → `App` ⬜ → `Canvas` ⬜
+4. `store/editor.ts` 切片 + 纯逻辑下沉（撤销/排序/移动/派生值）⬜（已实测：可机械搬走的只有约 10 个纯函数 / 99 行，主体是语义重构）
+5. `main/index.ts` 按 IPC 域拆分（注入 `ctx`，通道名不动）⬜（下一批开工项）
+6. `selfcheck.ts` 按域拆分（harness 先落地，再逐域搬）✅ 全部完成：`a40bce9` → `dcacfb4` 共 10 批，入口 11,844 → 473 行，断言仍 2628 项
+7. 重复实现收敛（§2.4 剩余项）🟡 已收 1 组：`FOLD_SIDE_LABELS` → `shared/model/fold-labels.ts`（`0054b68`）+ `styles.css` 拆分 ✅（`cca2c5b`：21 个分片 + `index.css` 按原顺序 @import）
+8. 文档与门槛收口（CHANGELOG / known-issues 状态更新）✅（`8527fa3`；G1 收尾 `56e477d`；本处状态由状态列同步提交补记）
 
 ### 已完成批次
 

@@ -24,11 +24,11 @@
 
 | 指标 | 数值 |
 |---|---|
-| 规模 | `src/**` + `scripts/**` 共 **144 个文件 / 56,681 行** |
+| 规模 | 战役起点 **144 个文件 / 56,681 行** → 现 **192 个文件 / 58,914 行**（文件数因拆分上升；行数上升来自自检断言 2522 → 2628 项与新模块） |
 | 分层方向 | `shared` 从不 import `renderer`/`main`；`main`/`preload` 不 import `renderer`；**无循环依赖**（唯一一个是类型态可擦除的 `layout/types ↔ layout/accessory`） |
 | IPC 面 | **70 条通道，两侧齐全**（脚本逐条核对：preload 缺失 0、main/menu 缺失 0） |
 | 已完成拆分 | **`shared` 层 6 次全完成**：`layout/core`（`6eeab2f`）、`layout/overlays`（`6c2f7ee`）、`layout/graphic`（`a7b01ec`）、`agent/index`（`db46ffd`）、`code/highlight`、`ai/index`；死代码清理 `8b7908a` |
-| 未完成 | **13 个文件仍在 600–11,844 行**，全部集中在 `renderer` / `main` / `scripts` |
+| 未完成（2026-09-19 本轮实测同步） | 剩 **7 个 600+ 行文件**，全在 `renderer` / `main`：`Canvas.tsx` 2951、`main/index.ts` 2498、`store/editor.ts` 2316、`ChatPanel.tsx` 1953、`App.tsx` 1272、`Toolbar.tsx` 1059、`NodePanel.tsx` 814；`scripts` 侧已全部拆完（入口 473 行） |
 | 安全网 | `selfcheck` **2628 项断言**（本轮从 2522 涨上来的），`verify` 21 个 `.xmind` + 4 个 `.emmx` 往返一致 |
 
 ---
@@ -43,7 +43,7 @@
 |---|---|---|---|---|---|---|
 | A1 | `render/measure.ts` 723 | `render/measure.ts` 入口 + `measure/{cache,formula-size,wrap,style,main}.ts` | 先把「字宽缓存」「公式尺寸」「断行」「样式解析」四块按行范围搬出，入口保留同名再导出 | 0 | `cssFontOf` / `ResolvedStyle` 刚被导出过，注意别丢公开面 | ✅ 9b5f077 |
 | A2 | `export/drawing.ts` 741 | `export/drawing.ts` 入口 + `export/ops.ts`（类型）+ `drawNode.ts` + `drawOverlay.ts` + `compose.ts` | 类型先搬到 `ops.ts`，`svg.ts`/`raster.ts` 改从 `ops` 引类型 | 2（svg、raster 的 import） | 类型搬动后 `strict` 配置下的 `noUncheckedIndexedAccess` 可能报新错 → 逐处按语义处理 | ✅ 8fdc8d6 |
-| A3 | `components/TopicNode.tsx` 618 | `topic/` 5 个（外壳 / 文本 / 装饰 / 附件与指示器 / 内联公式） | 抽子组件，props 原样传 | 0 | `React.memo` 的浅比较：回调 props 必须是稳定引用，别在拆分时引入内联箭头函数 | ✅ 64ed49e |
+| A3 | `components/TopicNode.tsx` 618 | `topic/` 5 个（外壳 / 文本 / 装饰 / 附件与指示器 / 内联公式） | 抽子组件，props 原样传 | 0 | `React.memo` 的浅比较：回调 props 必须是稳定引用，别在拆分时引入内联箭头函数 | 🟡 `64ed49e` 只做了 **A3-1 纯搬动**（619 → 542 + `topic/{props,segment-style}.ts`）；**A3-2 抽子组件仍未做** ⬜ |
 | A4 | `components/NodePanel.tsx` 814 | `nodePanel/` 4 个（两条独立分支各拆组件 + 公共控件） | 按"选到节点 / 选到画布元素"两条分支拆 | 0 | 面板内草稿状态（`useState`）跨组件后要确认没有重复初始化 | ⬜ |
 | A5 | `components/Toolbar.tsx` 1059 | `toolbar/` 3 个（主栏 / 结构切换 / 视图与缩放） | 自洽组件直接搬家 | 0 | 工具栏项数组里有彼此依赖的禁用条件，搬完要手点一遍逻辑分支 | ⬜ |
 | A6 | `components/ChatPanel.tsx` 1953 | `chat/` 5 个（runtime 状态机 / 纯函数 / 消息列表 / 工具条目 / 确认弹层） | 先抽纯函数与 runtime（本轮修过 `aiTurn` 收尾，`commitTurnRef` 一族必须整体搬、不能拆开） | 0 | **最高风险之一**：`runRoundRef`/`processQueueRef`/`commitTurnRef`/`stopRef` 是"打破循环引用"的一组 ref，拆散的瞬间会变成"用到未初始化" | ⬜ |
@@ -84,8 +84,8 @@
 
 | # | 内容 | 状态 |
 |---|---|---|
-| G1 | `shared/import/markdown.ts` 764 → `import/markdown/` 2 个（共享层最后一处 700+ 文件；可行则做，不划算就记录理由） | ⛔ 两次尝试失败已回退（第 1 次自创"类型回捞"、第 2 次区间边界切在注释中间）。**配方（下次照做）**：类型随函数一起搬 + 入口 `export *` 保公开面 + 边界用"顶层声明边界"算法（含 doc 注释），不要手挑行号 |
-| G2 | 文档收口：`refactor-audit.md` 的执行顺序打勾、`CHANGELOG.md` 记录、`known-issues.md` 状态同步 | ⬜ |
+| G1 | `shared/import/markdown.ts` 764 → `import/markdown/` 2 个（共享层最后一处 700+ 文件；可行则做，不划算就记录理由） | ✅ **`56e477d` 已完成**（入口 807 → 307 + `import/markdown/inline.ts`；配方照做即成功）。以下保留当时的失败记录：⛔ 两次尝试失败已回退（第 1 次自创"类型回捞"、第 2 次区间边界切在注释中间）。**配方（下次照做）**：类型随函数一起搬 + 入口 `export *` 保公开面 + 边界用"顶层声明边界"算法（含 doc 注释），不要手挑行号 |
+| G2 | 文档收口：`refactor-audit.md` 的执行顺序打勾、`CHANGELOG.md` 记录、`known-issues.md` 状态同步 | ✅ `8527fa3`（CHANGELOG「解耦 · 单文件拆分」小节 + known-issues「仍未做」「经核对不成立」两表 + `refactor-audit.md` §四 执行顺序打勾） |
 
 ---
 
@@ -142,3 +142,5 @@
 | 日期 | 批次 | 提交 | 结论 |
 |---|---|---|---|
 | 2026-09-19 | 本计划制定 | — | 现状实测 144 文件 / 56,681 行；`shared` 层 6 次拆分已完成，剩余 13 个 600+ 行文件全在 renderer/main/scripts |
+| 2026-09-19 | A1 / A2 / A3-1 / D1(10 批) / E1(1 组) / F1 / G1 / G2 | `9b5f077` `8fdc8d6` `64ed49e` `a40bce9`–`dcacfb4` `0054b68` `cca2c5b` `56e477d` `8527fa3` | 补记（原表停留在计划制定时）。各批五道门槛逐条打印退出码全绿；契约不变：selfcheck 入口仍是 `scripts/selfcheck.ts`、`run-selfcheck.mjs` 未动、断言 2628 项、70 条 IPC 通道与 `.xmind`/`.emmx` 字段未动 |
+| 2026-09-19 | 状态列同步（本次） | — | 修正 G1（⛔→已完成 `56e477d`）、G2（⬜→✅ `8527fa3`）、A3（✅→🟡，仅 A3-1）三处滞后状态；现状规模与剩余文件行数按实测更新；`refactor-audit.md` §四 第 3–8 步补勾 |
