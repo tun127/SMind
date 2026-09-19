@@ -6,6 +6,34 @@
 
 ## [未发布]
 
+### 新增 · 自动更新与许可交付（2026-09-19，四条提交，各自过五道门槛）
+
+> 来源：`docs/auto-update-and-license-delivery.md` 的 A3–A6 / B1–B3 / B5 需求；自检 2628 → **2660** 项。
+
+- **许可码带序列号，支持批量签发**（`4820e1e`）：`LicensePayload` 增加可选 `serial`（形状校验；
+  空串/非字符串整张拒绝），签名仍覆盖 payload 段原始字节 → **旧码完全向后兼容**。
+  新增 `npm run license:issue-batch -- --batch <批次> --count <N>`：**逐张真签**（不是"签一次改字符串"）、
+  每张签完当场 decode 自查、重复码/重复序列号即整批不落盘、输出 UTF-8 BOM 的 CSV
+  （`serial,code,holder,order,issuedAt`，写到仓库之外的密钥目录）。实测：3 张码两两不同、
+  真实私钥 selftest 通过（含「改一位序列号即验签失败」的实证）；码长 **226 / 249 字符**（无/有订单号）。
+- **「从文件导入…」许可码**（`4820e1e`）：AI 设置与聊天面板各一个入口，选一个含 `SMIND1.…` 的文本文件
+  即可激活（长码在聊天/邮件里易断行）；主进程 `importText` 增加 `license` 分支（1MB 上限）。
+  批量码不带持有人名时，界面显示「已激活 Pro」而不再出现空括号。
+- **自动更新：免安装版守卫 + 长期运行复查 + 更新说明可见**（`20bcd71`）：portable 版跳过后台检查、
+  主动检查改为「打开下载页」；窗口重新获得焦点且距上次检查超 6 小时会再静默查一次；
+  「发现新版本」对话框显示 Release 正文（剥 HTML、截断 800 字）。判定逻辑抽成纯函数
+  （`shared/update-policy.ts`）以便自检覆盖两条分支。
+- **更新源改为自己的镜像**（`20bcd71`、`bfc4932`）：`publish` 从 github provider 换成
+  `generic: https://dl.smindapp.cn/`——GitHub provider 走 API、匿名额度按 IP 限流（本机实测 403），
+  而失败是静默的；`npm run mirror` 同时补传 `latest.yml` 与 `*.blockmap`（缺了会显眼警告）。
+  ⚠️ 前置：R2 镜像必须先配好，否则更新渠道取不到 `latest.yml`。
+- **E1 尾巴收口**（`9bfadb4`）：`shared/model/path-text.ts` 的 `baseNameOf` 成为「从整条路径取最后一段」
+  的唯一原语（五处调用点的边界策略各自保留：回退整条路径 / 回退中心主题名 / 兜底 `file`）；
+  渲染层默认对齐初值改为从 `DEFAULT_APP_SETTINGS.defaultAlign` 派生。E1 收敛项到此结清。
+- **工程与清理**（`6b09711` 及本批）：CI 补 `format:check` 一道门；`.tmp-check` 删除 692 项已收官批次的
+  再生产物（90.3 MB → 1.0 MB，清单 `.tmp-check/cleanup-manifest.txt`）；`out/` 删除后重新构建；
+  可达性分析确认源码树**无孤儿文件**；自检 2628 → **2660** 项。
+
 ### 修复 · 本轮代码审计（2026-09-18，分批各自过五道门槛）
 
 > 来源：`docs/shared-audit.md`（83 文件 / 18k 行的 `src/shared/**` 审计）+ 应用层实测。

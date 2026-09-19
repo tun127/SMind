@@ -16,11 +16,17 @@
 ## 每次发版的镜像步骤
 
 ```powershell
-npm run dist                 # 打包（顺带生成 latest.yml，记得连 exe 一起传 GitHub Release）
-npm run mirror               # 上传两个 exe 到 R2 并自动校验 dl.smindapp.cn 直链
+npm run dist                 # 打包（顺带生成 latest.yml 与 *.blockmap）
+npm run mirror               # 上传 2 个 exe + latest.yml + *.blockmap 到 R2，并自动校验 dl.smindapp.cn 直链
 ```
 
 然后把 GitHub Release 建好（`docs/release-0.9.md` 的流程）。
+
+> ⚠️ **`latest.yml` 与 `*.blockmap` 现在是自动更新的命脉**：客户端的更新源已从 GitHub API
+> 换成 **generic provider 指向 `https://dl.smindapp.cn/`**（`electron-builder.yml` 的 `publish`），
+> 它读的就是镜像上的这两个文件。少传 → 客户端**静默**查不到更新（`npm run mirror` 会打显眼的 ⚠ 警告）。
+> 发版时顺手把该版本的 CHANGELOG 段落写进 Release 正文——`latest.yml` 的 `releaseNotes`
+> 会显示在「发现新版本」对话框里。
 
 ## 改官网下载入口（两个文件各两行）
 

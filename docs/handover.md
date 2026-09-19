@@ -2,6 +2,56 @@
 
 ---
 
+## 补记（第八次交接，2026-09-19 深夜）—— 代码侧未完成项清零 + 一次独立回归审计
+
+> **HEAD：`6b09711` + 本次文档提交**｜工作树干净｜**五道门槛全绿：selfcheck 2660 项**
+> （`npm run selfcheck` 现在**可直接跑**，不再需要 esbuild CLI 那条安全网；CLI 路线仍保留）
+
+**用户指令（原话）**：「你只需要专注于代码侧：①完成全部未完成功能 ②更新全部文件 ③全面检查 ④谨慎删除全部废弃的文件」。
+
+**这一批的提交（逐条五道门槛退出码全绿）**：
+
+| 提交 | 内容 |
+|---|---|
+| `9bfadb4` | E1 尾巴：`shared/model/path-text.ts` 的 `baseNameOf` 唯一来源（五处调用点边界策略各自保留）+ 渲染兜底对齐改为从 `DEFAULT_APP_SETTINGS.defaultAlign` 派生 |
+| `4820e1e` | 许可：可选 `serial` + 批量签发（逐张真签 / 逐张自查 / 唯一性守卫 / CSV 台账）+「从文件导入…」+ 持有人名可选 |
+| `20bcd71` | 更新：portable 守卫、6 小时复查、更新说明可见、`publish` 换 generic 指向 `dl.smindapp.cn` |
+| `bfc4932` | `npm run mirror` 补传 `latest.yml` + blockmap |
+| `6b09711` | CI 补 `format:check` 一道门 |
+| 本次 | 审计修复：`NodePanel` 双重面板外壳（A4 回归）+ 草稿不随撤销重同步（老缺陷）；`document.ts` 注释订正 |
+| 本次 | 文档同步：README / CHANGELOG / `auto-update-and-license-delivery.md` / `known-issues.md` / `ops.md` / `decoupling-plan.md` / 本文件 |
+
+**「全面检查」的实测结论**：
+- 五道门槛 + `npm run build`（三端构建 exit 0）全绿；自检 **2628 → 2660**；
+- **源码树零孤儿文件**：`.tmp-check/reach.mjs` 从三端入口 + 全部脚本入口做可达性分析，
+  结果 `files=312 reachable=311`；唯一"不可达"的 `src/renderer/src/global.d.ts` 是 tsconfig
+  显式包含的 `Window.api` 环境声明（**不是死文件**）；
+- 分层铁律复测无违反（`shared` 不 import `renderer`/`main`；`main` 不 import `renderer`）；
+  `ipcMain.handle/on` 注册仍 **66** 条；
+- **渲染层独立回归审计**（只读子代理，六个面逐条回拆分前版本比对）→ 4 条发现：
+  真回归 1（`NodePanel` 双重面板外壳，**已修**）、老缺陷 1（撤销后草稿不重同步，**已修**）、
+  注释不实 1（**已订正**）、`TabBar` 拖拽重排 1（中等信心，**登记待验**）。明细见 `known-issues.md`
+  「渲染层回归审计」表。
+- **审计本身的教训**：行多重集守卫只证明"没丢行"，**证明不了"没多行"**——A4 那次多包的一层外壳
+  就是这么漏过去的。以后 JSX 抽取的守卫要同时比对**新增行**（或直接比对渲染树/DOM 结构快照）。
+
+**「谨慎删除废弃文件」的边界**（可复查）：
+- 删 `.tmp-check` 里 **692 项**已收官批次的再生产物（esbuild `.cjs`、旧快照、预览目录、旧日志、
+  本轮临时测试密钥）→ 该目录 **90.3 MB → 1.0 MB**，清单留档 `.tmp-check/cleanup-manifest.txt`；
+- **保留**：全部 `*.mjs`（§4.7 记录的可复用工具一个不少）、`gates/` 门槛日志、
+  `.agent-teams/archive/`（战役记录，170 KB）；
+- `out/`（09-15 的旧构建）删除后**重新构建**（exit 0，65 文件 4.5 MB）；
+- **源码树一个文件都没删**——可达性分析显示没有可删对象。
+
+**仍待用户拍板 / 执行**（代码侧已无未完项）：
+D1 发码架构（卡密池 vs 服务端）、D3 批量码要不要带买家名字、**B6 吊销**（客户端名单 or 白纸黑字
+写"接受无法撤销"）、B7 台账工具；**R2 镜像必须先能提供 `latest.yml`**（否则 generic 渠道取不到更新，
+而失败是静默的）；**面包多卡密字段按 249 字符实测**（批量码 + 订单号实测 249，无订单号 226）；
+以及**渲染层人肉验收**——本批新增两条要看的：①节点属性面板**只有一个关闭按钮**、不再是嵌套面板；
+②撤销后，备注 / 公式 / 代码的草稿要跟着回退（以前不会）。
+
+---
+
 ## 补记（第七次交接，2026-09-19 深夜）—— 只剩一项在跑 + 一条口径订正
 
 > **HEAD：`c46774a`**（另加 captain 的文档提交）｜工作树**干净**（本批新代码都已在 eng-e1 的提交里落盘；t5 的切片尚未开始，其草稿已移出 `src/`）。
@@ -458,6 +508,8 @@ npm run verify       → exit 0   （21 个 .xmind + 4 个 .emmx 往返一致）
 | `a7-3-effect-order.mjs` | effect 顺序指纹比对 |
 | `a6-3-freescan.mjs` | 自由标识符全量扫描（补 `region-deps.mjs` 的盲区） |
 | `line-guard.mjs` / `move-chat-loop.mjs` / `move-app-effects.mjs` / `extract-jsx.mjs` / `move-domains.mjs` | 前几轮的工具（A3/A6/A7/C1/D1） |
+| `inventory.mjs` | **行数普查**（node 口径：文件数 / 总行数 / top N / 目录汇总）——要数字就用它，别用 `Get-Content` |
+| `reach.mjs` | **可达性分析**：从三端入口 + 全部脚本入口解析 import/require/动态 import，列出"没有任何引用者"的文件（清理废弃文件前先跑它；注意它只认静态引用，动态 import 与 tsconfig `include` 要人工判断） |
 
 ---
 
