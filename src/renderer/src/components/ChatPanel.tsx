@@ -13,6 +13,8 @@ import type { ExtractedDocument } from '@shared/document'
 import { buildTitleIndex } from '@shared/agent'
 import type { LicenseView } from '@shared/license'
 import { activeRoot } from '@shared/model/tree'
+// 导图文件的判定走共享原语（E1 收敛：本文件里原本有两份同样的正则）
+import { MINDMAP_FILE_RE } from '@shared/openfile'
 import { viewportActions } from '../render/viewport'
 import { useEditor } from '../store/editor'
 import ChatHeader from './chat/chat-header'
@@ -283,14 +285,14 @@ export default function ChatPanel({
       onDragOver={(event) => {
         const files = event.dataTransfer?.files
         const first = files && files.length > 0 ? files[0] : null
-        if (first && !/\.(xmind|emmx|emm)$/i.test(first.name)) {
+        if (first && !MINDMAP_FILE_RE.test(first.name)) {
           event.preventDefault()
           event.stopPropagation()
         }
       }}
       onDrop={(event) => {
         const picked = Array.from(event.dataTransfer?.files ?? []).find(
-          (item) => !/\.(xmind|emmx|emm)$/i.test(item.name)
+          (item) => !MINDMAP_FILE_RE.test(item.name)
         )
         if (!picked) return
         event.preventDefault()

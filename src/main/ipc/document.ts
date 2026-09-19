@@ -16,6 +16,7 @@ import { ensureXmindExt, firstPathOf, readDocumentInto, writeDocument } from '..
 import { docOf, pruneForSave } from '../doc-resources'
 import { autosaveDir, autosaveFile, autosaveMeta } from '../autosave'
 import type { MainContext } from '../context'
+import { MINDMAP_EXTENSIONS } from '@shared/openfile'
 
 /**
  * 这些处理器原来都在 `main/index.ts` 的 `registerIpc()` 里，整块搬来：
@@ -27,7 +28,7 @@ export function registerDocumentIpc(ctx: MainContext): void {
       title: '打开思维导图',
       filters: [
         // .emmx 是亿图脑图（EdrawMind / MindMaster）的文件，能直接打开
-        { name: '思维导图文件', extensions: ['xmind', 'emmx', 'emm'] },
+        { name: '思维导图文件', extensions: [...MINDMAP_EXTENSIONS] },
         { name: 'Xmind 文件', extensions: ['xmind'] },
         { name: '亿图脑图文件', extensions: ['emmx', 'emm'] },
         { name: '全部文件', extensions: ['*'] }

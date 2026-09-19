@@ -13,6 +13,18 @@
  * 以 `-` 开头的开关一律跳过。这样上面那些噪音都自然被过滤掉。
  */
 
+/**
+ * 思维导图文件的扩展名（**不带点**，小写）——这是唯一来源。
+ *
+ * E1 收敛：以前同一份「xmind / emmx / emm」在四处各写一遍——打开对话框的过滤器
+ * （`main/ipc/document.ts`）、拖拽判定（`app/use-file-drop.ts`）、聊天面板两次附件判定
+ * （`components/ChatPanel.tsx`）——新增一种格式时漏改一处就会"某种入口不认这个文件"。
+ */
+export const MINDMAP_EXTENSIONS = ['xmind', 'emmx', 'emm'] as const
+
+/** 判定「这是不是一个思维导图文件」。带 `i`，文件名大小写不敏感；共享带 `g` 的正则有 lastIndex 陷阱，这里刻意不带 */
+export const MINDMAP_FILE_RE = /\.(xmind|emmx|emm)$/i
+
 /** 能被本软件直接打开的文档扩展名（.emmx/.emm 是亿图脑图） */
 export const DOCUMENT_EXTENSIONS = ['.xmind', '.emmx', '.emm'] as const
 

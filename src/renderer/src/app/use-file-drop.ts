@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { readableIpcError } from '@shared/ai'
 import type { ExtractedDocument } from '@shared/document'
+import { MINDMAP_FILE_RE } from '@shared/openfile'
 import { useEditor } from '../store/editor'
 import { activeDocId } from '../store/tabs'
 
@@ -32,11 +33,11 @@ export function useFileDrop({ showToast, setDocToMap }: Deps): void {
      * 不支持的格式（如 PDF）也要拦下默认导航：否则整个界面会被替换成那个文件，
      * 看起来就像"软件坏了"；这里给一句人话提示（提示文案由主进程按格式给出）。
      */
-    const MINDMAP_RE = /\.(xmind|emmx|emm)$/i
+    // 导图文件的判定走共享原语（E1 收敛：这里与 ChatPanel 各写过一份同样的正则）
     const IMAGE_RE = /\.(png|jpe?g|gif|bmp|webp|svg|avif)$/i
     /** 混着导图文件时整体交给「打开文档」流程（既有语义，保持不变） */
     const hasMindmap = (files: FileList | null): boolean =>
-      files ? Array.from(files).some((file) => MINDMAP_RE.test(file.name)) : false
+      files ? Array.from(files).some((file) => MINDMAP_FILE_RE.test(file.name)) : false
     const firstFile = (files: FileList | null, match: (file: File) => boolean): File | null => {
       if (!files) return null
       for (const file of Array.from(files)) if (match(file)) return file
