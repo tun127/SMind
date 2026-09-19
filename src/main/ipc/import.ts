@@ -51,11 +51,20 @@ export function registerImportIpc(ctx: MainContext): void {
   })
   ipcMain.handle(
     IPC.importText,
-    async (e, kind: 'markdown' | 'opml'): Promise<ImportedTextFile | null> => {
-      const isMarkdown = kind !== 'opml'
-      const result = await showOpenIn(ctx.winOf(e.sender), {
-        title: isMarkdown ? '导入 Markdown 生成导图' : '导入 OPML 生成导图',
-        filters: isMarkdown
+    async (e, kind: 'markdown' | 'opml' | 'license'): Promise<ImportedTextFile | null> => {
+      const isLicense = kind === 'license'
+      const isMarkdown = kind === 'markdown'
+      const title = isLicense
+        ? '选择许可文件'
+        : isMarkdown
+          ? '导入 Markdown 生成导图'
+          : '导入 OPML 生成导图'
+      const filters = isLicense
+        ? [
+            { name: '文本 / 许可文件', extensions: ['txt', 'md', 'license', 'key'] },
+            { name: '所有文件', extensions: ['*'] }
+          ]
+        : isMarkdown
           ? [
               { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
               { name: '所有文件', extensions: ['*'] }
@@ -63,11 +72,22 @@ export function registerImportIpc(ctx: MainContext): void {
           : [
               { name: 'OPML', extensions: ['opml', 'xml'] },
               { name: '所有文件', extensions: ['*'] }
-            ],
+            ]
+      const result = await showOpenIn(ctx.winOf(e.sender), {
+        title,
+        filters,
         properties: ['openFile']
       })
       const path = firstPathOf(result)
       if (!path) return null
+
+      // 许可文件只该是纯文本：先按体积拦住"选错了个大文件"，免得整份读进内存
+      if (isLicense) {
+        const info = await fs.stat(path)
+        if (info.size > LICENSE_FILE_MAX) {
+          throw new Error('这个文件太大了：许可码是纯文本，正常不超过几十 KB')
+        }
+      }
 
       let text: string
       try {
@@ -83,3 +103,6 @@ export function registerImportIpc(ctx: MainContext): void {
     }
   )
 }
+
+/** 许可文件体积上限（1 MB：再大就不可能是许可码，多半是选错了文件） */
+const LICENSE_FILE_MAX = 1024 * 1024

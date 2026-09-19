@@ -46,10 +46,12 @@ import {
   segmentTitleMentions
 } from '../../../src/shared/agent'
 import {
+  batchSerialOf,
   bytesToBase64Url,
   bumpTrialUsed,
   decodeLicenseKey,
   encodeLicenseKey,
+  findLicenseKeyInText,
   hasWriteToolCall,
   licensePayloadSegment,
   licenseViewOf,
@@ -694,8 +696,44 @@ export function testLicenseHelpers(): void {
       normalizeLicensePayload({ v: 1, edition: 'pro', holder: '李四', issuedAt: '2026-09-15' }) !==
         null
     )
+
+    // holder 也可以缺省：批量卡密池的码没有买家名字，界面显示「已激活 Pro」（需求 B2）
+    check(
+      'holder 可以缺省（批量码不带名字）',
+      normalizeLicensePayload({ v: 1, edition: 'pro', issuedAt: '2026-09-15' }) !== null
+    )
+    eq(
+      '缺省时 holder 就是 undefined（界面不显示空括号）',
+      normalizeLicensePayload({ v: 1, edition: 'pro', issuedAt: '2026-09-15' })?.holder,
+      undefined
+    )
+    check(
+      'holder 给了空串 → 仍然拒绝（可选 ≠ 可以乱给）',
+      normalizeLicensePayload({ v: 1, edition: 'pro', holder: '  ', issuedAt: '2026-09-15' }) ===
+        null
+    )
     check('版本不是 1 → 拒绝', normalizeLicensePayload({ ...good, v: 2 }) === null)
     check('版别不是 pro → 拒绝', normalizeLicensePayload({ ...good, edition: 'free' }) === null)
+
+    // 序列号（批量签发 / 卡密池用）：可选，但**给了就必须干净**——它是对账与定位泄露的依据
+    check('不给序列号照常通过（旧码向后兼容）', normalizeLicensePayload(good)?.serial === undefined)
+    eq(
+      '序列号原样带回来',
+      normalizeLicensePayload({ ...good, serial: 'early-0001' })?.serial,
+      'early-0001'
+    )
+    check('序列号形状不对 → 拒绝', normalizeLicensePayload({ ...good, serial: '有中文' }) === null)
+    check('序列号空串 → 拒绝', normalizeLicensePayload({ ...good, serial: '   ' }) === null)
+    check(
+      '序列号超长（65 字符）→ 拒绝',
+      normalizeLicensePayload({ ...good, serial: 'a'.repeat(65) }) === null
+    )
+    check('序列号不是字符串 → 拒绝', normalizeLicensePayload({ ...good, serial: 123 }) === null)
+    eq('批次序列号形状＝批次-四位序号', batchSerialOf('early', 7), 'early-0007')
+    check(
+      '工具生成的序列号能通过校验（两侧同一形状）',
+      normalizeLicensePayload({ ...good, serial: batchSerialOf('early', 9999) }) !== null
+    )
   }
 
   eq('许可码是三段式', key.split('.').length, 3)
@@ -706,6 +744,24 @@ export function testLicenseHelpers(): void {
   check('中文持有人也没问题', decoded.ok && decoded.payload.holder === '张三')
   check('payload 段原样返回（验签覆盖的就是它）', decoded.ok && decoded.payloadSegment === segment)
   eq('订单号也带回来', decoded.ok ? decoded.payload.order : null, 'A-001')
+
+  // 「从文件导入许可码」：真实文件里常夹着说明文字、引号、断行
+  eq(
+    '从夹着说明文字的文件里抽出许可码',
+    findLicenseKeyInText(`许可码如下：\n${key}\n请妥善保存`),
+    key
+  )
+  eq(
+    '断行/空格也能抽出（先归一化再抓形状）',
+    findLicenseKeyInText('SMIND1.abc\ndef.ghi'),
+    'SMIND1.abcdef.ghi'
+  )
+  eq('文件里没有许可码时返回 null', findLicenseKeyInText('这是一份说明书，没有许可码'), null)
+  eq('前缀大小写不符就不是本产品的码', findLicenseKeyInText('smind1.abc.def'), null)
+  check(
+    '抽出来的码能直接解（与粘贴激活同一条路径）',
+    decodeLicenseKey(findLicenseKeyInText(key) ?? '').ok
+  )
 
   // 从聊天窗口/邮件复制，极易带上换行空格；中文输入法还会带全角符号
   eq(
@@ -773,6 +829,29 @@ export function testLicenseHelpers(): void {
       Buffer.from(licensePayloadSegment({ ...payload, holder: '李四' }), 'utf8'),
       publicKey,
       signature
+    ),
+    false
+  )
+
+  // 序列号必须**在签名覆盖范围内**：批量签发的每张码因此互相不可替代
+  const serialPayload = { ...payload, serial: batchSerialOf('early', 1) }
+  const serialSegment = licensePayloadSegment(serialPayload)
+  const serialSignature = signData(null, Buffer.from(serialSegment, 'utf8'), privateKey)
+  eq(
+    '带序列号的码同样验得过',
+    verifyData(null, Buffer.from(serialSegment, 'utf8'), publicKey, serialSignature),
+    true
+  )
+  eq(
+    '只改序列号 → 签名立刻对不上（serial 确实进了签名）',
+    verifyData(
+      null,
+      Buffer.from(
+        licensePayloadSegment({ ...serialPayload, serial: batchSerialOf('early', 2) }),
+        'utf8'
+      ),
+      publicKey,
+      serialSignature
     ),
     false
   )

@@ -110,7 +110,7 @@ export function verifyLicenseKey(raw: string): VerifyResult {
       error: '许可码的签名对不上：可能复制时缺了字符，或者它不是本产品签发的许可码'
     }
   }
-  return { ok: true, holder: decoded.payload.holder, error: '' }
+  return { ok: true, holder: decoded.payload.holder ?? null, error: '' }
 }
 
 /**
@@ -150,9 +150,11 @@ export async function activateLicense(
   const state = await readLicenseState()
   await saveLicenseState({ ...state, key: normalizeLicenseKey(raw) })
   proCache = null
+  // 批量卡密池的码不带持有人名（需求 B2）：省略括号，别说成「已激活 Pro（）」
+  const who = verified.holder === null ? '' : `（${verified.holder}）`
   return {
     ok: true,
-    message: `已激活 Pro（${verified.holder ?? ''}）。AI 现在可以直接改画布了，感谢支持。`,
+    message: `已激活 Pro${who}。AI 现在可以直接改画布了，感谢支持。`,
     view: await getLicenseView()
   }
 }

@@ -425,12 +425,13 @@ export interface MindApi {
   /** 取消激活（换机器、退货都用它） */
   licenseDeactivate(): Promise<LicenseView>
 
-  /* ---- 大纲文件导入 ---- */
+  /* ---- 大纲文件导入 / 许可文件导入 ---- */
   /**
-   * 选一个 Markdown / OPML 文件并读出文本（用于一键生成导图）。
+   * 选一个文本文件并读出内容。`kind` 决定对话框的标题与过滤器：
+   * `markdown` / `opml` 用于一键生成导图，`license` 用于「从文件导入许可码」。
    * 取消返回 null。
    */
-  importText(kind: 'markdown' | 'opml'): Promise<ImportedTextFile | null>
+  importText(kind: 'markdown' | 'opml' | 'license'): Promise<ImportedTextFile | null>
 
   /* ---- 历史记录与常用（P9+） ---- */
   /** 打开历史（常用在最前，带「文件是否还在原位置」标记） */

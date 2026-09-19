@@ -10,6 +10,7 @@ import {
   type QualityTier
 } from '@shared/ai'
 import type { LicenseView } from '@shared/license'
+import { importLicenseFromFile } from './license-import'
 import { DESTRUCTIVE_WRITE_LABELS, isDestructiveWriteKind } from '@shared/agent'
 import { patchAppSettings, useEditor } from '../store/editor'
 import { Modal } from './Dialogs'
@@ -105,6 +106,25 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
       setLicenseNote('已取消激活：本机的许可已清除（换机器 / 退货都用它）')
     } catch (error) {
       setLicenseNote(`取消失败：${(error as Error).message}`)
+    } finally {
+      setLicenseBusy(false)
+    }
+  }
+
+  /**
+   * 从文件导入许可码：与粘贴激活走**同一条**路径（离线验签、本地保存）。
+   * 取消文件框时返回 null，这里一个字都不改。
+   */
+  const importFromFile = async (): Promise<void> => {
+    setLicenseBusy(true)
+    try {
+      const result = await importLicenseFromFile()
+      if (!result) return
+      setLicense(result.view)
+      setLicenseNote(result.message)
+      if (result.ok) onNotify(result.message)
+    } catch (error) {
+      setLicenseNote(`导入失败：${(error as Error).message}`)
     } finally {
       setLicenseBusy(false)
     }
@@ -227,6 +247,14 @@ export default function AiSettingsDialog({ onClose, onNotify }: Props): ReactEle
               onClick={() => void activate()}
             >
               激活
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={licenseBusy}
+              onClick={() => void importFromFile()}
+            >
+              从文件导入…
             </button>
             {license?.pro && (
               <button

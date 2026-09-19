@@ -25,12 +25,26 @@ export const TRIAL_TURN_LIMIT = 30
 export interface LicensePayload {
   v: 1
   edition: 'pro'
-  /** 持有人（签发时填的名字，会在界面里显示出来） */
-  holder: string
+  /**
+   * 持有人（签发时填的名字，会在界面里显示出来）。
+   *
+   * **可选**：批量签发的卡密池码没有买家名字（需求 B2 推荐口径）——省略时界面显示
+   * 「已激活 Pro（不带括号名字）」，比硬塞一个"SMind Pro"更干净。
+   */
+  holder?: string
   /** 签发日期 YYYY-MM-DD */
   issuedAt: string
   /** 订单号（可选，售后对账用） */
   order?: string
+  /**
+   * 序列号（可选，**批量签发的卡密池专用**）。
+   *
+   * 为什么要有它：签名只覆盖 payload 段字节，于是同一个 payload 签出来的码**逐字相同**
+   * ——批量预生成 200 个早鸟码会得到 200 个一样的码，限量形同虚设、泄露也无法定位。
+   * 加上逐码不同的 serial 之后**每张码单独签名**，既能对账、也能定位泄露的是哪一张。
+   * 旧码没有这个字段：验签走的是 payload 段的原始字节，所以**完全向后兼容**。
+   */
+  serial?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -111,12 +125,27 @@ export function normalizeLicenseKey(raw: string): string {
     .trim()
 }
 
+/**
+ * 从任意文本里抽出许可码（「从文件导入」用）。
+ *
+ * 为什么需要它：许可码 200+ 字符，在邮件/聊天里极易断行漏字符，**文件形态最稳**；
+ * 而许可文件里往往还夹着说明文字、引号、Markdown 标记。做法是先按
+ * `normalizeLicenseKey` 的同一套规则抹平空白与全角符号，再抓三段式形状；
+ * 抓不到返回 null（由调用方给可读提示）。
+ */
+export function findLicenseKeyInText(text: string): string | null {
+  const flat = normalizeLicenseKey(text)
+  const match = new RegExp(`${LICENSE_PREFIX}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+`).exec(flat)
+  return match ? match[0] : null
+}
+
 /** 校验许可信息字段；不合格返回 null（**绝不半信半疑地接受**） */
 export function normalizeLicensePayload(raw: unknown): LicensePayload | null {
   if (typeof raw !== 'object' || raw === null) return null
   const record = raw as Record<string, unknown>
   if (record.v !== 1 || record.edition !== 'pro') return null
-  if (typeof record.holder !== 'string' || record.holder.trim().length === 0) return null
+  // holder 可选（批量卡密的码没有买家名字），但**给了就必须干净**
+  if (record.holder !== undefined && typeof record.holder !== 'string') return null
   if (typeof record.issuedAt !== 'string' || record.issuedAt.trim().length === 0) return null
 
   /**
@@ -128,8 +157,13 @@ export function normalizeLicensePayload(raw: unknown): LicensePayload | null {
    * 格式上宽容一些：日期-only 与完整 ISO 都收（签发工具改过格式也不至于全废），
    * 但必须是**真的能解析**的日期。
    */
-  const holder = record.holder.trim()
-  if (holder.length > HOLDER_MAX || hasControlChars(holder)) return null
+  const holder = typeof record.holder === 'string' ? record.holder.trim() : undefined
+  if (
+    holder !== undefined &&
+    (holder.length === 0 || holder.length > HOLDER_MAX || hasControlChars(holder))
+  ) {
+    return null
+  }
   const issuedAt = record.issuedAt.trim()
   if (issuedAt.length > ISSUED_AT_MAX || !isIsoLikeDate(issuedAt)) return null
 
@@ -139,7 +173,21 @@ export function normalizeLicensePayload(raw: unknown): LicensePayload | null {
       : undefined
   if (order !== undefined && (order.length > ORDER_MAX || hasControlChars(order))) return null
 
-  return { v: 1, edition: 'pro', holder, issuedAt, order }
+  /**
+   * 序列号：可选，但给了就必须干净。
+   * 空串、非字符串、形状不对一律**拒绝整张码**——序列号是对账与定位泄露的依据，
+   * 半信半疑地收下一个坏序列号，比直接拒掉更危险。
+   */
+  const rawSerial = record.serial
+  let serial: string | undefined
+  if (rawSerial !== undefined) {
+    if (typeof rawSerial !== 'string') return null
+    const trimmed = rawSerial.trim()
+    if (!SERIAL_RE.test(trimmed)) return null
+    serial = trimmed
+  }
+
+  return { v: 1, edition: 'pro', holder, issuedAt, order, serial }
 }
 
 /** 持有人名字的长度上限（正常姓名/公司名远小于它，超了就是脏数据） */
@@ -148,6 +196,22 @@ const HOLDER_MAX = 120
 const ISSUED_AT_MAX = 40
 /** 订单号长度上限 */
 const ORDER_MAX = 80
+
+/**
+ * 序列号的形状：字母数字开头，可带 `-`、`.`、`_`，**最长 64**（长度由 `{0,63}` 封顶）。
+ * 形状定死是为了对账时能直接做字符串比对——卡密池导出的 CSV 里就是这一列。
+ */
+const SERIAL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+
+/**
+ * 批量签发的序列号：`<批次>-0001`。
+ *
+ * 唯一来源：签发工具与自检共用它，免得"工具生成的形状"与"校验接受的形状"各改各的。
+ * 四位序号够一批 9999 张；卡密池按批导出时人眼也能一眼看出属于哪一批。
+ */
+export function batchSerialOf(batch: string, index: number): string {
+  return `${batch}-${String(index).padStart(4, '0')}`
+}
 
 function hasControlChars(text: string): boolean {
   return /[\u0000-\u001f\u007f]/.test(text)
