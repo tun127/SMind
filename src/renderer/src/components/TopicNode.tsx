@@ -4,7 +4,6 @@ import {
   BLOCK_GAP,
   MARKER_MAX_COLUMNS,
   MARKER_PER_COLUMN,
-  MARKER_STRIP_GAP,
   codeBlockMetrics,
   codeMinNodeSize,
   formulaMinNodeSize,
@@ -26,12 +25,14 @@ import { richFromPlain } from '@shared/richtext'
 import { formulaHtml, formulaSize } from '../render/formula'
 import { resourceUrl } from '../render/resource'
 import { branchColorOf, visualFor } from '../render/theme'
-import MarkerIcon, { IndicatorIcon } from './MarkerIcon'
 import RichTextEditor from './RichTextEditor'
 
 /* ---- A3 拆分：props 契约与行内样式函数搬进 ./topic/，入口保留同名再导出 ---- */
 import type { TopicNodeProps } from './topic/props'
-import { segmentStyle } from './topic/segment-style'
+import { TopicMarkersStrip } from './topic/markers'
+import { TopicAccessoryRow } from './topic/accessories'
+import { TopicTextLines } from './topic/text-lines'
+import { TopicLabelRow } from './topic/label-row'
 export type { TopicNodeProps } from './topic/props'
 
 function TopicNodeInner({
@@ -237,55 +238,14 @@ function TopicNodeInner({
         onDoubleClick(node.id)
       }}
     >
-      {/* 标记条：挂在节点**外侧**竖排（默认左侧，左向分支放右侧） */}
-      {markerColumns.length > 0 && (
-        <div
-          className="topic__markers"
-          style={
-            markerSide === 'left'
-              ? { left: -(markerStripWidth + MARKER_STRIP_GAP) }
-              : { right: -(markerStripWidth + MARKER_STRIP_GAP) }
-          }
-        >
-          {markerColumns.map((column, columnIndex) => (
-            <div key={columnIndex} className="topic__marker-col">
-              {column.map((markerId, index) => (
-                <MarkerIcon key={`mk-${columnIndex}-${index}-${markerId}`} markerId={markerId} />
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
+      <TopicMarkersStrip
+        markerColumns={markerColumns}
+        markerSide={markerSide}
+        markerStripWidth={markerStripWidth}
+      />
 
       <div className="topic__body">
-        {/* 顶部图标行：备注 / 链接 / 附件指示（标记已移到左侧） */}
-        {node.accessory.items.length > 0 && (
-          <div className="topic__accessory" style={{ height: node.accessory.height }}>
-            {node.accessory.items.map((item, index) => (
-              <button
-                key={`i-${index}-${item.kind}`}
-                type="button"
-                className="topic__indicator"
-                title={
-                  item.kind === 'notes'
-                    ? '有备注 · 点击查看 / 编辑'
-                    : item.kind === 'link'
-                      ? '有超链接 · 点击打开节点属性'
-                      : '有附件 · 点击打开节点属性'
-                }
-                onClick={(event) => {
-                  // 别让点击冒泡成「选中 / 进入编辑」：用户点的是指示图标
-                  event.stopPropagation()
-                  const editor = useEditor.getState()
-                  if (item.kind === 'notes') editor.requestNotesFocus()
-                  else editor.requestNodePanel()
-                }}
-              >
-                <IndicatorIcon kind={item.kind} />
-              </button>
-            ))}
-          </div>
-        )}
+        <TopicAccessoryRow node={node} />
 
         {editing ? (
           <RichTextEditor
@@ -300,35 +260,7 @@ function TopicNodeInner({
           />
         ) : (
           <div className="topic__text">
-            {node.lines.map((line, lineIndex) => (
-              <div
-                key={lineIndex}
-                className="topic__line"
-                style={{
-                  height: line.height,
-                  lineHeight: `${line.height}px`,
-                  textAlign: line.align
-                }}
-              >
-                {line.segments.length === 0
-                  ? '\u00A0'
-                  : line.segments.map((segment, segmentIndex) =>
-                      segment.formula ? (
-                        // 行内公式（标题里的 $…$）：交给 KaTeX，垂直居中对齐文字
-                        <span
-                          key={segmentIndex}
-                          className="topic__inline-formula"
-                          // KaTeX 的输出由渲染器生成，不是用户 HTML
-                          dangerouslySetInnerHTML={{ __html: formulaHtml(segment.formula) }}
-                        />
-                      ) : (
-                        <span key={segmentIndex} style={segmentStyle(segment)}>
-                          {segment.text}
-                        </span>
-                      )
-                    )}
-              </div>
-            ))}
+            <TopicTextLines node={node} />
           </div>
         )}
 
@@ -413,22 +345,7 @@ function TopicNodeInner({
           </div>
         )}
 
-        {/* 底部标签行 */}
-        {node.labelRow.items.length > 0 && (
-          <div className="topic__labels" style={{ height: node.labelRow.height }}>
-            {node.labelRow.items.map((label, index) => (
-              <span
-                key={`l-${index}-${label.text}`}
-                className="topic__label"
-                style={{ width: label.width }}
-                // 过长时标签画的是截断后的文字，hover 用完整原文提示
-                title={label.full ?? label.text}
-              >
-                {label.text}
-              </span>
-            ))}
-          </div>
-        )}
+        <TopicLabelRow node={node} />
       </div>
 
       {/* 手动拉伸手柄：选中且不在编辑态时出现，拖右下角改尺寸，双击恢复自动尺寸 */}
