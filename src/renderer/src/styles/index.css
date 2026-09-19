@@ -1,0 +1,25 @@
+/**
+ * 样式入口：**按原顺序** @import 各区块（顺序＝层叠顺序，是行为的一部分）。
+ * 由 src/renderer/src/styles.css 按区块切分而来（解耦任务表 F1）。
+ */
+
+@import './00-base.css';
+@import './01-section.css';
+@import './02-section.css';
+@import './03-section.css';
+@import './04-section.css';
+@import './05-section.css';
+@import './06-section.css';
+@import './07-section.css';
+@import './08-section.css';
+@import './09-section.css';
+@import './10-section.css';
+@import './11-section.css';
+@import './12-section.css';
+@import './13-section.css';
+@import './14-section.css';
+@import './15-section.css';
+@import './16-section.css';
+@import './17-section.css';
+@import './18-section.css';
+@import './19-section.css';

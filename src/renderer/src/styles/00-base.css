@@ -1,0 +1,58 @@
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --border: #e4e7ec;
+  --text: #1f2328;
+  --text-dim: #6b7280;
+  --accent: #2f6bff;
+  --danger: #e5484d;
+  font-family:
+    'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'Segoe UI', system-ui, sans-serif;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+button,
+select,
+textarea {
+  font-family: inherit;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 大纲面板占左侧固定宽度：画布让出这一块，两个视图并排显示 */
+.app__body--with-outline .canvas {
+  left: 320px;
+}
+
+/* 底部画布标签栏：画布让出底部一条 */
+.app__body--tabs .canvas {
+  bottom: 31px;
+}

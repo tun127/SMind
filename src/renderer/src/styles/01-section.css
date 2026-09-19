@@ -1,0 +1,98 @@
+/* 区块 1／19：画布标签栏（原 styles.css 第 60–157 行） */
+/* ------------------------------------------------------------------ */
+/* 画布标签栏                                                          */
+/* ------------------------------------------------------------------ */
+
+.sheet-tabs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 31px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 24px;
+  border-radius: 5px;
+  background: rgba(140, 148, 160, 0.12);
+}
+
+.sheet-tab--active {
+  background: rgba(47, 107, 255, 0.16);
+}
+
+.sheet-tab__name {
+  max-width: 180px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sheet-tab--active .sheet-tab__name {
+  font-weight: 600;
+}
+
+.sheet-tab__input {
+  width: 140px;
+  height: 20px;
+  margin: 0 4px;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.sheet-tab__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 3px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sheet-tab__close:hover {
+  background: #eb5757;
+  color: #fff;
+}
+
+.sheet-tab--add {
+  width: 24px;
+  justify-content: center;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sheet-tab--add:hover {
+  background: rgba(47, 107, 255, 0.16);
+  color: var(--accent);
+}

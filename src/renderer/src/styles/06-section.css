@@ -1,0 +1,220 @@
+/* 区块 6／19：AI 对话框（原 styles.css 第 705–924 行） */
+/* ------------------------------------------------------------------ */
+/* AI 对话框                                                           */
+/* ------------------------------------------------------------------ */
+
+.ai-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ai-field--row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-field__label {
+  flex: none;
+  min-width: 56px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.ai-field__value {
+  flex: none;
+  min-width: 48px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.ai-field__hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.ai-field--row input[type='range'] {
+  flex: 1;
+}
+
+.ai-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ai-preset {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-preset:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ai-choices {
+  display: flex;
+  gap: 6px;
+}
+
+.ai-choice {
+  flex: 1;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-choice:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-choice--active {
+  border-color: var(--accent);
+  background: rgba(47, 107, 255, 0.1);
+  color: var(--accent);
+}
+
+.ai-context {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(140, 148, 160, 0.12);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ai-error,
+.ai-test {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ai-error,
+.ai-test--fail {
+  background: rgba(235, 87, 87, 0.12);
+  color: #c0392b;
+}
+
+.ai-test--ok {
+  background: rgba(39, 174, 96, 0.12);
+  color: #1e8449;
+}
+
+.ai-preview {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.ai-preview__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  background: rgba(140, 148, 160, 0.12);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.ai-preview__body {
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+/* 模型原始输出（排查"没解析出大纲"时看）：等宽 + 保留换行，
+   否则一堆 `- ` 缩进全糊成一坨，根本看不出问题在哪 */
+.ai-preview__body--raw {
+  padding: 6px 10px;
+  font-family: Consolas, 'JetBrains Mono', Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-preview__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 节点的解释（`> ` 行会成为备注）：预览里也要看得见，
+   否则用户无法判断"详细"到底详在哪 */
+.ai-preview__note {
+  padding: 0 8px 2px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.ai-preview__dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.ai-raw {
+  font-size: 12px;
+}
+
+.ai-raw summary {
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.ai-raw pre {
+  max-height: 180px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(140, 148, 160, 0.12);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.ai-note {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(140, 148, 160, 0.12);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ai-note b {
+  color: var(--text);
+}

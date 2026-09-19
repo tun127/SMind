@@ -1,0 +1,58 @@
+/* 区块 15／19：主题面板（原 styles.css 第 2174–2231 行） */
+/* ------------------------------------------------------------------ */
+/* 主题面板                                                            */
+/* ------------------------------------------------------------------ */
+
+.side-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 328px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(16, 24, 40, 0.08);
+}
+
+.side-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.side-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+.side-panel__section + .side-panel__section {
+  margin-top: 18px;
+}
+
+.side-panel__title {
+  margin-bottom: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.side-panel__title--sub {
+  margin-top: 12px;
+}
+
+.side-panel__empty {
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}

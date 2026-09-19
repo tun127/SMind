@@ -1,0 +1,132 @@
+/* 区块 13／19：富文本格式栏（原 styles.css 第 1917–2048 行） */
+/* ------------------------------------------------------------------ */
+/* 富文本格式栏                                                        */
+/* ------------------------------------------------------------------ */
+
+.formatbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  background: #fbfcfd;
+  border-top: 1px solid var(--border);
+  user-select: none;
+}
+
+.formatbar__group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.formatbar__divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+.formatbar__label {
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.fmt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #39404b;
+  cursor: pointer;
+}
+
+.fmt-btn:hover {
+  background: #eef0f4;
+}
+
+.fmt-btn--active {
+  border-color: #c8d9ff;
+  background: #e6edff;
+  color: var(--accent);
+}
+
+.fmt-select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.color-dot {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1.5px solid rgba(16, 24, 40, 0.14);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.color-dot--active {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px var(--accent);
+}
+
+.statusbar__left,
+.statusbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.statusbar__file {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.statusbar__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b9c0ca;
+}
+
+.statusbar__dot--dirty {
+  background: #f2994a;
+}
+
+.statusbar__sep {
+  color: #ccd2da;
+}
+
+.statusbar__link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* 关闭态的开关：灰一点但仍可点、可看见（视角锁定这类"关着就隐形"的开关常驻化） */
+.statusbar__link--dim {
+  color: #6b7684;
+}
+
+.statusbar__link:hover {
+  text-decoration: underline;
+}

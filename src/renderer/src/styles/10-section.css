@@ -1,0 +1,132 @@
+/* 区块 10／19：底部多文档标签栏（浏览器式任务栏）（原 styles.css 第 1702–1833 行） */
+/* ------------------------------------------------------------------ */
+/* 底部多文档标签栏（浏览器式任务栏）                                   */
+/* ------------------------------------------------------------------ */
+
+.tabbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 8px;
+  background: var(--panel, #eceef2);
+  border-top: 1px solid #d8dce3;
+  user-select: none;
+}
+
+.tabbar__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabbar__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabbar__tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 190px;
+  height: 25px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted, #5c6672);
+  cursor: default;
+  white-space: nowrap;
+}
+
+.tabbar__tab:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.tabbar__tab--active {
+  background: var(--accent-soft, #dfe7f7);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tabbar__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.tabbar__dot--dirty {
+  background: #f2994a;
+}
+
+.tabbar__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tabbar__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.tabbar__close:hover {
+  background: rgba(0, 0, 0, 0.12);
+  opacity: 1;
+}
+
+.tabbar__arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted, #5c6672);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.tabbar__arrow:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.tabbar__new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted, #5c6672);
+  cursor: pointer;
+}
+
+.tabbar__new:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--text);
+}

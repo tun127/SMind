@@ -1,0 +1,19 @@
+/* 区块 18／19：提示条（原 styles.css 第 3313–3331 行） */
+/* ------------------------------------------------------------------ */
+/* 提示条                                                              */
+/* ------------------------------------------------------------------ */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 52px;
+  z-index: 200;
+  max-width: 70vw;
+  padding: 9px 18px;
+  border-radius: 8px;
+  background: rgba(31, 35, 40, 0.92);
+  color: #fff;
+  font-size: 13px;
+  transform: translateX(-50%);
+  box-shadow: 0 10px 26px rgba(16, 24, 40, 0.24);
+}

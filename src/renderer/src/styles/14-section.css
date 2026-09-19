@@ -1,0 +1,125 @@
+/* 区块 14／19：对话框（原 styles.css 第 2049–2173 行） */
+/* ------------------------------------------------------------------ */
+/* 对话框                                                              */
+/* ------------------------------------------------------------------ */
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(16, 24, 40, 0.42);
+}
+
+.modal {
+  width: min(560px, 90vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(16, 24, 40, 0.28);
+  overflow: hidden;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.modal__icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.modal__body {
+  padding: 4px 20px 16px;
+  overflow: auto;
+  color: #39404b;
+  line-height: 1.7;
+}
+
+.modal__body p {
+  margin: 0 0 6px;
+}
+
+.modal__dim {
+  color: var(--text-dim);
+}
+
+.modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: #fafbfc;
+}
+
+.btn {
+  height: 32px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #f2f4f7;
+}
+
+.btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn--primary:hover {
+  background: #255ce0;
+}
+
+.btn--danger {
+  border-color: #f4c7c8;
+  background: #fff;
+  color: var(--danger);
+}
+
+.btn--danger:hover {
+  background: #fdf1f1;
+}
+
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #eef0f4;
+}
+
+.shortcut-row kbd {
+  flex: 0 0 200px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: #f7f8fa;
+  color: #39404b;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+}

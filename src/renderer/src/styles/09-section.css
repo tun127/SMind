@@ -1,0 +1,472 @@
+/* 区块 9／19：主题节点（原 styles.css 第 1230–1701 行） */
+/* ------------------------------------------------------------------ */
+/* 主题节点                                                            */
+/* ------------------------------------------------------------------ */
+
+.topic {
+  position: absolute;
+  display: flex;
+  /* 内容列（图标行 / 文字 / 图片 / 代码 / 标签）；标记条是盒外的绝对定位元素 */
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  user-select: none;
+  transition: box-shadow 0.12s ease;
+}
+
+/* 内容列：原来的纵向排布都搬到这里 */
+.topic__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* 标记条：绝对定位在节点**外面**的左侧（左向分支用 right 定位放到右侧），
+   垂直居中；不参与节点盒尺寸，所以节点宽度不会因为标记变宽 */
+.topic__markers {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.topic__marker-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 手动拉伸手柄（选中时出现在右下角） */
+.topic__resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--accent);
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.28);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+/* 能拖的主题给「抓取」光标：这是最省事的操作提示，也省掉一次试探性拖动 */
+.topic--draggable {
+  cursor: grab;
+}
+
+/* 标题里的行内公式（$…$）：随文字行内排布，垂直居中对齐 */
+.topic__inline-formula {
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 1;
+  margin: 0 1px;
+}
+
+.topic__inline-formula .katex {
+  font-size: 1em;
+}
+
+.topic__text {
+  width: 100%;
+  white-space: pre;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ---- 顶部图标行与底部标签行 ---- */
+
+.topic__accessory {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.topic__labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.topic__label {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: rgba(140, 148, 160, 0.18);
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.marker-icon,
+.topic__indicator,
+.marker-badge,
+.marker-progress {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+/* ---- 节点内图片与公式 ---- */
+
+.topic__image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.topic__image img {
+  display: block;
+  border-radius: 4px;
+  object-fit: contain;
+  /* 图片不参与画布拖拽，避免拖动节点时被浏览器当成图片拖走 */
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.topic__image-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(140, 148, 160, 0.55);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* 固定尺寸框：与布局测量出来的 formulaBox 完全一致，保证不裁切、不撑开 */
+.topic__formula {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  line-height: 1;
+}
+
+/**
+ * 关键：这里**不能**再对 .katex 做 font-size 缩放。
+ * 测量（render/formula.ts）用的是脱离节点的隐藏容器，那里没有这条规则——
+ * 一旦这里放大（曾经是 1.1em），渲染出的公式就比算出来的框大约 10%，
+ * 而 .topic__formula 是 overflow: hidden，表现为「公式右/下被截断」。
+ * 想让公式更大，就调节点字号或公式框尺寸，别在这里偷偷放大。
+ */
+.topic__formula .katex {
+  white-space: nowrap;
+}
+
+.topic__formula .katex-display {
+  margin: 0;
+}
+
+/* 代码块：与 shared/layout/accessory.ts 的 codeBoxSize 共用常量。
+   尺寸完全由布局测量给出（不封顶），这里**不做裁剪、不出滚动条**——
+   代码必须完整显示。 */
+.topic__code {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  /* 实色浅色卡片：不管节点/主题是什么配色，代码都清晰可读 */
+  background: #f6f8fa;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  overflow: visible;
+  text-align: left;
+}
+
+.topic__code-lang {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 15px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  user-select: none;
+}
+
+.topic__code-lang:hover {
+  color: var(--accent);
+}
+
+.topic__code-pre {
+  margin: 0;
+  padding: 8px 10px;
+  padding-top: 17px;
+  font-family: Consolas, 'JetBrains Mono', Menlo, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #24292f;
+  white-space: pre;
+  /* 不滚动、不省略：整段代码铺开显示 */
+  overflow: visible;
+}
+
+/* 用于量公式真实尺寸的隐藏容器（不参与显示） */
+.formula-measure {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.topic__indicator {
+  color: inherit;
+  opacity: 0.72;
+}
+
+.marker-badge {
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.topic__line {
+  display: block;
+}
+
+.topic--deep {
+  background: transparent;
+}
+
+/*
+ * 自由摆放的主题（有手动位置偏移）。
+ * 用一个很浅的虚线圈标出来——它们不参与自动布局，视觉上会显得"浮"在树外面，
+ * 用户经常就是被这几个主题搞懵："为什么这条线横穿整张图"。
+ * 选中高亮与落点高亮都更强，所以不会被这圈虚线盖住。
+ */
+.topic--floating {
+  /*
+   * 用**实线细框**而不是虚线：主题本身就可能画成虚线边框（forest 这类主题），
+   * 「自由摆放」再叠一层虚线，屏幕上就到处都是虚线——落点高亮会被彻底淹没
+   * （用户反馈：拖拽时根本看不出落在谁身上）。细实线只表示"这个我手动摆过"。
+   */
+  outline: 1px solid rgba(140, 148, 160, 0.85);
+  outline-offset: 4px;
+}
+
+.topic--selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * 框选中「将要被选中」的节点：先用**同一圈蓝色描边 + 一层外发光**预告结果。
+ * 用和"已选中"同一套颜色是刻意的——用户看到的就是松手后的样子；
+ * 外发光只是提示"还没定"（松手后发光消失）。
+ */
+.topic--marquee {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(47, 107, 255, 0.18);
+}
+
+.topic--drop {
+  /*
+   * 必须**实线 + 更粗**：主题本身就可能画成虚线边框（forest 这类主题就是），
+   * 用虚线做落点高亮会和主题边框糊在一起——用户根本看不出"现在落在谁身上"，
+   * 只能去猜远处那个空位框属于谁（用户反馈：我明明放中心主题下面，却像连到分支主题 2）。
+   */
+  outline: 3px solid #12b76a;
+  outline-offset: 4px;
+}
+
+/**
+ * 同级插入时参照的那个主题：只标它自己，不标它的父级。
+ * 标父级（尤其父级是中心主题时）会让人误以为"要落到父级上"，
+ * 那正是用户反馈的「拖到空白处还吸附到根节点上」的来源。
+ */
+.topic--drop-sibling {
+  /* 同上：实线才不会被主题的虚线边框吞掉 */
+  outline: 3px solid #2f6bff;
+  outline-offset: 4px;
+}
+
+/* 拖拽中：被拖的整棵子树都跟着走，所以统一压一点透明度表示「在移动」 */
+.topic--dragging {
+  opacity: 0.85;
+  /* transform 是即时跟随的，绝不能有过渡，否则会拖泥带水 */
+  transition: none;
+}
+
+/* 手里正抓着的那一个：换成抓取光标，并压住其它节点 */
+.topic--drag-primary {
+  cursor: grabbing;
+  opacity: 1;
+  z-index: 40;
+}
+
+/**
+ * 关键：.topic 上为了拖拽时不选中文字而设了 user-select: none，
+ * 它会继承到子节点上，导致 contenteditable 无法放置光标、无法选中文本，
+ * 表现就是「节点里选不中字、格式按钮点了没反应」。这里必须显式恢复。
+ */
+.topic.topic--editing {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/**
+ * 编辑态容器：参与正常流布局（不能绝对定位），
+ * 这样内容变高时节点才能跟着长高。
+ */
+.topic__editor {
+  position: relative;
+  width: 100%;
+  /* 允许在节点宽度内收缩：否则 flex 子项的 min-width:auto 会把节点撑破（见下方说明） */
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 富文本内容：默认居中，与测量阶段的默认对齐保持一致 */
+.rich-editor__content {
+  position: relative;
+  width: 100%;
+  /* 关键：flex 子项默认 min-width:auto，下限是"最长不可断片段"，
+     一串没有空格的 `aaaa…` / 长 URL 会据此把节点撑破、文字排成一条长线，
+     看上去就是「输入时不换行、按 Enter 提交后才换行」。这两行让它能在节点宽度内断行。 */
+  min-width: 0;
+  outline: none;
+  /* ProseMirror 的基础排版要求，缺了会导致换行与光标定位异常 */
+  white-space: pre-wrap;
+  /* anywhere 与 break-word 的区别：anywhere 会参与"最小内容宽度"计算，
+     所以长串无空格文字才会真的在容器内断行 */
+  overflow-wrap: anywhere;
+  word-wrap: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  /* 与测量阶段的行高（字号 × 1.5）保持一致，保证编辑态和最终效果对得上 */
+  line-height: 1.5;
+}
+
+.rich-editor__content p {
+  margin: 0;
+  text-align: center;
+}
+
+.rich-editor__content ul {
+  margin: 0;
+  padding-left: 1.15em;
+}
+
+/* 列表项左对齐更好读，但仍可被文本对齐的内联样式覆盖 */
+.rich-editor__content li > p {
+  text-align: left;
+}
+
+.rich-editor__content p:empty::before {
+  content: '\00a0';
+}
+
+/* 高亮 / 上标 / 下标：与画布上的呈现保持一致（==高亮==、^上标^、~下标~） */
+.rich-editor__content mark,
+.rich-editor__content .rt-highlight {
+  background: rgba(255, 214, 0, 0.35);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.rich-editor__content sup {
+  font-size: 0.72em;
+  vertical-align: super;
+  line-height: 1;
+}
+
+.rich-editor__content sub {
+  font-size: 0.72em;
+  vertical-align: sub;
+  line-height: 1;
+}
+
+/* 折叠徽标：XMind 式**圆形简约**样式——折叠时显示数字、展开时是 −。
+   单个数字正好是正圆；两位数起变成小胶囊（min-width + padding 兜住） */
+.topic__collapse {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* width: max-content 必须显式给：绝对定位元素的收缩宽度会被**包含块右缘**卡住——
+     徽章定位在节点右缘（left: 100%-8px），可用空间只剩 8px，
+     于是折叠数到了三位数就被截成「2…」（AI 批量补全后根节点的折叠数就是三位数，真踩过） */
+  width: max-content;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+/* 与节点**部分重叠**：一半压在节点边缘上，看起来是"长在节点上"的，
+   而不是悬在旁边（悬空在小图上会显得很突兀）。
+
+   贴哪条边由「子节点往哪展开」决定（见 shared/layout/core.ts 的 collapseBadgeSide）：
+   向右/左展开贴左右缘（垂直居中），向下/上展开贴下/上缘（水平居中）。 */
+.topic__collapse--right {
+  top: 50%;
+  margin-top: -8px;
+  left: calc(100% - 8px);
+}
+
+.topic__collapse--left {
+  top: 50%;
+  margin-top: -8px;
+  right: calc(100% - 8px);
+}
+
+.topic__collapse--down {
+  top: calc(100% - 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.topic__collapse--up {
+  bottom: calc(100% - 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}

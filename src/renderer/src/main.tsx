@@ -3,7 +3,8 @@ import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 // KaTeX 的样式与字体：公式节点靠它排版，必须在渲染前就位
 import 'katex/dist/katex.min.css'
-import './styles.css'
+// 样式入口：由 styles.css 按区块切分而来，index.css 按**原顺序** @import（顺序即层叠）
+import './styles/index.css'
 
 const container = document.getElementById('root')
 if (!container) throw new Error('找不到根节点 #root')

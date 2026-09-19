@@ -1,0 +1,175 @@
+/* 区块 8／19：画布（原 styles.css 第 1055–1229 行） */
+/* ------------------------------------------------------------------ */
+/* 画布                                                                */
+/* ------------------------------------------------------------------ */
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* 左键是框选、右键才是平移，所以这里不再用 grab 光标 */
+  cursor: default;
+  background-color: #f7f8fa;
+  background-image: radial-gradient(circle, #d9dce2 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.canvas:active {
+  cursor: grabbing;
+}
+
+.canvas__world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.canvas__edges,
+.canvas__overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* 关系线端点手柄：只有它需要接收指针事件 */
+.overlay-handle {
+  pointer-events: all;
+  cursor: crosshair;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+.overlay-handle:hover,
+.overlay-handle--active {
+  opacity: 1;
+  stroke-width: 2.5;
+}
+
+/* 关系线线身的透明命中区：拖动可整体移动弧线 */
+.overlay-curve {
+  pointer-events: stroke;
+  cursor: move;
+}
+
+/* 画布级元素的命中区：空标题时也要能点到（光标给出可点提示）。
+   注意：.canvas__edges / .canvas__overlay 整体是 pointer-events: none，
+   所以命中区**必须**显式打开 pointer-events，否则等于没画。 */
+.overlay-hit {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+/* 选中画布级元素（概要 / 边界）时的虚线框 */
+.overlay-selected {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.overlay-title {
+  pointer-events: all;
+  cursor: text;
+}
+
+/* 边界的透明命中区：双击改标题（不拦截单击，事件仍会冒泡给画布） */
+.overlay-boundary-hit {
+  pointer-events: fill;
+  cursor: text;
+}
+
+/* 双击标题后的就地编辑框 */
+.overlay-title-editor {
+  position: absolute;
+  z-index: 20;
+  width: 180px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: #ffffff;
+  color: #1f2328;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.18);
+}
+
+/* 左键框选的橡皮筋 */
+.canvas__marquee {
+  position: absolute;
+  z-index: 5;
+  border: 1px dashed var(--accent);
+  border-radius: 2px;
+  background: rgba(47, 107, 255, 0.08);
+  pointer-events: none;
+}
+
+/* 拖到真正空白处时的提示：这一下会自由摆放，而不是吸附进树里 */
+.canvas__free-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  z-index: 6;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(16, 24, 40, 0.82);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 落点被判为非法的原因：说清楚"为什么这一下不会生效"，免得被当成卡死 */
+.canvas__blocked-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  z-index: 6;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(180, 35, 24, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 常驻的拖拽图例：三种结果提前讲清楚，省得用户一个个去试 */
+.canvas__drag-legend {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.canvas__drag-legend-sep {
+  opacity: 0.5;
+}
+
+/* 拖拽时把"这一下会发生什么"对应的那一条点亮：
+   三种结果里永远只有一条是高亮的，用户不用猜松手会落在哪 */
+.canvas__drag-legend .is-active {
+  color: #2f6bff;
+  font-weight: 700;
+}

@@ -1,0 +1,130 @@
+/* 区块 7／19：工具栏（原 styles.css 第 925–1054 行） */
+/* ------------------------------------------------------------------ */
+/* 工具栏                                                              */
+/* ------------------------------------------------------------------ */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  /* 窗口变窄时换行，而不是横向滚动：
+     横向滚动会让工具栏变成裁切容器，把下拉菜单整个裁掉（之前「点 AI 没反应」的根因）。
+     现在菜单走传送门 + fixed 定位，这里换行只是为了不让任何按钮被藏起来。 */
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+/* 滚动条样式已移除：工具栏现在换行显示，不再是滚动容器 */
+
+/* 分组与分隔线不参与压缩，保证按钮始终是完整尺寸 */
+.toolbar__group,
+.toolbar__divider,
+.toolbar__structure {
+  flex: none;
+}
+
+.toolbar__spacer {
+  flex: 1;
+}
+
+.toolbar__label {
+  margin-right: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #39404b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.tool-btn:hover:not(:disabled) {
+  background: #eef0f4;
+}
+
+.tool-btn:active:not(:disabled) {
+  background: #e3e6ec;
+}
+
+.tool-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tool-btn--text {
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 带文字的工具栏按钮：画布级元素这类操作靠图标难以辨认，直接标出名字 */
+.tool-btn--labeled {
+  gap: 5px;
+  padding: 0 10px;
+  border-color: var(--border);
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tool-btn--labeled:hover:not(:disabled) {
+  border-color: #c8d9ff;
+  background: #f5f8ff;
+  color: var(--accent);
+}
+
+/* 包一层，是为了让禁用状态的按钮也能弹出提示（禁用元素自身不触发 title） */
+.tool-btn-wrap {
+  display: inline-flex;
+}
+
+/* 开关按钮的「已打开」状态：再点一次就会取消 */
+.tool-btn--active,
+.tool-btn--active:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #eaf0ff;
+  color: var(--accent);
+}
+
+.select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.select {
+  appearance: none;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.select:hover {
+  border-color: #cfd6e0;
+}
+
+.select-arrow {
+  position: absolute;
+  right: 9px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
