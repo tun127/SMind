@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { defaultDocumentName, fileNameOf } from '@shared/model/naming'
-import { snapshotForSave, useEditor } from '../store/editor'
 import { beginCost } from '../dev/stage'
+import { snapshotForSave, useEditor } from '../store/editor'
 import { activeDocId } from '../store/tabs'
 
 /**
