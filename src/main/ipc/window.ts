@@ -10,19 +10,16 @@ import type { Workbook } from '@shared/model/types'
 
 import { serializeXmind } from '@shared/xmind/serialize'
 
-import { type DocWindow } from '../context'
 import { docOf, pruneForSave } from '../doc-resources'
 import { copyDir } from '../autosave'
 import type { MainContext } from '../context'
+import { createWindow } from '../windows'
 
 /**
  * 这些处理器原来都在 `main/index.ts` 的 `registerIpc()` 里，整块搬来：
  * 函数体、先后顺序、通道名逐字未改（搬迁只做剪切粘贴）。
  */
-export function registerWindowIpc(
-  ctx: MainContext,
-  createWindow: (options?: { path?: string | null; copySource?: string | null }) => DocWindow
-): void {
+export function registerWindowIpc(ctx: MainContext): void {
   ipcMain.handle(IPC.openFilePending, async (e): Promise<string | null> => {
     const state = ctx.stateOf(e.sender)
     if (!state) return null
@@ -47,7 +44,7 @@ export function registerWindowIpc(
 
   /** 新建一个窗口（菜单「新建窗口」/ Ctrl+Shift+N） */
   ipcMain.handle(IPC.newWindow, async (): Promise<void> => {
-    createWindow()
+    createWindow(ctx)
   })
 
   /**
@@ -71,7 +68,7 @@ export function registerWindowIpc(
         const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
         const copyPath = join(copyDir(), `${state.slot}-copy-${randomUUID()}.xmind`)
         await fs.writeFile(copyPath, Buffer.from(bytes))
-        createWindow({ path: copyPath, copySource: copyPath })
+        createWindow(ctx, { path: copyPath, copySource: copyPath })
         return 'ok'
       } catch (error) {
         /**

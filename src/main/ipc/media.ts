@@ -19,15 +19,13 @@ import { showOpenIn, showSaveIn } from '../dialogs'
 import { firstPathOf } from '../files'
 import { docOf } from '../doc-resources'
 import type { MainContext } from '../context'
+import { resourceBytesOf } from '../resource-protocol'
 
 /**
  * 这些处理器原来都在 `main/index.ts` 的 `registerIpc()` 里，整块搬来：
  * 函数体、先后顺序、通道名逐字未改（搬迁只做剪切粘贴）。
  */
-export function registerMediaIpc(
-  ctx: MainContext,
-  resourceBytesOf: (path: string) => Uint8Array | undefined
-): void {
+export function registerMediaIpc(ctx: MainContext): void {
   ipcMain.handle(IPC.pickImage, async (e, docId: string): Promise<PickedImage | null> => {
     const result = await showOpenIn(ctx.winOf(e.sender), {
       title: '插入图片',
@@ -143,7 +141,7 @@ export function registerMediaIpc(
 
   ipcMain.handle(IPC.openAttachment, async (_e, path: string, name: string): Promise<boolean> => {
     // 附件资源路径全局唯一：直接跨窗口/跨标签找
-    const bytes = resourceBytesOf(path)
+    const bytes = resourceBytesOf(ctx, path)
     if (!bytes) return false
     // 附件是包内资源，得先落到临时文件才能交给系统程序打开。
     // 文件名带上路径哈希：同名附件互不覆盖，同一附件重复打开复用同一个临时文件。
@@ -159,7 +157,7 @@ export function registerMediaIpc(
   ipcMain.handle(
     IPC.saveAttachmentAs,
     async (e, path: string, suggestedName: string): Promise<boolean> => {
-      const bytes = resourceBytesOf(path)
+      const bytes = resourceBytesOf(ctx, path)
       if (!bytes) return false
       const result = await showSaveIn(ctx.winOf(e.sender), {
         title: '导出附件',
