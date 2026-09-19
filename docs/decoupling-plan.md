@@ -43,7 +43,7 @@
 |---|---|---|---|---|---|---|
 | A1 | `render/measure.ts` 723 | `render/measure.ts` 入口 + `measure/{cache,formula-size,wrap,style,main}.ts` | 先把「字宽缓存」「公式尺寸」「断行」「样式解析」四块按行范围搬出，入口保留同名再导出 | 0 | `cssFontOf` / `ResolvedStyle` 刚被导出过，注意别丢公开面 | ✅ 9b5f077 |
 | A2 | `export/drawing.ts` 741 | `export/drawing.ts` 入口 + `export/ops.ts`（类型）+ `drawNode.ts` + `drawOverlay.ts` + `compose.ts` | 类型先搬到 `ops.ts`，`svg.ts`/`raster.ts` 改从 `ops` 引类型 | 2（svg、raster 的 import） | 类型搬动后 `strict` 配置下的 `noUncheckedIndexedAccess` 可能报新错 → 逐处按语义处理 | ✅ 8fdc8d6 |
-| A3 | `components/TopicNode.tsx` 618 | `topic/` 5 个（外壳 / 文本 / 装饰 / 附件与指示器 / 内联公式） | 抽子组件，props 原样传 | 0 | `React.memo` 的浅比较：回调 props 必须是稳定引用，别在拆分时引入内联箭头函数 | 🟡 `64ed49e`（A3-1 纯搬动）+ **A3-2 已抽 8 个子组件**（`0bb4812` 4 个纯展示块、后续一批 4 个交互块：图片/公式/代码块/拉伸手柄），入口 619 → 334 行；**折叠徽标与外壳未做** ⬜ |
+| A3 | `components/TopicNode.tsx` 618 | `topic/` 5 个（外壳 / 文本 / 装饰 / 附件与指示器 / 内联公式） | 抽子组件，props 原样传 | 0 | `React.memo` 的浅比较：回调 props 必须是稳定引用，别在拆分时引入内联箭头函数 | ✅ A3-1 `64ed49e`（纯搬动）+ **A3-2 收口**（3 批：`0bb4812` `3fe548d` `329546a`，共抽 9 个子组件到 `topic/`）；入口 619 → **305** 行。**外壳刻意不抽**：`.topic` 外层 div 的 className/style 依赖 `visualFor`/`branchColorOf`/`minNodeWidth` 等一组值，其中 `color`、`minNodeWidth/minNodeHeight` 折叠徽标与拉伸手柄也要用——抽出去要么重复计算、要么只剩一个空壳 div，都比"只搬不改"更差 |
 | A4 | `components/NodePanel.tsx` 814 | `nodePanel/` 4 个（两条独立分支各拆组件 + 公共控件） | 按"选到节点 / 选到画布元素"两条分支拆 | 0 | 面板内草稿状态（`useState`）跨组件后要确认没有重复初始化 | ⬜ |
 | A5 | `components/Toolbar.tsx` 1059 | `toolbar/` 3 个（主栏 / 结构切换 / 视图与缩放） | 自洽组件直接搬家 | 0 | 工具栏项数组里有彼此依赖的禁用条件，搬完要手点一遍逻辑分支 | ⬜ |
 | A6 | `components/ChatPanel.tsx` 1953 | `chat/` 5 个（runtime 状态机 / 纯函数 / 消息列表 / 工具条目 / 确认弹层） | 先抽纯函数与 runtime（本轮修过 `aiTurn` 收尾，`commitTurnRef` 一族必须整体搬、不能拆开） | 0 | **最高风险之一**：`runRoundRef`/`processQueueRef`/`commitTurnRef`/`stopRef` 是"打破循环引用"的一组 ref，拆散的瞬间会变成"用到未初始化" | ⬜ |
@@ -147,3 +147,4 @@
 | 2026-09-19 | C1（8 批） | `a8aebe6` `cdf8cff` `b2b0647` `e3aaf3c` `a7af884` `230d4c9` `7d7cbe8` `3a61e69` | `main/index.ts` 2498 → 65 行，14 个 IPC 域拆进 `main/ipc/*`。每批五道门槛逐条打印退出码全绿；结构守卫「`ipcMain.handle\|on(` 注册总数 = 66」全程不变；契约未动（通道名 / `.xmind`·`.emmx` 字段 / `@import` 顺序 / `selfcheck` 入口） |
 | 2026-09-19 | C1 状态列同步（本次） | — | C1 行两处打勾 + `refactor-audit.md` §四 第 5 步打勾；未完成文件表仍待更新（下次统一做） |
 | 2026-09-19 | A3-2（2 批） | `0bb4812` `3fe548d` | TopicNode 抽子组件：第一批 4 个纯展示块（标记条 / 附件指示器 / 文本行+行内公式 / 标签行），第二批 4 个交互块（图片 / 公式 / 代码块 / 拉伸手柄）。手法＝整块搬 JSX + 外面包 Fragment + **props 原样传**（块体零改动）；两批五道门槛逐条打印退出码全绿；入口 619 → 334 行。折叠徽标与外壳仍未抽 |
+| 2026-09-19 | A3-2 第三批（收官） | `329546a` | 折叠徽标（双向展开两根 + 单徽标）抽进 `topic/collapse-badges.tsx`，入口 334 → **305** 行；A3 行改 ✅ 并写明"外壳刻意不抽"的理由。工具：`.tmp-check/extract-jsx.mjs`（脚本化 JSX 抽取 + 括号/注释配平与"注释数量不变量"守卫） |
