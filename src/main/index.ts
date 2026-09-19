@@ -15,7 +15,7 @@ import { writeFileAtomic, writeJsonAtomic } from './atomic-write'
 import { logDirectory, logMain } from './log'
 import { DOCUMENT_EXTENSIONS, extractDocumentFromBytes, extractDocumentFromPath } from './document'
 import type { ExtractedDocument } from '@shared/document'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -1189,11 +1189,17 @@ function registerIpc(): void {
         const doc = typeof docId === 'string' ? docOf(state, docId) : null
         if (doc) pruneForSave(doc, workbook)
         const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
-        const copyPath = join(copyDir(), `${state.slot}-copy-${Date.now().toString(36)}.xmind`)
+        const copyPath = join(copyDir(), `${state.slot}-copy-${randomUUID()}.xmind`)
         await fs.writeFile(copyPath, Buffer.from(bytes))
         createWindow({ path: copyPath, copySource: copyPath })
         return 'ok'
-      } catch {
+      } catch (error) {
+        /**
+         * 失败要**留下可查的痕迹**：以前这里只有一个裸 `catch {}`，
+         * 用户看到"新窗口打不开"、日志里什么都没有，只能靠猜。
+         * 返回值仍是 'failed'（渲染层的契约不变），但主进程日志里有原因。
+         */
+        logMain('open-sheet-window-failed', (error as Error).message)
         return 'failed'
       }
     }
@@ -1730,7 +1736,12 @@ function registerIpc(): void {
   svg { display: block }
 </style></head><body>${svg}</body></html>`
 
-    const tempPath = join(app.getPath('temp'), `smind-export-${Date.now()}.html`)
+    /**
+     * 临时 HTML 的文件名要**唯一**，不能只靠毫秒时间戳：
+     * 连点两次导出、或同时导两份，同一毫秒内会撞名——后写的把前一份替换掉，
+     * 于是"导出的 PDF 内容是另一张图"（或者 loadFile 读到一半被换掉）。
+     */
+    const tempPath = join(app.getPath('temp'), `smind-export-${randomUUID()}.html`)
     let win: BrowserWindow | null = null
     try {
       await fs.writeFile(tempPath, html, 'utf8')
