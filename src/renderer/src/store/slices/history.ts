@@ -7,14 +7,31 @@
  * 深度计算、合并顺序（patches 正序、inverse 倒序）、`HISTORY_LIMIT` 截断与 `COALESCE_WINDOW_MS`
  * 合并窗口一律逐字未改。
  *
- * `HISTORY_LIMIT` / `HistoryEntry` / `COALESCE_WINDOW_MS` 随本切片搬来（只被这里使用）。
+ * `HISTORY_LIMIT` / `HistoryEntry` / `COALESCE_WINDOW_MS` 随本切片搬来（`HistoryEntry` 落在 `types.ts`，
+ * 因为它是 `EditorState` 的成员类型）。
+ *
+ * **跨域归属（计划表第七批的实测口径）**：本切片新暴露 `resetHistory()`，文档生命周期只调它，
+ * 不再直接写 `undoStack` / `redoStack` / `aiTurn`。
  *
  * 本文件同时拥有这些成员在 `EditorState` 里的**声明**（接口逐字搬来）。
  */
+import { applyPatches, produceWithPatches, type Patch } from 'immer'
 
 import type { Workbook } from '@shared/model/types'
 
+import { activeRoot } from '@shared/model/tree'
+
+import { liveSelection } from '@shared/model/editor-pure'
+
+import type { StateCreator } from 'zustand'
+import type { EditorState } from './types'
+import { NO_EDITING } from './types'
 import type { HistoryEntry } from './types'
+
+const HISTORY_LIMIT = 200
+
+/** 合并窗口：同一个 coalesceKey 在此时间内的连续操作算作一步 */
+const COALESCE_WINDOW_MS = 1500
 
 export interface HistorySlice {
   undoStack: HistoryEntry[]
@@ -39,6 +56,160 @@ export interface HistorySlice {
   beginAiTurn(): void
   /** 结束 AI 回合并合并；返回这一步是否真的产生了改动 */
   commitAiTurn(label: string): boolean
+
+  /** 换文档时整段复位历史（含 AI 回合状态）：文档生命周期只调它，不再直接写这三样 */
+  resetHistory(): void
 }
 
-/** 实现（状态初值与动作）随「B1 第二步 B」的对应批次搬入；本文件此刻只有类型声明。 */
+export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice> = (set, get) => ({
+  undoStack: [],
+  redoStack: [],
+  aiTurn: null,
+
+  /* ------------------------------------------------------------------ */
+  /* 编辑                                                                */
+  /* ------------------------------------------------------------------ */
+
+  mutate: (recipe, label, coalesceKey) => {
+    const { workbook, undoStack, selection: selectionBefore } = get()
+    const [next, patches, inverse] = produceWithPatches(workbook, recipe)
+    if (patches.length === 0) return false
+
+    const now = Date.now()
+    const last = undoStack[undoStack.length - 1]
+    const canMerge =
+      coalesceKey !== undefined &&
+      last !== undefined &&
+      last.coalesceKey === coalesceKey &&
+      now - last.time < COALESCE_WINDOW_MS
+
+    if (canMerge) {
+      // 合并成一步撤销：重做用最新的 patches，撤销仍然回到最早那次修改之前
+      const merged: HistoryEntry = {
+        label,
+        patches,
+        inverse: last.inverse,
+        coalesceKey,
+        time: now,
+        selectionBefore: last.selectionBefore ?? selectionBefore
+      }
+      set({
+        workbook: next,
+        dirty: true,
+        undoStack: [...undoStack.slice(0, -1), merged],
+        redoStack: []
+      })
+      return true
+    }
+
+    set({
+      workbook: next,
+      dirty: true,
+      undoStack: [
+        ...undoStack,
+        { label, patches, inverse, coalesceKey, time: now, selectionBefore }
+      ].slice(-HISTORY_LIMIT),
+      redoStack: []
+    })
+    return true
+  },
+
+  beginAiTurn: () => {
+    // 已经在回合里就别重入：同一份文档同时只允许一个 AI 回合
+    if (get().aiTurn) return
+    set({ aiTurn: { depth: get().undoStack.length, selectionBefore: get().selection } })
+  },
+
+  /**
+   * 结束 AI 回合，把期间的所有改动**并成一步撤销**。
+   *
+   * 合成规则是这件事的关键：
+   * - `patches` 按**发生顺序**拼（撤销栈里的顺序就是发生顺序）；
+   * - `inverse` 按**条目倒序**拼（每个 inverse 是针对它自己那次改动**之前**的状态算出来的，
+   *   必须从最后一步往前依次套用）。
+   *
+   * 反过来做（把 inverse 合成一份、正向套到"后来的状态"上）会踩坑：数组重排的 patch 带下标，
+   * 套错状态就会改坏 `children`——早期做「连按方向键合并成一步」时就这么坏过数据。
+   */
+  commitAiTurn: (label) => {
+    const turn = get().aiTurn
+    if (!turn) return false
+    const { undoStack } = get()
+    const batch = undoStack.slice(turn.depth)
+    if (batch.length === 0) {
+      // AI 没改任何东西：不留空条目（否则用户按 Ctrl+Z 会"没反应"）
+      set({ aiTurn: null })
+      return false
+    }
+
+    const patches = batch.flatMap((entry) => entry.patches)
+    const inverse: Patch[] = []
+    for (let index = batch.length - 1; index >= 0; index -= 1) {
+      const entry = batch[index]
+      if (entry) inverse.push(...entry.inverse)
+    }
+
+    set({
+      aiTurn: null,
+      undoStack: [
+        ...undoStack.slice(0, turn.depth),
+        { label, patches, inverse, time: Date.now(), selectionBefore: turn.selectionBefore }
+      ].slice(-HISTORY_LIMIT),
+      redoStack: []
+    })
+    return true
+  },
+
+  undo: () => {
+    // AI 回合进行中禁止撤销：中途把撤销栈抽走，会让后续步骤全部错位
+    if (get().aiTurn) return
+    const { workbook, undoStack, redoStack } = get()
+    const entry = undoStack[undoStack.length - 1]
+    if (!entry) return
+    const next = applyPatches(workbook, entry.inverse) as Workbook
+    const root = activeRoot(next)
+    /**
+     * 撤销连选择一起还原：框选了几个节点，撤销后还是那几个。
+     *
+     * 写进**新对象**而不是就地改 `entry.selectionAtUndo`：`entry` 是 store 里的历史条目，
+     * 就地改等于绕过 `set` 改 state——不触发渲染、dev 下若对象被冻结就直接抛错。
+     */
+    const undone = { ...entry, selectionAtUndo: get().selection }
+    set({
+      workbook: next,
+      dirty: true,
+      undoStack: undoStack.slice(0, -1),
+      redoStack: [...redoStack, undone],
+      ...NO_EDITING,
+      selection: liveSelection(root, entry.selectionBefore)
+    })
+  },
+
+  redo: () => {
+    // 同 undo：AI 回合进行中不许动历史
+    if (get().aiTurn) return
+    const { workbook, undoStack, redoStack } = get()
+    const entry = redoStack[redoStack.length - 1]
+    if (!entry) return
+    const next = applyPatches(workbook, entry.patches) as Workbook
+    const root = activeRoot(next)
+    // 重做还原「撤销那一刻」的选择。注意不要覆盖 entry.selectionBefore——
+    // 条目回到撤销栈后，再撤销仍要用它还原到「这次修改之前」的框选
+    set({
+      workbook: next,
+      dirty: true,
+      undoStack: [...undoStack, entry],
+      redoStack: redoStack.slice(0, -1),
+      ...NO_EDITING,
+      selection: liveSelection(root, entry.selectionAtUndo)
+    })
+  },
+
+  /**
+   * 换文档时整段复位：撤销/重做栈清空，AI 回合状态一并作废。
+   * 为什么必须一起清（照搬原来的注释）：`aiTurn` 只在 `commitAiTurn` 里复位，而「AI 正在改这个文档时
+   * 用户新建/打开了另一份」会让它一直留着，新文档里的 undo/redo 从此被静默挡住（Ctrl+Z 完全没反应）；
+   * 整份文档被替换掉时同理。
+   */
+  resetHistory: () => set({ undoStack: [], redoStack: [], aiTurn: null })
+})

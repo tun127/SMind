@@ -13,6 +13,12 @@
  */
 
 import type { Workbook } from '@shared/model/types'
+import { createWorkbook } from '@shared/model/factory'
+
+import type { StateCreator } from 'zustand'
+import type { EditorState } from './types'
+import { NO_EDITING } from './types'
+import { readPersistedViewLock } from './view'
 
 export interface DocumentSlice {
   workbook: Workbook
@@ -33,4 +39,75 @@ export interface DocumentSlice {
   markSaved(path: string): void
 }
 
-/** 实现（状态初值与动作）随「B1 第二步 B」的对应批次搬入；本文件此刻只有类型声明。 */
+export const createDocumentSlice: StateCreator<EditorState, [], [], DocumentSlice> = (
+  set,
+  get
+) => ({
+  workbook: createWorkbook(),
+  filePath: null,
+  dirty: false,
+  docSeq: 0,
+
+  /* ------------------------------------------------------------------ */
+  /* 文档                                                                */
+  /* ------------------------------------------------------------------ */
+
+  newDocument: () => {
+    get().resetHistory()
+    set((state) => ({
+      workbook: createWorkbook({
+        rootTitle: '中心主题',
+        seedBranches: ['分支主题 1', '分支主题 2']
+      }),
+      filePath: null,
+      dirty: false,
+      docSeq: state.docSeq + 1,
+      selection: [],
+      ...NO_EDITING,
+      // 换文档时必须把 AI 回合状态清掉：它只在 commitAiTurn 里复位，
+      // 而"AI 正在改这个文档时用户新建/打开了另一份"会让 aiTurn 一直留着，
+      // 新文档里的 undo/redo 从此被静默挡住（Ctrl+Z 完全没反应）
+      // 新文档：优先恢复用户上次的选择；从未动过开关才按「启动默认视角锁定」起手
+      viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
+      selectedOverlay: null,
+      zoom: 1,
+      pan: { x: 0, y: 0 }
+    }))
+  },
+
+  loadDocument: (workbook, path) => {
+    get().resetHistory()
+    set((state) => ({
+      // 界面只显示**第一张画布**（画布切换按钮已移除）：文件的其余画布原样保留在
+      // workbook 里，保存时照旧写回，不会丢内容。
+      workbook: { ...workbook, activeSheetId: workbook.sheets[0]?.id ?? workbook.activeSheetId },
+      filePath: path,
+      dirty: false,
+      docSeq: state.docSeq + 1,
+      selection: [],
+      ...NO_EDITING,
+      // 同 newDocument：换文档不能把上一个文档的 AI 回合带过来
+      // 打开文档同样恢复上次的选择（与新建一致）
+      viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
+      selectedOverlay: null,
+      zoom: 1,
+      pan: { x: 0, y: 0 }
+    }))
+  },
+
+  restoreDocument: (workbook) => {
+    get().resetHistory()
+    set((state) => ({
+      workbook,
+      // filePath 保持不动；标记为未保存，避免用户以为已经落盘
+      dirty: true,
+      docSeq: state.docSeq + 1,
+      selection: [],
+      ...NO_EDITING
+      // 恢复是一次大跨度替换，撤销栈对它没有意义（恢复前会自动存一份版本兜底）
+      // 整份文档被替换掉了，进行中的 AI 回合同样作废（否则新状态下的撤销被挡住）
+    }))
+  },
+
+  markSaved: (path) => set({ filePath: path, dirty: false })
+})

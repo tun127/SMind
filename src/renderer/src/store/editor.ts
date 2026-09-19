@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import { applyPatches, enablePatches, produce, produceWithPatches, type Patch } from 'immer'
+import { enablePatches, produce } from 'immer'
 import { DEFAULT_APP_SETTINGS, type AppSettings } from '@shared/ipc'
 import { withOverlayTextStyle } from '@shared/model/overlay-style'
 import type { Workbook } from '@shared/model/types'
-import { createId, createTopic, createWorkbook } from '@shared/model/factory'
+import { createId, createTopic } from '@shared/model/factory'
 import {
   appendToRich,
   hasFormatting,
@@ -46,7 +46,6 @@ import { notesHtmlFrom } from '@shared/richtext'
 import { resolveDrop } from '@shared/model/drop'
 import {
   editingContent,
-  liveSelection,
   pruneOverlays,
   sameRich,
   settleAfterMove,
@@ -70,8 +69,6 @@ import {
 import type { EditorState } from './slices/types'
 import { createViewSlice } from './slices/view'
 import { NO_EDITING } from './slices/types'
-import { readPersistedViewLock } from './slices/view'
-import type { HistoryEntry } from './slices/types'
 
 /**
  * 公开面：`themeColorsOf` / `overlayToggleOf` 已下沉到 `@shared/model/editor-pure`。
@@ -84,10 +81,8 @@ enablePatches()
 
 import { createSearchSlice } from './slices/search'
 import { createOutlineSlice } from './slices/outline'
-const HISTORY_LIMIT = 200
-
-/** 合并窗口：同一个 coalesceKey 在此时间内的连续操作算作一步 */
-const COALESCE_WINDOW_MS = 1500
+import { createDocumentSlice } from './slices/document'
+import { createHistorySlice } from './slices/history'
 
 /**
  * 改应用设置：写进 store 并落盘。所有「默认值」入口（格式栏默认样式面板 /
@@ -108,225 +103,13 @@ export const useEditor = create<EditorState>()((set, get, store) => ({
   ...createViewSlice(set, get, store),
   ...createSearchSlice(set, get, store),
   ...createOutlineSlice(set, get, store),
-  ...createViewSlice(set, get, store),
-  workbook: createWorkbook(),
-  filePath: null,
-  dirty: false,
-  docSeq: 0,
+  ...createHistorySlice(set, get, store),
+  ...createDocumentSlice(set, get, store),
 
   selection: [],
   ...NO_EDITING,
   renderEpoch: 0,
   clipboard: null,
-
-  undoStack: [],
-  redoStack: [],
-  aiTurn: null,
-
-  /* ------------------------------------------------------------------ */
-  /* 文档                                                                */
-  /* ------------------------------------------------------------------ */
-
-  newDocument: () =>
-    set((state) => ({
-      workbook: createWorkbook({
-        rootTitle: '中心主题',
-        seedBranches: ['分支主题 1', '分支主题 2']
-      }),
-      filePath: null,
-      dirty: false,
-      docSeq: state.docSeq + 1,
-      selection: [],
-      ...NO_EDITING,
-      undoStack: [],
-      redoStack: [],
-      // 换文档时必须把 AI 回合状态清掉：它只在 commitAiTurn 里复位，
-      // 而"AI 正在改这个文档时用户新建/打开了另一份"会让 aiTurn 一直留着，
-      // 新文档里的 undo/redo 从此被静默挡住（Ctrl+Z 完全没反应）
-      aiTurn: null,
-      // 新文档：优先恢复用户上次的选择；从未动过开关才按「启动默认视角锁定」起手
-      viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
-      selectedOverlay: null,
-      zoom: 1,
-      pan: { x: 0, y: 0 }
-    })),
-
-  loadDocument: (workbook, path) =>
-    set((state) => ({
-      // 界面只显示**第一张画布**（画布切换按钮已移除）：文件的其余画布原样保留在
-      // workbook 里，保存时照旧写回，不会丢内容。
-      workbook: { ...workbook, activeSheetId: workbook.sheets[0]?.id ?? workbook.activeSheetId },
-      filePath: path,
-      dirty: false,
-      docSeq: state.docSeq + 1,
-      selection: [],
-      ...NO_EDITING,
-      undoStack: [],
-      redoStack: [],
-      // 同 newDocument：换文档不能把上一个文档的 AI 回合带过来
-      aiTurn: null,
-      // 打开文档同样恢复上次的选择（与新建一致）
-      viewLock: readPersistedViewLock() ?? state.appSettings.defaultViewLock,
-      selectedOverlay: null,
-      zoom: 1,
-      pan: { x: 0, y: 0 }
-    })),
-
-  restoreDocument: (workbook) =>
-    set((state) => ({
-      workbook,
-      // filePath 保持不动；标记为未保存，避免用户以为已经落盘
-      dirty: true,
-      docSeq: state.docSeq + 1,
-      selection: [],
-      ...NO_EDITING,
-      // 恢复是一次大跨度替换，撤销栈对它没有意义（恢复前会自动存一份版本兜底）
-      undoStack: [],
-      redoStack: [],
-      // 整份文档被替换掉了，进行中的 AI 回合同样作废（否则新状态下的撤销被挡住）
-      aiTurn: null
-    })),
-
-  markSaved: (path) => set({ filePath: path, dirty: false }),
-
-  /* ------------------------------------------------------------------ */
-  /* 编辑                                                                */
-  /* ------------------------------------------------------------------ */
-
-  mutate: (recipe, label, coalesceKey) => {
-    const { workbook, undoStack, selection: selectionBefore } = get()
-    const [next, patches, inverse] = produceWithPatches(workbook, recipe)
-    if (patches.length === 0) return false
-
-    const now = Date.now()
-    const last = undoStack[undoStack.length - 1]
-    const canMerge =
-      coalesceKey !== undefined &&
-      last !== undefined &&
-      last.coalesceKey === coalesceKey &&
-      now - last.time < COALESCE_WINDOW_MS
-
-    if (canMerge) {
-      // 合并成一步撤销：重做用最新的 patches，撤销仍然回到最早那次修改之前
-      const merged: HistoryEntry = {
-        label,
-        patches,
-        inverse: last.inverse,
-        coalesceKey,
-        time: now,
-        selectionBefore: last.selectionBefore ?? selectionBefore
-      }
-      set({
-        workbook: next,
-        dirty: true,
-        undoStack: [...undoStack.slice(0, -1), merged],
-        redoStack: []
-      })
-      return true
-    }
-
-    set({
-      workbook: next,
-      dirty: true,
-      undoStack: [
-        ...undoStack,
-        { label, patches, inverse, coalesceKey, time: now, selectionBefore }
-      ].slice(-HISTORY_LIMIT),
-      redoStack: []
-    })
-    return true
-  },
-
-  beginAiTurn: () => {
-    // 已经在回合里就别重入：同一份文档同时只允许一个 AI 回合
-    if (get().aiTurn) return
-    set({ aiTurn: { depth: get().undoStack.length, selectionBefore: get().selection } })
-  },
-
-  /**
-   * 结束 AI 回合，把期间的所有改动**并成一步撤销**。
-   *
-   * 合成规则是这件事的关键：
-   * - `patches` 按**发生顺序**拼（撤销栈里的顺序就是发生顺序）；
-   * - `inverse` 按**条目倒序**拼（每个 inverse 是针对它自己那次改动**之前**的状态算出来的，
-   *   必须从最后一步往前依次套用）。
-   *
-   * 反过来做（把 inverse 合成一份、正向套到"后来的状态"上）会踩坑：数组重排的 patch 带下标，
-   * 套错状态就会改坏 `children`——早期做「连按方向键合并成一步」时就这么坏过数据。
-   */
-  commitAiTurn: (label) => {
-    const turn = get().aiTurn
-    if (!turn) return false
-    const { undoStack } = get()
-    const batch = undoStack.slice(turn.depth)
-    if (batch.length === 0) {
-      // AI 没改任何东西：不留空条目（否则用户按 Ctrl+Z 会"没反应"）
-      set({ aiTurn: null })
-      return false
-    }
-
-    const patches = batch.flatMap((entry) => entry.patches)
-    const inverse: Patch[] = []
-    for (let index = batch.length - 1; index >= 0; index -= 1) {
-      const entry = batch[index]
-      if (entry) inverse.push(...entry.inverse)
-    }
-
-    set({
-      aiTurn: null,
-      undoStack: [
-        ...undoStack.slice(0, turn.depth),
-        { label, patches, inverse, time: Date.now(), selectionBefore: turn.selectionBefore }
-      ].slice(-HISTORY_LIMIT),
-      redoStack: []
-    })
-    return true
-  },
-
-  undo: () => {
-    // AI 回合进行中禁止撤销：中途把撤销栈抽走，会让后续步骤全部错位
-    if (get().aiTurn) return
-    const { workbook, undoStack, redoStack } = get()
-    const entry = undoStack[undoStack.length - 1]
-    if (!entry) return
-    const next = applyPatches(workbook, entry.inverse) as Workbook
-    const root = activeRoot(next)
-    /**
-     * 撤销连选择一起还原：框选了几个节点，撤销后还是那几个。
-     *
-     * 写进**新对象**而不是就地改 `entry.selectionAtUndo`：`entry` 是 store 里的历史条目，
-     * 就地改等于绕过 `set` 改 state——不触发渲染、dev 下若对象被冻结就直接抛错。
-     */
-    const undone = { ...entry, selectionAtUndo: get().selection }
-    set({
-      workbook: next,
-      dirty: true,
-      undoStack: undoStack.slice(0, -1),
-      redoStack: [...redoStack, undone],
-      ...NO_EDITING,
-      selection: liveSelection(root, entry.selectionBefore)
-    })
-  },
-
-  redo: () => {
-    // 同 undo：AI 回合进行中不许动历史
-    if (get().aiTurn) return
-    const { workbook, undoStack, redoStack } = get()
-    const entry = redoStack[redoStack.length - 1]
-    if (!entry) return
-    const next = applyPatches(workbook, entry.patches) as Workbook
-    const root = activeRoot(next)
-    // 重做还原「撤销那一刻」的选择。注意不要覆盖 entry.selectionBefore——
-    // 条目回到撤销栈后，再撤销仍要用它还原到「这次修改之前」的框选
-    set({
-      workbook: next,
-      dirty: true,
-      undoStack: [...undoStack, entry],
-      redoStack: redoStack.slice(0, -1),
-      ...NO_EDITING,
-      selection: liveSelection(root, entry.selectionAtUndo)
-    })
-  },
 
   /* ------------------------------------------------------------------ */
   /* 选择与编辑态                                                        */
