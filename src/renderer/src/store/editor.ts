@@ -57,7 +57,7 @@ import {
   withFoldedSides,
   type FoldSide
 } from '@shared/model/tree'
-import { buildRange, parseRange, readCurveOffset, sameRange, withCurveOffset } from '@shared/layout'
+import { buildRange, parseRange, readCurveOffset, withCurveOffset } from '@shared/layout'
 import {
   reconcileMarkers,
   RELATIONSHIP_CURVE_KEY,
@@ -79,9 +79,14 @@ import {
 } from '@shared/model/editor-pure'
 import {
   clampSizeToContent,
+  findOverlayByRange,
+  findRelationshipBetween,
+  mergeTopicContent,
   navigateTargetOf,
   normalizeImage,
   normalizeSizeOverride,
+  orderChildren,
+  renumberChildren,
   resolveKeyMove,
   selectReducer,
   selectionAfterDelete
@@ -1433,28 +1438,15 @@ export const useEditor = create<EditorState>()((set, get) => ({
   },
 
   sortChildren: (parentId, orderedIds, renumber) => {
-    const index = new Map(orderedIds.map((id, at) => [id, at]))
     get().mutate(
       (draft) => {
         const parent = findTopic(activeRoot(draft), parentId)
         if (!parent) return
         // 只按给定顺序排**还在的**子主题；没给到的（模型看不到的）保持原相对顺序、排在最后
-        const ordered = [...parent.children].sort((left, right) => {
-          const leftAt = index.get(left.id) ?? Number.MAX_SAFE_INTEGER
-          const rightAt = index.get(right.id) ?? Number.MAX_SAFE_INTEGER
-          return leftAt - rightAt
-        })
+        const ordered = orderChildren(parent.children, orderedIds)
         parent.children = ordered
         if (!renumber) return
-        ordered.forEach((child, at) => {
-          const stripped = child.title.replace(/^\s*\d+\s*[.、)]\s*/, '').trim()
-          if (stripped.length === 0) return
-          const next = `${at + 1}. ${stripped}`
-          if (child.title === next) return
-          child.title = next
-          // 与手工改名一致：局部格式（加粗/颜色）是按字符位置贴的，留着会盖在错的字上
-          child.titleRich = undefined
-        })
+        renumberChildren(ordered)
       },
       renumber ? '同级排序并编号' : '同级排序'
     )
@@ -1478,19 +1470,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
             continue
           }
           // 内容并入：保留方缺什么补什么（不覆盖它已有的内容）
-          if (!keep.notes && loser.notes) {
-            keep.notes = loser.notes
-            keep.notesHtml = notesHtmlFrom(loser.notes)
-          }
-          if (!keep.code && loser.code) keep.code = loser.code
-          if (!keep.formula && loser.formula) keep.formula = loser.formula
-          const labels = new Set([...(keep.labels ?? []), ...(loser.labels ?? [])])
-          if (labels.size > 0) keep.labels = [...labels]
-          const markers = new Map((keep.markers ?? []).map((marker) => [marker.markerId, marker]))
-          for (const marker of loser.markers ?? []) {
-            if (!markers.has(marker.markerId)) markers.set(marker.markerId, marker)
-          }
-          if (markers.size > 0) keep.markers = [...markers.values()]
+          mergeTopicContent(keep, loser)
 
           // 子主题原样搬到保留方下面
           for (const child of [...loser.children]) {
@@ -1761,11 +1741,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const [end1Id, end2Id] = selection
     if (!end1Id || !end2Id || end1Id === end2Id) return null
 
-    const existing = activeSheet(workbook).relationships.find(
-      (item) =>
-        (item.end1Id === end1Id && item.end2Id === end2Id) ||
-        (item.end1Id === end2Id && item.end2Id === end1Id)
-    )
+    const existing = findRelationshipBetween(activeSheet(workbook).relationships, end1Id, end2Id)
     // 开关：已经连过就取消，避免同一个位置叠出多条线
     if (existing) {
       get().removeRelationship(existing.id)
@@ -1784,7 +1760,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const range = buildRange(activeRoot(workbook), selection)
     if (!range) return null
 
-    const existing = activeSheet(workbook).boundaries.find((item) => sameRange(item.range, range))
+    const existing = findOverlayByRange(activeSheet(workbook).boundaries, range)
     // 开关：再点一次移除，否则半透明填充会一层层叠加、颜色越来越深
     if (existing) {
       get().removeBoundary(existing.id)
@@ -1803,7 +1779,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const range = buildRange(activeRoot(workbook), selection)
     if (!range) return null
 
-    const existing = activeSheet(workbook).summaries.find((item) => sameRange(item.range, range))
+    const existing = findOverlayByRange(activeSheet(workbook).summaries, range)
     if (existing) {
       get().removeSummary(existing.id)
       return null
@@ -1823,10 +1799,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const root = activeRoot(get().workbook)
     // 两端都得真实存在：id 是模型给的，不能默认可信
     if (!findTopic(root, end1Id) || !findTopic(root, end2Id)) return null
-    const existing = activeSheet(get().workbook).relationships.find(
-      (item) =>
-        (item.end1Id === end1Id && item.end2Id === end2Id) ||
-        (item.end1Id === end2Id && item.end2Id === end1Id)
+    const existing = findRelationshipBetween(
+      activeSheet(get().workbook).relationships,
+      end1Id,
+      end2Id
     )
     if (existing) return existing.id
     const id = createId('rel')
@@ -1839,9 +1815,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
   addBoundaryFor: (topicIds, title) => {
     const range = buildRange(activeRoot(get().workbook), topicIds)
     if (!range) return null
-    const existing = activeSheet(get().workbook).boundaries.find((item) =>
-      sameRange(item.range, range)
-    )
+    const existing = findOverlayByRange(activeSheet(get().workbook).boundaries, range)
     if (existing) return existing.id
     const id = createId('boundary')
     const text = title?.trim()
@@ -1856,9 +1830,7 @@ export const useEditor = create<EditorState>()((set, get) => ({
     if (!range) return null
     const topicId = parseRange(range)?.[0]
     if (!topicId) return null
-    const existing = activeSheet(get().workbook).summaries.find((item) =>
-      sameRange(item.range, range)
-    )
+    const existing = findOverlayByRange(activeSheet(get().workbook).summaries, range)
     if (existing) return existing.id
     const id = createId('summary')
     get().mutate((draft) => {

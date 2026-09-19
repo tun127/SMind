@@ -18,7 +18,9 @@
  * 所以外部文件一行都不用改。
  */
 
+import { sameRange } from '../layout'
 import type { Size } from '../layout/types'
+import { notesHtmlFrom } from '../richtext'
 import { allChildrenOf, findParent, findTopic } from './tree'
 import type { Topic, TopicImage } from './types'
 
@@ -190,4 +192,91 @@ export function normalizeImage(image: TopicImage | null): TopicImage | null {
   return image
     ? { path: image.path, width: positive(image.width), height: positive(image.height) }
     : null
+}
+
+/* ------------------------------------------------------------------ */
+/* 同级排序与编号                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 按给定顺序重排子主题。
+ * **只按给定顺序排「还在的」子主题**；没给到的（模型看不到的）保持原相对顺序、排在最后
+ * ——`sort` 稳定，且未给到的一律取 `MAX_SAFE_INTEGER`，所以它们的相对次序原样保留。
+ */
+export function orderChildren(children: Topic[], orderedIds: string[]): Topic[] {
+  const index = new Map(orderedIds.map((id, at) => [id, at]))
+  return [...children].sort((left, right) => {
+    const leftAt = index.get(left.id) ?? Number.MAX_SAFE_INTEGER
+    const rightAt = index.get(right.id) ?? Number.MAX_SAFE_INTEGER
+    return leftAt - rightAt
+  })
+}
+
+/** 按 `「序号. 标题」` 就地重新编号；已经是目标写法就跳过，不产生无谓的 patch。 */
+export function renumberChildren(children: Topic[]): void {
+  children.forEach((child, at) => {
+    const stripped = child.title.replace(/^\s*\d+\s*[.、)]\s*/, '').trim()
+    if (stripped.length === 0) return
+    const next = `${at + 1}. ${stripped}`
+    if (child.title === next) return
+    child.title = next
+    // 与手工改名一致：局部格式（加粗/颜色）是按字符位置贴的，留着会盖在错的字上
+    child.titleRich = undefined
+  })
+}
+
+/* ------------------------------------------------------------------ */
+/* 合并同名主题：内容并入                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 合并时把 `loser` 的内容并入 `keep`：**保留方缺什么补什么**（不覆盖它已有的内容）。
+ * 标签取并集；标记按 `markerId` 去重后取并集。子主题的搬运与 loser 的摘除不在这里（要动树）。
+ */
+export function mergeTopicContent(keep: Topic, loser: Topic): void {
+  if (!keep.notes && loser.notes) {
+    keep.notes = loser.notes
+    keep.notesHtml = notesHtmlFrom(loser.notes)
+  }
+  if (!keep.code && loser.code) keep.code = loser.code
+  if (!keep.formula && loser.formula) keep.formula = loser.formula
+  const labels = new Set([...(keep.labels ?? []), ...(loser.labels ?? [])])
+  if (labels.size > 0) keep.labels = [...labels]
+  const markers = new Map((keep.markers ?? []).map((marker) => [marker.markerId, marker]))
+  for (const marker of loser.markers ?? []) {
+    if (!markers.has(marker.markerId)) markers.set(marker.markerId, marker)
+  }
+  if (markers.size > 0) keep.markers = [...markers.values()]
+}
+
+/* ------------------------------------------------------------------ */
+/* 画布级元素查重                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 找一条**同一对端点**的关系线（**不分方向**）。
+ * `addRelationship`（读当前选择）与 `connectTopics`（模型直接给 id）原来各写一份同样的扫描；
+ * 这里只抽原语——两个调用点各自的策略（一个是开关、一个返回已有 id）留在 store。
+ */
+export function findRelationshipBetween<T extends { end1Id: string; end2Id: string }>(
+  relationships: T[],
+  end1Id: string,
+  end2Id: string
+): T | undefined {
+  return relationships.find(
+    (item) =>
+      (item.end1Id === end1Id && item.end2Id === end2Id) ||
+      (item.end1Id === end2Id && item.end2Id === end1Id)
+  )
+}
+
+/**
+ * 找一段**同一个区间**的边界 / 概要（判据仍是共享的 `sameRange`，不在这里重写比较）。
+ * `addBoundary` / `addSummary` / `addBoundaryFor` / `addSummaryFor` 四个调用点共用。
+ */
+export function findOverlayByRange<T extends { range: string }>(
+  items: T[],
+  range: string
+): T | undefined {
+  return items.find((item) => sameRange(item.range, range))
 }
