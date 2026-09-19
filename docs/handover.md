@@ -2,6 +2,27 @@
 
 ---
 
+## 补记（第七次交接，2026-09-19 深夜）—— 只剩一项在跑 + 一条口径订正
+
+> **HEAD：`c46774a`**（另加 captain 的文档提交）｜工作树**干净**（本批新代码都已在 eng-e1 的提交里落盘；t5 的切片尚未开始，其草稿已移出 `src/`）。
+
+**这一段做完了什么（15 条工作提交，captain 逐条独立验收）**：脚本侧**四项全清**（CRC32+PNG → `scripts/lib/png.mjs`；`make-marker-art` 与 `make-katex-assets` 的 Prettier 配置漂移；三份 esbuild runner → `scripts/lib/esbuild-runner.mjs`）｜E1 **五项**（(5)(3)(12)(11尾巴) + 结论入册 `known-issues.md`）｜B1 第二步 A（`editor.ts` 2181 → 2084 + `editor-ops.ts` 282）｜**A6-4**（turn-runtime 拆三模块 + 去掉 A6-3 的两条 eslint-disable）｜**A7-3 残留**（`App.tsx` 366 → **238**）。明细与证据见 `docs/decoupling-plan.md` §八 顶部「第七批」那段。
+
+**唯一未完成**：**`t5`＝`store/slices` 8 片切片**（已转派 eng-app，规格见 §八「B1 切片口径变更」）。**另有两件事**：①若你（接手者）要发布，注意 §八 里**两个新登记的 DoD 例外**（A8 入口 385>250；`use-chat-loop.ts` 硬下限 **584 行**）；②**文档尚未同步的收口项**：任务表里 A8/A6-4 两行的状态列仍写着"进行中"的口径，需一并改。
+
+### ⚠️ 口径订正（推翻第五/六次补记的两条说法，都是本轮实测）
+
+1. **`npm run selfcheck` 不再必然 EPERM**：esbuild **JS API 在本轮环境可直接跑**（captain 亲手复跑：exit 0、**2628 项断言**、约 2 秒）。CLI + 文件重定向那条路**保留为安全网**，且两条路线产物 `.cjs` 已实测**逐字节相同（3/3 sha256）**。→ **先直接跑，失败了再走安全网**，别把"必然 EPERM"当常量。
+2. **行数一律用 `git diff --numstat` 或 node 统计**：PowerShell 的 `Get-Content .Count` 把 `esbuild-runner.mjs` **128 行数成 107**、`Measure-Object -Line` 数成 98（漏空行）。第五/六次补记里"用 node 统计"仍然正确，这次补的是"`Measure-Object` 与 `.Count` 都不可信"。
+
+### 🧭 团队与任务的续接（若还要接着跑）
+
+- 团队成员是**持久的**：先 `agent_teams_status`。**任务状态机要求两步**：`claimed → in_progress → completed`（直接 `claimed→completed` 会被拒）；`blocked by X,Y` 是把**整条依赖列**打全，不代表每个都没满足。
+- **成员会话可能没有 `agent_teams_*` 工具**（本轮 eng-e1 只有 pwsh/read）→ 队长用 `reassign_task(id, assignee='captain')` 接管后两步代置。**成员会话也可能中途失败**（本轮 eng-b1）→ 先清理它在 `src/` 下留的未跟踪草稿（会落进门禁范围）、复跑门槛确认树干净，再用 `reassign_task` **连完整规格**转派。
+- 已清空的队列：eng-scripts（t3/t6/t7/t9/t10/t11）、eng-app（t8，现接 t5）、eng-e1（t2/t4，会话已结束）。
+
+---
+
 ## 补记（第六次交接，2026-09-19 深夜）—— 一行现状 + 交给谁
 
 > **HEAD：`105a732`**（另有 captain 的文档提交压在它上面）｜工作树里**有成员在飞的改动**（`store/editor.ts`、`App.tsx`、`src/shared/model/editor-ops.ts`、`scripts/make-marker-art.mjs`、4 个 `app/*.tsx?` 新文件）——**接手前先 `git status --short` 与 `agent_teams_status`**。
