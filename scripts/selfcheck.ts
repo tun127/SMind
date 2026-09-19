@@ -1317,6 +1317,15 @@ function testNodeDrag(): void {
     JSON.stringify(stackDirection(box(0, 0), box(100, 40))),
     JSON.stringify({ axis: 'x', forward: true })
   )
+  /**
+   * 中心完全重合（退化）：没有方向可言，契约是"水平、向后"。
+   * 钉住它是为了让这条**显式规则**不被实现细节的微小改动悄悄换掉。
+   */
+  eq(
+    '中心重合的退化情形 → 按契约判为「水平、向后」',
+    JSON.stringify(stackDirection(box(0, 0), box(0, 0))),
+    JSON.stringify({ axis: 'x', forward: true })
+  )
   eq(
     '垂直于 y 轴得到 x 轴',
     JSON.stringify(perpendicularOf({ axis: 'y', forward: true })),

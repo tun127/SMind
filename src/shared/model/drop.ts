@@ -126,6 +126,11 @@ const centerOf = (rect: DropRect): DropPoint => ({
  * 必须用**两个同级节点的实际坐标**来算：
  * 平衡思维导图的子节点其实是**竖着**排的，若按"父节点→子节点"的方向去猜，
  * 会把"插到下面那个兄弟后面"错画成"插到它右边"，看起来就像要连回根节点。
+ *
+ * 中心完全重合（退化情形，比如两个节点叠在一起）时没有"方向"可言，
+ * 这里**规定**按"水平、向后"处理：`Math.abs(0) >= Math.abs(0)` 为真、`0 >= 0` 也为真。
+ * 与其让实现细节随机决定，不如把它当契约写下来——自检里有断言钉着，
+ * 将来若要改成"垂直"或其他规则，会先撞到那条断言而不是悄悄换行为。
  */
 export function stackDirection(before: DropRect, after: DropRect): DropAxis {
   const a = centerOf(before)
