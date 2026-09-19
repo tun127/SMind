@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { createLayoutCache, layoutSheetCached } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
-import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
-import type { RichText, Topic } from '@shared/model/types'
-import { activeRoot, activeSheet, countTopics, type FoldSide } from '@shared/model/tree'
+import type { Topic } from '@shared/model/types'
+import { activeRoot, activeSheet, countTopics } from '@shared/model/tree'
 import type { DragMove } from '@shared/model/dragmove'
 import { measureTopic, bumpMeasureEpoch } from '../render/measure'
 import { beginCost, count, isDiagArmed, mark, setStage } from '../dev/stage'
@@ -25,6 +24,9 @@ import { useNodeDrag } from './canvas/use-node-drag'
 import { useCanvasDisplay } from './canvas/use-canvas-display'
 import { CanvasEdgesLayer } from './canvas/canvas-edges-layer'
 import { CanvasNodesLayer } from './canvas/canvas-nodes-layer'
+import { CanvasHints } from './canvas/canvas-hints'
+import { CanvasTitleEditor } from './canvas/canvas-title-editor'
+import { useNodeCallbacks } from './canvas/use-node-callbacks'
 import { CanvasOverlayLayer } from './canvas/canvas-overlay-layer'
 import { CanvasRelationshipHitLayer } from './canvas/canvas-relationship-hit-layer'
 
@@ -339,78 +341,18 @@ export default function Canvas(): ReactElement {
   /* ---- 双击标题就地编辑：整块搬进 canvas/use-title-edit.ts ---- */
   const { titleEdit, setTitleEdit, cancelTitleRef, commitTitleEdit } = useTitleEdit()
 
-  /* ---- 节点回调：全部只走 useEditor.getState() / ref 拿最新值，引用永远稳定 ---- */
-  /**
-   * TopicNode 有 memo，但只要这里传进去的回调每次渲染都是新函数，
-   * 浅比较必然失败、memo 就整个被架空——以前 8 个内联箭头函数正是这样
-   * 把「每次 pan 更新」放大成「全部可见节点重渲染」的。
-   */
-  const handleNodeDoubleClick = useCallback((id: string): void => {
-    useEditor.getState().beginEdit(id)
-  }, [])
-  const handleNodeRichChange = useCallback((id: string, rich: RichText): void => {
-    const store = useEditor.getState()
-    if (store.editingId === id) store.updateEditingRich(rich)
-  }, [])
-  const handleNodeCancelEdit = useCallback((): void => {
-    useEditor.getState().cancelEdit()
-  }, [])
-  const handleNodeCommitEdit = useCallback((): void => {
-    useEditor.getState().commitEdit()
-  }, [])
-  const handleNodeCommitAndAddChild = useCallback((): void => {
-    useEditor.getState().commitAndAddChild()
-  }, [])
-  const handleNodeCommitAndAddSibling = useCallback((): void => {
-    useEditor.getState().commitAndAddSibling()
-  }, [])
-  const handleNodeNavigateEdit = useCallback(
-    (key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'): void => {
-      // 空主题上的方向键：先提交（空内容不会进撤销栈），再移动选择
-      const store = useEditor.getState()
-      if (store.editingId) store.commitEdit()
-      store.navigateSelection(key)
-    },
-    []
-  )
-  const handleNodeToggleCollapse = useCallback((id: string): void => {
-    // 折叠 / 展开会重排整张图：把被点的那个主题**按在原处**，
-    // 否则用户眼前的画面会整体跳走（看着看着，那一支忽然不见了）。
-    // 视口值走 ref：回调才能保持引用稳定，又不失真（点击瞬间 ref 与渲染值一致）。
-    const lay = layoutRef.current
-    const z = zoomRef.current
-    const p = panRef.current
-    const before = lay?.nodeMap.get(id)
-    const screen = before ? { x: before.x * z + p.x, y: before.y * z + p.y } : null
-    useEditor.getState().toggleCollapse(id)
-    if (!screen || !containerRef.current) return
-    window.requestAnimationFrame(() => {
-      const after = layoutRef.current?.nodeMap.get(id)
-      if (!after) return
-      // 反解平移量：让 after 的世界坐标仍落在同一个屏幕位置
-      useEditor.getState().setPan({ x: screen.x - after.x * z, y: screen.y - after.y * z })
-    })
-  }, [])
-
-  const handleNodeToggleFoldSide = useCallback((id: string, side: FoldSide): void => {
-    /**
-     * 平衡思维导图的中心主题：收起/展开某一侧。
-     * 与整体折叠同一处理——重排后把被点的中心主题**按在屏幕原处**，
-     * 否则用户正看着左侧收起来，画面却整体跳走。
-     */
-    const lay = layoutRef.current
-    const z = zoomRef.current
-    const p = panRef.current
-    const before = lay?.nodeMap.get(id)
-    const screen = before ? { x: before.x * z + p.x, y: before.y * z + p.y } : null
-    useEditor.getState().toggleFoldSide(id, side)
-    if (!screen || !containerRef.current) return
-    window.requestAnimationFrame(() => {
-      const after = layoutRef.current?.nodeMap.get(id)
-      if (!after) return
-      useEditor.getState().setPan({ x: screen.x - after.x * z, y: screen.y - after.y * z })
-    })
-  }, [])
+  /* ---- 节点回调：整块搬进 canvas/use-node-callbacks.ts（引用仍然永远稳定） ---- */
+  const {
+    handleNodeDoubleClick,
+    handleNodeRichChange,
+    handleNodeCancelEdit,
+    handleNodeCommitEdit,
+    handleNodeCommitAndAddChild,
+    handleNodeCommitAndAddSibling,
+    handleNodeNavigateEdit,
+    handleNodeToggleCollapse,
+    handleNodeToggleFoldSide
+  } = useNodeCallbacks({ containerRef, layoutRef, zoomRef, panRef })
 
   /* ---- 空白处：右键/中键拖动平移、左键拖动框选：整块搬进 canvas/use-marquee-select.ts ---- */
   const { marquee, handleBackgroundPointerDown } = useMarqueeSelect({
@@ -550,95 +492,23 @@ export default function Canvas(): ReactElement {
           setTitleEdit={setTitleEdit}
         />
 
-        {/* 双击标题后的就地编辑框。放在世界容器内，所以会随画布一起缩放。
-            关系线 / 边界 / 概要**都支持手动换行**（Enter 换行、Esc 取消、Ctrl+Enter 提交、失焦也提交）——
-            以前只有概要能换行，另外两种用单行 input，用户根本没法换行 */}
-        {titleEdit ? (
-          <textarea
-            className="overlay-title-editor overlay-title-editor--multi"
-            rows={Math.max(1, overlayTitleLines(titleEdit.value).length)}
-            style={{
-              left: titleEdit.x,
-              // 多行时整块按中线对齐（与画布上的排布方式一致）
-              top:
-                titleEdit.y -
-                13 -
-                ((Math.max(1, overlayTitleLines(titleEdit.value).length) - 1) *
-                  OVERLAY_TITLE_LINE_HEIGHT) /
-                  2,
-              transform:
-                titleEdit.anchor === 'middle'
-                  ? 'translateX(-50%)'
-                  : titleEdit.anchor === 'end'
-                    ? 'translateX(-100%)'
-                    : 'none'
-            }}
-            value={titleEdit.value}
-            autoFocus
-            onFocus={(e) => e.currentTarget.select()}
-            onChange={(e) => {
-              const next = e.currentTarget.value
-              setTitleEdit((current) => (current ? { ...current, value: next } : current))
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              // 输入法组词期间交给输入法处理（React 合成事件没有 isComposing）
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return
-              // Enter = 换行（这就是「手动换行」，关系线 / 边界 / 概要一视同仁）；
-              // Esc = 取消；Ctrl/Cmd+Enter = 直接提交并退出（单行标签改完想快点收工）
-              if (e.key === 'Escape') {
-                e.preventDefault()
-                cancelTitleRef.current = true
-                e.currentTarget.blur()
-                return
-              }
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault()
-                e.currentTarget.blur()
-              }
-            }}
-            onBlur={commitTitleEdit}
-          />
-        ) : null}
-      </div>
-
-      {/* 拖到真正的空白处：明确告诉用户"这一下会自由摆放"，
-          免得他以为已经吸附进树里了（自由摆放的主题会被自动布局甩在一边，连线横穿整张图） */}
-      {/* 常驻图例：拖拽的三种结果提前讲清楚，不用用户去试 */}
-      <div className="canvas__drag-legend">
-        <span className={dragVisual && dropTarget?.mode === 'child' ? 'is-active' : undefined}>
-          拖到主题上＝成为它的子主题
-        </span>
-        <span className="canvas__drag-legend-sep">·</span>
-        <span
-          className={
-            dragVisual && dropTarget && dropTarget.mode !== 'child' ? 'is-active' : undefined
-          }
-        >
-          拖到同级之间＝插进那一层
-        </span>
-        <span className="canvas__drag-legend-sep">·</span>
-        <span className={dragVisual && freeDrop ? 'is-active' : undefined}>按住 Alt＝自由摆放</span>
-      </div>
-
-      {freeDrop ? <div className="canvas__free-hint">自由摆放（按住 Alt 可随时切换）</div> : null}
-
-      {/* 落点被判为非法的原因：不写出来，用户只会以为"拖到这里没反应"＝坏了 */}
-      {dropBlocked ? <div className="canvas__blocked-hint">{dropBlocked}</div> : null}
-
-      {/* 左键框选的橡皮筋 */}
-      {marquee ? (
-        <div
-          className="canvas__marquee"
-          style={{
-            left: Math.min(marquee.x0, marquee.x1),
-            top: Math.min(marquee.y0, marquee.y1),
-            width: Math.abs(marquee.x1 - marquee.x0),
-            height: Math.abs(marquee.y1 - marquee.y0)
-          }}
+        {/* 双击标题后的就地编辑框（整块搬进 canvas/canvas-title-editor.tsx） */}
+        <CanvasTitleEditor
+          titleEdit={titleEdit}
+          setTitleEdit={setTitleEdit}
+          cancelTitleRef={cancelTitleRef}
+          commitTitleEdit={commitTitleEdit}
         />
-      ) : null}
+      </div>
+
+      {/* 底部提示层（图例 / 自由摆放 / 非法落点原因 / 框选橡皮筋）：搬进 canvas/canvas-hints.tsx */}
+      <CanvasHints
+        dragVisual={dragVisual}
+        dropTarget={dropTarget}
+        freeDrop={freeDrop}
+        dropBlocked={dropBlocked}
+        marquee={marquee}
+      />
     </div>
   )
 }
