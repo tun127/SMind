@@ -8,7 +8,7 @@
  * 不支持（用不到的）：DTD 实体定义、处理指令以外的 Parser 扩展。
  */
 
-import { decodeNumericEntity } from '../entities'
+import { decodeEntityReferences } from '../entities'
 
 export interface XmlNode {
   /** 完整标签名（含命名空间前缀，如 xhtml:img） */
@@ -32,11 +32,9 @@ const NAMED_ENTITIES: Record<string, string> = {
 
 /** 解码 XML 实体（&amp; / &#65; / &#x41; …） */
 export function decodeEntities(input: string): string {
-  return input.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
-    const numeric = decodeNumericEntity(body)
-    if (numeric !== null) return numeric
-    return NAMED_ENTITIES[body] ?? whole
-  })
+  // 查表**不折叠大小写**（`&AMP;` 在这一路保留原文）——这是本入口的历史口径，属于策略，留在这里；
+  // 扫描与「数字优先、解不出保留原文」的规则统一走 shared/entities.ts。
+  return decodeEntityReferences(input, (name) => NAMED_ENTITIES[name] ?? null)
 }
 
 function localName(name: string): string {

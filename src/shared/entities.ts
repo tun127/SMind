@@ -49,3 +49,43 @@ export function decodeNumericEntity(body: string): string | null {
   const char = charOfCodePoint(code)
   return char === '' ? null : char
 }
+
+/* ------------------------------------------------------------------ */
+/* 扫描与分派：数字引用优先、命名实体交给调用点、都不是就原样保留      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 一条实体引用的形状（三处扫描用的正则完全一致，收在这里）。
+ *
+ * 不让调用点各自持有它：正则对象带 `lastIndex`，跨文件共享同一个实例是隐患；
+ * 这里只作为 `String.replace` 的入参使用（replace 会自行复位 lastIndex）。
+ */
+const ENTITY_REFERENCE = /&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g
+
+/**
+ * 单条实体体（`#x41` / `nbsp`，不含 `&` 与 `;`）→ 字符。
+ *
+ * **命名实体表留在调用点**：那三份差异是有意的，本原语不碰策略——
+ * `named` 返回 `null` 表示"这张表不认识"，此时把引用**原样还原**成 `&body;`
+ * （宁可显示成源码，也不要静默丢字符）。
+ */
+export function decodeEntityBody(body: string, named: (name: string) => string | null): string {
+  const numeric = decodeNumericEntity(body)
+  if (numeric !== null) return numeric
+  return named(body) ?? `&${body};`
+}
+
+/**
+ * 扫描整段文本并解码其中的实体引用（XML 读取、XML→纯文本、Markdown 行内三条路径共用）。
+ *
+ * 各调用点只提供自己的名字表与查表口径（是否折叠大小写、`&nbsp;` 映射成什么），
+ * 扫描本身与"数字优先、解不出保留原文"的规则在这里唯一实现。
+ */
+export function decodeEntityReferences(
+  text: string,
+  named: (name: string) => string | null
+): string {
+  return text.replace(ENTITY_REFERENCE, (_whole: string, body: string) =>
+    decodeEntityBody(body, named)
+  )
+}

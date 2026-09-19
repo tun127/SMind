@@ -51,6 +51,7 @@ import {
 } from '../../../src/shared/ai'
 import {
   classifyDocument,
+  decodeXmlEntities,
   documentStats,
   extractDocumentText,
   extractDocxText,
@@ -66,6 +67,8 @@ import {
   parseInlineMarkdown,
   parseMarkdownOutline
 } from '../../../src/shared/import/markdown'
+import { decodeEntity } from '../../../src/shared/import/markdown/inline'
+import { decodeEntityBody, decodeEntityReferences } from '../../../src/shared/entities'
 import {
   matchWholeLineMath,
   normalizeFormulaInput,
@@ -74,7 +77,7 @@ import {
 
 import { parseOpmlOutline } from '../../../src/shared/import/opml'
 
-import { parseXml } from '../../../src/shared/xmind/xml'
+import { decodeEntities, parseXml } from '../../../src/shared/xmind/xml'
 import {
   OUTLINE_FORMATS,
   buildOutline,
@@ -175,6 +178,44 @@ export function testMarkdownFullFormat(): void {
   eq('反斜杠转义', parseInlineMarkdown('\\*不是斜体\\*').text, '*不是斜体*')
   eq('HTML 实体解码', parseInlineMarkdown('A &amp; B &lt;C&gt;').text, 'A & B <C>')
   eq('数值实体解码', parseInlineMarkdown('&#65;').text, 'A')
+
+  /*
+   * 实体解码：**原语唯一，名字表与查表口径按调用点各自保留**（2026-09-19 收敛最后一份重复）。
+   *
+   * 以前三处（XML 读取 / XML→纯文本 / Markdown 行内）各写一遍「扫描 + 数字优先 +
+   * 解不出保留原文」，现在只有 `shared/entities.ts` 一份；三处的名字表差异是**有意**的
+   * （`&nbsp;` 在 XML 里是 U+00A0，在「XML → 纯文本」和 Markdown 里当普通空格；
+   * XML 读取不折叠大小写、另两处折叠），这里逐条钉住，免得以后被"顺手统一"。
+   */
+  group('实体解码：原语唯一，名字表与口径各自保留')
+
+  eq(
+    '原语：不认识的命名实体原样还原',
+    decodeEntityBody('unknown', () => null),
+    '&unknown;'
+  )
+  eq(
+    '原语：数字引用优先于名字表',
+    decodeEntityBody('#65', () => 'X'),
+    'A'
+  )
+  eq(
+    '原语：扫描整段、不认识的原样留着',
+    decodeEntityReferences('A &amp; B &#65; C', () => null),
+    'A &amp; B A C'
+  )
+
+  eq('XML 读取：&nbsp; → U+00A0', decodeEntities('&nbsp;'), '\u00a0')
+  eq('XML→纯文本：&nbsp; → 普通空格', decodeXmlEntities('&nbsp;'), ' ')
+  eq('Markdown：&nbsp; → 普通空格', decodeEntity('nbsp'), ' ')
+
+  eq('XML 读取不折叠大小写（&AMP; 原样保留）', decodeEntities('&AMP;'), '&AMP;')
+  eq('XML→纯文本折叠大小写（&AMP; → &）', decodeXmlEntities('&AMP;'), '&')
+  eq('Markdown 同样折叠', decodeEntity('AMP'), '&')
+
+  eq('三处共同的底线：越界码点原样保留', decodeEntities('&#x110000;'), '&#x110000;')
+  eq('三处共同的底线：合成十六进制写法不当十进制', decodeXmlEntities('&#12ab;'), '&#12ab;')
+  eq('三处共同的底线：NUL 引用原样保留', parseInlineMarkdown('&#0;').text, '&#0;')
 
   // 行内 HTML
   check(

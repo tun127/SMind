@@ -21,7 +21,7 @@
  * 7. YAML front-matter 与水平线跳过；一个标题/列表都没有时，退化成「一行一个主题」。
  */
 
-import { decodeNumericEntity } from '../../entities'
+import { decodeEntityBody } from '../../entities'
 import { matchWholeLineMath } from '../../formula'
 import { MARKDOWN_ESCAPABLE } from '../../markdown-escape'
 import { depthOfIndent, expandTabs } from '../../outline-dialect'
@@ -96,12 +96,9 @@ export const ENTITIES: Record<string, string> = {
 }
 
 export function decodeEntity(name: string): string {
-  if (name.startsWith('#')) {
-    // 数字引用统一走 shared/entities.ts：越界（如 &#x110000;）保留原文，
-    // 不再让 String.fromCodePoint 抛 RangeError 把整次导入打断
-    return decodeNumericEntity(name) ?? `&${name};`
-  }
-  return ENTITIES[name.toLowerCase()] ?? `&${name};`
+  // 名字表是完整 HTML 名集、查表折叠大小写——策略留在这里；数字引用与
+  // 「解不出就把 `&…;` 原样还原」（越界如 `&#x110000;` 不再抛 RangeError）走 shared/entities.ts。
+  return decodeEntityBody(name, (n) => ENTITIES[n.toLowerCase()] ?? null)
 }
 
 /** 行内 HTML 标签 → 它对应的富文本样式（不认识的一律剥掉） */

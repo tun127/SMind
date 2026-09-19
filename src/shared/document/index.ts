@@ -12,7 +12,7 @@
  *   docx 或 txt），而不是静默失败。
  */
 
-import { decodeNumericEntity } from '../entities'
+import { decodeEntityReferences } from '../entities'
 import { extensionOf } from '../model/resources'
 
 export type DocumentKind = 'text' | 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'unsupported'
@@ -162,13 +162,10 @@ const ENTITIES: Record<string, string> = {
 
 /** 解掉 XML 实体（含数字引用） */
 export function decodeXmlEntities(text: string): string {
-  // 数字引用交给 shared/entities.ts（越界不抛异常）；命名实体表保持小写查表——
-  // 这里做的是「XML → 纯文本」，`&nbsp;` 当普通空格比塞一个 U+00A0 更好用
-  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
-    const numeric = decodeNumericEntity(body)
-    if (numeric !== null) return numeric
-    return ENTITIES[body.toLowerCase()] ?? whole
-  })
+  // 名字表与查表口径留在这里（**有意**的差异，见 shared/entities.ts 的说明）：
+  // 这一路做的是「XML → 纯文本」，`&nbsp;` 当普通空格比塞一个 U+00A0 更好用；查表折叠大小写。
+  // 扫描与「数字优先、解不出保留原文」的规则统一走 shared/entities.ts。
+  return decodeEntityReferences(text, (name) => ENTITIES[name.toLowerCase()] ?? null)
 }
 
 /**
