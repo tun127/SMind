@@ -23,6 +23,12 @@
  *
  * 3/4 缺失时**只警告、不中断**（只发安装包是允许的），但会自动更新渠道失效。
  *
+ * 三个为"上传大文件会中断"而做的设计（2026-09-20 实测踩过：108 MB 的 portable 传到一半
+ * 断在 `fetch failed`，而脚本当时会直接退出、也不做校验）：
+ *   - **断点续传的替代**：上传前先 HEAD，**对象已存在且大小一致就跳过**，只补传缺的那个；
+ *   - **失败重试**：每个对象最多试 3 次（1s / 3s 退避）；
+ *   - **校验不再被跳过**：即使有对象上传失败，也把已成功的逐个 HEAD 验一遍，最后才以非 0 退出。
+ *
  * 为什么用 OSS：Cloudflare R2 激活必须绑支付方式（免费额度内不扣费，但不绑就开不了），
  * 而阿里云 OSS 用支付宝即可、香港节点绑自定义域名**不需要 ICP 备案**。详见 docs/release-oss.md。
  *
@@ -37,18 +43,15 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 const version = pkg.version
 
 const bucket = process.env.OSS_BUCKET
-const endpoint = (process.env.OSS_ENDPOINT ?? '').replace(/^https?:\/\//, '').replace(/\/+$/, '')
+const endpoint = (process.env.OSS_ENDPOINT ?? '')
+  .replace(/^https?:\/\//, '')
+  .replace(/\/+$/, '')
 const keyId = process.env.OSS_ACCESS_KEY_ID
 const keySecret = process.env.OSS_ACCESS_KEY_SECRET
-const publicBase = (process.env.OSS_PUBLIC_BASE ?? `https://${bucket}.${endpoint}`).replace(
-  /\/+$/,
-  ''
-)
+const publicBase = (process.env.OSS_PUBLIC_BASE ?? `https://${bucket}.${endpoint}`).replace(/\/+$/, '')
 
 if (!bucket || !endpoint || !keyId || !keySecret) {
-  console.error(
-    '缺少环境变量：OSS_BUCKET / OSS_ENDPOINT / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET'
-  )
+  console.error('缺少环境变量：OSS_BUCKET / OSS_ENDPOINT / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET')
   console.error('创建方式见 docs/release-oss.md（RAM 子账号 + 只授该桶的读写权限）。')
   process.exit(1)
 }
@@ -82,28 +85,60 @@ const targets = [
  * OSS 原生 V1 签名的待签字符串（注意：Content-MD5 与 Content-Type 即使为空也要占位，
  * 段之间用 \n 连接，最后一段是 `/桶名/对象名`——顺序错一个字符就是 403）。
  */
-function authorization(key, contentType, date) {
-  const stringToSign = ['PUT', '', contentType, date, `/${bucket}/${key}`].join('\n')
+function authorization(method, key, contentType, date) {
+  const stringToSign = [method, '', contentType, date, `/${bucket}/${key}`].join('\n')
   const signature = createHmac('sha1', keySecret).update(stringToSign, 'utf8').digest('base64')
   return `OSS ${keyId}:${signature}`
 }
 
+function signedHeaders(method, key, contentType) {
+  const date = new Date().toUTCString()
+  return { Date: date, 'Content-Type': contentType, Authorization: authorization(method, key, contentType, date) }
+}
+
+/** 已存在则返回字节数，不存在返回 null（HEAD 不计流量费，可放心用来做"跳过已传"） */
+async function head(key) {
+  const res = await fetch(`https://${bucket}.${endpoint}/${key}`, {
+    method: 'HEAD',
+    headers: signedHeaders('HEAD', key, '')
+  })
+  if (res.status === 404) return null
+  if (!res.ok) return null
+  const len = res.headers.get('content-length')
+  return len === null ? null : Number(len)
+}
+
 async function put(key, filePath, contentType) {
   const body = readFileSync(filePath)
-  // OSS 要求 Date 头且与签名一致；这里用标准 UTC 串（GMT）
-  const date = new Date().toUTCString()
   const res = await fetch(`https://${bucket}.${endpoint}/${key}`, {
     method: 'PUT',
-    headers: {
-      Date: date,
-      'Content-Type': contentType,
-      Authorization: authorization(key, contentType, date)
-    },
+    headers: signedHeaders('PUT', key, contentType),
     body
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status} ${text.slice(0, 200)}`)
+  }
+}
+
+/** undici 的 `fetch failed` 会把真正原因藏在 cause 里，不打印出来根本没法排查 */
+function describe(error) {
+  const cause = error instanceof Error ? error.cause : undefined
+  const detail = cause instanceof Error ? cause.message : ''
+  return detail ? `${error.message}（${detail}）` : String(error instanceof Error ? error.message : error)
+}
+
+async function putWithRetry(key, filePath, contentType) {
+  const attempts = 3
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await put(key, filePath, contentType)
+      return
+    } catch (error) {
+      if (i === attempts) throw error
+      console.warn(`  ⚠ 第 ${i} 次失败（${describe(error)}），${i * 2} 秒后重试…`)
+      await new Promise((r) => setTimeout(r, i * 2000))
+    }
   }
 }
 
@@ -125,32 +160,48 @@ for (const target of targets) {
     }
     continue
   }
-  const mb = (statSync(local).size / 1024 / 1024).toFixed(1)
+
+  const size = statSync(local).size
+  const mb = (size / 1024 / 1024).toFixed(1)
+
+  // 已存在且大小一致就跳过：补传时不必把 108 MB 白传一遍
+  let remote = null
+  try {
+    remote = await head(target.name)
+  } catch (error) {
+    console.warn(`  （HEAD 探测失败，将直接上传：${describe(error)}）`)
+  }
+  if (remote === size) {
+    console.log(`= ${target.name}（${mb} MB）远端已存在且大小一致 → 跳过`)
+    uploaded.push(target.name)
+    continue
+  }
+
   console.log(`上传 ${target.name}（${mb} MB）→ ${bucket}/${target.name} ...`)
   try {
-    await put(target.name, local, target.contentType)
+    await putWithRetry(target.name, local, target.contentType)
     console.log(`✓ ${publicBase}/${target.name}`)
     uploaded.push(target.name)
   } catch (error) {
-    console.error(`✗ ${target.name} 上传失败：${error.message}`)
+    console.error(`✗ ${target.name} 上传失败：${describe(error)}`)
     failed = true
   }
 }
 
-if (failed) process.exit(1)
-
-// 上传后校验直链可达：既验证桶的读权限，也验证自定义域名绑定是否生效
-console.log('校验直链…')
-for (const name of uploaded) {
-  try {
-    const res = await fetch(`${publicBase}/${name}`, { method: 'HEAD' })
-    console.log(
-      res.ok
-        ? `✓ ${publicBase}/${name} 可下载（${res.headers.get('content-length') ?? '?'} 字节）`
-        : `⚠ ${publicBase}/${name} 返回 ${res.status}（刚绑域名/刚设公共读时，稍等几分钟再试）`
-    )
-  } catch (e) {
-    console.warn(`⚠ 无法访问 ${publicBase}/${name}：${e.cause?.message ?? e.message}`)
+// 不论上面有没有失败，都把已传成功的验一遍 —— 否则"哪几个真上去了"要靠猜
+if (uploaded.length > 0) {
+  console.log('校验直链…')
+  for (const name of uploaded) {
+    try {
+      const res = await fetch(`${publicBase}/${name}`, { method: 'HEAD' })
+      console.log(
+        res.ok
+          ? `✓ ${publicBase}/${name} 可下载（${res.headers.get('content-length') ?? '?'} 字节）`
+          : `⚠ ${publicBase}/${name} 返回 ${res.status}（刚绑域名或刚设公共读时，稍等几分钟再试）`
+      )
+    } catch (e) {
+      console.warn(`⚠ 无法访问 ${publicBase}/${name}：${describe(e)}`)
+    }
   }
 }
 
@@ -159,4 +210,9 @@ if (missingOptional) {
     '⚠ 有更新渠道文件没上传（见上面的 ⚠ 行）：安装包能下，但客户端不会自动提示新版本，' +
       '也不会走差分下载。发正式版时请确保 release/ 里有 latest.yml 与 *.blockmap。'
   )
+}
+
+if (failed) {
+  console.error('有对象上传失败：直接重跑本命令即可（已传成功的会被跳过，只补失败的那些）。')
+  process.exit(1)
 }

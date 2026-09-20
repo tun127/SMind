@@ -22,6 +22,12 @@ commercialization/
 # 许可签发的私钥：永远不进仓库（默认落在仓库之外，这里是第二道保险）
 license-private.pem
 *.license-key
+# 上传凭据（OSS / R2 / Cloudflare 等）：本机载入的环境变量文件，永远不进仓库。
+# 这个仓库是**公开**的——一旦提交，密钥等于永久泄露（git 历史里删不干净），所以宁可多列几条。
+*.env.ps1
+*.env.sh
+.oss.env
+.r2.env
 # 用文件传中文提交信息时产生的临时文件（误提交过一次）
 .commit-msg.txt
 # 开发版的输出日志（排查「窗口是不是旧的 / 崩没崩」时用）
