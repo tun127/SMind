@@ -393,6 +393,38 @@ export async function testSafetyHelpers(): Promise<void> {
   eq('四条「主→渲染」通道不由 handler 注册', wronglyRegistered.join(',') || '(none)', '(none)')
   eq('preload 覆盖全部通道（两侧齐全）', missingInPreload.join(',') || '(none)', '(none)')
 
+  /*
+   * 菜单命令是**同一类契约**：主进程 `menu.ts` 发命令 id、渲染层 `use-menu-commands.ts` 分派。
+   * 两边对不上时的症状很隐蔽——菜单项点下去毫无反应（或某段处理器永远不执行），
+   * 而 typecheck / lint / 自检都不会响。这里按「集合相等」双向断言。
+   */
+  group('菜单命令契约：主进程发的每条命令都有渲染层处理（静态扫描）')
+
+  const menuSource = readFileSync('src/main/menu.ts', 'utf8')
+  const menuCommands = [
+    ...new Set([...menuSource.matchAll(/'([a-z]+:[a-z-]+)'/g)].map((match) => match[1] ?? ''))
+  ]
+  const handledCommands = new Set(
+    [
+      ...readFileSync('src/renderer/src/app/use-menu-commands.ts', 'utf8').matchAll(
+        /case '([a-z]+:[a-z-]+)'/g
+      )
+    ].map((match) => match[1] ?? '')
+  )
+  const unhandledMenu = menuCommands.filter((id) => !handledCommands.has(id))
+  const orphanHandlers = [...handledCommands].filter((id) => !menuCommands.includes(id))
+
+  check(
+    '扫描确实抓到了命令（防正则失效导致下面两条空过）',
+    menuCommands.length >= 20 && handledCommands.size >= 20
+  )
+  eq(
+    '主进程发的每条命令都有处理器（否则菜单项点了没反应）',
+    unhandledMenu.join(',') || '(none)',
+    '(none)'
+  )
+  eq('渲染层没有多余的死处理器', orphanHandlers.join(',') || '(none)', '(none)')
+
   group('原子写文件')
 
   const dir = mkdtempSync(`${tmpdir()}/smind-atomic-`)
