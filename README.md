@@ -5,15 +5,15 @@
 
 ## 界面预览
 
-![功能一览：富文本、公式、标记标签、关系线、边界与概要](docs/images/screenshot-1-overview.png)
+![功能一览：标记标签、关系线、边界与概要](docs/images/screenshot-1-overview.png)
 
-![头脑风暴：思维导图（平衡）结构，左右分布](docs/images/screenshot-2-structures.png)
+![图片、附件与 LaTeX 公式](docs/images/screenshot-2-structures.png)
 
-![项目规划](docs/images/screenshot-3-plan.png)
+![项目规划（逻辑图 · 向右）](docs/images/screenshot-3-plan.png)
 
-![鱼骨图分析](docs/images/screenshot-4-fishbone.png)
+![项目规划：矩阵结构](docs/images/screenshot-4-matrix.png)
 
-> 这四张图的源文件在 [`examples/`](./examples) 目录里，用 SMind 直接打开就能玩。
+> 这四张图对应的文档在 [`samples/`](./samples) 目录里，用 SMind 直接打开就能玩。
 
 ---
 
