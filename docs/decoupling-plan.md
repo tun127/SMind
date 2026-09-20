@@ -4,6 +4,12 @@
 > 本文件是它的**可执行版**：每一项＝一个批次＝一个提交，逐项给「现状 / 目标 / 手法 / 调用点改动 / 风险 / 验收」。
 > 每完成一项，把状态列改成 ✅ 并写上提交号。
 
+>
+> ⚠️ **2026-09-20 加注：本表的 15 项目标已全部落地。**
+> 实测 11 个目标目录/文件全部存在（`render/measure/`、`export/{ops,node}.ts`、`components/{topic,nodePanel,toolbar,chat,canvas}/`、`app/`、`store/slices/`、`main/ipc/`），`store/editor.ts` 2084 → **74** 行。
+> **状态列存在滞后**（部分仍标 🟡「第一步已完成」），以**代码、`CHANGELOG.md` 与 `docs/refactor-audit.md`** 为准。
+> 本表保留为「执行过程与手法」的记录 —— §一 的八条总原则至今仍然有效。
+
 ---
 
 ## 一、总原则（每条都不可省）

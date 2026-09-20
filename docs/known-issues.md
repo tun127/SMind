@@ -227,136 +227,50 @@ Electron API 变化维护的假实现。
 - 唯一**真实**的问题是 `runsToHtml` 的参数里有个 `RichTextRun` 并不存在的 `mono?: boolean`（等宽的真实表示是 `fontFamily`），已就地写成注释（`shared/richtext/index.ts`），不无中生有一个字段。
 - 结论：**不值得为"看起来干净的导出面"去改动 200 处零收益的代码**；若将来真要收紧，正确做法是"按目录逐个 barrel 决定哪些是公开面"，而不是照抄一份已多次出错的清单。
 
----
+## P0–P3 快照的逐条核实（2026-09-20）
 
----
+> 本节取代原先的 `## P0 / P1 / P2 / P3` 四节——那四节是 **2026-09-14 的审计快照**，标题里还写着「建议**明天**先做」「**明天**不必再查」，那个「明天」是 9/15。
+> 2026-09-20 逐条回查代码：**已修的全部删除**（核实证据见下表），**仍开着的 2 条**保留在下方。
+> 删掉而不是打勾，是为了让这份文档恢复它唯一的作用：**回答「还剩什么没做」**。
 
-## P0 · 数据与健壮性（建议明天先做）
+| 原条目 | 当时的断言 | 2026-09-20 回查（证据） |
+|---|---|---|
+| P0-1 | 保存不是原子写，会把原文件截断成坏包 | **已修**：`writeJsonAtomic` / `writeFileAtomic` 全仓 25 处，`main/atomic-write.ts` 在 |
+| P0-2 | 没有错误边界，出错就是白屏 / 静默退出 | **已修**：`renderer/src/components/ErrorBoundary.tsx` 在 |
+| P0-3 | 自动保存失败被静默吞掉 | **已修**：`use-autosave.ts:43` 会 `showToast('自动保存失败：…（请尽快手动保存一次）')` |
+| P0-4 | 损坏文件把 JSZip 英文异常直接抛给用户 | **已修**：`main/document.ts` 给人话原因 + GBK 回退 + 解压前拦压缩炸弹 |
+| P1-2 | `sandbox: false` | **已修**：`main/windows.ts:46`、`main/ipc/export.ts:135` 均为 `sandbox: true` |
+| P1-4 | 公式错误信息未转义就拼进 HTML 属性 | **已修**：`render/formula.ts:42` 已用 `escapeHtml` |
+| P1-5 | 导入的外部字段缺结构校验（`as unknown as`） | **已修**：`xmind/parse.ts` 已用 `isRecord` 逐字段守卫 |
+| P2-1 | 布局每次击键全量重算 | **已修**：增量布局（`shared/layout/{incremental,stamp,run}.ts`），自检有「增量必须逐字段等于全量」断言 |
+| P2-2 | 大纲面板零虚拟化 | **已修**：已用 `content-visibility` |
+| P2-3 | 搜索没有防抖 | **已修**：防抖痕迹 13 处 |
+| P2-4 | `applyTopicFilter` 每次递归都拷贝路径数组 | **已修**：改父指针回溯（`shared/search/index.ts` 的注释里记着这次改动） |
+| P2-5 | 测量缓存到上限是整体 `clear()` | **已修**：`@shared/cache` 的 `evictOldest` 分批淘汰 |
+| P3-1 | 没有 ESLint / Prettier / .editorconfig | **已修**：四件套齐 + `npm run lint`（现零告警） |
+| P3-2 | 没有 CI | **已修**：`.github/workflows/ci.yml`（含 `format:check` 一道门） |
+| P3-3 | 类型只开 `strict` | **已修**：`noUncheckedIndexedAccess` 已进 `tsconfig.strict.json` |
+| P3-4 | 缺 CHANGELOG / CONTRIBUTING / SECURITY | **已修**：三份都在 |
+| P3-5 | 仍有重复实现（备注 HTML 派生 / XML 转义 / `isPlainRecord` 别名） | **已修**：`isPlainRecord` 0 处；`editor.ts` 2084 → **74 行**（原文那种行号引用早已失效——这正是它后来改用符号名的原因） |
+| P3-6 | 提交习惯（多主题攒成一笔） | **无需修**：属流程约定；后续各批均已按主题单独提交 |
+| 附一 | 图标字母还是 M，产品名已是 SMind | **已修**：`scripts/make-icon.mjs:5` 现写着「字母用『S』（应用名 SMind 的首字母）」 |
+| 附二 | 八项「已核查确认没问题」 | **结论保留**（路径穿越安全 / 导航与弹窗一律拒绝 / 只放行 `https?`·`mailto` / 零 `as any`·零 `ts-ignore` / 零 TODO·FIXME / 定时器与 IPC 监听有清理 / 外部数据不当 HTML 执行 / `contextIsolation: true` + `nodeIntegration: false`）。⚠️ **证据行号已随重构失效**，需按符号名重新定位；其中「零 TODO·FIXME」于 2026-09-20 复测仍成立 |
+| 附三 | 「明天的建议顺序」5 条 | **已全部执行**（原子保存 / 错误边界 + autosave / 三处小修 / CI + lint / 安全纵深） |
+| P5 | 功能缺口清单 | **需重新核对一条**：`.docx` 现已被 `main/document.ts` 用于**抽取文本**（AI 附件那条链路），是否等同于原文所指的「导入成图」待确认；其余仍未实现 |
 
-### P0-1 保存不是原子写，可能把用户原文件截断成坏包
+### 仍开着的 2 条
 
-- **现象**：保存时直接把字节写到目标路径（就地覆盖），没有"临时文件 + rename"。
-- **证据**：`src/main/index.ts:284` —— `await fs.writeFile(path, Buffer.from(bytes))`（`writeDocument`）。
-- **风险**：磁盘满 / 进程崩溃 / 断电发生在写入过程中，用户**原本能打开的 .xmind 会被截断**。序列化后的字节都在内存里，所以窗口很小，但后果是最严重的（丢的是原文件）。
-- **建议改法**：写到同目录的 `xxx.xmind.tmp` → `fsync` → `fs.rename` 覆盖目标（同盘 rename 是原子操作）；任一步失败则删除临时文件，**原文件保持不动**并抛出可读错误。另存为/自动保存同样处理。
-- **怎么验收**：①把目标目录设为只读或磁盘配额失败后，原文件仍能正常打开；②自检里对"临时文件名生成 + 失败清理"这段逻辑加断言。
+#### P1-1 渲染进程仍未设置 CSP
 
-### P0-2 没有错误边界，也没有进程级兜底 —— 出错就是白屏/静默退出
+- **现状（2026-09-20 实测）**：全仓搜不到 `Content-Security-Policy` / `onHeadersReceived`；`docs/P1-acceptance.md` 的已知限制表也仍挂着这条（标注 P9）。
+- **影响**：渲染层一旦出现注入面（外部 `.xmind` / Markdown / 粘贴 HTML），缺少最后一道限制。现有缓解：`contextIsolation: true` + `sandbox: true` + 外部数据一律不当 HTML 执行。
+- **建议**：在 `index.html` 加 `meta`，或由主进程在 `onHeadersReceived` 注入响应头；注意 KaTeX 与导出用的 `data:` 资产需要相应放行。
+- **怎么验收**：打包版启动后 DevTools Console 不再出现 Electron 的 CSP 警告，且导出 / 公式 / 图片照常。
 
-- **现象**：根渲染没有任何错误边界；主进程与渲染进程都没有崩溃兜底。
-- **证据**：
-  - `src/renderer/src/main.tsx:10` —— `createRoot(container).render(<App />)`，无 `ErrorBoundary`。
-  - 全仓 `uncaughtException` / `unhandledRejection` / `render-process-gone` / `child-process-gone` / `componentDidCatch` **搜索零命中**。
-  - 现实触发点举例：`src/shared/layout/core.ts:113` 的 `节点 X 尚未测量` 这类断言一旦抛出，整棵树卸载 → **白屏、无提示、无恢复**。
-- **建议改法**：①渲染层加 `ErrorBoundary`（`getDerivedStateFromError`），兜底页给出「重新加载」「把当前内容另存一份」「恢复自动存档」三个出口；②主进程挂 `process.on('uncaughtException' | 'unhandledRejection')`，写日志到 `%APPDATA%\SMind\logs\`；③窗口上挂 `render-process-gone` / `did-fail-load` / `unresponsive`，提示并允许重开窗口。
-- **怎么验收**：在某个组件里故意 `throw`，应看到可读错误页而不是白屏；杀掉渲染进程应看到提示而不是空窗口；`%APPDATA%\SMind\logs\` 里有记录。
+#### P1-3 IPC 入参校验覆盖度未逐条核对
 
-### P0-3 自动保存失败被静默吞掉（"以为存上了，其实没存"）
-
-- **现象**：自动保存的 Promise 没有 `.catch`，而旁边的版本快照有 —— 两边写法不一致。
-- **证据**：`src/renderer/src/App.tsx:698` —— `void window.api.autosave(...)`（无 catch）；对照 `src/renderer/src/App.tsx:726` —— `.catch(() => undefined)`。
-- **风险**：自动保存失败（磁盘满、目录只读、权限）完全不告知用户；叠加上 P0-2 连日志都没有。
-- **建议改法**：加 `.catch`，并通过 toast/状态栏提示「自动保存失败（可能是磁盘空间不足）」；同时让主进程的 `autosave` 返回明确结果而不是抛裸错。
-- **怎么验收**：把保存目录设为只读，30 秒内应看到失败提示，而不是毫无反应。
-
-### P0-4 打开损坏文件时把 JSZip 的英文异常直接抛给用户
-
-- **现象**：`.zip` 损坏时用户看到的是 JSZip 的原始英文异常。
-- **证据**：`src/shared/xmind/parse.ts:314` —— `JSZip.loadAsync(data)` 未包 try/catch（其余情况如缺 `content.json`、JSON 非法、无画布都已有中文提示，见同文件 `:323`、`:334`、`:348`）。
-- **建议改法**：包一层，抛出中文错误，例如「这个文件不是有效的 .xmind（压缩包已损坏）」，并在提示里给出「文件可能不完整，试试重新导出」。
-- **怎么验收**：把任意 `.xmind` 截断一半后打开，应看到中文提示。
-
----
-
-## P1 · 安全纵深
-
-### P1-1 全仓没有 CSP
-
-- **证据**：`src/renderer/index.html` 无 CSP meta；全仓无 `onHeadersReceived` / `Content-Security-Policy`。
-- **影响**：渲染层一旦出现注入点就没有第二道防线（与 P1-2 叠加）。
-- **建议改法**：生产构建下发 CSP，例如 `default-src 'self'; img-src 'self' data: blob: mind-resource:; style-src 'self' 'unsafe-inline'; font-src 'self' data:`。注意 KaTeX / TipTap 需要内联样式，**先在生产构建下把公式、富文本、图片、导出逐个回归**。
-- **怎么验收**：DevTools 控制台无 CSP 违规；公式与富文本显示正常。
-
-### P1-2 `sandbox: false`
-
-- **证据**：`src/main/index.ts:436` —— 同时 `contextIsolation: true`、`nodeIntegration: false`（这两项是对的）。
-- **建议改法**：试探性开启 `sandbox: true`（preload 只用 `contextBridge` + `ipcRenderer` 的话通常可行）；若被某个能力挡住，再单独评估并在此记录原因。
-- **怎么验收**：功能全量回归（打开/保存/导出/导入/AI/历史）+ `selfcheck` 全绿。
-
-### P1-3 IPC 入参校验不均，部分通道完全信任渲染进程
-
-- **证据**：
-  - `src/main/index.ts:689`（`openPath` 直接按传入路径读文件）
-  - `src/main/index.ts:693`（`saveToPath` 直接按传入路径写文件）
-  - `src/main/index.ts:1214`、`src/main/index.ts:1315`（`showItemInFolder` 任意路径）
-  - `src/main/index.ts:1003`（`addImage` 只查 `byteLength === 0`，**没有大小上限**）
-  - 对照做得好的：`src/main/index.ts:1306`（`openExternal` 只放行 `https?` / `mailto`）、`:842`/`:885`（设置与主题逐字段收敛）。
-- **建议改法**：把这几处按 `openExternal` 的标准补齐 —— 路径校验（存在 / 是文件 / 扩展名白名单）、图片大小上限（例如 20 MB）与类型白名单；做成小工具函数以便复用与自检。
-- **怎么验收**：自检里对校验函数写断言（超限、扩展名不符、路径不存在都要被拒）。
-
-### P1-4 公式错误信息未转义就拼进 HTML 属性
-
-- **现象**：全仓**唯一**一处未转义的 HTML 拼接。
-- **证据**：`src/renderer/src/render/formula.ts:38` —— `title="${String(error.message)}"`，而这段 HTML 经 `dangerouslySetInnerHTML` 注入：`src/renderer/src/components/TopicNode.tsx:273`、`:322`。
-- **影响**：异常消息里若含引号会逃逸出属性；理论上可由**外部导入的 .xmind 公式字段**触发（低危自 XSS）。
-- **建议改法**：用已有的 `escapeHtml`（`src/shared/richtext/index.ts:88`）包一层，或改用 DOM API 设置 `title`。
-- **怎么验收**：构造一个会报错且消息含 `"` 的公式，检查 DOM 属性未被逃逸。
-
-### P1-5 导入的外部字段缺结构校验
-
-- **证据**：`src/shared/xmind/parse.ts:123`、`:127` —— `titleRich` / `code` 用 `as unknown as` 直接强转，未逐字段校验。
-- **影响**：坏数据会带着"未检类型"流进布局与渲染，可能引发 P0-2 的白屏。
-- **建议改法**：项目已经有 `src/shared/guards.ts` 的 `isRecord`，把这两处补上逐字段校验，校验不过就丢弃该字段并保留纯文本兜底。
-- **怎么验收**：自检加「坏 `titleRich` / 坏 `code` 不会让布局崩」的用例。
-
----
-
-## P2 · 性能（大文档）
-
-### P2-1 布局每次击键全量重算（与需求书承诺不符）
-
-- **证据**：`src/renderer/src/components/Canvas.tsx:260-272` —— 布局 `useMemo` 依赖 `[workbook, editingId, editingText, editingRich, fontEpoch]`；而 `editingText` / `editingRich` **每敲一个字都变**。
-- **对照承诺**：`docs/requirements.md:135` —— 「布局结果缓存：仅子树变更时局部重算」。
-- **影响**：万级节点下每次击键都重跑全量布局；且视口裁剪只作用在**渲染**层（`Canvas.tsx:1468`），布局、测量、吸附候选仍是全量，"只渲染可视区"救不了大文档。
-- **建议改法**：把编辑态与布局解耦 —— 编辑中只对"被编辑节点的子树"做局部测量与重排，或至少在尺寸未真正变化时不触发全量；提交编辑后再全量一次。
-- **怎么验收**：万级节点文档里连续打字不掉帧（用 Performance 面板量化长任务）。
-
-### P2-2 大纲面板零虚拟化
-
-- **证据**：`src/renderer/src/components/OutlinePanel.tsx:42`（生成全部行）、`:256`（逐行渲染）。
-- **建议改法**：只渲染视口内的行（或先用 `content-visibility: auto` 顶一阵）。
-- **怎么验收**：1 万节点文档打开大纲不卡。
-
-### P2-3 搜索没有防抖
-
-- **证据**：`src/renderer/src/components/SearchPanel.tsx:47-48` —— 随 `search.query` 每次输入即时全树扫描。
-- **建议改法**：输入防抖 150–250ms，并对结果数设上限提示。
-- **怎么验收**：大文档里连续快速输入不卡顿。
-
-### P2-4 `applyTopicFilter` 每次递归都拷贝路径数组
-
-- **证据**：`src/shared/search/index.ts:241-247` —— `visit(child, [...trail, topic.id])`，复杂度放大到 n × 深度。
-- **建议改法**：改用父指针回溯或用可变数组 + 回溯时 `pop()`。
-- **怎么验收**：构造「10 层 × 1 万节点」用例，对比筛选耗时。
-
-### P2-5 测量缓存到上限是整体 `clear()`
-
-- **证据**：`src/renderer/src/render/measure.ts:646`、`src/renderer/src/render/formula.ts:41`、`:91`。
-- **影响**：不是泄漏，但会造成"周期性一次性全失效"的卡顿抖动。
-- **建议改法**：换成 LRU 或分批淘汰。
-
----
-
-## P3 · 工程规范
-
-| 编号 | 问题 | 证据 / 现状 | 建议 |
-|---|---|---|---|
-| P3-1 | **没有 ESLint / Prettier / .editorconfig** | 根目录全无；`package.json` 也没有 `lint` 脚本（而代码里已有 3 处 `eslint-disable`，说明规则是需要的：`Canvas.tsx:271`、`NodePanel.tsx:123`、`shared/export/pdf.ts:53`） | 接入 eslint + `@typescript-eslint` + `eslint-plugin-react-hooks` + prettier，先只把 error 级别接进 CI，避免存量告警淹没 |
-| P3-2 | **没有 CI** | 无 `.github/` | 加 workflow：`npm ci` → `npx tsc --noEmit` → `npm run selfcheck` → `npm run verify`（均为纯 Node，ubuntu runner 即可）。1474 项断言与样本往返已经很值钱，接上 CI 才真正发挥作用 |
-| P3-3 | **类型只开了 `strict`** | `tsconfig.json:9` | 逐步加 `noUncheckedIndexedAccess`（预计 30–80 处报错，**单独一次提交专门修**，别和功能混在一起）、`noUnusedLocals` / `noUnusedParameters`（预计个位数） |
-| P3-4 | 缺 CHANGELOG / CONTRIBUTING / SECURITY | 有 README 与 THIRD-PARTY-NOTICES，其余无 | 至少在公开发布前补 CHANGELOG（可从 59 条提交归纳） |
-| P3-5 | 仍有重复实现 | 备注 HTML 派生表达式两处一字不差：`src/renderer/src/store/editor.ts:1301` 与 `src/shared/ai/index.ts:336`；XML 转义两份：`src/shared/outline/index.ts:170` 与 `src/renderer/src/export/svg.ts:16`；历史别名：`src/main/index.ts:303` 的 `isPlainRecord = isRecord` | 各抽一处公共实现；删掉别名 |
-| P3-6 | 提交习惯 | 本次把一整个会话的多主题改动合成了一笔提交（`7a5cf53`，24 文件）—— 因为改动在文件间交织，无法干净拆分 | 以后按主题收尾即提交，别再攒 |
+- **现状（2026-09-20 实测）**：已建 `shared/ipc-args.ts`（路径与图片载荷校验）、`shared/guards.ts`，并加了**契约静态断言**（70 条通道常量 / 无重复 / 每条渲染→主通道都有 handler / preload 两侧齐全）；但**「每个参数都校验」的覆盖度没有逐条核对**。
+- **建议**：按通道清单逐个补校验，或把「必须校验」写进契约断言——新增通道漏校验时让自检直接红。
 
 ---
 
@@ -365,7 +279,7 @@ Electron API 变化维护的假实现。
 | 编号 | 问题 | 影响 | 备注 |
 |---|---|---|---|
 | P4-1 | 无代码签名 | 对方首次运行会看到 SmartScreen「未知发布者」，需点「仍要运行」 | 消除必须购买证书；过渡期可在 README 里写明这一点 |
-| P4-2 | 无自动更新 | 升级要重新分发 exe | ✅ **已实现**（客户端 + 渠道 + 镜像脚本 + CI，2026-09-19：`20bcd71` `bfc4932` `6b09711`）：打包版启动 45s 后台检查、退出时静默安装、帮助菜单可主动检查/立即重启安装；**免安装版不支持自更新**（显式守卫 + 提示手动下载）；更新源为 **GitHub Releases 固定直链**（generic provider，2026-09-20 改；R2 因无可用支付方式搁置，见 `docs/release-mirror.md`）。剩下的是**发版动作**：0.9.1 首跑，并把 `latest.yml` / `*.blockmap` 与 exe 一起上传（`docs/ops.md` #3） |
+| P4-2 | 无自动更新 | 升级要重新分发 exe | ✅ **已实现**（客户端 + 渠道 + 镜像脚本 + CI，2026-09-19：`20bcd71` `bfc4932` `6b09711`）：打包版启动 45s 后台检查、退出时静默安装、帮助菜单可主动检查/立即重启安装；**免安装版不支持自更新**（显式守卫 + 提示手动下载）；更新源为 **GitHub Releases 固定直链**（generic provider，2026-09-20 改；R2 因无可用支付方式搁置，见 `docs/release-mirror.md`）。**2026-09-20 已发版**：v0.9.1 Release 已发布（四件资产齐全，`latest.yml` 的 `version=0.9.1`、三条直链实测 206），官网下载页与首页已切到 0.9.1 |
 | P4-3 | 仅 Windows x64 | macOS / Linux 未配置 | 按需 |
 
 ---
@@ -384,40 +298,3 @@ Electron API 变化维护的假实现。
 - 文件夹 / 批量管理
 
 **优先级判断**：这些不建议现在做。本项目的差异点是**本地优先 + 格式保真 + 反向兼容亿图 `.emmx`**，把这三件事做深，比补齐功能清单更值。
-
----
-
-## 附一 · 图标收尾（独立待办）
-
-`scripts/make-icon.mjs` 画的仍是字母 **M**、注释写着「应用名 mind」，而产品名已是 **SMind**。
-该文件当前与 HEAD 一致（未被改动）。收尾动作：把字母改成 **S**（含注释）→ `npm run icon` 重新生成各尺寸 PNG/ICO → 重新打包验证图标已嵌入 exe。
-> 注意：`electron-builder.yml` 的 `productName`、`appId`、快捷方式名都已是 SMind，**只有图标字母没跟上**。
-
----
-
-## 附二 · 已核查确认"没问题"的（明天不必再查）
-
-| 项 | 结论 | 证据 |
-|---|---|---|
-| `mind-resource` 协议是否存在路径穿越 | **安全**。不是"按路径读文件"，而是拿路径当 key 查**内存资源表**，`../../` 匹配不到任何 key | `src/main/index.ts:567`、`:579` |
-| 窗口导航/弹窗 | `setWindowOpenHandler` 一律 deny 并转 `shell.openExternal`；`will-navigate` 一律 `preventDefault` | `src/main/index.ts:470`、`:480` |
-| 外部外链 | 只放行 `https?` / `mailto` | `src/main/index.ts:1306` |
-| 类型逃逸 | `as any` / `@ts-ignore` / `@ts-expect-error` **零** | 全仓搜索 |
-| 技术债标记 | `TODO` / `FIXME` / `HACK` **零**（注意 `src/renderer/src/export/katex-assets.ts` 的 base64 会造成误报） | 全仓搜索 |
-| 定时器与 IPC 监听泄漏 | 均有清理；`ipcMain.handle` 只在启动注册一次，多窗口不会重复注册 | `App.tsx:705`、`:728`；`preload/index.ts:34-86`；`src/main/index.ts:606`、`:1355` |
-| 外部数据的 HTML 入口 | 都不当 HTML 执行：备注只渲染纯文本、Markdown 导入丢弃整行 HTML、粘贴交给 ProseMirror schema 过滤、正文走 React 转义 | `NodePanel.tsx:502`；`shared/import/markdown.ts:562`；`RichTextEditor.tsx:126`；`TopicNode.tsx:276` |
-| 渲染进程外壳 | `contextIsolation: true`、`nodeIntegration: false`（仅 `sandbox` 待议） | `src/main/index.ts:437`、`:438` |
-
----
-
-## 附三 · 明天的建议顺序
-
-1. **P0-1 原子保存** —— 改动最小、直接防丢数据。
-2. **P0-2 + P0-3 错误边界 / 进程兜底 / autosave 加 catch** —— 可放同一笔提交，把"白屏与静默失败"变成"有提示、能恢复"。
-3. **P0-4 + P1-4 + P1-5 三处小修** —— 损坏文件中文提示、公式 title 转义、导入字段结构校验（都小、都独立）。
-4. **P3-2 + P3-1 接 CI 再补 lint** —— 一次投入长期受益，之后每次改动都有守门。
-5. **P1-1 + P1-2 + P1-3 安全纵深** —— 需要回归验证，单独留出时间。
-
-**P2 性能建议单独排一轮**（涉及布局与编辑态解耦，改动面最大，别和上面混做）。
-
-改完任一项，记得同步更新 `docs/P1-acceptance.md` 的 §六 缺陷修复记录，并保持 `npm run selfcheck` 全绿。

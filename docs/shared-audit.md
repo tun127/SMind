@@ -1,5 +1,13 @@
 # SMind `src/shared/**` architecture audit
 
+> ⚠️ **2026-09-20 加注：本文件各分区的新鲜度不一样。**
+>
+> - **§5「Duplicated implementations」（(1)–(18) 组）仍是权威枚举** —— `docs/decoupling-plan.md` 的 E1 条、`docs/handover.md`、`docs/known-issues.md` 都指向本节；收敛进度与逐条「判不合并」的结论也在那两处。
+> - **§1 文件对照表里的行数已过时**：`src/shared/**` 之后又经历多轮拆分（`agent/` 9 文件、`ai/` 7、`code/` 3…），表里的数字只代表 2026-09-18 那一刻。
+> - **§2–§4 的缺陷条目**已在 2026-09-18 那一批逐条落地（结果见 `CHANGELOG.md` 同批记录与 `known-issues.md`「处理结果（2026-09-18）」）；本轮（2026-09-20）未逐条复核。
+>
+> 之所以保留而不是删除：它是 E1 枚举的唯一来源，删了会让上面几处引用悬空。
+
 Scope: all 83 files / 18,241 lines under `src/shared/**`, read in full. Read-only; nothing was modified.
 Method: full reads + two scripts I ran against the tree (`.tmp-check/api-audit.mjs`, `.tmp-check/dead2.mjs`) that resolve every relative import to a real file and check, name by name, whether an importer exists. `npx tsc --noEmit -p tsconfig.json` and `-p tsconfig.strict.json` both exit 0.
 Line counts below are from the working tree and differ slightly from the brief (e.g. `xmind/legacy.ts` 318→326, `import/markdown.ts` 743→778) — the brief's numbers are stale, files grew in later commits.
