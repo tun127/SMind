@@ -13,6 +13,7 @@ import { migrateAiConfigKey } from './ai'
 import { registerIpc } from './ipc'
 import { createWindow, openDocumentSomewhere } from './windows'
 import { registerResourceProtocol } from './resource-protocol'
+import { windowsToAsk } from './quit-flow'
 import type { MainContext } from './context'
 
 /**
@@ -169,11 +170,16 @@ export function startLifecycle(ctx: MainContext, startupOpenPath: string | null)
   /**
    * 退出前也要走一遍未保存确认——**每个窗口都要问**。
    * 之前这里只问了一个窗口，多窗口下「退出」会静默丢掉其他窗口的未保存修改。
+   * 判定本身在 `./quit-flow`（纯函数，有断言守着"已批准的不问、界面没了的不问"）。
    */
   app.on('before-quit', (event) => {
     if (ctx.isQuitApproved()) return
-    const pending = [...ctx.windows.values()].filter(
-      (state) => !state.allowClose && !state.win.webContents.isDestroyed()
+    const pending = windowsToAsk(
+      [...ctx.windows.values()].map((state) => ({
+        state,
+        allowClose: state.allowClose,
+        destroyed: state.win.webContents.isDestroyed()
+      }))
     )
     if (pending.length === 0) {
       ctx.approveQuit()
@@ -181,7 +187,7 @@ export function startLifecycle(ctx: MainContext, startupOpenPath: string | null)
     }
     event.preventDefault()
     ctx.setQuitRequested(true)
-    for (const state of pending) state.win.webContents.send(IPC.closeRequest)
+    for (const item of pending) item.state.win.webContents.send(IPC.closeRequest)
   })
 
   /**

@@ -54,6 +54,17 @@ import {
   UPDATE_RECHECK_INTERVAL_MS
 } from '../../../src/shared/update-policy'
 import { normalizeLicenseState } from '../../../src/main/license/state'
+import { verifyLicenseKeyWith } from '../../../src/main/license/verify'
+import { findResourceBytes, resourcePathFromUrl } from '../../../src/main/resource-table'
+import { windowsToAsk } from '../../../src/main/quit-flow'
+import { windowOwningPath } from '../../../src/main/window-match'
+import { generateKeyPairSync, sign as signData } from 'node:crypto'
+import {
+  bytesToBase64Url,
+  encodeLicenseKey,
+  licensePayloadSegment,
+  type LicensePayload
+} from '../../../src/shared/license'
 import { writeFileAtomic, writeJsonAtomic } from '../../../src/main/atomic-write'
 /*
  * 主进程的回归网：`selfcheck` 此前只覆盖到 `atomic-write.ts` 一个主进程文件（14 个 IPC 域拆分后
@@ -424,6 +435,171 @@ export async function testSafetyHelpers(): Promise<void> {
     '(none)'
   )
   eq('渲染层没有多余的死处理器', orphanHandlers.join(',') || '(none)', '(none)')
+
+  group('主进程：资源协议的 URL 还原与查表（只按 key 查内存表，不碰文件系统）')
+
+  eq(
+    'URL → 包内路径（逐段百分号编码会被还原）',
+    resourcePathFromUrl('mind-resource://local/resources/%E7%85%A7%E7%89%87.png'),
+    'resources/照片.png'
+  )
+  eq(
+    '普通 ASCII 路径',
+    resourcePathFromUrl('mind-resource://local/resources/a.png'),
+    'resources/a.png'
+  )
+  eq('不是 URL → null（调用方回 400）', resourcePathFromUrl('这不是 URL'), null)
+
+  const resourceTableA: Record<string, Uint8Array> = { 'resources/a.png': new Uint8Array([1]) }
+  const resourceTableB: Record<string, Uint8Array> = { 'resources/b.png': new Uint8Array([2]) }
+  eq('第一张表命中', findResourceBytes([resourceTableA, resourceTableB], 'resources/a.png')?.[0], 1)
+  eq(
+    '第二张表也能命中（协议认不出窗口，所以要逐表查）',
+    findResourceBytes([resourceTableA, resourceTableB], 'resources/b.png')?.[0],
+    2
+  )
+  eq(
+    '查不到 → undefined（协议回 404）',
+    findResourceBytes([resourceTableA, resourceTableB], 'resources/nope.png'),
+    undefined
+  )
+  eq(
+    '穿越式 key 查不到任何东西（资源只按 key 查内存表，不拼进路径）',
+    findResourceBytes([resourceTableA, resourceTableB], '../../etc/passwd'),
+    undefined
+  )
+
+  group('主进程：退出前该问哪些窗口（多窗口退出不能静默丢改动）')
+
+  eq('没有窗口 → 不用问', windowsToAsk([]).length, 0)
+  eq(
+    '已批准关闭的不再问',
+    windowsToAsk([{ id: 'a', allowClose: true, destroyed: false }]).length,
+    0
+  )
+  eq(
+    '界面进程已经没了的问了也没人答',
+    windowsToAsk([{ id: 'a', allowClose: false, destroyed: true }]).length,
+    0
+  )
+  eq(
+    '正常窗口都要问，且保持原顺序',
+    windowsToAsk([
+      { id: 'a', allowClose: false, destroyed: false },
+      { id: 'b', allowClose: true, destroyed: false },
+      { id: 'c', allowClose: false, destroyed: false }
+    ])
+      .map((item) => item.id)
+      .join(','),
+    'a,c'
+  )
+
+  group('主进程：从外面打开文件时找哪个窗口（多文档窗口 / 界面已亡）')
+
+  const ownershipWindows = [
+    { id: 'a', destroyed: false, docPaths: [null, 'C:/docs/one.xmind'] },
+    { id: 'b', destroyed: true, docPaths: ['C:/docs/two.xmind'] },
+    { id: 'c', destroyed: false, docPaths: ['C:/docs/three.xmind'] }
+  ]
+  const samePath = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
+
+  eq(
+    '命中开着该文件的窗口（同一窗口的多份文档要逐个比）',
+    windowOwningPath(ownershipWindows, 'C:/docs/one.xmind', samePath)?.id,
+    'a'
+  )
+  eq(
+    '路径大小写不敏感（Windows）',
+    windowOwningPath(ownershipWindows, 'c:/DOCS/ONE.XMIND', samePath)?.id,
+    'a'
+  )
+  eq(
+    '界面进程已经没了的窗口不算（即使它开着这个文件）',
+    windowOwningPath(ownershipWindows, 'C:/docs/two.xmind', samePath),
+    undefined
+  )
+  eq(
+    '没开过 → undefined（交给聚焦窗口开新标签）',
+    windowOwningPath(ownershipWindows, 'C:/docs/nope.xmind', samePath),
+    undefined
+  )
+  eq(
+    '未保存过的新文档（docPath = null）不会误命中',
+    windowOwningPath(
+      [{ id: 'x', destroyed: false, docPaths: [null] }],
+      'C:/docs/one.xmind',
+      samePath
+    ),
+    undefined
+  )
+
+  group('主进程：许可码验签（自生成密钥对，正反两条路都真跑一遍）')
+
+  {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+    const publicPem = publicKey.export({ type: 'spki', format: 'pem' }) as string
+    const payload: LicensePayload = {
+      v: 1,
+      edition: 'pro',
+      holder: '测试买家',
+      issuedAt: '2026-09-19'
+    }
+    const segment = licensePayloadSegment(payload)
+    const signature = bytesToBase64Url(signData(null, Buffer.from(segment, 'utf8'), privateKey))
+    const goodKey = encodeLicenseKey(payload, signature)
+
+    const verified = verifyLicenseKeyWith(goodKey, publicPem)
+    check('签得对就验得过', verified.ok)
+    eq('持有人带回来（界面要显示它）', verified.holder, '测试买家')
+
+    const tampered = verifyLicenseKeyWith(
+      encodeLicenseKey({ ...payload, holder: '别人' }, signature),
+      publicPem
+    )
+    check('改一位内容就验不过', !tampered.ok)
+    check('失败原因可读（会原样显示给用户）', tampered.error.includes('签名对不上'))
+
+    const otherPem = generateKeyPairSync('ed25519').publicKey.export({
+      type: 'spki',
+      format: 'pem'
+    }) as string
+    check('换一把公钥也验不过', !verifyLicenseKeyWith(goodKey, otherPem).ok)
+
+    // 批量卡密池的码不带持有人名：**必须单独签一次**——签名覆盖的是 payload 段字节本身，
+    // 复用带名字那次的签名会验不过（这条断言第一版就写错了，被它自己当场抓出来）
+    const noNamePayload: LicensePayload = { v: 1, edition: 'pro', issuedAt: '2026-09-19' }
+    const noName = verifyLicenseKeyWith(
+      encodeLicenseKey(
+        noNamePayload,
+        bytesToBase64Url(
+          signData(null, Buffer.from(licensePayloadSegment(noNamePayload), 'utf8'), privateKey)
+        )
+      ),
+      publicPem
+    )
+    check(
+      '不带持有人名的批量码：验得过且 holder 为 null（界面不显示空括号）',
+      noName.ok && noName.holder === null
+    )
+
+    check(
+      '占位公钥给可读报错（开发构建）',
+      verifyLicenseKeyWith(
+        goodKey,
+        '-----BEGIN PUBLIC KEY-----\n__SMIND_LICENSE_PUBLIC_KEY__\n-----END PUBLIC KEY-----'
+      ).error.includes('没有内置许可公钥')
+    )
+    check(
+      '公钥不是 PEM → 可读报错',
+      verifyLicenseKeyWith(goodKey, 'not a pem').error.includes('公钥不可用')
+    )
+    check(
+      '签名段读不出来 → 可读报错',
+      verifyLicenseKeyWith(encodeLicenseKey(payload, '@@@'), publicPem).error.includes(
+        '签名读不出来'
+      )
+    )
+  }
 
   group('原子写文件')
 

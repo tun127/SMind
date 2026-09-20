@@ -10,13 +10,10 @@
  * 荣誉制取舍，已经在商业化一节里记过账。
  */
 import { readFile } from 'node:fs/promises'
-import { createPublicKey, verify as verifySignature, type KeyObject } from 'node:crypto'
 import { join } from 'node:path'
 import { app } from 'electron'
 import {
-  base64UrlToBytes,
   bumpTrialUsed,
-  decodeLicenseKey,
   licenseViewOf,
   normalizeLicenseKey,
   type LicenseView
@@ -24,6 +21,9 @@ import {
 import { writeFileAtomic } from '../atomic-write'
 import { LICENSE_PUBLIC_KEY_PEM } from './public-key'
 import { DEFAULT_LICENSE_STATE, normalizeLicenseState, type LicenseState } from './state'
+import { verifyLicenseKeyWith, type VerifyResult } from './verify'
+
+export type { VerifyResult } from './verify'
 
 function licenseFilePath(): string {
   return join(app.getPath('userData'), 'license.json')
@@ -46,12 +46,6 @@ async function saveLicenseState(state: LicenseState): Promise<void> {
   await writeFileAtomic(licenseFilePath(), Buffer.from(JSON.stringify(state, null, 2), 'utf8'))
 }
 
-export interface VerifyResult {
-  ok: boolean
-  holder: string | null
-  error: string
-}
-
 /**
  * 离线验签。
  *
@@ -59,41 +53,10 @@ export interface VerifyResult {
  * ——后者会因为键序、空格不同而假失败，那是签发工具与客户端最容易对不上的地方。
  */
 export function verifyLicenseKey(raw: string): VerifyResult {
-  const decoded = decodeLicenseKey(raw)
-  if (!decoded.ok) return { ok: false, holder: null, error: decoded.error }
-
-  if (LICENSE_PUBLIC_KEY_PEM.includes('__SMIND_LICENSE_PUBLIC_KEY__')) {
-    return {
-      ok: false,
-      holder: null,
-      error: '这个构建没有内置许可公钥，无法激活 Pro（开发构建请先跑 npm run license:keygen）'
-    }
-  }
-
-  const signature = base64UrlToBytes(decoded.signature)
-  if (!signature) return { ok: false, holder: null, error: '许可码的签名读不出来' }
-
-  let publicKey: KeyObject
-  try {
-    publicKey = createPublicKey(LICENSE_PUBLIC_KEY_PEM)
-  } catch {
-    return { ok: false, holder: null, error: '内置的许可公钥不可用（这是程序自身的问题，请反馈）' }
-  }
-
-  let good = false
-  try {
-    good = verifySignature(null, Buffer.from(decoded.payloadSegment, 'utf8'), publicKey, signature)
-  } catch {
-    good = false
-  }
-  if (!good) {
-    return {
-      ok: false,
-      holder: null,
-      error: '许可码的签名对不上：可能复制时缺了字符，或者它不是本产品签发的许可码'
-    }
-  }
-  return { ok: true, holder: decoded.payload.holder ?? null, error: '' }
+  // 实现搬进 ./verify（不依赖 Electron）：自检因此能自己生成一对密钥，把
+  // 「签得对 → 验得过」「改一位 → 验不过」「占位公钥 → 可读报错」都真跑一遍。
+  // 这里只负责把**内嵌公钥**递进去。
+  return verifyLicenseKeyWith(raw, LICENSE_PUBLIC_KEY_PEM)
 }
 
 /**

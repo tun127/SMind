@@ -12,6 +12,7 @@ import { pickDocumentArg } from '@shared/openfile'
 import { autosaveSlotName, sameDocPath } from '@shared/window'
 import { type DocWindow } from './context'
 import { autosaveFile, autosaveMeta } from './autosave'
+import { windowOwningPath } from './window-match'
 
 /* ------------------------------------------------------------------ */
 /* 窗口                                                                */
@@ -273,20 +274,22 @@ export function createWindow(
  * 一个窗口都没有才新建窗口。
  */
 export function openDocumentSomewhere(ctx: MainContext, path: string): void {
-  for (const state of ctx.windows.values()) {
-    let has = false
-    for (const doc of state.docs.values()) {
-      if (doc.docPath && sameDocPath(doc.docPath, path)) {
-        has = true
-        break
-      }
-    }
-    if (has && !state.win.isDestroyed()) {
-      if (state.win.isMinimized()) state.win.restore()
-      state.win.focus()
-      state.win.webContents.send(IPC.fileOpenRequest, path)
-      return
-    }
+  // 归属判定在 ./window-match（纯函数，有断言守着"多文档窗口要逐个比、界面没了的窗口不算"）
+  const owner = windowOwningPath(
+    [...ctx.windows.values()].map((state) => ({
+      state,
+      destroyed: state.win.isDestroyed(),
+      docPaths: [...state.docs.values()].map((doc) => doc.docPath)
+    })),
+    path,
+    sameDocPath
+  )
+  if (owner) {
+    const { win } = owner.state
+    if (win.isMinimized()) win.restore()
+    win.focus()
+    win.webContents.send(IPC.fileOpenRequest, path)
+    return
   }
   const current = ctx.focusedState()
   if (current && !current.win.isDestroyed()) {
