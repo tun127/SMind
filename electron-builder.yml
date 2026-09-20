@@ -1,23 +1,31 @@
 appId: com.smind.local
 productName: SMind
 # ---- 自动更新（electron-updater）----
-# **更新源 = 自己的镜像（generic provider）**，不是 GitHub API。
+# **更新源 = GitHub Releases 的固定直链（generic provider）**。
 #
-# 为什么换掉 github provider（实测依据）：它走 GitHub API，匿名额度 60 次/小时/**IP**，
-# 国内共享出口 IP 实测已返回 403 `API rate limit exceeded`——而更新检查**失败是静默的**，
-# 失效了你根本不会知道。generic provider 只是对一个 URL 做 GET，指向 Cloudflare R2
-# （无 API、无速率限制、国内快），稳定性完全在自己手里。
+# 为什么是 GitHub 直链（2026-09-20 决定）：Cloudflare R2 激活**必须绑支付方式**
+# （免费额度内不扣费，但不绑就开不了），当前没有可用信用卡 → R2 暂时搁置。
+# 直链走 generic provider，只是对一个 URL 做 GET，**不走 GitHub API**，
+# 所以没有「匿名额度 60 次/小时按 IP 限流 → 403」那个坑（那才是当初想换掉 github provider
+# 的原因，实测本机出口 IP 已 403）；而 `releases/latest/download/` 是**版本无关的固定 URL**，
+# 发新版不用改配置、也不用重新打包。
 #
-# ⚠️ 两个前提，缺一个更新链路就不通：
-#   1. `npm run mirror` 必须把 **latest.yml + *.blockmap** 一起传上去（脚本已支持，缺了会打警告）；
-#   2. Release 正文写清这版改了什么（latest.yml 的 releaseNotes 会显示在「发现新版本」对话框里）。
-# 若某次要临时回到 GitHub：把下面两行换成
-#   provider: github / owner: tun127 / repo: SMind
-# 即可——客户端不用改，electron-updater 原生支持两种 provider（配置由打包时生成的
-# app-update.yml 决定，所以**改了这里必须重新打包**才会生效）。
+# ⚠️ 三个前提，缺一个更新链路就不通（2026-09-20 实测 v0.9.0 的 Release 只有两个 exe，
+#    `latest.yml` 与 `*.blockmap` 都**不在里面** → 只传 exe 的话渠道是空的）：
+#   1. 发版时必须把 **`latest.yml` 与 `*.blockmap` 和 exe 一起作为 Release 资产上传**（同名）；
+#   2. Release 必须是**正式发布**（draft / prerelease 都不会被 `latest` 指到）；
+#   3. Release 正文写清这版改了什么（`latest.yml` 的 releaseNotes 会显示在「发现新版本」对话框里）。
+#
+# 代价：国内拉 GitHub 资产偏慢。查版本用的 `latest.yml` 只有几百字节，影响可忽略；
+# 差分下载的 blockmap（≈100 MB）会明显慢些 —— 这是本方案唯一的短板。
+# 等有了可用支付方式，换回 R2 镜像只需把下面两行改成：
+#   provider: generic
+#   url: https://dl.smindapp.cn/
+# 并**重新打包**（更新地址写在打包生成的 app-update.yml 里，改这里必须重打包才生效）；
+# 镜像侧的完整步骤见 docs/release-mirror.md。
 publish:
   provider: generic
-  url: https://dl.smindapp.cn/
+  url: https://github.com/tun127/SMind/releases/latest/download/
 # ---- 代码签名（Azure Trusted Signing，商业化计划选定的方案）----
 # 证书开通后设三个环境变量再打包即可，**不用改这份文件**：
 #   AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET

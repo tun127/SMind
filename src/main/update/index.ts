@@ -7,16 +7,20 @@
  * 2. **免安装版（portable）不做自动更新**：它运行时把自己解压到临时目录再启动，
  *    electron-updater 会把新版装进那个临时目录，**下次启动仍是旧版**——用户以为更新了、
  *    其实没有。所以对 portable 一律跳过检查，主动检查时给「打开下载页」的出口。
- * 3. **例行检查失败一律安静**：启动时的后台检查不该为「没网 / 镜像还没上 latest.yml」
+ * 3. **例行检查失败一律安静**：启动时的后台检查不该为「没网 / 渠道上还没有更新清单」
  *    打扰用户——记日志即可；只有菜单里的**主动检查**才把结果说清楚。
  * 4. **下载在后台、安装放在退出时**（autoInstallOnAppQuit）：不弹窗打断正在画图的人。
  *    真想立刻升级，帮助菜单里随时能主动检查并选择「立即重启安装」。
  * 5. **应用长期开着也要有机会发现新版**：重新获得焦点、且距上次检查超过 6 小时就再查一次
  *    （判据是纯函数 `shouldRecheck`，自检覆盖；失败照旧静默）。
  *
- * 更新源是**自己的镜像**（`electron-builder.yml` 的 `publish: provider: generic`，指向
- * `dl.smindapp.cn`）：GitHub provider 走 GitHub API，匿名额度按 **IP** 限流，国内共享出口
- * 实测已 403，而失败是静默的。镜像里必须有 `latest.yml`（`npm run mirror` 会一起传）。
+ * 更新源是 **GitHub Releases 的固定直链**（`electron-builder.yml` 的 `publish: provider: generic`
+ * 指向 `releases/latest/download/`）。这里用 generic provider 而不是 github provider，是因为
+ * 后者走 GitHub API、匿名额度按 **IP** 限流（国内共享出口实测 403），而失败是静默的；
+ * 直链只是对一个 URL 做 GET，且 URL 与版本无关、发新版不用改配置。
+ *
+ * ⚠️ 渠道里必须同时有 `latest.yml` 与 `*.blockmap`（和 exe 一起作为 Release 资产上传）——
+ * 只传 exe 的话这里会一直查不到新版本。换回 R2 镜像的步骤见 `electron-builder.yml` 注释。
  *
  * 与签名的关系：签名（Azure Trusted Signing）不是自动更新的前置——未签名也能收提示、
  * 也能在退出时静默装（electron-updater 会校验 latest.yml 里的 SHA512，防下载损坏）。
@@ -72,7 +76,7 @@ export function startAutoUpdate(): void {
     downloadedVersion = info.version ?? null
   })
 
-  // 例行检查的失败（离线、镜像没上 latest.yml）记日志就好，别弹窗打扰用户
+  // 例行检查的失败（离线、渠道上还没有更新清单）记日志就好，别弹窗打扰用户
   autoUpdater.on('error', (error) => {
     console.warn('[updater]', (error as Error).message)
   })
@@ -158,7 +162,7 @@ export async function checkForUpdateInteractive(win: BrowserWindow | null): Prom
       win,
       '检查更新',
       `检查失败：${(error as Error).message}\n\n` +
-        '多见于没有联网，或镜像里还没有 latest.yml（发版时先 npm run dist，再 npm run mirror）。'
+        '多见于没有联网，或这次发布还没上传 latest.yml（发版时要把 latest.yml 与 blockmap 一起传上去）。'
     )
   }
 }
