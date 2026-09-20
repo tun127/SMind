@@ -92,11 +92,11 @@ ref-vs-state / 回调身份与 `React.memo` 浅比较面 / 事件绑定 / zustan
 
 ---
 
-## 主进程回归网 + 两类契约守卫（2026-09-19 补，2694 → **2728** 项断言）
+## 主进程回归网 + 两类契约守卫（2026-09-19 补，2694 → **2753** 项断言）
 
 **背景**：`selfcheck` 长期只覆盖主进程的 `atomic-write.ts` 一个文件（C1 把 `main/index.ts` 拆成
 14 个 IPC 域之后，这块全靠 `npm run build` + 手工冒烟）。这一轮按「**把纯判定从 Electron 里抽出来**」
-的姿势补网，四笔提交：
+的姿势补网，五笔提交：
 
 | 提交 | 内容 |
 |---|---|
@@ -104,6 +104,7 @@ ref-vs-state / 回调身份与 `React.memo` 浅比较面 / 事件绑定 / zustan
 | `7ceec3f` | **IPC 契约静态断言**（见下）+ 新增 `main/file-args.ts`（`firstPathOf` / `ensureXmindExt`，从 `files.ts` 抽出，`files.ts` 原样再导出 → 调用点零改动）（+13 条） |
 | `88da8b6` | 新增 `main/license/state.ts`（`normalizeLicenseState`：坏 JSON 逐字段收敛）+ `shared/update-policy.ts` 增加 `releaseNotesOf`（剥 HTML / 分段拼接 / 超 800 字截断）（+18 条） |
 | `1128477` | **菜单命令契约静态断言**（见下）（+3 条） |
+| `3298a2c` | 最后四块纯判定：`main/resource-table.ts`（URL→路径、按 key 查表，含**穿越式 key 查不到**）、`main/quit-flow.ts`（退出前该问哪些窗口）、`main/license/verify.ts`（`verifyLicenseKeyWith(raw, pem)`，自检用**自生成 Ed25519 密钥对**跑正反两条路）、`main/window-match.ts`（多文档窗口归属 / 界面已亡的窗口不算）（+25 条） |
 
 **两类契约守卫**（过去只有文档口径，没有任何门）：
 
@@ -114,10 +115,12 @@ ref-vs-state / 回调身份与 `React.memo` 浅比较面 / 事件绑定 / zustan
   漏一条的症状是"菜单项点下去毫无反应"。**并带防空过守卫**：断言扫描至少抓到 20 条命令——
   静态扫描类断言最容易"正则失效 → 两侧空集合 → 假绿"。
 
-**仍未覆盖（如实登记，不假装覆盖）**：`windows.ts`、`menu.ts`（菜单结构本身）、`lifecycle.ts`、
-`resource-protocol.ts`、`ipc/*`（各域的入参校验细节）、`license/index.ts`（验签与状态落盘）、
-`update/index.ts`（与 electron-updater 的交互）——纳入前都要先像上面那样把**纯判定**抽成
-不依赖 Electron 的函数（窗口归属、入参校验、吊销名单判定…），属后续可做的批次。
+**仍未覆盖（如实登记，不假装覆盖）**：`menu.ts`（菜单**结构**本身）、`lifecycle.ts` 的其余部分
+（单实例锁与心跳、启动装配顺序）、`resource-protocol.ts` 的 `protocol.handle` 注册本身、
+`ipc/*`（各域在 handler 里的入参校验细节）、`license/index.ts`（状态落盘与 Pro 缓存）、
+`update/index.ts`（与 electron-updater 的交互）。这些要么依赖 Electron、要么依赖 electron-updater，
+要么是"装配顺序"这类只能在真机上观察的行为——想纳入得先继续抽纯判定（这是本批的做法），
+或改用别的手段（例如把 `ipc/*` 的入参校验统一收成纯校验函数）。
 
 ---
 

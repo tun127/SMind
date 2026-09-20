@@ -46,7 +46,12 @@
   - `88da8b6`：新增 `main/license/state.ts`（坏 JSON 逐字段收敛）＋ `shared/update-policy.ts` 的
     `releaseNotesOf`（剥 HTML / 分段拼接 / 超 800 字截断）；
   - `1128477`：**菜单命令契约静态断言**（主进程发的每条命令都要在渲染层有处理器，双向集合相等，
-    并带"防空过"守卫——防正则失效导致假绿）。
+    并带"防空过"守卫——防正则失效导致假绿）；
+  - `3298a2c`：最后四块纯判定——`main/resource-table.ts`（URL→包内路径、按 key 查表，
+    含「穿越式 key 查不到任何东西」）、`main/quit-flow.ts`（退出前该问哪些窗口）、
+    `main/license/verify.ts`（`verifyLicenseKeyWith(raw, pem)`，自检用**自生成的 Ed25519 密钥对**
+    把「签得对→过 / 改一位→不过 / 换公钥→不过 / 占位公钥→可读报错」真跑一遍）、
+    `main/window-match.ts`（"从外面打开文件"找哪个窗口：多文档窗口逐个比、界面已亡的窗口不算）。
 - 仍依赖 Electron 的模块（`windows.ts` / `menu.ts` / `lifecycle.ts` / `resource-protocol.ts` / `ipc/*` /
   `license/index.ts` / `update/index.ts`）要纳入得先抽纯判定，属后续批次（已登记在 `known-issues.md`）。
 

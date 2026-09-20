@@ -4,7 +4,7 @@
 
 ## 补记（第九次交接，2026-09-19 深夜）—— 审计收尾 + 主进程回归网 + 用户验收通过
 
-> **HEAD：`1128477`**｜工作树干净｜**五道门槛全绿：selfcheck 2728 项**（`npm run selfcheck` 可直接跑）
+> **HEAD：`3298a2c`**｜工作树干净｜**五道门槛全绿：selfcheck 2753 项**（`npm run selfcheck` 可直接跑）
 > 用户已把前序提交**推送到 GitHub**（`origin/main` 与本地一致），之后的提交由用户继续推。
 
 **用户指令序列**（原话）：「完成文件推送与复核,复核结果在refactor-audit.md」→「我完成了推送,现在已经打开了本地开发版,
@@ -22,6 +22,7 @@
 | `7ceec3f` | **IPC 契约静态断言**（70 通道 / 66 注册 / 无重复 / 两侧齐全）+ 新增 `main/file-args.ts`（+13 条） |
 | `88da8b6` | 新增 `main/license/state.ts`（坏 JSON 逐字段收敛）+ `shared/update-policy.ts` 的 `releaseNotesOf`（+18 条） |
 | `1128477` | **菜单命令契约静态断言**（主进程发的每条命令都要有渲染层处理器；带"防空过"守卫）（+3 条） |
+| `3298a2c` | 最后四块纯判定：`resource-table.ts`（URL→路径 + 穿越式 key 查不到）、`quit-flow.ts`（退出前问哪些窗口）、`license/verify.ts`（自生成密钥对跑正反两条路）、`window-match.ts`（多文档窗口归属）（+25 条） |
 
 **独立复核（我做的，不是照抄别人自述）**：
 - 在用户推送后的 HEAD 上亲手复跑五道门槛全绿；`npm run build` 通过；
