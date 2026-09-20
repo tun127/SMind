@@ -1,5 +1,22 @@
 # 国内镜像发布指引（Cloudflare R2）
 
+> **当前状态（2026-09-20）：🅿️ 本方案搁置，尚未启用。**
+>
+> 原因：Cloudflare R2 **激活必须绑支付方式**（免费额度内不扣费，但不绑就开不了服务），
+> 当前没有可用的国际信用卡（PayPal / Apple Pay / 银行卡三条路都需先有可绑的卡）。
+>
+> **现阶段的更新源 = GitHub Releases 固定直链**
+> （`https://github.com/tun127/SMind/releases/latest/download/`，见 `electron-builder.yml` 的 `publish`）：
+> 发版时把 `latest.yml` 与 `*.blockmap` 与 exe 一起作为 Release 资产上传即可，**不必**跑本手册。
+>
+> 本文以下步骤**仍然有效**，等有支付方式后照做；届时要做的收尾是：把 `publish.url` 换回
+> `https://dl.smindapp.cn/` **并重新打包**（更新地址写在打包生成的 `app-update.yml` 里，
+> 改配置必须重打包才生效）。
+>
+> 域名侧已完成的前置：`smindapp.cn` 已托管到 Cloudflare（NS = `deborah` / `javon.ns.cloudflare.com`），
+> 官网两条 CNAME 走 **DNS only（灰云）**、官网零中断。**只剩三步**：建 `smind-releases` 桶 →
+> 绑 `dl.smindapp.cn` → 拿 API Token。
+
 > 预推行阶段的零成本方案：exe 镜像走 Cloudflare R2（每月免费 10GB 存储 + 下行流量免费），
 > 官网下载页**自动优先走镜像、失败回退 GitHub 直链**——镜像没配好也不影响用户下载。
 

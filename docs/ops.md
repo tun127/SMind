@@ -23,9 +23,9 @@
 | # | 事项 | 状态 | 下一步 | 依赖 |
 |---|---|---|---|---|
 | 1 | 0.9.0 正式发布 | ✅ 已发布（GitHub Release + 官网直链下载） | 观察下载数与反馈 | — |
-| 2 | **0.9.1 发版** | ⬜ 等 PDF 验收 | 用户人工验收 PDF（导出 → 选中文字 → 放大 400% 看锐利）→ `npm version 0.9.1` → `dist` → `mirror` → Release（agent 代跑，说明用户过目） | #6 验收通过 |
-| 3 | 自动更新首跑 | ⬜ 随 0.9.1（**客户端侧已换源**） | 需求见 `docs/auto-update-and-license-delivery.md` §3。Release 页上传 exe + `latest.yml` + blockmap，且必须是**已发布**（非 draft/prerelease）。**2026-09-19 代码侧已把 `publish` 换成 `generic` 指向 `dl.smindapp.cn`**（`20bcd71`），`npm run mirror` 也已补传 `latest.yml` + blockmap（`bfc4932`）→ **前置变成 R2 镜像必须先配好**（#7）；镜像没就绪时 generic 渠道会静默取不到更新 | #7 |
-| 4 | README 已知限制随 0.9.1 更新 | 🟡 部分已改 | PDF 改矢量、自动更新渠道就绪——代码侧已把「无自动更新」改成「自 0.9.1 起启用（免安装版不支持自更新）」，发 0.9.1 时再核对一遍 | #2 |
+| 2 | **0.9.1 发版** | 🟡 打包就绪，等 PDF 验收 | 用户人工验收 PDF（导出 → 选中文字 → 放大 400% 看锐利）→ `npm run dist` → 建 `v0.9.1` Release 并**同时上传 exe + `latest.yml` + `*.blockmap`**（agent 代跑打包，上传与过目由用户执行） | #6 验收通过 |
+| 3 | 自动更新首跑 | ⬜ 随 0.9.1 | 需求见 `docs/auto-update-and-license-delivery.md` §3。**2026-09-20 更新源改为 GitHub Releases 固定直链**（`provider: generic` + `releases/latest/download/`，见 `electron-builder.yml` 注释）——R2 因**无可用支付方式**搁置（#7）。发版时必须把 `latest.yml` + blockmap 与 exe 一起作为资产上传，且 Release 必须是**已发布**（非 draft/prerelease）；**实测 v0.9.0 的 Release 只有两个 exe、缺 `latest.yml`**，所以渠道至今是空的 | #2 |
+| 4 | README 已知限制随 0.9.1 更新 | ✅ 已改（2026-09-20） | 已删两条**已被代码修掉**的限制（「SVG 导出里部分标记图标简化」→ 矢量数据已覆盖全部图形；「概要/边界不参与布局空间预留」→ 已接进全部 14 个结构）；「自动更新自 0.9.1 起启用」的更新源已改为 GitHub Releases 直链 | — |
 | 20 | **渲染层人肉验收**（曾阻塞 0.9.1 打包） | 🟡 **高危五项已由用户实测通过**（2026-09-19 深夜，开发版） | 用户逐条实测并确认**无问题**：①关窗链路（多标签逐个询问 / 中途取消 / 保存失败不关窗 / 启动即关窗不清存档 / 崩溃恢复）②一整轮真实 AI 对话（工具调用·破坏性确认·中途停止·切文档中止·整轮一步撤销）③画布拖拽（吸附成子主题 / 同级插入线 / Alt 自由摆放 / 多选整群拖 / 左右对调预览 / 贴边自动滚动）④撤销后备注·公式·代码草稿跟着回退⑤搜索筛选染色·折叠锚点·视角锁定。**剩余长尾细项未逐条走**（A4–A6 更早各批、外壳菜单/快捷键/拖文件、工具栏分组禁用提示）。**打包仍卡在 #6 PDF 验收**；`release/` 仍是 09-18 打出的 0.9.0 | #2、代码 agent |
 
 ## 二、分发与官网
@@ -34,8 +34,8 @@
 |---|---|---|---|---|
 | 5 | 官网下载直链 | ✅ /download/setup·portable/ 点按钮直下 | — | — |
 | 6 | PDF 矢量人工验收 | ⬜ 用户执行 | 见 #2 | — |
-| 7 | **R2 国内镜像** | ⬜ 等用户配置 Cloudflare（**现在是自动更新的前置**） | 用户：迁 DNS → 建 `smind-releases` 桶 → 绑 `dl.smindapp.cn` → 拿 API Token；然后 `npm run mirror` 验证（手册：docs/release-mirror.md） | 用户 |
-| 8 | 官网下载页 | ✅ 镜像优先 + GitHub 回退（已上线） | 镜像就绪后无需改页面 | #7 |
+| 7 | **R2 国内镜像** | 🅿️ **搁置**（2026-09-20：R2 激活必须绑支付方式，当前无可用信用卡）；**已不再是自动更新的前置** | DNS 侧已完成（`smindapp.cn` 已托管到 Cloudflare，NS = `deborah` / `javon.ns.cloudflare.com`，官网两条 CNAME 走 DNS only 灰云、官网零中断）。等有支付方式后只剩三步：建 `smind-releases` 桶 → 绑 `dl.smindapp.cn` → 拿 API Token → `npm run mirror`（手册：docs/release-mirror.md） | 用户 |
+| 8 | 官网下载页 | ✅ 镜像优先 + GitHub 回退（已上线；镜像未就绪时自动走回退分支，实测有效） | 镜像就绪后无需改页面 | #7 |
 | 18 | 官网「结构数」口径 | 🟡 待统一（小） | 官网写「**9 种结构**」（自测：按结构**族**数），README / CHANGELOG 写「**14 种**」（按 Xmind class 数，源码 `STRUCTURES` 实测 14 项 / 9 族）。两个数都对，但对外应统一——建议官网改「14 种结构（9 大族）」；属站点仓库 `tun127/smind-site` | 站点仓库 |
 
 ## 三、商业化（Pro 侧）
