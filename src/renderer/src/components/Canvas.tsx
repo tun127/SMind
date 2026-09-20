@@ -9,6 +9,7 @@ import { useEditor } from '../store/editor'
 import { useCanvasGeometry } from './canvas/use-canvas-geometry'
 import { useCanvasViewport } from './canvas/use-canvas-viewport'
 import { useFlashNodes } from './canvas/use-flash-nodes'
+import { useAiWriteVisuals } from './canvas/use-ai-write-visuals'
 import { useFoldAnchor } from './canvas/use-fold-anchor'
 import { useViewFollow } from './canvas/use-view-follow'
 import { useWheelPanZoom } from './canvas/use-wheel-pan-zoom'
@@ -37,6 +38,8 @@ export default function Canvas(): ReactElement {
   const workbook = useEditor((s) => s.workbook)
   /** AI 回合进行中？（面板那边开的事务）——只用来决定「布局要不要节流」 */
   const aiTurnActive = useEditor((s) => s.aiTurn !== null)
+  // AI 执行动效（视觉规格 4.6）：只读上面的 aiTurn 当开关，纯视觉层——不参与任何事务判定
+  const { writingIds, pulsingId, settling } = useAiWriteVisuals(workbook, aiTurnActive)
   /**
    * **布局**用节流后的工作簿：AI 批量写入时把重排合并到每 ~100ms 一次。
    *
@@ -285,7 +288,7 @@ export default function Canvas(): ReactElement {
   return (
     <div
       ref={containerRef}
-      className="canvas"
+      className={settling ? 'canvas canvas--ai-settling' : 'canvas'}
       style={{
         backgroundColor: colors.canvas,
         backgroundImage: `radial-gradient(circle, ${colors.grid} 1px, transparent 1px)`
@@ -337,6 +340,8 @@ export default function Canvas(): ReactElement {
           searchHits={searchHits}
           marqueeHits={marqueeHits}
           flashIds={flashIds}
+          writingIds={writingIds}
+          pulsingId={pulsingId}
           filterResult={filterResult}
           handleNodePointerDown={handleNodePointerDown}
           handleNodeDoubleClick={handleNodeDoubleClick}

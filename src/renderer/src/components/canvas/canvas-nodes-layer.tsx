@@ -32,6 +32,8 @@ export function CanvasNodesLayer({
   searchHits,
   marqueeHits,
   flashIds,
+  writingIds,
+  pulsingId,
   filterResult,
   handleNodePointerDown,
   handleNodeDoubleClick,
@@ -58,6 +60,9 @@ export function CanvasNodesLayer({
   searchHits: ReadonlySet<string> | null
   marqueeHits: ReadonlySet<string> | null
   flashIds: ReadonlySet<string>
+  /** AI 执行动效（规格 4.6）：刚写入的节点（入场渐显）与当前执行到的那一个（描边脉冲） */
+  writingIds: ReadonlySet<string>
+  pulsingId: string | null
   filterResult: ReturnType<typeof useCanvasDisplay>['filterResult']
   handleNodePointerDown: TopicNodeProps['onPointerDown']
   handleNodeDoubleClick: TopicNodeProps['onDoubleClick']
@@ -95,6 +100,8 @@ export function CanvasNodesLayer({
           searchHit={searchHits ? searchHits.has(node.id) : false}
           marqueeHit={marqueeHits ? marqueeHits.has(node.id) : false}
           flash={flashIds.has(node.id)}
+          writing={writingIds.has(node.id)}
+          pulsing={pulsingId === node.id}
           dimmed={
             filterResult
               ? !filterResult.keep.has(node.id)

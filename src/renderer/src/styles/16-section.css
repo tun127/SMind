@@ -114,6 +114,83 @@
   animation: ai-flash 0.8s ease-out 2;
 }
 
+/* ------------------------------------------------------------------ */
+/* AI 执行动效（视觉规格 4.6）：写入渐显 / 当前步描边脉冲 / 回合收敛     */
+/*                                                                     */
+/* 只用 opacity 与**独立的 scale 属性**，不用 transform：拖拽期间画布会  */
+/* 直接改写元素的 transform（见 TopicNode 的说明），入场动效若占用        */
+/* transform 就会打断"指针跟手"。                                       */
+/* ------------------------------------------------------------------ */
+@keyframes ai-write-in {
+  from {
+    opacity: 0;
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes ai-pulse-ring {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+@keyframes ai-canvas-settle {
+  from {
+    scale: 1.005;
+  }
+  to {
+    scale: 1;
+  }
+}
+
+/* 节点被写入：渐显 120ms */
+.topic--ai-writing {
+  animation: ai-write-in 120ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* 「当前执行中」：一圈 2px 描边脉冲，1.2s 循环；::after 画环，不碰节点自身的阴影与 outline */
+.topic--ai-pulsing::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--accent, #3b5bdb);
+  border-radius: 12px;
+  pointer-events: none;
+  animation: ai-pulse-ring 1.2s ease-in-out infinite;
+}
+
+/* 回合结束：所有脉冲**同时**淡出（300ms），画布轻微落定 */
+.canvas--ai-settling {
+  animation: ai-canvas-settle 300ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.canvas--ai-settling .topic--ai-pulsing::after {
+  animation: none;
+  opacity: 0;
+  transition: opacity 300ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* 无障碍：系统开启"减少动态效果"时，脉冲与收敛全部关闭（节点照常出现） */
+@media (prefers-reduced-motion: reduce) {
+  .topic--ai-writing,
+  .canvas--ai-settling {
+    animation: none;
+  }
+
+  .topic--ai-pulsing::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 /* 工具调用痕迹：让用户看得见 AI 翻看过什么。
    版式是「过程在上、结论在下」，而且是**纵向时间线**——从上到下就是执行顺序：
    计划（💬）→ 工具步骤 → 每步反馈（💬）→ … → 最终自检与总结（正文） */
