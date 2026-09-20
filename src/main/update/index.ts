@@ -25,13 +25,10 @@
  */
 import { autoUpdater } from 'electron-updater'
 import { app, dialog, shell, type BrowserWindow } from 'electron'
-import { isPortableBuild, shouldRecheck } from '@shared/update-policy'
+import { isPortableBuild, releaseNotesOf, shouldRecheck } from '@shared/update-policy'
 
 /** 免安装版的手动下载页（它没有自动更新，只能让用户自己去下） */
 const PORTABLE_DOWNLOAD_PAGE = 'https://smindapp.cn/download/portable/'
-
-/** 「发现新版本」对话框里最多显示多少字的更新说明（Release 正文可能很长） */
-const RELEASE_NOTES_MAX = 800
 
 /** 本机是不是免安装版？判据在 @shared/update-policy（纯函数，自检覆盖两条分支） */
 function portableNow(): boolean {
@@ -56,31 +53,6 @@ async function showInfo(win: BrowserWindow | null, title: string, message: strin
     return
   }
   await dialog.showMessageBox(win, { type: 'info', title, message, noLink: true })
-}
-
-/**
- * Release 正文（latest.yml 的 releaseNotes）→ 对话框里能显示的一段纯文本。
- *
- * GitHub 生成的正文可能带 HTML 标签，粗粗剥掉；没有正文就返回 null（对话框照原样显示）。
- */
-function releaseNotesOf(raw: unknown): string | null {
-  let text = ''
-  if (typeof raw === 'string') {
-    text = raw
-  } else if (Array.isArray(raw)) {
-    text = raw
-      .map((item) => {
-        const note = (item as { note?: unknown } | null)?.note
-        return typeof note === 'string' ? note : ''
-      })
-      .join('\n')
-  }
-  const clean = text
-    .replace(/<[^>]+>/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-  if (clean.length === 0) return null
-  return clean.length > RELEASE_NOTES_MAX ? `${clean.slice(0, RELEASE_NOTES_MAX)}…` : clean
 }
 
 /** 应用启动时调用：只在打包版生效，启动后延迟做一次后台检查 */

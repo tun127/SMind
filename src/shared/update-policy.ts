@@ -27,3 +27,33 @@ export function shouldRecheck(lastCheckAt: number | null, now: number): boolean 
   if (lastCheckAt === null) return true
   return now - lastCheckAt >= UPDATE_RECHECK_INTERVAL_MS
 }
+
+/** 「发现新版本」对话框里最多显示多少字的更新说明（Release 正文可能很长） */
+export const RELEASE_NOTES_MAX = 800
+
+/**
+ * Release 正文（`latest.yml` 的 `releaseNotes`）→ 对话框里能显示的一段纯文本。
+ *
+ * electron-updater 交出来的可能是字符串，也可能是 `{ note }[]`（按版本分段）；
+ * GitHub 生成的正文还可能带 HTML 标签，粗粗剥掉；没有正文就返回 `null`（对话框照原样显示）。
+ * 放这里而不是主进程模块里，是因为它能在自检里跑（主进程那份 import 了 electron）。
+ */
+export function releaseNotesOf(raw: unknown): string | null {
+  let text = ''
+  if (typeof raw === 'string') {
+    text = raw
+  } else if (Array.isArray(raw)) {
+    text = raw
+      .map((item) => {
+        const note = (item as { note?: unknown } | null)?.note
+        return typeof note === 'string' ? note : ''
+      })
+      .join('\n')
+  }
+  const clean = text
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  if (clean.length === 0) return null
+  return clean.length > RELEASE_NOTES_MAX ? `${clean.slice(0, RELEASE_NOTES_MAX)}…` : clean
+}

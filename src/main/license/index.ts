@@ -23,39 +23,22 @@ import {
 } from '@shared/license'
 import { writeFileAtomic } from '../atomic-write'
 import { LICENSE_PUBLIC_KEY_PEM } from './public-key'
-
-interface LicenseState {
-  version: 1
-  /** 用户激活时粘进来的许可码（原样保存，每次启动重新验签） */
-  key: string | null
-  /** 已经用掉几个「写回合」 */
-  trialUsed: number
-}
-
-const DEFAULT_STATE: LicenseState = { version: 1, key: null, trialUsed: 0 }
+import { DEFAULT_LICENSE_STATE, normalizeLicenseState, type LicenseState } from './state'
 
 function licenseFilePath(): string {
   return join(app.getPath('userData'), 'license.json')
 }
 
-/** 读状态；文件缺失或损坏一律回退到默认值（许可问题不该让应用起不来） */
+/**
+ * 读状态；文件缺失或损坏一律回退到默认值（许可问题不该让应用起不来）。
+ * 形状与逐字段收敛搬进 `./state`（**不依赖 Electron**），因此能被自检覆盖。
+ */
 export async function readLicenseState(): Promise<LicenseState> {
   try {
-    const raw: unknown = JSON.parse(await readFile(licenseFilePath(), 'utf8'))
-    if (typeof raw !== 'object' || raw === null) return { ...DEFAULT_STATE }
-    const record = raw as Record<string, unknown>
-    return {
-      version: 1,
-      key: typeof record.key === 'string' && record.key.length > 0 ? record.key : null,
-      trialUsed:
-        typeof record.trialUsed === 'number' &&
-        Number.isFinite(record.trialUsed) &&
-        record.trialUsed > 0
-          ? Math.floor(record.trialUsed)
-          : 0
-    }
+    const text = await readFile(licenseFilePath(), 'utf8')
+    return normalizeLicenseState(JSON.parse(text))
   } catch {
-    return { ...DEFAULT_STATE }
+    return { ...DEFAULT_LICENSE_STATE }
   }
 }
 

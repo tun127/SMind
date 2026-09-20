@@ -49,9 +49,11 @@ import {
 import { isInstanceAlive, isSelfNavigation } from '../../../src/shared/guards'
 import {
   isPortableBuild,
+  releaseNotesOf,
   shouldRecheck,
   UPDATE_RECHECK_INTERVAL_MS
 } from '../../../src/shared/update-policy'
+import { normalizeLicenseState } from '../../../src/main/license/state'
 import { writeFileAtomic, writeJsonAtomic } from '../../../src/main/atomic-write'
 /*
  * 主进程的回归网：`selfcheck` 此前只覆盖到 `atomic-write.ts` 一个主进程文件（14 个 IPC 域拆分后
@@ -307,6 +309,39 @@ export async function testSafetyHelpers(): Promise<void> {
   eq('大小写不敏感', ensureXmindExt('C:\\a.XMIND'), 'C:\\a.XMIND')
   eq('没扩展名就补上', ensureXmindExt('C:\\a'), 'C:\\a.xmind')
   eq('别的扩展名照样补（与旧行为一致）', ensureXmindExt('C:\\a.txt'), 'C:\\a.txt.xmind')
+
+  group('主进程：许可状态的形状与规范化（坏文件不该让应用起不来）')
+
+  const badState = normalizeLicenseState(null)
+  eq('null → 未激活', badState.key, null)
+  eq('null → 试用 0 次', badState.trialUsed, 0)
+  eq('字符串不是状态 → 未激活', normalizeLicenseState('坏了').key, null)
+  eq('空对象 → 未激活', normalizeLicenseState({}).key, null)
+  eq(
+    'key 原样保留（每次启动重新验签）',
+    normalizeLicenseState({ key: 'SMIND1.a.b' }).key,
+    'SMIND1.a.b'
+  )
+  eq('key 是空串 → 当没有', normalizeLicenseState({ key: '' }).key, null)
+  eq('key 不是字符串 → 当没有', normalizeLicenseState({ key: 123 }).key, null)
+  eq('trialUsed 取整', normalizeLicenseState({ trialUsed: 3.7 }).trialUsed, 3)
+  eq('trialUsed 负数 → 0', normalizeLicenseState({ trialUsed: -5 }).trialUsed, 0)
+  eq('trialUsed 是 NaN → 0', normalizeLicenseState({ trialUsed: Number.NaN }).trialUsed, 0)
+  eq(
+    'trialUsed 是字符串数字 → 0（不当成 5）',
+    normalizeLicenseState({ trialUsed: '5' }).trialUsed,
+    0
+  )
+  eq('version 一律收敛成 1', normalizeLicenseState({ version: 99 }).version, 1)
+
+  group('更新说明：HTML 剥掉、分段拼接、超长截断（对话框直接显示它）')
+
+  eq('纯文本只规整空白', releaseNotesOf('修了 A\n\n\n\nB'), '修了 A\n\nB')
+  eq('HTML 标签剥掉', releaseNotesOf('<b>修了</b> A'), '修了 A')
+  eq('数组形式（按版本分段）拼起来', releaseNotesOf([{ note: 'A' }, { note: null }, {}]), 'A')
+  eq('空内容 → null（对话框照原样显示）', releaseNotesOf(''), null)
+  eq('不是字符串也不是数组 → null', releaseNotesOf(123), null)
+  eq('超长截断到 800 字 + 省略号', releaseNotesOf('x'.repeat(900))?.length, 801)
 
   /*
    * IPC 契约是**冻结面**：C1 拆主进程、A6/A7 拆渲染层期间，「70 条通道常量 / 66 条 ipcMain 注册 /
