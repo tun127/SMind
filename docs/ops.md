@@ -5,12 +5,12 @@
 > 支付 / 开店 / 发布）由用户执行，agent 备好材料与步骤。
 > 规则：做完一项就更新状态；新增事项随手登记。
 >
-> **环境限制（2026-09-19 深夜复核，订正本段旧口径）**：本会话沙箱内 **git 与 curl 建不了 TLS**
-> （curl/schannel 报 `SEC_E_NO_CREDENTIALS`，git 换 openssl 后端也连不上 github.com:443），
-> 而 **Node 的 fetch 可用**（实测 smindapp.cn 200、api.github.com 403 限流、npmmirror 200）。
-> 结论：**代码可读、可改、可本地提交；但「推送 GitHub」「用 API 管 Release」当前做不到**——
-> 需要用户提供 PAT / 由用户侧执行 push，或放行沙箱网络。另：站点仓库 `tun127/smind-site`
-> **本机没有检出**，改官网文案前需要先 clone。
+> **环境（2026-09-20 订正本段）**：**`git push` / `curl` / Node `fetch` 都可用**——2026-09-20 当天
+> 多次实际推送成功（`7d2f8d1`…`51aedcd`）、curl 全程可用（含 GitHub 与 OSS 直链）。此前
+> 2026-09-19 记录的「沙箱内 git 与 curl 建不了 TLS → 推送 GitHub 做不到」**已不成立**，保留仅作历史。
+> 遗留的一点：`github.com:443` 会**间歇性**被中间设备重置（TCP 通但握手失败），重试即过。
+> 另：站点仓库 **已检出到 `D:\smind-site`**（改下载页 `MIRROR` 或官网文案前先 `git pull`）。
+> 用 API 管 Release 仍需 PAT —— 当前发 Release 由用户在网页执行。
 >
 > **五道门槛全部能在本会话独立跑通**（2026-09-19 深夜，代码 agent 亲手逐门复跑）：
 > `typecheck`（含 strict）✅ exit 0｜`lint --max-warnings 0` ✅ exit 0｜`format:check` ✅ exit 0｜
