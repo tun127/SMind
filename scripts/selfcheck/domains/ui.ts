@@ -60,6 +60,7 @@ import { writeFileAtomic, writeJsonAtomic } from '../../../src/main/atomic-write
  */
 import { DOC_ID_MAX, docOf, pruneForSave, type DocResources } from '../../../src/main/doc-resources'
 import { IMPORT_DOCUMENT_EXTENSIONS, extractDocumentFromBytes } from '../../../src/main/document'
+import { ensureXmindExt, firstPathOf } from '../../../src/main/file-args'
 import { createWorkbook } from '../../../src/shared/model/factory'
 
 import { evictOldest } from '../../../src/shared/cache'
@@ -292,6 +293,70 @@ export async function testSafetyHelpers(): Promise<void> {
     noTextMessage = (error as Error).message
   }
   check('zip 里抽不到文字时给专门的原因', noTextMessage.includes('没有抽到文字'))
+
+  group('主进程：对话框结果与扩展名（file-args）')
+
+  eq('取消的对话框 → null', firstPathOf({ canceled: true, filePaths: ['C:\\a.xmind'] }), null)
+  eq('没选文件 → null', firstPathOf({ canceled: false, filePaths: [] }), null)
+  eq(
+    '取用户选中的第一个',
+    firstPathOf({ canceled: false, filePaths: ['C:\\a.xmind', 'D:\\b.xmind'] }),
+    'C:\\a.xmind'
+  )
+  eq('已经有 .xmind 就不动', ensureXmindExt('C:\\a.xmind'), 'C:\\a.xmind')
+  eq('大小写不敏感', ensureXmindExt('C:\\a.XMIND'), 'C:\\a.XMIND')
+  eq('没扩展名就补上', ensureXmindExt('C:\\a'), 'C:\\a.xmind')
+  eq('别的扩展名照样补（与旧行为一致）', ensureXmindExt('C:\\a.txt'), 'C:\\a.txt.xmind')
+
+  /*
+   * IPC 契约是**冻结面**：C1 拆主进程、A6/A7 拆渲染层期间，「70 条通道常量 / 66 条 ipcMain 注册 /
+   * preload 与 main 两侧齐全」全靠一次性脚本 + 人眼核过，**没有任何门保护它**。以后谁新增一个域、
+   * 漏注册一条通道，五道门槛照样全绿，而渲染层的 `invoke` 永远等不到回执（静默失效）。
+   * 这里把它变成断言：直接扫源码文本（自检本来就是 Node，读文件没有副作用）。
+   */
+  group('IPC 契约：通道 / 注册 / 两侧覆盖（静态扫描）')
+
+  const readTsTree = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? readTsTree(`${dir}/${entry.name}`)
+        : entry.name.endsWith('.ts')
+          ? [`${dir}/${entry.name}`]
+          : []
+    )
+
+  const ipcSource = readFileSync('src/shared/ipc.ts', 'utf8')
+  const ipcBlockStart = ipcSource.indexOf('export const IPC = {')
+  const ipcBlockEnd = ipcSource.indexOf('} as const', ipcBlockStart)
+  const channelNames = [
+    ...ipcSource.slice(ipcBlockStart, ipcBlockEnd).matchAll(/^ {2}(\w+):/gm)
+  ].map((match) => match[1] ?? '')
+
+  let registrationCount = 0
+  const registered = new Set<string>()
+  for (const file of readTsTree('src/main')) {
+    const text = readFileSync(file, 'utf8')
+    for (const match of text.matchAll(/ipcMain\.(?:handle|on)\(\s*IPC\.(\w+)/g)) {
+      registrationCount += 1
+      registered.add(match[1] ?? '')
+    }
+  }
+
+  // 这四条是**主→渲染**方向（主进程 `webContents.send`、preload 负责监听），不该有 handler
+  const MAIN_TO_RENDERER = ['fileOpenRequest', 'menuCommand', 'closeRequest', 'aiStreamEvent']
+  const preloadSource = readFileSync('src/preload/index.ts', 'utf8')
+  const missingHandlers = channelNames.filter(
+    (name) => !MAIN_TO_RENDERER.includes(name) && !registered.has(name)
+  )
+  const wronglyRegistered = MAIN_TO_RENDERER.filter((name) => registered.has(name))
+  const missingInPreload = channelNames.filter((name) => !preloadSource.includes(`IPC.${name}`))
+
+  eq('通道常量总数 = 70（文档口径）', channelNames.length, 70)
+  eq('ipcMain 注册处数 = 66（= 70 − 4 条主→渲染）', registrationCount, 66)
+  eq('没有重复注册（同一通道两处注册会静默覆盖）', registered.size, registrationCount)
+  eq('每个「渲染→主」通道都有注册', missingHandlers.join(',') || '(none)', '(none)')
+  eq('四条「主→渲染」通道不由 handler 注册', wronglyRegistered.join(',') || '(none)', '(none)')
+  eq('preload 覆盖全部通道（两侧齐全）', missingInPreload.join(',') || '(none)', '(none)')
 
   group('原子写文件')
 

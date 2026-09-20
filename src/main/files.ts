@@ -11,20 +11,10 @@ import { docOf, pruneForSave } from './doc-resources'
 import type { DocWindow } from './context'
 
 /**
- * 从「打开 / 保存对话框」的结果里取用户选中的第一个路径。
- *
- * 各处原本都写成「先判 `filePaths.length === 0`、再取 `filePaths[0]`」——
- * 逻辑没错，但取下标那一步没有类型保证，于是这段判断在每个调用点都重复了一遍。
- * 收成一个函数：判断只写一次，也不会再出现"忘了判"的新代码。
+ * 这两个小助手搬进了 `./file-args`（**不依赖 Electron**，因此能被自检覆盖）。
+ * 在这里原样再导出：调用点（多个 IPC 域）一行都不用改。
  */
-export function firstPathOf(result: { canceled: boolean; filePaths: string[] }): string | null {
-  if (result.canceled) return null
-  return result.filePaths[0] ?? null
-}
-
-export function ensureXmindExt(p: string): string {
-  return p.toLowerCase().endsWith('.xmind') ? p : `${p}.xmind`
-}
+export { ensureXmindExt, firstPathOf } from './file-args'
 
 /* ------------------------------------------------------------------ */
 /* 文件读写                                                            */
