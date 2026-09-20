@@ -19,6 +19,7 @@
     "fonts": "node scripts/make-katex-assets.mjs",
     "marker-art": "node scripts/make-marker-art.mjs",
     "mirror": "node scripts/upload-mirror.mjs",
+    "mirror:oss": "node scripts/upload-oss.mjs",
     "icon": "node scripts/make-icon.mjs",
     "verify": "tsc -p tsconfig.check.json && node scripts/verify-roundtrip.cjs",
     "selfcheck": "node scripts/run-selfcheck.mjs",
