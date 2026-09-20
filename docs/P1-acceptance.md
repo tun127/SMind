@@ -118,7 +118,7 @@ npm run verify      # .xmind 解析 → 序列化 → 再解析 往返一致性�
 | ~~导出的是位图 PDF~~ **已完成**：PDF 现在是矢量单页（文字可选中），超大画布才回落为位图（4.47 节）                                                                       | 以后可做矢量 PDF |
 | AI 功能需要**自备 API Key**（软件不提供额度），结果质量取决于所选模型                                                        | 设计如此         |
 | 渲染层 JS 产物约 **2.9 MB**（实测 `index.js` 2.91 MB + `katex-assets.js` 370 KB 按需加载），未做体积优化 | P9 |
-| 渲染进程暂未设置 CSP                                                                                                         | P9               |
+| ~~渲染进程暂未设置 CSP~~ **已完成**：生产构建注入 CSP meta（`electron.vite.config.ts` 的 `smind-csp`；开发模式不注入以免打死 Vite 刷新），已在构建产物 `out/renderer/index.html` 里复核 | 已完成 |
 | Xmind 8 旧版只做「读入」：文件里 `styles.xml` 的主题/样式不解析，另存时会转成新版 `content.json` 格式                        | 符合原需求范围   |
 
 ---

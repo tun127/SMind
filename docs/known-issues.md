@@ -258,19 +258,30 @@ Electron API 变化维护的假实现。
 | 附三 | 「明天的建议顺序」5 条 | **已全部执行**（原子保存 / 错误边界 + autosave / 三处小修 / CI + lint / 安全纵深） |
 | P5 | 功能缺口清单 | **需重新核对一条**：`.docx` 现已被 `main/document.ts` 用于**抽取文本**（AI 附件那条链路），是否等同于原文所指的「导入成图」待确认；其余仍未实现 |
 
-### 仍开着的 2 条
+### 原「仍开着的 2 条」——2026-09-20 复核后**均已关闭**
 
-#### P1-1 渲染进程仍未设置 CSP
+#### P1-1 渲染进程 CSP：**已修（2026-09-15）**，本条曾被一次复核误记为"仍未设置"
 
-- **现状（2026-09-20 实测）**：全仓搜不到 `Content-Security-Policy` / `onHeadersReceived`；`docs/P1-acceptance.md` 的已知限制表也仍挂着这条（标注 P9）。
-- **影响**：渲染层一旦出现注入面（外部 `.xmind` / Markdown / 粘贴 HTML），缺少最后一道限制。现有缓解：`contextIsolation: true` + `sandbox: true` + 外部数据一律不当 HTML 执行。
-- **建议**：在 `index.html` 加 `meta`，或由主进程在 `onHeadersReceived` 注入响应头；注意 KaTeX 与导出用的 `data:` 资产需要相应放行。
-- **怎么验收**：打包版启动后 DevTools Console 不再出现 Electron 的 CSP 警告，且导出 / 公式 / 图片照常。
+- **误记的原因（搜索口径）**：原文写「2026-09-20 实测：全仓搜不到 `Content-Security-Policy`」——
+  但 `electron.vite.config.ts` 在**仓库根目录**、不在 `src/**` 下，只搜源码目录必然搜不到。
+- **实测证据（2026-09-20 复核）**：`electron.vite.config.ts` 的 `CSP` 常量 + `cspPlugin()`
+  （`apply: 'build'`，`transformIndexHtml` 注入 `<meta http-equiv="Content-Security-Policy">`）；
+  **构建产物 `out/renderer/index.html` 里确有该 meta**：
+  `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: mind-resource:;
+  font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'`；
+  另 `SECURITY.md` 与本文档的 2026-09-15 处理结果表都登记为**已修**。
+- **开发模式刻意不注入**（否则会打死 Vite 的内联刷新脚本）→ 验收判据是"**打包版** Console 无 CSP 警告"。
+- **复核方法**：`npm run build` 后
+  `Select-String -Path out/renderer/index.html -Pattern Content-Security-Policy`。
 
-#### P1-3 IPC 入参校验覆盖度未逐条核对
+#### P1-3 "每个参数都校验"的覆盖度：**按拍板判据不做**
 
-- **现状（2026-09-20 实测）**：已建 `shared/ipc-args.ts`（路径与图片载荷校验）、`shared/guards.ts`，并加了**契约静态断言**（70 条通道常量 / 无重复 / 每条渲染→主通道都有 handler / preload 两侧齐全）；但**「每个参数都校验」的覆盖度没有逐条核对**。
-- **建议**：按通道清单逐个补校验，或把「必须校验」写进契约断言——新增通道漏校验时让自检直接红。
+- 现状（2026-09-20 复核）：`shared/ipc-args.ts` 覆盖路径与图片载荷校验，`shared/guards.ts` 通用守卫，
+  再加 **IPC 契约静态断言**（70 条通道常量 / 66 条注册 / 无重复 / 每条渲染→主通道都有 handler / preload 两侧齐全）。
+- **判据**（用户 2026-09-20 拍板，**三条同时满足才值得加网**）：**静默失败 ＋ 会伤数据或收入 ＋ 能纯函数化**。
+  缺失入参校验的症状是**当场报错**（不是静默写坏文件），不满足第一条；而"把『必须校验』写进契约断言"
+  属"改通道就得改测试"的变更检测器，与 menu 结构那条同性质 → **不做**。
+- 真要回来时看这里：该补的是"会**静默**伤数据"的入参路径（写盘路径已全部来自对话框，不走用户输入）。
 
 ---
 
