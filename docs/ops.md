@@ -14,7 +14,7 @@
 >
 > **五道门槛全部能在本会话独立跑通**（2026-09-19 深夜，代码 agent 亲手逐门复跑）：
 > `typecheck`（含 strict）✅ exit 0｜`lint --max-warnings 0` ✅ exit 0｜`format:check` ✅ exit 0｜
-> `selfcheck` ✅ exit 0（**2694 项断言**）｜`verify` ✅ exit 0（21 个 `.xmind` + 4 个 `.emmx` 全部往返一致）。
+> `selfcheck` ✅ exit 0（**2728 项断言**）｜`verify` ✅ exit 0（21 个 `.xmind` + 4 个 `.emmx` 全部往返一致）。
 > 本段旧口径写「selfcheck 跑不了（esbuild spawn EPERM）」——**已不成立**：现在 `npm run selfcheck`
 > 直接跑通（2 秒），esbuild CLI + 文件重定向那条等价路线保留为安全网。
 

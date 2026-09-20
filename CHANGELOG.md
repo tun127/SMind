@@ -34,14 +34,21 @@
   再生产物（90.3 MB → 1.0 MB，清单 `.tmp-check/cleanup-manifest.txt`）；`out/` 删除后重新构建；
   可达性分析确认源码树**无孤儿文件**；自检 2628 → **2660** 项。
 
-### 测试 · 主进程回归网（2026-09-19）
+### 测试 · 主进程回归网 + 两类契约守卫（2026-09-19）
 
-- `selfcheck` 此前只覆盖主进程的 `atomic-write.ts`。本轮纳入两个**不依赖 Electron** 的模块并加 22 条断言
-  （`fb4adbd`）：`main/doc-resources.ts`（按 docId 隔离图片/附件；`pruneForSave` 只清"新插入且已不再被引用"的
-  资源、**文件里原有的资源一律不动**）与 `main/document.ts`（扩展名清单 ↔ 识别口径一致、PDF/未知格式/空内容
-  给人话原因、**GBK 回退**、超 32MB 拒绝、docx zip 解包、超 30 万字如实截断、zip 里抽不到文字给专门原因）。
-  自检 2672 → **2694 项**。仍依赖 Electron 的模块（`files.ts` / `windows.ts` / `ipc/*` / `license/index.ts` /
-  `update/index.ts`）要纳入得先把纯判定抽出来，属后续批次。
+- `selfcheck` 此前只覆盖主进程的 `atomic-write.ts`。本轮按「把纯判定从 Electron 里抽出来」的姿势补网
+  （自检 2672 → **2728 项**）：
+  - `fb4adbd`：`main/doc-resources.ts`（按 docId 隔离图片/附件；`pruneForSave` 只清"新插入且已不再被引用"的
+    资源、**文件里原有的资源一律不动**）与 `main/document.ts`（扩展名清单 ↔ 识别口径一致、PDF/未知格式/空内容
+    给人话原因、**GBK 回退**、超 32MB 拒绝、docx zip 解包、超 30 万字如实截断、zip 里抽不到文字给专门原因）；
+  - `7ceec3f`：**IPC 契约静态断言**（70 条通道常量 / 66 条注册 / 无重复 / 每条渲染→主通道都有 handler /
+    四条主→渲染通道不被 handler 注册 / preload 两侧齐全）＋ 新增 `main/file-args.ts`；
+  - `88da8b6`：新增 `main/license/state.ts`（坏 JSON 逐字段收敛）＋ `shared/update-policy.ts` 的
+    `releaseNotesOf`（剥 HTML / 分段拼接 / 超 800 字截断）；
+  - `1128477`：**菜单命令契约静态断言**（主进程发的每条命令都要在渲染层有处理器，双向集合相等，
+    并带"防空过"守卫——防正则失效导致假绿）。
+- 仍依赖 Electron 的模块（`windows.ts` / `menu.ts` / `lifecycle.ts` / `resource-protocol.ts` / `ipc/*` /
+  `license/index.ts` / `update/index.ts`）要纳入得先抽纯判定，属后续批次（已登记在 `known-issues.md`）。
 
 ### 修复 · 本轮代码审计（2026-09-18，分批各自过五道门槛）
 

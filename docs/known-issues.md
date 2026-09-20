@@ -92,21 +92,32 @@ ref-vs-state / 回调身份与 `React.memo` 浅比较面 / 事件绑定 / zustan
 
 ---
 
-## 主进程回归网（2026-09-19 补）
+## 主进程回归网 + 两类契约守卫（2026-09-19 补，2694 → **2728** 项断言）
 
 **背景**：`selfcheck` 长期只覆盖主进程的 `atomic-write.ts` 一个文件（C1 把 `main/index.ts` 拆成
-14 个 IPC 域之后，这块全靠 `npm run build` + 手工冒烟）。本轮把两个**不依赖 Electron**、
-因此能直接进自检的模块纳入（`fb4adbd`，+22 条断言，自检 2672 → **2694**）：
+14 个 IPC 域之后，这块全靠 `npm run build` + 手工冒烟）。这一轮按「**把纯判定从 Electron 里抽出来**」
+的姿势补网，四笔提交：
 
-| 模块 | 已钉住的语义 |
+| 提交 | 内容 |
 |---|---|
-| `main/doc-resources.ts` | `docOf` 第一次建 / 再取**同一对象**（否则会把已收集的资源丢掉）/ 两份文档互不串；`DOC_ID_MAX = 120`；`pruneForSave`：仍被引用的保留、**新插入且已不再被引用的清掉**、**文件里原本带着的资源一律不动**（可能有本软件尚未建模的引用）、清掉的要从 `inserted` 一并移除 |
-| `main/document.ts` | 导入扩展名清单 ↔ `classifyDocument` 口径一致（防"对话框能选、真读时说读不了"）；PDF / 未知格式 / 空内容各给**人话原因**；纯文本按排版清洗；**GBK 回退**（`[D6 D0 CE C4]` → 「中文」）；超 32MB 拒绝并说清上限；docx zip 解包并还原实体；超 30 万字**如实截断**且 note 写明"只取了前"；zip 里抽不到文字给专门原因 |
+| `fb4adbd` | `main/doc-resources.ts`（按 docId 隔离资源 + `pruneForSave` 三条语义）与 `main/document.ts`（拖文档抽取 + 防 zip 炸弹）纳入自检（+22 条） |
+| `7ceec3f` | **IPC 契约静态断言**（见下）+ 新增 `main/file-args.ts`（`firstPathOf` / `ensureXmindExt`，从 `files.ts` 抽出，`files.ts` 原样再导出 → 调用点零改动）（+13 条） |
+| `88da8b6` | 新增 `main/license/state.ts`（`normalizeLicenseState`：坏 JSON 逐字段收敛）+ `shared/update-policy.ts` 增加 `releaseNotesOf`（剥 HTML / 分段拼接 / 超 800 字截断）（+18 条） |
+| `1128477` | **菜单命令契约静态断言**（见下）（+3 条） |
 
-**仍未覆盖（如实登记，不假装覆盖）**：`files.ts`、`windows.ts`、`menu.ts`、`lifecycle.ts`、
-`resource-protocol.ts`、`ipc/*`、`license/index.ts`、`update/index.ts` 等——它们**依赖 Electron 或
-electron-updater**，纳入前需要先像 `shared/update-policy.ts` 那样把**纯判定**抽成不依赖 Electron 的函数
-（窗口归属、参数校验、吊销名单判定、IPC 注册完整性…），属后续可做的批次。
+**两类契约守卫**（过去只有文档口径，没有任何门）：
+
+* **IPC**：通道常量 **70** 条 / `ipcMain` 注册处数 **66** 条（= 70 − 4 条主→渲染）/ 无重复注册 /
+  每条「渲染→主」通道都有 handler / 四条主→渲染通道不被 handler 注册 / `preload` 覆盖全部通道。
+  漏一条的症状是"渲染层 `invoke` 永远等不到回执"，而五道门槛照样全绿。
+* **菜单命令**：`main/menu.ts` 发的每条命令都必须在 `use-menu-commands.ts` 有处理器（双向集合相等）。
+  漏一条的症状是"菜单项点下去毫无反应"。**并带防空过守卫**：断言扫描至少抓到 20 条命令——
+  静态扫描类断言最容易"正则失效 → 两侧空集合 → 假绿"。
+
+**仍未覆盖（如实登记，不假装覆盖）**：`windows.ts`、`menu.ts`（菜单结构本身）、`lifecycle.ts`、
+`resource-protocol.ts`、`ipc/*`（各域的入参校验细节）、`license/index.ts`（验签与状态落盘）、
+`update/index.ts`（与 electron-updater 的交互）——纳入前都要先像上面那样把**纯判定**抽成
+不依赖 Electron 的函数（窗口归属、入参校验、吊销名单判定…），属后续可做的批次。
 
 ---
 
