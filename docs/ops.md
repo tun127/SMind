@@ -23,8 +23,8 @@
 | # | 事项 | 状态 | 下一步 | 依赖 |
 |---|---|---|---|---|
 | 1 | 0.9.0 正式发布 | ✅ 已发布（GitHub Release + 官网直链下载） | 观察下载数与反馈 | — |
-| 2 | **0.9.1 发版** | 🟡 **已打包完成（2026-09-20）**，等网络恢复上传 | PDF 验收已通过（#6）→ `npm run dist` 已产出 2 exe + `latest.yml` + blockmap（SHA256 见 `docs/release-0.9.1.md`）→ 剩：`git push` + 建 `v0.9.1` Release 并**四件资产一起传**；当前 github.com 推送不通（间歇性干扰：TCP 假通、TLS 握不上） | #6 ✅ |
-| 3 | 自动更新首跑 | ⬜ 随 0.9.1 | 需求见 `docs/auto-update-and-license-delivery.md` §3。**2026-09-20 更新源改为 GitHub Releases 固定直链**（`provider: generic` + `releases/latest/download/`，见 `electron-builder.yml` 注释）——R2 因**无可用支付方式**搁置（#7）。发版时必须把 `latest.yml` + blockmap 与 exe 一起作为资产上传，且 Release 必须是**已发布**（非 draft/prerelease）；**实测 v0.9.0 的 Release 只有两个 exe、缺 `latest.yml`**，所以渠道至今是空的 | #2 |
+| 2 | **0.9.1 发版** | ✅ **已发布（2026-09-20）** | PDF 验收已通过（#6）→ `npm run dist` 已产出 2 exe + `latest.yml` + blockmap（SHA256 见 `docs/release-0.9.1.md`）→ GitHub Release `v0.9.1` 已发布：匿名 API 实测 `draft=False / prerelease=False / 资产数=4`（两个 exe + `latest.yml` + `*.blockmap`）；`latest.yml` 的 `version=0.9.1`、三条直链 HTTP 206；官网下载页与首页已切到 0.9.1（站点仓库 `baccc65`）。⚠️ **0.9.0 的用户收不到更新提示**（那一版没配更新源），需手动下载 | #6 ✅ |
+| 3 | 自动更新首跑 | 🟡 **渠道已端到端验证，真机首跑待 0.9.2** | 需求见 `docs/auto-update-and-license-delivery.md` §3。**2026-09-20 更新源改为 GitHub Releases 固定直链**（`provider: generic` + `releases/latest/download/`，见 `electron-builder.yml` 注释）——R2 因**无可用支付方式**搁置（#7）。发版时必须把 `latest.yml` + blockmap 与 exe 一起作为资产上传，且 Release 必须是**已发布**（非 draft/prerelease）；**实测 v0.9.0 的 Release 只有两个 exe、缺 `latest.yml`**，所以渠道此前是空的。**2026-09-20 已实测打通**：`latest.yml` 可读且 `version=0.9.1`、三个包直链均 206、v0.9.0 的发布仍完整（2 个 exe → 官网回退直链未受影响）。**唯一还没验的**是真机上的一次实际检查（等 0.9.2 发布，或在帮助菜单点「检查更新」） | #2 |
 | 4 | README 已知限制随 0.9.1 更新 | ✅ 已改（2026-09-20） | 已删两条**已被代码修掉**的限制（「SVG 导出里部分标记图标简化」→ 矢量数据已覆盖全部图形；「概要/边界不参与布局空间预留」→ 已接进全部 14 个结构）；「自动更新自 0.9.1 起启用」的更新源已改为 GitHub Releases 直链 | — |
 | 20 | **渲染层人肉验收**（曾阻塞 0.9.1 打包） | 🟡 **高危五项已由用户实测通过**（2026-09-19 深夜，开发版） | 用户逐条实测并确认**无问题**：①关窗链路（多标签逐个询问 / 中途取消 / 保存失败不关窗 / 启动即关窗不清存档 / 崩溃恢复）②一整轮真实 AI 对话（工具调用·破坏性确认·中途停止·切文档中止·整轮一步撤销）③画布拖拽（吸附成子主题 / 同级插入线 / Alt 自由摆放 / 多选整群拖 / 左右对调预览 / 贴边自动滚动）④撤销后备注·公式·代码草稿跟着回退⑤搜索筛选染色·折叠锚点·视角锁定。**剩余长尾细项未逐条走**（A4–A6 更早各批、外壳菜单/快捷键/拖文件、工具栏分组禁用提示）。**#6 PDF 验收已于 2026-09-20 通过**，打包不再受阻；`release/` 已是 09-20 打出的 0.9.1（2 exe + latest.yml + blockmap） | #2、代码 agent |
 
@@ -32,11 +32,11 @@
 
 | # | 事项 | 状态 | 下一步 | 依赖 |
 |---|---|---|---|---|
-| 5 | 官网下载直链 | ✅ /download/setup·portable/ 点按钮直下 | — | — |
+| 5 | 官网下载直链 | ✅ **已指向 0.9.1**（2026-09-20，站点仓库 `baccc65`） | 两页各四处（meta / 主按钮 href / `MIRROR` / `FALLBACK`）+ 首页「当前版本」全部更新；线上实测两页与首页均 HTTP 200 且已无 0.9.0 残留 | — | — |
 | 6 | PDF 矢量人工验收 | ✅ **已通过**（2026-09-20，用户实测） | 用户确认「**能用鼠标选中文字**」= 真矢量（回落成位图时整张画布是一块选不动的图片）；开发版日志中**无**「导出矢量 PDF 失败，回落到位图」记录（该分支在 `src/main/ipc/export.ts:146` 必写日志），两条独立证据一致 | — |
 | 7 | **R2 国内镜像** | 🅿️ **搁置**（2026-09-20：R2 激活必须绑支付方式，当前无可用信用卡）；**已不再是自动更新的前置** | DNS 侧已完成（`smindapp.cn` 已托管到 Cloudflare，NS = `deborah` / `javon.ns.cloudflare.com`，官网两条 CNAME 走 DNS only 灰云、官网零中断）。等有支付方式后只剩三步：建 `smind-releases` 桶 → 绑 `dl.smindapp.cn` → 拿 API Token → `npm run mirror`（手册：docs/release-mirror.md） | 用户 |
 | 8 | 官网下载页 | ✅ 镜像优先 + GitHub 回退（已上线；镜像未就绪时自动走回退分支，实测有效） | 镜像就绪后无需改页面 | #7 |
-| 18 | 官网「结构数」口径 | 🟡 待统一（小） | 官网写「**9 种结构**」（自测：按结构**族**数），README / CHANGELOG 写「**14 种**」（按 Xmind class 数，源码 `STRUCTURES` 实测 14 项 / 9 族）。两个数都对，但对外应统一——建议官网改「14 种结构（9 大族）」；属站点仓库 `tun127/smind-site` | 站点仓库 |
+| 18 | 官网「结构数」口径 | ✅ **已统一**（2026-09-20，站点仓库 `baccc65`） | 官网写「**9 种结构**」（自测：按结构**族**数），README / CHANGELOG 写「**14 种**」（按 Xmind class 数，源码 `STRUCTURES` 实测 14 项 / 9 族）。两个数都对，但对外需统一。官网已改为「**14 种结构（9 大族）**」，与 README / CHANGELOG 一致，线上实测生效 | — |
 
 ## 三、商业化（Pro 侧）
 
