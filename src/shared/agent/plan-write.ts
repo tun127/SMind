@@ -185,10 +185,10 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       )
     }
     const rawIndex = args.index
+    // 负数**保留**（-1 = 放到最后）：树层按"从末尾倒数"解释。
+    // 以前这里夹成 0，把"放到最后"变成"放到最前"，意图正好相反而且不报错（报告 D-10）
     const index =
-      typeof rawIndex === 'number' && Number.isFinite(rawIndex)
-        ? Math.max(0, Math.round(rawIndex))
-        : null
+      typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.round(rawIndex) : null
     return {
       ok: true,
       intent: { kind: 'move', id: source.topic.id, targetId: destination.topic.id, index },
@@ -247,10 +247,9 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
         continue
       }
       const rawIndex = item.index
+      // 同上：负数保留语义（-1 = 末尾），不要在这里夹成 0
       const slot =
-        typeof rawIndex === 'number' && Number.isFinite(rawIndex)
-          ? Math.max(0, Math.round(rawIndex))
-          : null
+        typeof rawIndex === 'number' && Number.isFinite(rawIndex) ? Math.round(rawIndex) : null
       moves.push({
         id: source.resolved.topic.id,
         targetId: destination.resolved.topic.id,

@@ -42,7 +42,10 @@ export function useAutosave({ showToast }: Deps): void {
           const detail = error instanceof Error ? error.message : String(error)
           showToast(`自动保存失败：${detail}（请尽快手动保存一次）`)
         })
-      endSave()
+        // 计时必须等到**真的写完**：原来发起 IPC 之后同步就 endSave（没 await），
+        // 量到的是"发起那一瞬间"（≈0ms），永远看不到写盘开销 ——
+        // 而这正是抓"回合结束后冻结"最需要的那条数字（报告 D-11）。
+        .finally(endSave)
     }, 30000)
     return () => window.clearInterval(timer)
   }, [showToast])

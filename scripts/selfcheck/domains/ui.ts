@@ -38,6 +38,8 @@ import {
   findParent,
   findTopic,
   foldedSidesOf,
+  attachChild,
+  moveTopic,
   visibleChildren
 } from '../../../src/shared/model/tree'
 import { coerceCode, coerceRichText } from '../../../src/shared/model/coerce'
@@ -137,7 +139,7 @@ import {
   type TipTapDoc,
   type TipTapMark
 } from '../../../src/shared/richtext'
-import type { MindPackage, RichText } from '../../../src/shared/model/types'
+import type { MindPackage, RichText, Topic } from '../../../src/shared/model/types'
 import { MD_MONO_FONT, isMonoFontFamily } from '../../../src/shared/mono-font'
 import {
   inlineRunsToRich,
@@ -1763,6 +1765,59 @@ export function testRichText(): void {
 
   /* ---- 快捷键：编辑态下应用级组合键不再跟着一起失效 ---- */
   group('快捷键：焦点在输入处时的接管判据')
+  // D-12：拖拽会话的兜底清理只能做源码级断言（纯函数碰不到 DOM 卸载），改没了它就红
+  check(
+    '拖拽 hook 里保留了卸载兜底清理（detachRef）',
+    readFileSync(
+      `${process.cwd()}/src/renderer/src/components/canvas/use-node-drag.ts`,
+      'utf8'
+    ).includes(`detachRef.current?.()`)
+  )
+
+  /* ---- D-09 / D-10：树操作的两个口径 ---- */
+  group('树操作：移动失败不动物件 + 负数下标（D-09 / D-10）')
+  reset()
+  const d09RootId = root().id
+  const d09ChildId = store().addChild(d09RootId)
+  // store 里的树是 immer 冻结的，而 moveTopic / attachChild 是"就地改"的纯函数：
+  // 先克隆一份可变副本再测（否则测试自己会抛 read-only 错误）
+  const d09Tree = structuredClone(activeRoot(store().workbook)) as Topic
+  const d09Before = normalize(d09Tree)
+  check(
+    'D-09：目标父级不存在时返回 false',
+    moveTopic(d09Tree, d09ChildId, '不存在的父级') === false
+  )
+  eq(
+    'D-09：树与调用前逐字段相同（以前会挂到根下，调用方却按「没移动」处理）',
+    normalize(d09Tree),
+    d09Before
+  )
+
+  // D-10：负数下标 = 从末尾倒数（-1 = 放到最后）。以前规划层把它夹成 0，变成「放到最前」
+  store().addChild(d09RootId)
+  store().addChild(d09RootId)
+  const d10Root = structuredClone(activeRoot(store().workbook)) as Topic
+  const d10First = d10Root.children[0]
+  if (d10First) {
+    const node = d10Root.children.shift() as Topic
+    attachChild(d10Root, node, -1)
+    check(
+      'D-10：index = -1 落到末尾（以前被夹成 0 = 落到最前）',
+      d10Root.children[d10Root.children.length - 1]?.id === node.id
+    )
+    d10Root.children.shift()
+    attachChild(d10Root, node, 0)
+    check('D-10：index = 0 仍是落到最前（没改坏正常语义）', d10Root.children[0]?.id === node.id)
+  }
+
+  // D-11：自动存档的计时必须等到写完（纯函数碰不到 IPC 时序，退一步做源码级断言）
+  check(
+    'D-11：自动存档计时挂在 .finally 上（不再恒为 0）',
+    readFileSync(`${process.cwd()}/src/renderer/src/app/use-autosave.ts`, 'utf8').includes(
+      '.finally(endSave)'
+    )
+  )
+
   const shortcutKey = (
     key: string,
     ctrl = false

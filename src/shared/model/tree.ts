@@ -159,23 +159,48 @@ export function detachTopic(root: Topic, id: string): Topic | null {
 
 /** 插入子节点 */
 export function attachChild(parent: Topic, child: Topic, index?: number): void {
-  if (index === undefined || index < 0 || index > parent.children.length) {
-    parent.children.push(child)
-  } else {
-    parent.children.splice(index, 0, child)
-  }
+  /**
+   * 负数按**从末尾倒数**解释（`-1` = 放到最后）：模型常把"放到最后"写成 `index: -1`，
+   * 而规划层以前把它夹成 0（变成"放到最前"，意图正好相反且不报错，报告 D-10）。
+   * 越界（> 当前子节点数）仍旧当"追加到末尾"。
+   */
+  const at =
+    index === undefined || index > parent.children.length
+      ? parent.children.length
+      : index < 0
+        ? Math.max(0, parent.children.length + index + 1)
+        : index
+  parent.children.splice(at, 0, child)
 }
 
 /** 移动节点到新父级 */
 export function moveTopic(root: Topic, id: string, newParentId: string, index?: number): boolean {
   if (id === root.id) return false
   if (isSelfOrDescendant(root, id, newParentId)) return false
+  /**
+   * 先记下原位（父级 + 下标 + 它原本是不是浮动主题）：目标父级不存在时要**原样放回**。
+   * 以前这里把节点挂到根下却仍 `return false`，调用方一律按"没移动"处理 ——
+   * 不清自由摆放偏移、不计入批量结果，用户看到的是"节点莫名跑到中心主题旁边"（报告 D-09）。
+   */
+  const origin = findParent(root, id)
+  const originDetached = origin ? origin.detachedChildren.some((child) => child.id === id) : false
+  const originIndex = origin
+    ? (originDetached ? origin.detachedChildren : origin.children).findIndex(
+        (child) => child.id === id
+      )
+    : -1
   const node = detachTopic(root, id)
   if (!node) return false
   const parent = findTopic(root, newParentId)
   if (!parent) {
-    // 目标不存在，把节点放回原位会丢数据，这里退回到根下
-    attachChild(root, node, index)
+    // 真正什么都不做：放回原位（含"它本来是浮动主题"这一点），再如实报失败
+    if (origin) {
+      const list = originDetached ? origin.detachedChildren : origin.children
+      if (originIndex >= 0 && originIndex <= list.length) list.splice(originIndex, 0, node)
+      else list.push(node)
+    } else {
+      attachChild(root, node)
+    }
     return false
   }
   attachChild(parent, node, index)

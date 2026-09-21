@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -105,6 +106,22 @@ export function useNodeDrag({
   ghostOffsetRef: RefObject<{ dx: number; dy: number } | null>
   handleNodePointerDown(e: ReactPointerEvent<HTMLDivElement>, id: string): void
 } {
+  /**
+   * 当前拖拽会话的清理函数（`detach` 要按下时才创建，所以用 ref 转交给最外层的 cleanup）。
+   *
+   * 为什么必须有这层兜底：4 个监听都挂在 window 上，而 `detach()` 只在松手 / 取消 / Esc 里调用。
+   * 用户在**拖着不松手**的时候切标签或关抽屉，组件卸载了监听却还在 —— 之后松手还会走一次
+   * `dropNode`（对已经不存在的文档是 no-op，但白做一次 hitTest，报告 D-12）。
+   */
+  const detachRef = useRef<(() => void) | null>(null)
+  useEffect(
+    () => () => {
+      detachRef.current?.()
+      detachRef.current = null
+    },
+    []
+  )
+
   /* ---- 落点状态（R1） ---- */
   /**
    * 拖拽节点时的落点预测：
@@ -494,6 +511,9 @@ export function useNodeDrag({
         window.removeEventListener('pointercancel', onCancel)
         window.removeEventListener('keydown', onKeyDown)
       }
+
+      // 登记给最外层的 cleanup：组件在拖拽中途被卸载时由它兜底收尾（见 hook 顶部的 detachRef）
+      detachRef.current = detach
 
       /** 指针被系统取消（例如切窗口）时只清理状态，不执行移动 */
       const onCancel = (): void => {
