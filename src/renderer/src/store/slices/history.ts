@@ -36,8 +36,16 @@ const COALESCE_WINDOW_MS = 1500
 export interface HistorySlice {
   undoStack: HistoryEntry[]
   redoStack: HistoryEntry[]
-  /** 进行中的 AI 回合（null = 不在 AI 操作中；此时禁止撤销，见 undo 的说明） */
-  aiTurn: { depth: number; selectionBefore: string[] } | null
+  /**
+   * 进行中的 AI 回合（null = 不在 AI 操作中；此时禁止撤销，见 undo 的说明）。
+   *
+   * 这里存的是**回合序号**而不是"入栈时的下标"：`mutate` 会用 `slice(-HISTORY_LIMIT)` 从头部
+   * 截断撤销栈，下标会随截断永久错位 —— 栈一满，"整轮 AI 并成一步"就静默失效（D-01）。
+   * 序号单调递增、与截断无关，`commitAiTurn` 按它取整批。
+   */
+  aiTurn: { turnSeq: number; selectionBefore: string[] } | null
+  /** 下一个 AI 回合序号（单调递增，与撤销栈的截断无关） */
+  aiTurnSeq: number
 
   /* ---- 编辑 ---- */
   /**
@@ -65,6 +73,7 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
   undoStack: [],
   redoStack: [],
   aiTurn: null,
+  aiTurnSeq: 0,
 
   /* ------------------------------------------------------------------ */
   /* 编辑                                                                */
@@ -77,10 +86,14 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
 
     const now = Date.now()
     const last = undoStack[undoStack.length - 1]
+    // 先算这次改动属于哪个回合：**跨回合不合并** —— 否则合并条目会带着上一回合的序号，
+    // 被这一回合 commit 一起收走，两轮 AI 的改动就粘成一步（撤销一次退太多）。
+    const turnSeq = get().aiTurn?.turnSeq
     const canMerge =
       coalesceKey !== undefined &&
       last !== undefined &&
       last.coalesceKey === coalesceKey &&
+      last.turnSeq === turnSeq &&
       now - last.time < COALESCE_WINDOW_MS
 
     if (canMerge) {
@@ -91,6 +104,7 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
         inverse: last.inverse,
         coalesceKey,
         time: now,
+        turnSeq,
         selectionBefore: last.selectionBefore ?? selectionBefore
       }
       set({
@@ -107,7 +121,7 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
       dirty: true,
       undoStack: [
         ...undoStack,
-        { label, patches, inverse, coalesceKey, time: now, selectionBefore }
+        { label, patches, inverse, coalesceKey, time: now, turnSeq, selectionBefore }
       ].slice(-HISTORY_LIMIT),
       redoStack: []
     })
@@ -117,7 +131,8 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
   beginAiTurn: () => {
     // 已经在回合里就别重入：同一份文档同时只允许一个 AI 回合
     if (get().aiTurn) return
-    set({ aiTurn: { depth: get().undoStack.length, selectionBefore: get().selection } })
+    const turnSeq = get().aiTurnSeq + 1
+    set({ aiTurnSeq: turnSeq, aiTurn: { turnSeq, selectionBefore: get().selection } })
   },
 
   /**
@@ -135,7 +150,8 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
     const turn = get().aiTurn
     if (!turn) return false
     const { undoStack } = get()
-    const batch = undoStack.slice(turn.depth)
+    // 按**回合序号**取整批：栈被 HISTORY_LIMIT 截断过也不受影响（原来用下标，栈满即失效）
+    const batch = undoStack.filter((entry) => entry.turnSeq === turn.turnSeq)
     if (batch.length === 0) {
       // AI 没改任何东西：不留空条目（否则用户按 Ctrl+Z 会"没反应"）
       set({ aiTurn: null })
@@ -149,12 +165,30 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
       if (entry) inverse.push(...entry.inverse)
     }
 
+    const mergedEntry: HistoryEntry = {
+      label,
+      patches,
+      inverse,
+      time: Date.now(),
+      selectionBefore: turn.selectionBefore
+    }
+    // 合并条目**插回本回合第一条的位置**（不是一律追加到末尾）：回合期间万一还夹着别的手动改动，
+    // 撤销的先后顺序才不会乱。用 filter+重建而不是 slice：切片下标正是这条 bug 的来源。
+    const kept: HistoryEntry[] = []
+    let inserted = false
+    for (const entry of undoStack) {
+      if (entry.turnSeq === turn.turnSeq) {
+        if (!inserted) {
+          kept.push(mergedEntry)
+          inserted = true
+        }
+        continue
+      }
+      kept.push(entry)
+    }
     set({
       aiTurn: null,
-      undoStack: [
-        ...undoStack.slice(0, turn.depth),
-        { label, patches, inverse, time: Date.now(), selectionBefore: turn.selectionBefore }
-      ].slice(-HISTORY_LIMIT),
+      undoStack: kept.slice(-HISTORY_LIMIT),
       redoStack: []
     })
     return true

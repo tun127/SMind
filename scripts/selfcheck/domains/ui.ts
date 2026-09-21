@@ -1636,6 +1636,54 @@ export function testRichText(): void {
     MD_MONO_FONT
   )
 
+  /* ---- D-01：撤销栈满之后，AI 回合仍必须并成一步 ---- */
+  group('撤销：栈满 200 后 AI 回合仍是一步（D-01）')
+  reset()
+  const d01Root = root().id
+  // 先把撤销栈填满（每次 addChild 都是一条历史）—— 这正是原来那套"按下标记 depth"失效的现场
+  for (let index = 0; index < 205; index += 1) store().addChild(d01Root)
+  check(
+    '撤销栈被 HISTORY_LIMIT 限制在 200 条',
+    store().undoStack.length === 200,
+    String(store().undoStack.length)
+  )
+
+  const childrenBeforeTurn = activeRoot(store().workbook).children.length
+  store().beginAiTurn()
+  store().addChild(d01Root)
+  store().addChild(d01Root)
+  store().addChild(d01Root)
+  check('栈已满时回合照样能提交', store().commitAiTurn('AI 批量改') === true)
+  // 栈满时长度不会增长（HISTORY_LIMIT 截断），所以判据不看长度，而看"并成的那一条覆盖了几处改动"
+  const mergedTurnEntry = store().undoStack[store().undoStack.length - 1]
+  check('三条改动被并成最后一条历史', mergedTurnEntry?.label === 'AI 批量改')
+  check(
+    '这一条覆盖了三处改动',
+    (mergedTurnEntry?.patches.length ?? 0) >= 3,
+    String(mergedTurnEntry?.patches.length)
+  )
+  store().undo()
+  check(
+    '一次撤销把三处改动全部回退（修复前栈满时只会退一处）',
+    activeRoot(store().workbook).children.length === childrenBeforeTurn,
+    String(activeRoot(store().workbook).children.length)
+  )
+
+  // 再验一遍"栈没满"的常规路径：合并语义本身也要是 +1
+  reset()
+  const d01Root2 = root().id
+  store().addChild(d01Root2)
+  const stackBeforeShort = store().undoStack.length
+  store().beginAiTurn()
+  store().addChild(d01Root2)
+  store().addChild(d01Root2)
+  store().commitAiTurn('AI 两步')
+  check(
+    '栈没满时同样并成恰好一步（+1 而不是 +2）',
+    store().undoStack.length === stackBeforeShort + 1,
+    String(store().undoStack.length)
+  )
+
   /* ---- A2：中文紧贴的行内 markdown 不触发（输入规则的前导边界） ---- */
   group('输入规则：中文紧贴的行内写法')
   check('中文后面 **粗体** 触发', BOLD_INPUT.test('神经网络**粗体**'))

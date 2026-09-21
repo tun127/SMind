@@ -28,6 +28,14 @@ export interface HistoryEntry {
   /** 连续同类操作（例如拖动调色）合并为一步撤销 */
   coalesceKey?: string
   time: number
+  /**
+   * 这条改动属于哪一轮 AI 回合（不在回合里产生的条目为 undefined）。
+   *
+   * 为什么是**序号**而不是"入栈时的下标"：`mutate` 会用 `slice(-HISTORY_LIMIT)` 从头部截断，
+   * 下标会随截断永久错位 —— 栈一满，"整轮 AI 并成一步"就静默失效（D-01）。
+   * 序号单调递增、与截断无关，`commitAiTurn` 按它取整批条目即可。
+   */
+  turnSeq?: number
   /** 这次修改**之前**的选择（框选/多选）。撤销时恢复它，框选才不会凭空丢掉 */
   selectionBefore?: string[]
   /** 撤销那一刻的选择，重做时恢复 */
