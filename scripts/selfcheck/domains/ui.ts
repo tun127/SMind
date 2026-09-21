@@ -158,7 +158,7 @@ import {
   SUBSCRIPT_INPUT,
   SUPERSCRIPT_INPUT
 } from '../../../src/shared/inline-rules'
-import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
+import { compositionBoxWidth, draftBoxWidth } from '../../../src/renderer/src/editor/composition-width'
 import { codeDraftPatch } from '../../../src/renderer/src/components/nodePanel/code-draft'
 import { shouldHandleGlobalShortcut } from '../../../src/renderer/src/app/shortcut-scope'
 import {
@@ -1724,6 +1724,15 @@ export function testRichText(): void {
   eq('加宽不超过测量上限', compositionBoxWidth(230, 80, 240), 240)
   eq('已在顶点时不再变大', compositionBoxWidth(240, 40, 240), 240)
   eq('小数向上取整（与测量口径一致）', compositionBoxWidth(100.2, 10.4, 240), 111)
+
+  /* ---- D-07：编辑框宽度不得小于**内容所需**（组词结束后不许缩回） ---- */
+  group('编辑态：编辑框宽度不小于内容所需（D-07 / 报告 §18）')
+  eq('组词结束、内容还在编辑区 → 保持放宽，不缩回测得宽度', draftBoxWidth(49, 250, 320), 251)
+  eq('内容比测得宽度窄 → 用测得宽度（不缩也不多放）', draftBoxWidth(200, 120, 320), 200)
+  eq('内容恰好在余量内 → 用测得宽度', draftBoxWidth(120, 119, 320), 120)
+  eq('内容超出上限 → 封顶（与提交后按上限换行一致）', draftBoxWidth(49, 999, 320), 320)
+  eq('空内容 → 用测得宽度', draftBoxWidth(120, 0, 320), 120)
+  eq('测得宽度已到上限 → 不再放宽（不与提交后排版打架）', draftBoxWidth(320, 999, 320), 320)
 
   /* ---- 节点属性面板：代码块草稿的落盘判据（「点公式却插入 python 代码块」的修复） ---- */
   group('节点面板：代码块草稿 → store 的判据')
