@@ -193,7 +193,11 @@ D4  ⑧  你上传真 0.9.2 到 OSS（`npm run mirror:oss`，需你的 AK）→
 
 - **绝不覆盖或删除线上 0.9.1 的四个资产**（官网回退直链与老用户的渠道都靠它）
 - 不动价格 / 发货方式 / 免费边界 / 退款条款文案
-- 不动许可（激活/验签）链路；不动 `shared/update-policy.ts` 的既有判据（portable / 6 小时 / releaseNotes 清洗）
+- 不动许可（激活/验签）链路；不动 `shared/update-policy.ts` 的既有判据**语义**
+  （portable / 6 小时 / releaseNotes 清洗）。
+  **已批准的受控例外（2026-09-21）**：`shouldRecheck(lastCheckAt === null, …)` 的 null 分支
+  —— 原来「没查过」被当成「该查」，使窗口聚焦在启动 ≈1 秒时抢跑一次检查（D-15 / T3）。
+  三条语义一行未改，且由三条断言钉住（null → false / 差 1ms → false / 满 6h → true）。
 - 每修一条 bug **补一条自检断言**（自检数只增不减，现 2753）
 - 测试构建的版本号**一律带 `-rt.N` / `-alpha.N`**，且**从不上传**
 

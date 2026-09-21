@@ -91,8 +91,12 @@ export function startAutoUpdate(): void {
     logMain('updater', `例行检查失败：${(error as Error).message}`)
   })
 
-  // 启动 45 秒后再查：别和应用抢启动时的磁盘与网络
-  setTimeout(checkQuietly, 45_000)
+  // 启动 45 秒后再查：别和应用抢启动时的磁盘与网络。
+  // 守卫：只有"一次都还没查过"时才补发 —— 否则窗口聚焦那条路径已经在启动瞬间查过一次，
+  // 这个定时器会再发一次，启动就变成两个请求（报告 D-15 / T3）
+  setTimeout(() => {
+    if (lastCheckAt === null) checkQuietly()
+  }, 45_000)
 
   // 长期开着的窗口也有机会发现新版：重新获得焦点、且距上次检查超过 6 小时就再查一次
   app.on('browser-window-focus', () => {

@@ -22,9 +22,17 @@ export function isPortableBuild(env: Record<string, string | undefined>): boolea
   return typeof marker === 'string' && marker.length > 0
 }
 
-/** 距上次检查是否已经够久了（`lastCheckAt === null` = 还没查过 → 该查） */
+/**
+ * 距上次检查是否已经够久了。
+ *
+ * `lastCheckAt === null`（**还没做过例行检查**）返回 **false**：能走到这里的只有
+ * "窗口重新获得焦点"那条复检，而窗口在启动瞬间就会获得焦点 —— 返回 true 等于让复检
+ * 在启动 ≈1 秒时抢跑一次，把"启动 45 秒后再查"的宽限整个绕过去（报告 D-15 / 用例 T3，
+ * 2026-09-21 真机实测：启动 12:29:14.958 → 12:29:15.825 就发了检查）。
+ * 首次检查由启动定时器负责，见 `main/update/index.ts`。
+ */
 export function shouldRecheck(lastCheckAt: number | null, now: number): boolean {
-  if (lastCheckAt === null) return true
+  if (lastCheckAt === null) return false
   return now - lastCheckAt >= UPDATE_RECHECK_INTERVAL_MS
 }
 

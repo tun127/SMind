@@ -206,7 +206,9 @@ export async function testSafetyHelpers(): Promise<void> {
   eq('标记是空串 → 不算（防误判）', isPortableBuild({ PORTABLE_EXECUTABLE_FILE: '' }), false)
 
   // 长期开着的窗口：重新获得焦点、且距上次检查够久才再查一次（A5）
-  eq('还没查过 → 该查', shouldRecheck(null, 1_000), true)
+  // D-15 / T3（2026-09-21）：null（还没查过）从「该查」改成「不查」 —— 能走到这里的只有窗口聚焦那条复检，
+  // 而窗口在启动瞬间就会获得焦点，返回 true 等于让检查在启动 ≈1 秒时抢跑。首次检查交给启动定时器。
+  eq('还没查过 → 不查（首次检查由启动定时器负责）', shouldRecheck(null, 1_000), false)
   eq('刚查过 → 不查', shouldRecheck(1_000, 1_000 + 60_000), false)
   eq(
     '差一分钟到间隔 → 不查',
@@ -1765,6 +1767,23 @@ export function testRichText(): void {
 
   /* ---- 快捷键：编辑态下应用级组合键不再跟着一起失效 ---- */
   group('快捷键：焦点在输入处时的接管判据')
+
+  /* ---- D-15 / T3：启动 45 秒内不发检查请求 ---- */
+  group('更新：复检时机判据（D-15 / T3）')
+  const nowD15 = Date.now()
+  check(
+    '还没查过时，焦点复检不触发（否则启动瞬间就抢跑一次）',
+    shouldRecheck(null, nowD15) === false
+  )
+  check(
+    '距上次差 1ms 未满 6 小时 → 不查',
+    shouldRecheck(nowD15 - UPDATE_RECHECK_INTERVAL_MS + 1, nowD15) === false
+  )
+  check(
+    '刚好满 6 小时 → 查（三条既有语义未被顺手改掉）',
+    shouldRecheck(nowD15 - UPDATE_RECHECK_INTERVAL_MS, nowD15) === true
+  )
+
   // D-12：拖拽会话的兜底清理只能做源码级断言（纯函数碰不到 DOM 卸载），改没了它就红
   check(
     '拖拽 hook 里保留了卸载兜底清理（detachRef）',
