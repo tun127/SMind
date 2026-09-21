@@ -125,11 +125,20 @@ export interface Topic {
   extensions?: unknown[]
 }
 
+/**
+ * 画布级元素（关系线 / 边界 / 概要）的文字。
+ *
+ * 三者一律只有 `title`（**纯文本**，Xmind 认的就是它）加可选的 `titleRich`（本软件的富文本）。
+ * 富文本存进 `extensions` 里 `provider` 为自己标识的那个扩展 —— Xmind 忽略它，
+ * 于是「部分文字加粗 / 变色 / 高亮」既能保真往返，纯文本也一个字不丢（外部编辑器照旧可读）。
+ */
 export interface Relationship {
   id: string
   end1Id: string
   end2Id: string
   title?: string
+  /** 富文本（部分文字加粗 / 变色 / 高亮）；缺省时整段按纯文本渲染 */
+  titleRich?: RichText
   style?: NodeStyle
   extensions?: unknown[]
 }
@@ -139,6 +148,8 @@ export interface Boundary {
   /** Xmind 的区间表示，如 (topicId1,topicId2) */
   range: string
   title?: string
+  /** 富文本（部分文字加粗 / 变色 / 高亮）；缺省时整段按纯文本渲染 */
+  titleRich?: RichText
   style?: NodeStyle
   extensions?: unknown[]
 }
@@ -149,6 +160,8 @@ export interface Summary {
   topicId: string
   range: string
   title?: string
+  /** 富文本（部分文字加粗 / 变色 / 高亮）；缺省时整段按纯文本渲染 */
+  titleRich?: RichText
   style?: NodeStyle
   extensions?: unknown[]
 }

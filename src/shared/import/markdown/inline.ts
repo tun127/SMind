@@ -25,7 +25,7 @@ import { decodeEntityBody } from '../../entities'
 import { matchWholeLineMath } from '../../formula'
 import { MARKDOWN_ESCAPABLE } from '../../markdown-escape'
 import { depthOfIndent, expandTabs } from '../../outline-dialect'
-import type { RichText, RichTextRun } from '../../model/types'
+import type { RichText, RichTextParagraph, RichTextRun } from '../../model/types'
 import { MD_MONO_FONT } from '../../mono-font'
 
 /**
@@ -419,6 +419,29 @@ export function inlineRunsToRich(runs: InlineRun[]): RichText | undefined {
   )
   if (!hasFormat) return undefined
   return { paragraphs: [{ runs: mapped }] }
+}
+
+/**
+ * 多行文字 → 富文本（画布级元素：关系线 / 边界 / 概要的文字用它）。
+ *
+ * 与主题标题用**同一套行内语法**：`**粗体**`、`*斜体*`、`~~删除线~~`、`==高亮==`、
+ * `^上标^`、`~下标~`、`` `等宽` `` —— 于是用户能在这些文字里**只把其中几个字**加粗或高亮，
+ * 而不是只能整块设样式（面板上的字体 / 颜色按钮作用的是整块，两者互补）。
+ *
+ * 按行拆段落，口径与 `overlayTitleLines` 一致（`\r?\n` 都算换行）；
+ * 整段没有任何格式时返回 undefined —— 让调用方把 `titleRich` 留空，
+ * .xmind 里不会凭空多出无意义的数据。
+ */
+export function parseInlineRichText(text: string): RichText | undefined {
+  if (text.length === 0) return undefined
+  let formatted = false
+  const paragraphs: RichTextParagraph[] = text.split(/\r?\n/).map((line) => {
+    const rich = inlineRunsToRich(parseInlineMarkdown(line).runs)
+    if (!rich) return { runs: [] }
+    formatted = true
+    return rich.paragraphs[0] ?? { runs: [] }
+  })
+  return formatted ? { paragraphs } : undefined
 }
 
 /** 去掉行内的 Markdown 装饰，只留文字（表格单元格、备注等纯文本场合用） */

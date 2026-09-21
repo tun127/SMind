@@ -9,6 +9,7 @@
 import { Bold, Eraser, Italic, X } from 'lucide-react'
 import type { ReactElement } from 'react'
 import { activeSheet } from '@shared/model/tree'
+import { parseInlineRichText } from '@shared/import/markdown'
 import {
   OVERLAY_TITLE_DEFAULTS,
   readOverlayTextStyle,
@@ -78,8 +79,17 @@ export default function OverlayBranch({
           rows={3}
           defaultValue={overlayItem.title ?? ''}
           placeholder="输入文字（Enter 换行；清空后画布上仍留有可点击的占位）"
-          onBlur={(event) => setTitle(overlayItem.id, event.currentTarget.value)}
+          onBlur={(event) => {
+            // 行内简写（**粗体** / ==高亮== / `等宽`）解析成富文本：只有被标记的那几个字有格式，
+            // 与下面"整块字体/颜色"的按钮互补 —— 想要部分格式就写标记。
+            const value = event.currentTarget.value
+            setTitle(overlayItem.id, value, parseInlineRichText(value) ?? null)
+          }}
         />
+        <div className="side-panel__hint">
+          想只加粗 / 高亮其中几个字：在文字里写 <code>**粗体**</code>、<code>==高亮==</code>、
+          <code>^上标^</code>、<code>`等宽`</code>（与 Markdown 一致）；下面的字体与颜色作用于整块。
+        </div>
 
         <div className="side-panel__title">字体</div>
         <div className="side-panel__row">

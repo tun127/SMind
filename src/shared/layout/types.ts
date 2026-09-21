@@ -1,4 +1,4 @@
-import type { NodeStyle, Topic } from '../model/types'
+import type { NodeStyle, RichText, Topic } from '../model/types'
 import type { CodeMetrics } from './accessory'
 
 export interface Size {
@@ -169,6 +169,8 @@ export interface OverlayLabelSize {
 export interface OverlayLayout {
   id: string
   title?: string
+  /** 富文本（部分文字加粗 / 变色 / 高亮）；缺省时整段按纯文本渲染 */
+  titleRich?: RichText
   /** 取哪个节点的分支配色；找不到则用中性色 */
   branchId?: string
   /**

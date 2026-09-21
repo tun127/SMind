@@ -4,7 +4,7 @@
  * 单一职责：把区间与包围盒翻译成可渲染的几何体，并把整体边界撑大
  * （避免「适应画布」把这些元素切掉）。形状拼装见 ./shapes.ts。
  */
-import type { NodeStyle, Relationship, Sheet, Topic } from '../../model/types'
+import type { NodeStyle, Relationship, RichText, Sheet, Topic } from '../../model/types'
 import type { FoldSide } from '../../model/tree'
 import { readOverlayFontSize } from '../../model/overlay-style'
 import { round } from '../core'
@@ -119,6 +119,7 @@ function relationshipOf(
   return {
     id: relationship.id,
     title: relationship.title,
+    titleRich: relationship.titleRich,
     branchId: relationship.end2Id,
     d: `M ${round(start.x)} ${round(start.y)} Q ${controlX} ${controlY} ${round(end.x)} ${round(end.y)}`,
     start: { x: start.x, y: start.y },
@@ -131,7 +132,7 @@ function relationshipOf(
 }
 
 function boundaryOf(
-  boundary: { id: string; range: string; title?: string; style?: NodeStyle },
+  boundary: { id: string; range: string; title?: string; titleRich?: RichText; style?: NodeStyle },
   index: TreeIndex,
   boundsOf: Map<string, Bounds | null>
 ): BoundaryLayout | null {
@@ -154,6 +155,7 @@ function boundaryOf(
   return {
     id: boundary.id,
     title: boundary.title,
+    titleRich: boundary.titleRich,
     branchId: topics[0]?.id,
     x,
     y,
@@ -168,7 +170,14 @@ function boundaryOf(
 }
 
 function summaryOf(
-  summary: { id: string; topicId: string; range: string; title?: string; style?: NodeStyle },
+  summary: {
+    id: string
+    topicId: string
+    range: string
+    title?: string
+    titleRich?: RichText
+    style?: NodeStyle
+  },
   index: TreeIndex,
   boundsOf: Map<string, Bounds | null>,
   sideOf: (topicId: string) => FoldSide
@@ -212,6 +221,7 @@ function summaryOf(
     return {
       id: summary.id,
       title,
+      titleRich: summary.titleRich,
       branchId: firstTopic?.id ?? '',
       d: bracePath('v', spanStart, spanEnd, base, spine, nib),
       label,

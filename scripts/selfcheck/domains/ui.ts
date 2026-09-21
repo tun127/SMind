@@ -139,7 +139,12 @@ import {
 } from '../../../src/shared/richtext'
 import type { MindPackage, RichText } from '../../../src/shared/model/types'
 import { MD_MONO_FONT, isMonoFontFamily } from '../../../src/shared/mono-font'
-import { inlineRunsToRich, parseInlineMarkdown } from '../../../src/shared/import/markdown'
+import {
+  inlineRunsToRich,
+  parseInlineMarkdown,
+  parseInlineRichText
+} from '../../../src/shared/import/markdown'
+import { overlayRunLines } from '../../../src/shared/layout/overlays'
 import {
   BOLD_INPUT,
   BOLD_UNDERSCORE_INPUT,
@@ -1571,6 +1576,65 @@ export function testRichText(): void {
     litBullets.paragraphs.every((paragraph) => paragraph.runs[0].highlight === true)
   )
   check('多段：段落级属性（项目符号）原样保留', litBullets.paragraphs[0].bullet === true)
+
+  /* ---- 画布级元素（关系线 / 边界 / 概要）的标题富文本 ---- */
+  group('画布级元素：标题富文本按 run 切行')
+  const plainLines = overlayRunLines(undefined, '第一行\n第二行')
+  eq(
+    '没有富文本时按纯文本切行',
+    plainLines.map((line) => line.map((run) => run.text).join('')),
+    ['第一行', '第二行']
+  )
+  check('纯文本行只有一段', plainLines[0].length === 1)
+
+  const richLines = overlayRunLines(
+    {
+      paragraphs: [
+        { runs: [{ text: '普通' }, { text: '加粗', bold: true, color: '#f00' }] },
+        { runs: [{ text: '第二段' }] }
+      ]
+    },
+    '普通加粗\n第二段'
+  )
+  eq('行数 = 段落数', richLines.length, 2)
+  eq(
+    '行内按 run 切成两段',
+    richLines[0].map((run) => run.text),
+    ['普通', '加粗']
+  )
+  check(
+    '被标记的那段带上自己的格式',
+    richLines[0][1].bold === true && richLines[0][1].color === '#f00'
+  )
+  check('没标记的那段不带样式', richLines[1][0].bold === undefined)
+
+  const splitLines = overlayRunLines(
+    { paragraphs: [{ runs: [{ text: '上\n下', highlight: true }] }] },
+    '上\n下'
+  )
+  eq('run 里的换行也算换行', splitLines.length, 2)
+  check(
+    '拆出来的两行都带上 run 自己的格式',
+    splitLines.every((line) => line[0].highlight === true)
+  )
+
+  group('画布级元素：文字输入的行内简写')
+  const inlineRich = parseInlineRichText('重要：**只看这句** 与 ==高亮==')
+  check(
+    '粗体与高亮都能解析出来（只作用于被标记的字）',
+    Boolean(
+      inlineRich?.paragraphs[0].runs.some((run) => run.bold === true) &&
+      inlineRich?.paragraphs[0].runs.some((run) => run.highlight === true)
+    )
+  )
+  eq('没有标记的纯文本不产出富文本', parseInlineRichText('就是普通文字'), undefined)
+  eq('多行 → 多段', parseInlineRichText('**粗**\n第二行')?.paragraphs.length, 2)
+  eq('空串不产出富文本', parseInlineRichText(''), undefined)
+  eq(
+    '等宽简写也认（与主题同一套语法）',
+    parseInlineRichText('`code` 说明')?.paragraphs[0].runs[0].fontFamily,
+    MD_MONO_FONT
+  )
 
   /* ---- A2：中文紧贴的行内 markdown 不触发（输入规则的前导边界） ---- */
   group('输入规则：中文紧贴的行内写法')

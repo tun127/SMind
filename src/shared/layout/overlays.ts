@@ -28,7 +28,9 @@ export type { OverlayReserves } from './overlays/reserves'
 export {
   OVERLAY_TITLE_LINE_HEIGHT,
   estimateOverlayLabelSize,
+  overlayRunLines,
   overlayTitleLines,
   roundedRectPath
 } from './overlays/shapes'
+export type { OverlayLineRun } from './overlays/shapes'
 export { addOverlays } from './overlays/build'

@@ -5,6 +5,7 @@
  * 不做语义判断（哪个区间、什么方向），因此可以独立验证。
  */
 import { round } from '../core'
+import type { RichText, RichTextRun } from '../../model/types'
 
 /* ------------------------------------------------------------------ */
 /* 括号形状                                                            */
@@ -72,6 +73,55 @@ export const OVERLAY_TITLE_LINE_HEIGHT = 15
 export function overlayTitleLines(title: string | undefined): string[] {
   if (!title) return []
   return title.split(/\r?\n/)
+}
+
+/** 画布级元素标题的一小段文字（同一行里可以有多个，各自带自己的格式） */
+export interface OverlayLineRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  color?: string
+  fontSize?: number
+  /** 高亮：SVG 里没有背景色，渲染层用"描边加粗一圈"近似（见 canvas 层的注释） */
+  highlight?: boolean
+}
+
+/**
+ * 把画布级元素的文字切成「行 → 行内片段」。
+ *
+ * 有富文本（`titleRich`）就按 run 切 —— 这样「只把其中几个字加粗/变色」能在画布上如实画出来；
+ * 没有就退回纯文本（每行一段），与 `overlayTitleLines` 的口径完全一致（`\r?\n` 与段落都算换行）。
+ * 画布渲染与导出共用这一份切法，免得两处各切一次、结果不一样。
+ */
+export function overlayRunLines(
+  rich: RichText | undefined,
+  title: string | undefined
+): OverlayLineRun[][] {
+  if (!rich) return overlayTitleLines(title).map((line) => [{ text: line }])
+
+  const lines: OverlayLineRun[][] = [[]]
+  const pushRun = (run: RichTextRun, text: string): void => {
+    if (text.length === 0) return
+    lines[lines.length - 1]?.push({
+      text,
+      bold: run.bold,
+      italic: run.italic,
+      color: run.color,
+      fontSize: run.fontSize,
+      highlight: run.highlight
+    })
+  }
+  rich.paragraphs.forEach((paragraph, paragraphIndex) => {
+    if (paragraphIndex > 0) lines.push([])
+    for (const run of paragraph.runs) {
+      const parts = run.text.split(/\r?\n/)
+      parts.forEach((part, index) => {
+        if (index > 0) lines.push([])
+        pushRun(run, part)
+      })
+    }
+  })
+  return lines
 }
 
 /**

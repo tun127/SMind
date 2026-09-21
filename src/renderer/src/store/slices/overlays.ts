@@ -15,6 +15,7 @@ import {
   type OverlayKind,
   type OverlayTextStylePatch
 } from '@shared/model/overlay-style'
+import type { RichText } from '@shared/model/types'
 
 import { createId } from '@shared/model/factory'
 
@@ -82,9 +83,9 @@ export interface OverlaysSlice {
   setAppSettings(next: AppSettings): void
   /** 把关系线的某一端改接到另一个主题（拖拽端点用） */
   setRelationshipEnd(id: string, end: 'end1Id' | 'end2Id', topicId: string): void
-  setRelationshipTitle(id: string, title: string): void
-  setBoundaryTitle(id: string, title: string): void
-  setSummaryTitle(id: string, title: string): void
+  setRelationshipTitle(id: string, title: string, rich?: RichText | null): void
+  setBoundaryTitle(id: string, title: string, rich?: RichText | null): void
+  setSummaryTitle(id: string, title: string, rich?: RichText | null): void
 
   /* ---- 画布元素：给 AI 用的「不依赖选中」版本 ---- */
   /**
@@ -334,25 +335,34 @@ export const createOverlaysSlice: StateCreator<EditorState, [], [], OverlaysSlic
     }, '改接关系线')
   },
 
-  setRelationshipTitle: (id, title) => {
+  /**
+   * 三个标题 setter 的第三个参数统一是**富文本**（部分文字加粗 / 变色 / 高亮）：
+   * - `undefined` = 这次调用不管格式（保持原样）—— 画布上就地编辑那条老路径就是它；
+   * - `null` = 显式作废（用纯文本编辑器改了字，旧格式的字符偏移已经对不上）；
+   * - 对象 = 换成这份新的富文本。
+   * `title` 始终是**纯文本**（Xmind 只认它，外部编辑器也靠它可读）。
+   */
+  setRelationshipTitle: (id, title, rich) => {
     const text = title.trim()
     get().mutate((draft) => {
       const target = activeSheet(draft).relationships.find((item) => item.id === id)
       if (!target) return
       target.title = text.length > 0 ? text : undefined
+      if (rich !== undefined) target.titleRich = rich ?? undefined
     }, '修改关系线标题')
   },
 
-  setBoundaryTitle: (id, title) => {
+  setBoundaryTitle: (id, title, rich) => {
     const text = title.trim()
     get().mutate((draft) => {
       const target = activeSheet(draft).boundaries.find((item) => item.id === id)
       if (!target) return
       target.title = text.length > 0 ? text : undefined
+      if (rich !== undefined) target.titleRich = rich ?? undefined
     }, '修改边界标题')
   },
 
-  setSummaryTitle: (id, title) => {
+  setSummaryTitle: (id, title, rich) => {
     const text = title.trim()
     get().mutate((draft) => {
       const target = activeSheet(draft).summaries.find((item) => item.id === id)
@@ -361,6 +371,7 @@ export const createOverlaysSlice: StateCreator<EditorState, [], [], OverlaysSlic
       // 用户主动清空时必须写成空串而不是 undefined，
       // 否则清空后会立刻回退成主题的文字，看起来就像「改不动」。
       target.title = text
+      if (rich !== undefined) target.titleRich = rich ?? undefined
     }, '修改概要标题')
   }
 })

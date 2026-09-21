@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useEditor } from '../../store/editor'
+import { parseInlineRichText } from '@shared/import/markdown'
 
 /**
  * 双击画布元素（边界 / 概要 / 关系线）标题后的「就地编辑」（自 `Canvas.tsx` 整块搬出，逐字未改）。
@@ -59,9 +60,12 @@ export function useTitleEdit(): {
       return
     }
     const store = useEditor.getState()
-    if (target.kind === 'boundary') store.setBoundaryTitle(target.id, target.value)
-    else if (target.kind === 'summary') store.setSummaryTitle(target.id, target.value)
-    else store.setRelationshipTitle(target.id, target.value)
+    // 就地编辑也走同一套行内简写解析（`**粗体**` / `==高亮==`）：否则纯文本一提交，
+    // 旧的富文本会因为字符偏移对不上而"格式落在别的字上"。没有标记时 rich = null，显式清干净。
+    const rich = parseInlineRichText(target.value) ?? null
+    if (target.kind === 'boundary') store.setBoundaryTitle(target.id, target.value, rich)
+    else if (target.kind === 'summary') store.setSummaryTitle(target.id, target.value, rich)
+    else store.setRelationshipTitle(target.id, target.value, rich)
     setTitleEdit(null)
   }, [])
 

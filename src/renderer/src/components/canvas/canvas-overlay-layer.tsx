@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
+import { OverlayTitleRuns, centeredTitleDy } from './overlay-title-runs'
 import type { LayoutResult } from '@shared/layout/types'
 import { OVERLAY_TITLE_DEFAULTS } from '@shared/model/overlay-style'
 import type { ThemeColors } from '@shared/model/types'
@@ -127,20 +127,15 @@ export function CanvasOverlayLayer({
                   strokeLinejoin="round"
                   pointerEvents="none"
                 >
-                  {/* 关系线标题同样支持手动换行（与边界 / 概要一致）：按 \n 拆行、整体垂直居中 */}
-                  {overlayTitleLines(relationship.title).map((line, index, all) => (
-                    <tspan
-                      key={index}
-                      x={relationship.label.x}
-                      dy={
-                        index === 0
-                          ? -((all.length - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2
-                          : OVERLAY_TITLE_LINE_HEIGHT
-                      }
-                    >
-                      {line.length > 0 ? line : '\u00A0'}
-                    </tspan>
-                  ))}
+                  {/* 关系线标题同样支持手动换行；富文本按 run 分段（部分文字加粗/变色/高亮） */}
+                  <OverlayTitleRuns
+                    x={relationship.label.x}
+                    rich={relationship.titleRich}
+                    title={relationship.title}
+                    fill={color}
+                    fontSize={OVERLAY_TITLE_DEFAULTS.relationship.fontSize}
+                    dyOf={centeredTitleDy}
+                  />
                 </text>
               ) : null}
 

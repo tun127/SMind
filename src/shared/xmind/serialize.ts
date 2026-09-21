@@ -44,31 +44,37 @@ function compact<T extends Raw>(obj: T): T {
   return out as T
 }
 
+/**
+ * 拼出元素自己的 `extensions`：本软件字段包成 `provider === OUR_PROVIDER` 的扩展放在最前，
+ * 外部扩展原样跟在后面（**先剔除**同名 provider 的那一份，否则「打开 → 另存」会越存越多）。
+ *
+ * 主题与画布级元素（关系线 / 边界 / 概要）共用这一处 —— 两边各写一份的话，
+ * 迟早有一边忘了剔除，于是文件里凭空多出一份重复数据。
+ */
+function buildExtensions(
+  external: unknown[] | undefined,
+  ours: Record<string, unknown>
+): unknown[] | undefined {
+  const kept = (external ?? []).filter(
+    (ext) => !(typeof ext === 'object' && ext !== null && (ext as Raw).provider === OUR_PROVIDER)
+  )
+  const content = compact(ours)
+  const list =
+    Object.keys(content).length > 0 ? [{ provider: OUR_PROVIDER, content }, ...kept] : kept
+  return list.length > 0 ? list : undefined
+}
+
 function topicToRaw(topic: Topic): Raw {
   const attached = topic.children.map(topicToRaw)
   const detached = topic.detachedChildren.map(topicToRaw)
 
-  const extensions: unknown[] = []
-  // 本软件自己的扩展字段（Xmind 会忽略，但不影响往返保真）
-  if (topic.titleRich || topic.formula || topic.code || topic.sizeOverride) {
-    extensions.push({
-      provider: OUR_PROVIDER,
-      content: compact({
-        titleRich: topic.titleRich,
-        formula: topic.formula,
-        code: topic.code,
-        sizeOverride: topic.sizeOverride
-      })
-    })
-  }
-  // 原样透传外部扩展
-  if (topic.extensions) {
-    for (const ext of topic.extensions) {
-      if (typeof ext === 'object' && ext !== null && (ext as Raw).provider === OUR_PROVIDER)
-        continue
-      extensions.push(ext)
-    }
-  }
+  // 本软件自己的扩展字段（Xmind 会忽略，但不影响往返保真）+ 原样透传的外部扩展
+  const extensions = buildExtensions(topic.extensions, {
+    titleRich: topic.titleRich,
+    formula: topic.formula,
+    code: topic.code,
+    sizeOverride: topic.sizeOverride
+  })
 
   const notes =
     topic.notes !== undefined || topic.notesHtml !== undefined
@@ -122,7 +128,7 @@ function sheetToRaw(sheet: MindPackage['workbook']['sheets'][number]): Raw {
         end2Id: r.end2Id,
         title: r.title,
         style: r.style,
-        extensions: r.extensions
+        extensions: buildExtensions(r.extensions, { titleRich: r.titleRich })
       })
     ),
     boundaries: sheet.boundaries.map((b) =>
@@ -132,7 +138,7 @@ function sheetToRaw(sheet: MindPackage['workbook']['sheets'][number]): Raw {
         range: b.range,
         title: b.title,
         style: b.style,
-        extensions: b.extensions
+        extensions: buildExtensions(b.extensions, { titleRich: b.titleRich })
       })
     ),
     summaries: sheet.summaries.map((s) =>
@@ -143,7 +149,7 @@ function sheetToRaw(sheet: MindPackage['workbook']['sheets'][number]): Raw {
         range: s.range,
         title: s.title,
         style: s.style,
-        extensions: s.extensions
+        extensions: buildExtensions(s.extensions, { titleRich: s.titleRich })
       })
     ),
     topicPositioning: sheet.topicPositioning,

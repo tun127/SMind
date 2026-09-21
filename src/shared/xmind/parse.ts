@@ -103,6 +103,29 @@ function parseImage(raw: unknown): Topic['image'] {
   }
 }
 
+/**
+ * 把 extensions 拆成「本软件自己的内容」与「外部扩展」。
+ *
+ * 自己的字段（titleRich 等）一律包成 `provider === OUR_PROVIDER` 的扩展对象；
+ * 读取时必须**同时**把它们从外部扩展里剔干净，否则「打开 → 另存」会凭空多出一份重复数据。
+ * 主题与画布级元素（关系线 / 边界 / 概要）共用这一条约定。
+ */
+export function splitOurExtensions(raw: unknown): {
+  ours: Record<string, unknown>
+  external: unknown[] | undefined
+} {
+  let ours: Record<string, unknown> = {}
+  const external: unknown[] = []
+  for (const item of asArray(raw)) {
+    if (isRecord(item) && item.provider === OUR_PROVIDER) {
+      if (isRecord(item.content)) ours = { ...ours, ...item.content }
+      continue
+    }
+    external.push(item)
+  }
+  return { ours, external: external.length > 0 ? external : undefined }
+}
+
 /** 从 extensions 里读回本软件自己的字段 */
 function readOurExtensions(raw: unknown): {
   titleRich?: Topic['titleRich']
@@ -116,25 +139,19 @@ function readOurExtensions(raw: unknown): {
     code?: Topic['code']
     sizeOverride?: Topic['sizeOverride']
   } = {}
-  for (const item of asArray(raw)) {
-    if (!isRecord(item)) continue
-    if (item.provider !== OUR_PROVIDER) continue
-    const content = item.content
-    if (isRecord(content)) {
-      // 逐字段收敛后再收下：这是**别人的文件**，字段缺失/类型不对都是常态，
-      // 强转会让坏数据一路流进测量与渲染
-      const titleRich = coerceRichText(content.titleRich)
-      if (titleRich) out.titleRich = titleRich
-      if (typeof content.formula === 'string') out.formula = content.formula
-      const code = coerceCode(content.code)
-      if (code) out.code = code
-      if (isRecord(content.sizeOverride)) {
-        const width = asNumber(content.sizeOverride.width)
-        const height = asNumber(content.sizeOverride.height)
-        if (width !== undefined && height !== undefined && width > 0 && height > 0) {
-          out.sizeOverride = { width: Math.round(width), height: Math.round(height) }
-        }
-      }
+  const { ours: content } = splitOurExtensions(raw)
+  // 逐字段收敛后再收下：这是**别人的文件**，字段缺失/类型不对都是常态，
+  // 强转会让坏数据一路流进测量与渲染
+  const titleRich = coerceRichText(content.titleRich)
+  if (titleRich) out.titleRich = titleRich
+  if (typeof content.formula === 'string') out.formula = content.formula
+  const code = coerceCode(content.code)
+  if (code) out.code = code
+  if (isRecord(content.sizeOverride)) {
+    const width = asNumber(content.sizeOverride.width)
+    const height = asNumber(content.sizeOverride.height)
+    if (width !== undefined && height !== undefined && width > 0 && height > 0) {
+      out.sizeOverride = { width: Math.round(width), height: Math.round(height) }
     }
   }
   return out
@@ -243,14 +260,16 @@ function parseSheet(raw: unknown, index: number): Sheet | null {
       const end1Id = asString(r.end1Id)
       const end2Id = asString(r.end2Id)
       if (!end1Id || !end2Id) return []
+      const { ours, external } = splitOurExtensions(r.extensions)
       return [
         {
           id: asString(r.id) ?? createId('rel'),
           end1Id,
           end2Id,
           title: asString(r.title),
+          titleRich: coerceRichText(ours.titleRich),
           style: parseStyle(r.style),
-          extensions: Array.isArray(r.extensions) ? r.extensions : undefined
+          extensions: external
         }
       ]
     }),
@@ -258,13 +277,15 @@ function parseSheet(raw: unknown, index: number): Sheet | null {
       if (!isRecord(b)) return []
       const range = asString(b.range)
       if (!range) return []
+      const { ours, external } = splitOurExtensions(b.extensions)
       return [
         {
           id: asString(b.id) ?? createId('boundary'),
           range,
           title: asString(b.title),
+          titleRich: coerceRichText(ours.titleRich),
           style: parseStyle(b.style),
-          extensions: Array.isArray(b.extensions) ? b.extensions : undefined
+          extensions: external
         }
       ]
     }),
@@ -273,14 +294,16 @@ function parseSheet(raw: unknown, index: number): Sheet | null {
       const range = asString(s.range)
       const topicId = asString(s.topicId)
       if (!range || !topicId) return []
+      const { ours, external } = splitOurExtensions(s.extensions)
       return [
         {
           id: asString(s.id) ?? createId('summary'),
           topicId,
           range,
           title: asString(s.title),
+          titleRich: coerceRichText(ours.titleRich),
           style: parseStyle(s.style),
-          extensions: Array.isArray(s.extensions) ? s.extensions : undefined
+          extensions: external
         }
       ]
     }),

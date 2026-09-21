@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent, ReactElement, RefObject } from 'react'
-import { OVERLAY_TITLE_LINE_HEIGHT, overlayTitleLines } from '@shared/layout/overlays'
+import { OVERLAY_TITLE_LINE_HEIGHT } from '@shared/layout/overlays'
+import { OverlayTitleRuns, stackedTitleDy } from './overlay-title-runs'
 import type { LayoutResult } from '@shared/layout/types'
 import { OVERLAY_TITLE_DEFAULTS, readOverlayTextStyle } from '@shared/model/overlay-style'
 import type { ThemeColors } from '@shared/model/types'
@@ -177,16 +178,20 @@ export function CanvasEdgesLayer({
                 })
               }
             >
-              {/* 边界标题同样支持换行（自上而下排） */}
-              {overlayTitleLines(boundary.title).map((line, index) => (
-                <tspan
-                  key={index}
-                  x={boundary.label.x}
-                  dy={index === 0 ? 0 : OVERLAY_TITLE_LINE_HEIGHT}
-                >
-                  {line.length > 0 ? line : '\u00A0'}
-                </tspan>
-              ))}
+              {/* 边界标题同样支持换行（自上而下排）；富文本按 run 分段 */}
+              <OverlayTitleRuns
+                x={boundary.label.x}
+                rich={boundary.titleRich}
+                title={boundary.title}
+                fill={
+                  boundaryText.color ??
+                  (boundary.branchId
+                    ? branchColorOf(colors, layout, boundary.branchId)
+                    : colors.deepText)
+                }
+                fontSize={boundaryText.fontSize}
+                dyOf={stackedTitleDy}
+              />
             </text>
           ) : null
         })}
@@ -267,21 +272,22 @@ export function CanvasEdgesLayer({
                 opacity={summary.title ? 1 : 0.45}
                 pointerEvents="none"
               >
-                {summary.title
-                  ? overlayTitleLines(summary.title).map((line, index, all) => (
-                      <tspan
-                        key={index}
-                        x={summary.label.x}
-                        dy={
-                          index === 0
-                            ? -(all.length - 1) * (OVERLAY_TITLE_LINE_HEIGHT / 2)
-                            : OVERLAY_TITLE_LINE_HEIGHT
-                        }
-                      >
-                        {line.length > 0 ? line : '\u00A0'}
-                      </tspan>
-                    ))
-                  : '概要（双击输入）'}
+                {summary.title ? (
+                  <OverlayTitleRuns
+                    x={summary.label.x}
+                    rich={summary.titleRich}
+                    title={summary.title}
+                    fill={text.color ?? color}
+                    fontSize={text.fontSize}
+                    dyOf={(index, total) =>
+                      index === 0
+                        ? -((total - 1) * OVERLAY_TITLE_LINE_HEIGHT) / 2
+                        : OVERLAY_TITLE_LINE_HEIGHT
+                    }
+                  />
+                ) : (
+                  '概要（双击输入）'
+                )}
               </text>
               {selected && summary.bounds ? (
                 <rect
