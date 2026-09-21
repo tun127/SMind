@@ -133,6 +133,7 @@ import {
   richFromPlain,
   richToTiptap,
   tiptapToRich,
+  withHighlightAll,
   type TipTapDoc,
   type TipTapMark
 } from '../../../src/shared/richtext'
@@ -1533,6 +1534,43 @@ export function testRichText(): void {
     ]),
     'Fira Code, monospace'
   )
+
+  /* ---- 高亮：节点属性面板的「整个主题」开关（格式栏那个按钮走同一套 mark） ---- */
+  group('富文本：整段高亮开关（节点属性面板用）')
+  const litPlain = withHighlightAll(richFromPlain('一段文字'), true)
+  check(
+    '打开：每个 run 都带上高亮',
+    litPlain.paragraphs[0].runs.every((run) => run.highlight === true)
+  )
+  check('打开后判为有格式（会写进 titleRich）', hasFormatting(litPlain) === true)
+
+  const litMixed = withHighlightAll(
+    { paragraphs: [{ runs: [{ text: 'a', bold: true, color: '#f00' }, { text: 'b' }] }] },
+    true
+  )
+  check(
+    '打开：原有粗体与颜色不被抹掉',
+    litMixed.paragraphs[0].runs[0].bold === true && litMixed.paragraphs[0].runs[0].color === '#f00'
+  )
+  check(
+    '关闭：高亮被清干净',
+    withHighlightAll(litMixed, false).paragraphs[0].runs.every((run) => run.highlight === undefined)
+  )
+  check(
+    '关闭后只剩纯高亮 → 不再算富文本（titleRich 会被自动清掉）',
+    hasFormatting(withHighlightAll(litPlain, false)) === false
+  )
+  check('关闭只清高亮，别的格式留下', hasFormatting(withHighlightAll(litMixed, false)) === true)
+
+  const litBullets = withHighlightAll(
+    { paragraphs: [{ bullet: true, runs: [{ text: 'x' }] }, { runs: [{ text: 'y' }] }] },
+    true
+  )
+  check(
+    '多段：每段的高亮都开上',
+    litBullets.paragraphs.every((paragraph) => paragraph.runs[0].highlight === true)
+  )
+  check('多段：段落级属性（项目符号）原样保留', litBullets.paragraphs[0].bullet === true)
 
   /* ---- A2：中文紧贴的行内 markdown 不触发（输入规则的前导边界） ---- */
   group('输入规则：中文紧贴的行内写法')

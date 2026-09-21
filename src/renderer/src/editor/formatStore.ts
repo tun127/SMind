@@ -9,6 +9,8 @@ export interface FormatState {
   italic: boolean
   underline: boolean
   strike: boolean
+  /** 高亮（`==高亮==` 与格式栏的高亮按钮是同一个 mark） */
+  highlight: boolean
   /** 上标 / 下标（互斥，都没有时为 null） */
   script: 'super' | 'sub' | null
   color: string | null
@@ -22,6 +24,7 @@ const INITIAL: FormatState = {
   italic: false,
   underline: false,
   strike: false,
+  highlight: false,
   script: null,
   color: null,
   fontSize: null,
@@ -60,6 +63,7 @@ export function readFormatState(editor: RichEditor): FormatState {
     italic: editor.isActive('italic'),
     underline: editor.isActive('underline'),
     strike: editor.isActive('strike'),
+    highlight: editor.isActive('highlight'),
     script: editor.isActive('superscript') ? 'super' : editor.isActive('subscript') ? 'sub' : null,
     color: typeof attributes.color === 'string' ? attributes.color : null,
     fontSize: Number.isFinite(parsedSize) ? parsedSize : null,

@@ -9,9 +9,10 @@
  * 使本文件保持在子模块上限（≤400 行）以内。
  */
 
-import { Code2, ExternalLink, Plus, Sigma, X } from 'lucide-react'
+import { Code2, ExternalLink, Highlighter, Plus, Sigma, X } from 'lucide-react'
 import type { ReactElement, RefObject } from 'react'
 import { normalizeFormulaInput } from '@shared/formula'
+import { richFromPlain, withHighlightAll } from '@shared/richtext'
 import { CODE_LANGUAGES } from '@shared/code-language'
 import type { Sheet, Topic } from '@shared/model/types'
 import { formulaHtml } from '../../render/formula'
@@ -78,6 +79,16 @@ export default function TopicBranch({
   const setFormula = useEditor((s) => s.setFormula)
   const setCode = useEditor((s) => s.setCode)
   const setSizeOverride = useEditor((s) => s.setSizeOverride)
+  const setRichText = useEditor((s) => s.setRichText)
+
+  /**
+   * 节点标题的富文本：还没写过格式时按纯文本现造一份，保证"高亮/取消高亮"能覆盖全部文字
+   * （`setRichText` 那边会在取消高亮且再无其它格式时自动清掉 titleRich，不用这里判断）。
+   */
+  const titleRich = topic.titleRich ?? richFromPlain(topic.title)
+  const highlighted = titleRich.paragraphs.some((paragraph) =>
+    paragraph.runs.some((run) => run.highlight === true)
+  )
 
   const commitNotes = (): void => {
     if ((topic.notes ?? '') !== notesDraft) setNotes(topicId, notesDraft)
@@ -126,6 +137,23 @@ export default function TopicBranch({
         <div className="side-panel__title">当前主题</div>
         <div className="node-preview" title={topic.title}>
           {topic.title || '（空标题）'}
+        </div>
+
+        {/* 文字外观：整个主题的粒度。要只高亮其中几个字，进编辑态选中它们再点格式栏 */}
+        <div className="side-panel__title">文字</div>
+        <div className="side-panel__row">
+          <button
+            type="button"
+            className={highlighted ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
+            title="高亮这个主题的文字（整个主题，可撤销）"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setRichText(topicId, withHighlightAll(titleRich, !highlighted))}
+          >
+            <Highlighter size={15} />
+          </button>
+          <span className="side-panel__hint">
+            {highlighted ? '已高亮（再点一次取消）' : '高亮整个主题；只高亮几个字请进编辑态选中'}
+          </span>
         </div>
 
         <MarkerSection topic={topic} topicId={topicId} />

@@ -158,8 +158,31 @@ export function hasFormatting(rich: RichText): boolean {
   return false
 }
 
-/** 清掉空 run、去掉尾部多余空段落，保证模型干净 */
-export function normalizeRich(rich: RichText): RichText {
+/**
+ * 把整段富文本的**高亮**统一打开或关掉（节点属性面板那个「高亮」开关用它）。
+ *
+ * 只动 `highlight` 一个属性，粗体 / 颜色 / 字号等原样保留 —— 面板上的开关是**整个节点**
+ * 的粒度，不能顺手把用户其它格式抹掉。结果直接交给 `setRichText`：
+ * 那里的 `hasFormatting` 会在"取消高亮之后再也没有别的格式"时自动清掉 `titleRich`，
+ * 所以不需要在这里额外判断。
+ */
+export function withHighlightAll(rich: RichText, on: boolean): RichText {
+  return {
+    paragraphs: rich.paragraphs.map((paragraph) => ({
+      ...paragraph,
+      runs: paragraph.runs.map((run) => {
+        const next: RichTextRun = { ...run }
+        if (on) next.highlight = true
+        else delete next.highlight
+        return next
+      })
+    }))
+  }
+}
+
+/** 清掉空 run、去掉尾部多余空段落，保证模型干净 */ export function normalizeRich(
+  rich: RichText
+): RichText {
   const paragraphs: RichTextParagraph[] = rich.paragraphs.map((paragraph) => {
     const next: RichTextParagraph = { runs: paragraph.runs.filter((run) => run.text.length > 0) }
     if (isExplicitAlign(paragraph.align)) next.align = paragraph.align

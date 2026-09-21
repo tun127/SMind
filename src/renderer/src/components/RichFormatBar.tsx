@@ -6,6 +6,7 @@ import {
   AlignRight,
   Bold,
   Eraser,
+  Highlighter,
   Italic,
   List,
   RotateCcw,
@@ -381,6 +382,14 @@ export default function RichFormatBar({ onRenderDefaultsChanged }: Props): React
           onClick={() => applyInline((c) => c.toggleStrike())}
         >
           <Strikethrough size={15} />
+        </button>
+        <button
+          type="button"
+          className={state.highlight ? 'fmt-btn fmt-btn--active' : 'fmt-btn'}
+          title="高亮（未选中文字时作用于整个节点；也可以打 ==高亮==）"
+          onClick={() => applyInline((c) => c.toggleMark('highlight'))}
+        >
+          <Highlighter size={15} />
         </button>
         <button
           type="button"
