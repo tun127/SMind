@@ -151,6 +151,7 @@ import {
   SUPERSCRIPT_INPUT
 } from '../../../src/shared/inline-rules'
 import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
+import { codeDraftPatch } from '../../../src/renderer/src/components/nodePanel/code-draft'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1562,6 +1563,52 @@ export function testRichText(): void {
   eq('加宽不超过测量上限', compositionBoxWidth(230, 80, 240), 240)
   eq('已在顶点时不再变大', compositionBoxWidth(240, 40, 240), 240)
   eq('小数向上取整（与测量口径一致）', compositionBoxWidth(100.2, 10.4, 240), 111)
+
+  /* ---- 节点属性面板：代码块草稿的落盘判据（「点公式却插入 python 代码块」的修复） ---- */
+  group('节点面板：代码块草稿 → store 的判据')
+  eq(
+    '空文本 + 没有既有代码块 → 不新建（默认语言也不建）',
+    codeDraftPatch(undefined, '', 'python'),
+    undefined
+  )
+  eq('空文本 + 纯文本语言 → 同样不新建', codeDraftPatch(undefined, '', 'text'), undefined)
+  check(
+    '全是空白也算没内容（滚轮扫过语言下拉不该写 store）',
+    codeDraftPatch(undefined, '   \n ', 'python') === undefined
+  )
+  eq('写了内容 → 写入（顺带去掉行尾空白）', codeDraftPatch(undefined, 'print(1)\n\n', 'python'), {
+    language: 'python',
+    text: 'print(1)'
+  })
+  eq(
+    '已有空代码块：只换语言，块留着',
+    codeDraftPatch({ language: 'text', text: '' }, '', 'python'),
+    { language: 'python', text: '' }
+  )
+  eq(
+    '已有代码块：清空文本且语言回到纯文本 → 移除',
+    codeDraftPatch({ language: 'python', text: 'x' }, '', 'text'),
+    null
+  )
+  eq(
+    '草稿与现状一致 → 不动 store（不写无意义的历史）',
+    codeDraftPatch({ language: 'python', text: 'a' }, 'a', 'python'),
+    undefined
+  )
+
+  // 端到端：面板两个入口都走这条判据 —— 复现「点公式 → 代码框失焦」那一下，
+  // 空文本 + 默认 python 语言不该让节点长出代码块。
+  const codeId = store().addChild(rootId)
+  const codePatch = codeDraftPatch(find(codeId)?.code, '', 'python')
+  if (codePatch !== undefined) store().setCode(codeId, codePatch)
+  check('端到端：点公式那一下的失焦提交不再长出 python 代码块', find(codeId)?.code === undefined)
+  // 反面对照：真写了内容就必须落盘（别把正常路径一起堵掉）
+  const writtenPatch = codeDraftPatch(find(codeId)?.code, 'print(1)', 'python')
+  if (writtenPatch) store().setCode(codeId, writtenPatch)
+  check(
+    '对照：真写了内容仍会落盘（带所选语言）',
+    find(codeId)?.code?.language === 'python' && find(codeId)?.code?.text === 'print(1)'
+  )
 }
 
 export function testTheme(): void {

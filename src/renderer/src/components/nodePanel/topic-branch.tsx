@@ -17,6 +17,7 @@ import type { Sheet, Topic } from '@shared/model/types'
 import { formulaHtml } from '../../render/formula'
 import { useEditor } from '../../store/editor'
 import { PanelHeader, defaultCodeLanguage } from './panel-parts'
+import { codeDraftPatch } from './code-draft'
 import AttachmentSection from './attachment-section'
 import ImageSection from './image-section'
 import MarkerSection from './marker-section'
@@ -111,10 +112,10 @@ export default function TopicBranch({
   }
 
   const commitCode = (): void => {
-    const text = codeDraft.replace(/\s+$/, '')
-    const language = codeLangDraft
-    if ((topic.code?.text ?? '') === text && (topic.code?.language ?? 'text') === language) return
-    setCode(topicId, text.length === 0 && language === 'text' ? null : { language, text })
+    // 判据在 code-draft.ts：空文本且没有既有代码块时**不新建**——
+    // 否则点「公式」把焦点从代码框拿走触发的那次 onBlur，就会凭空插入一个空代码块
+    const patch = codeDraftPatch(topic.code, codeDraft, codeLangDraft)
+    if (patch !== undefined) setCode(topicId, patch)
   }
 
   return (
@@ -278,8 +279,12 @@ export default function TopicBranch({
             className="select"
             value={codeLangDraft}
             onChange={(event) => {
-              setCodeLangDraft(event.target.value)
-              setCode(topicId, { language: event.target.value, text: codeDraft })
+              const language = event.target.value
+              setCodeLangDraft(language)
+              // 还没有代码块、代码框也是空的时候**只改草稿**：滚轮扫过下拉不该凭空建出
+              // 一个空代码块（默认语言正是 python 这类）。真写了内容，失焦时照样带上所选语言。
+              const patch = codeDraftPatch(topic.code, codeDraft, language)
+              if (patch !== undefined) setCode(topicId, patch)
             }}
           >
             {CODE_LANGUAGES.map((lang) => (
