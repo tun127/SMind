@@ -43,15 +43,18 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 const version = pkg.version
 
 const bucket = process.env.OSS_BUCKET
-const endpoint = (process.env.OSS_ENDPOINT ?? '')
-  .replace(/^https?:\/\//, '')
-  .replace(/\/+$/, '')
+const endpoint = (process.env.OSS_ENDPOINT ?? '').replace(/^https?:\/\//, '').replace(/\/+$/, '')
 const keyId = process.env.OSS_ACCESS_KEY_ID
 const keySecret = process.env.OSS_ACCESS_KEY_SECRET
-const publicBase = (process.env.OSS_PUBLIC_BASE ?? `https://${bucket}.${endpoint}`).replace(/\/+$/, '')
+const publicBase = (process.env.OSS_PUBLIC_BASE ?? `https://${bucket}.${endpoint}`).replace(
+  /\/+$/,
+  ''
+)
 
 if (!bucket || !endpoint || !keyId || !keySecret) {
-  console.error('缺少环境变量：OSS_BUCKET / OSS_ENDPOINT / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET')
+  console.error(
+    '缺少环境变量：OSS_BUCKET / OSS_ENDPOINT / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET'
+  )
   console.error('创建方式见 docs/release-oss.md（RAM 子账号 + 只授该桶的读写权限）。')
   process.exit(1)
 }
@@ -78,6 +81,21 @@ const targets = [
     contentType: 'application/octet-stream',
     required: false,
     note: '自动更新差分下载'
+  },
+  {
+    name: 'rt.yml',
+    /**
+     * 内容与 `latest.yml` **完全同一份**，只是换个对象名（所以用 sourceName 指回它）。
+     *
+     * 为什么必须有：预发布构建（`0.9.2-rt.N` 这类）的 app-update.yml 里是 `channel: rt`，
+     * electron-updater 取的是 `rt.yml` 而不是 `latest.yml` —— 只传后者的话那边拿到 404，
+     * 而例行检查失败是**刻意静默**的，现场表现就是"什么都没发生"，
+     * 足以把 D4 的首跑验收做成假通过（报告 §7.4 / D-16）。
+     */
+    sourceName: 'latest.yml',
+    contentType: 'text/yaml; charset=utf-8',
+    required: false,
+    note: '预发布通道（channel: rt）：与 latest.yml 同一份内容另存'
   }
 ]
 
@@ -93,7 +111,11 @@ function authorization(method, key, contentType, date) {
 
 function signedHeaders(method, key, contentType) {
   const date = new Date().toUTCString()
-  return { Date: date, 'Content-Type': contentType, Authorization: authorization(method, key, contentType, date) }
+  return {
+    Date: date,
+    'Content-Type': contentType,
+    Authorization: authorization(method, key, contentType, date)
+  }
 }
 
 /** 已存在则返回字节数，不存在返回 null（HEAD 不计流量费，可放心用来做"跳过已传"） */
@@ -125,7 +147,9 @@ async function put(key, filePath, contentType) {
 function describe(error) {
   const cause = error instanceof Error ? error.cause : undefined
   const detail = cause instanceof Error ? cause.message : ''
-  return detail ? `${error.message}（${detail}）` : String(error instanceof Error ? error.message : error)
+  return detail
+    ? `${error.message}（${detail}）`
+    : String(error instanceof Error ? error.message : error)
 }
 
 async function putWithRetry(key, filePath, contentType) {
@@ -147,7 +171,8 @@ let missingOptional = false
 const uploaded = []
 
 for (const target of targets) {
-  const local = resolve('release', target.name)
+  // 默认从同名产物读；带 sourceName 的（rt.yml）与 latest.yml 共用同一份内容
+  const local = resolve('release', target.sourceName ?? target.name)
   if (!existsSync(local)) {
     if (target.required) {
       console.error(`✗ 缺少产物：release/${target.name}（先跑 npm run dist）`)
