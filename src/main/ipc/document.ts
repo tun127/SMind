@@ -30,7 +30,7 @@ import { MINDMAP_EXTENSIONS } from '@shared/openfile'
  * 这些处理器原来都在 `main/index.ts` 的 `registerIpc()` 里，整块搬来：
  * 函数体、先后顺序、通道名逐字未改（搬迁只做剪切粘贴）。
  */
-/** ?????????????????????? id??clearAutosave ?????????????D-02? */
+/** 本进程里「每个窗口槽位最近一次自动保存的文档 id」：判断「最近一份」副本是否属于刚清掉的那份（D-02） */
 const lastAutosaveDocIds = new Map<string, string>()
 
 export function registerDocumentIpc(ctx: MainContext): void {
@@ -97,7 +97,7 @@ export function registerDocumentIpc(ctx: MainContext): void {
       if (doc) pruneForSave(doc, workbook)
       const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
       // 存档也走原子写：半截的存档在恢复时会被判为损坏，等于白存一份
-      // ? docId ??????????????????????? D-02?
+      // 按 docId 分开存：切标签不再把上一个标签的存档盖掉，逐份都能恢复（报告 D-02）
       await writeFileAtomic(autosaveFile(state.slot, docId), bytes)
       lastAutosaveDocIds.set(state.slot, docId)
       const meta: RecoveryMeta = {
@@ -108,7 +108,7 @@ export function registerDocumentIpc(ctx: MainContext): void {
       // 元信息也要原子写：它是「这次自动保存对应哪份原稿」的唯一凭证，
       // 半截 JSON 会让恢复功能读不出标题与原路径（正文却好端端地在那儿）
       await writeJsonAtomic(autosaveMeta(state.slot, docId), meta)
-      // ????????????????recovery.ts ???????????????
+      // 再写一份「最近一份」给恢复链兜底：两份必须是同一份 bytes（同一个 meta 对象），否则恢复出来的正文与标题会对不上
       await writeFileAtomic(latestAutosaveFile(state.slot), bytes)
       await writeJsonAtomic(latestAutosaveMeta(state.slot), meta)
     }
