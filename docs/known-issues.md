@@ -1,7 +1,7 @@
 # 待修问题清单（Known Issues）
 
 > 生成时间：2026-09-14
-> 最后处理：**2026-09-15**（见下方「处理结果」）
+> 最后处理：**2026-09-15**（见下方「处理结果」）；**2026-09-21 追加**一组「待处理」审查发现（F1–F5，见文末）
 > 对应版本：0.6.0 起
 > 排查方式：全仓只读审查（安全 / 健壮性 / 性能 / 资源泄漏 / 类型卫生 / 功能缺口），关键结论均已人工复核
 
@@ -309,3 +309,62 @@ Electron API 变化维护的假实现。
 - 文件夹 / 批量管理
 
 **优先级判断**：这些不建议现在做。本项目的差异点是**本地优先 + 格式保真 + 反向兼容亿图 `.emmx`**，把这三件事做深，比补齐功能清单更值。
+
+---
+
+## 待处理（2026-09-21 独立只读审查：F1–F5）
+
+来源：一次独立代码审查（覆盖 `store/slices/**`、`layout/**`、`app/**`、`main/**` 胶水层与部分画布 hook；
+`shared/agent/**`、`shared/ai/**`、`shared/export/**`、`xmind/serialize.ts` 与多数 `*.tsx` **未覆盖**）。
+行号以提交 `65d028a` 为基准，**符号名优先**（行号一改就假，本轮已因此踩过）。
+五条都**不是**解耦搬迁引入的（`history.ts` 那批注释已写明"逐字未改"），是早就存在的语义缺陷；
+共同根因是「自检 2800 条断言全在纯函数上，而真 bug 落在栈满 / 多标签 / 异步竞态 / 诊断埋点」。
+
+### F1 撤销栈满 200 后，AI 回合的「一步撤销」静默失效（P0）
+
+- **现象**：长会话（撤销栈接近或达到 200）之后，AI 改一轮再按 Ctrl+Z **回不到**改动前、要按 2~N 次；
+  而气泡与 `chat/turn-runtime.ts` 仍打印"按一次 Ctrl+Z 全部回退"——对用户说了假话。
+- **证据**：`store/slices/history.ts` 的 `HISTORY_LIMIT = 200`（:31）、入栈 `slice(-HISTORY_LIMIT)`（:108-111）、
+  `aiTurn.depth = undoStack.length`（:120，**拿数组下标当深度**）、`undoStack.slice(turn.depth)`（:138）、
+  合并 `[...slice(0, turn.depth), merged].slice(-HISTORY_LIMIT)`（:155）。
+  截断从**头部**丢而 `depth` 按下标记 → 栈满后 `slice(depth)` 恒为空 → 走 `batch.length === 0` 分支：
+  只清 `aiTurn`、什么都不合并；`commitTurn` 又忽略了返回值，失败无人知晓。
+- **建议**：`depth` 改存**稳定标识**（entry id，或"距尾部偏移"），合并时按标识定位；返回值接到调用点，失败至少落一行日志。
+- **验收**：自检断言——把栈填满 `HISTORY_LIMIT` 后再做一轮三步改动，`undo()` 一次即回起点。
+
+### F2 多标签下崩溃恢复只覆盖「激活标签」（P0）
+
+- **现象**：一个窗口开 A/B 两标签、都改过未保存 → 崩溃后只能恢复最后激活的那个；README 却笼统承诺"30 秒自动保存 + 崩溃恢复"。
+- **证据**：`main/autosave.ts`（自动存档按**窗口**分槽 slot-N，不是按标签）；
+  `main/ipc/document.ts` 的 `writeFileAtomic(autosaveFile(state.slot), bytes)` 只写激活标签；
+  `app/use-autosave.ts` 只送 `activeDocId()`；`app/use-document-actions.ts` 任一次保存就把整槽 `clearAutosave()`。
+- **建议**：槽位按标签分文件（slot-N-doc-M）；或单文件内改存多文档；至少"非激活标签有未保存改动时不清空槽位"。
+- **验收**：自检覆盖"两标签都脏 → 存档序列化含两份"；真机：两标签各改一笔 → 强杀 → 看恢复提示覆盖两个。
+
+### F3 保存期间的新编辑被 `markSaved()` 一并标成「已保存」（P1，窄窗口竞态）
+
+- **现象**：写盘那几十到几百毫秒里继续打字，这些改动没落盘却被标记已保存 → 之后关窗不再提示，静默丢失。
+- **证据**：`app/use-document-actions.ts`：`const state = useEditor.getState()` 取快照 → `await saveToPath(...)`
+  → `useEditor.getState().markSaved(state.filePath)` 无条件置假；`store/slices/document.ts` 的 `markSaved` 直接 `set({ dirty: false })`。
+- **建议**：给文档加"保存代次"（`mutate` 自增），`markSaved` 只在代次未变时置 `dirty: false`。
+- **验收**：自检断言"保存期间有改动 → 仍 dirty"。
+
+### F4 `moveTopic` 在「目标父级不存在」时改了树却返回 false（P2）
+
+- **现象**：拖拽/批量移动时若目标父级已被删除或收起，节点被挂到**根下**且保留自由摆放偏移，
+  调用方却按"没移动"处理——不收尾、不计入结果、不更新选中。
+- **证据**：`shared/model/tree.ts` 的 `moveTopic`：先 `detachTopic`，`if (!parent) { attachChild(root, node, index); return false }`；
+  `store/slices/move.ts` 的 `if (!moveTopic(...)) continue` 跳过位置清理，`if (ok) settleAfterMove(...)` 也不执行。
+- **建议**：二者选一——要么真的不移动（原样挂回再返回 false），要么返回 true 让调用方按"移到根下"收尾。
+- **验收**：自检断言"目标父级不存在 → 树与调用前逐字相同"或"→ 挂到根下且 position 已清理"。
+
+### F5 自动存档计时恒为 ~0，并污染 AI 回合的耗时归属行（P3，诊断可靠性）
+
+- **现象**：为抓"回合结束后冻结"埋的计时点量到的是"发起 IPC 的时间"，永远看不到真实写盘开销。
+- **证据**：`app/use-autosave.ts` 的 `const endSave = beginCost('自动存档快照')` → `void window.api.autosave(...)`（**没有 await**）
+  → 紧接 `endSave()`；`dev/stage.ts` 的 `beginCost` 是纯同步计时器，`reportCosts` 会把 `costs` 表里所有条目拼进那一行。
+- **建议**：`await` 后再 `endSave()`（或 `.finally`）；不想阻塞就换个不进 `costs` 表的名字。
+- **验收**：真机跑一次自动存档，诊断行里该条耗时应与实际写盘量级一致。
+
+**2026-09-21 处置**：按用户决定，**本轮只登记不改**（先把「关系线/概要富文本 + 高亮」两条需求做完）。
+其中 F1 / F2 / F3 都满足「静默失败 + 伤数据」两条，建议尽早排一轮；F5 是取证链路的可靠性问题，改动最小、可顺手做。
