@@ -2,6 +2,8 @@
 
 > **审查者**：质检/文书侧（**本轮零代码改动**，只做只读审查）
 > **审查基线**：`HEAD da0f478`（只看**已提交**代码；未提交的工作树改动不在范围内）
+> **第二轮复验**：同日 21:1x，基线推进到 `HEAD cbc1ead`（工作树干净）→ **见 §7**（含新发现 **D-16**，🔴 P0）
+> **第三轮复验**：同日 21:3x，基线推进到 `HEAD f66b073` → **见 §8**（8 条已修逐条取证 + 清单口径纠正 + 新登记 **D-17**）
 > **方法**：逐文件读代码 + 目录级存在性扫描 + 关键结论当日实跑（五道门槛 / 线上 CH 校验）
 > **本文件用途**：交给代码 agent 逐条修复。每条都给了**证据（file:line）→ 触发路径 → 影响 → 修法建议 → 验收判据**。
 
@@ -22,6 +24,9 @@
 | 🟠 P1 正确性 | 5 | AI 对浮动主题整块失明 / 上下文压缩漏一段 / 重复调用拿旧结果 / 组词期加宽无效 / 两个 effect 抢写宽度 |
 | 🟠 P1 用户已复现 | 1 | **清空标题后节点不缩回**（D-14；用户 2026-09-21 判定为缺陷，需先按 §3 探针定死机制） |
 | 🟡 P2 一致性 | 6 | 改树却报失败 / index 负数静默夹取 / 诊断计时失效 / 监听器泄漏 / AI 清空型写操作缺确认（方案已定稿）/ 启动时发两次更新检查（D-15） |
+
+**2026-09-21 晚追加（§7 复验结论）**：**D-16**（🔴 P0，上传脚本不产 `rt.yml` → 0.9.2 的"首跑验收"会**假通过**）＋ **D-01 已由 `cbc1ead` 修复并通过复核** ＋ **D-15 仍未落地** ＋ **A3 属"已交付但实测无效"**（= D-07，口径要纠正）。
+**2026-09-21 深夜追加（§8 复验结论）**：**总账 17 条**（原 15 + D-16 + **新 D-17**）；**已修 8 条**（D-01/D-03/D-09/D-10/D-11*/D-12/D-15/D-16，其中 **D-11 只做了前一半**）；**剩余 9 条**（D-02/D-04/D-05/D-06/D-07/D-08/D-13/D-14/**D-17**）；自检 **2852**，五道门槛全绿；待推 **14** 条。
 
 **这些都不是解耦搬坏的**：逐条追过，逻辑在搬迁前就存在（`history.ts` 的头注还明写「`HISTORY_LIMIT` 截断……一律逐字未改」）。
 **真正的成因**：自检 2791 项断言**全部落在纯函数上**，而下面 15 条里只有 2 条本来就能被纯函数覆盖（见 §5）。
@@ -605,10 +610,245 @@ src/main/update/index.ts:52      let lastCheckAt: number | null = null
 
 - 五道门槛（每道单独打印退出码，日志重定向前先确认目录存在）：
   `npm run typecheck && npm run lint && npm run format:check && npm run selfcheck && npm run verify`
-- 自检基线：**2791 项**（只增不减）
+- 自检基线：**2791 项**（只增不减；2026-09-21 晚复验时已推进到 **2838**，见 §7.7）
 - 复现浮动主题：`samples/` 里的 `.xmind` 无浮动主题，需要**新造**一份（`xmind/serialize.ts` 支持 `children.detached`）或用带浮动主题的真实 Xmind 文件
 - 复现组词期折行：需真实中文输入法（无法在自检里造），但可以用合成 `CompositionEvent` 脚本复现
 - 复现 D-01：不需要真实 AI，直接对 `useEditor.getState()` 连续调用 store 动作填满撤销栈即可
+
+---
+
+## 7. 交付复验（2026-09-21 晚 · 第二轮）
+
+> **复验者**：同一质检/文书侧，**零代码改动**
+> **复验基线**：`HEAD cbc1ead`（工作树**干净**，无未提交改动）
+> **复验对象**：代码侧自报的 (a)(b)(c)(d) 四条交付
+> **复验方式**：`git show` 逐提交看改动面 + 逐个能力点读实现 + 当日实跑五道门槛 + 线上/脚本实况核对
+
+### 7.0 结论速览
+
+| 自报交付 | 复验结论 |
+|---|---|
+| (a) A1/A2/A3 + 公式插 python + 编辑态快捷键 **三批修复** | ✅ 三批都在提交里、都有断言；**但 A3 的修复被 CSS 抵消 → 功能等于没做**（= D-07，另有 D-08）。**这条不能算"已修"** |
+| (a) 0.9.2 + D3 源切回 OSS + `release/` 未被覆盖 | ✅ **复验通过**（时间戳 + SHA512 逐字比对，见 7.2） |
+| (a) D2 本机回环（T1/T2/T5/T6/T9/T10） | 🔶 记录在案；**T3 = D-15 至今未修**；**且 D4 会静默失败（新发现 D-16）** |
+| (b) F1–F5 登记进 `known-issues.md` | ✅ `3daedfe`，四段式 + `file:line` + 符号名（且自知"行号会漂、**符号名优先**"）｜⚠️ 只覆盖**第一轮** F1–F5；第二轮 D-04～D-15 仅在本报告 |
+| (c) overlay 文字做成真富文本 | 🔶 **部分完成，口径必须收紧**（见 7.3） |
+| (d) 格式栏 + 节点属性面板都加高亮 | ✅ `ba91793`，两个入口都在 |
+| 每批补断言 + 过五道门槛 | ✅ 断言 2759 → 2791 → 2832 → **2838**（只增不减）；五道门槛当日实跑全绿 |
+
+### 7.1 (b) 登记复验
+
+`3daedfe` → `docs/known-issues.md` **+60 行**，每条四段式（现象 / 证据 / 建议 / 验收），证据带 `file:line` 与符号名，开头即说明「行号以 `65d028a` 为基准、**符号名优先**」——**符合本报告对"登记"的要求** ✓
+
+⚠️ 范围差异：登记的是**第一轮 F1–F5**；第二轮 **D-04～D-15** 仍只存在于本报告（已随 `4d9b1e6` 落库），代码侧若按 `known-issues.md` 排期会漏掉它们。
+
+### 7.2 (a) 三批修复 + D3 —— 逐条取证
+
+| 项 | 提交 | 关键产物 | 复核结论 |
+|---|---|---|---|
+| A1 行内代码提交即丢 | `515aac2` | 新增 `shared/mono-font.ts`(24)、重写 `shared/inline-rules.ts`(83)、`richtext/index.ts`(+19)、`import/markdown/inline.ts` | ✅ 双向对齐（`code` mark ↔ 等宽 `fontFamily`），`code` 分支带 `fontFamily === undefined` 守卫 |
+| A2 中文紧贴 markdown | `515aac2` | 新增 `editor/cjk-inline-rules.ts`(51) | ✅ 边界含 CJK、不含字母数字，配 4 条反向断言 |
+| **A3 组词期宽度冻住** | `515aac2` | 新增 `editor/composition-width.ts`(36) + `RichTextEditor` 的 composition 处理 | ⚠️ **代码在、实测无效**：`.rich-editor__content` 是 `.topic__editor` 的 flex 子项且自身 `min-width: 0`，把 `max-width` 放开后 `width` 立刻被 **flex-shrink** 压回节点内宽 → 拼音照样折行（= **D-07**）。**放错了约束** |
+| 点「公式」插入 python | `4c001f5` | 新增 `nodePanel/code-draft.ts`(40) + `topic-branch.tsx` | ✅ |
+| 编辑态快捷键全失效 | `da0f478` | 新增 `app/shortcut-scope.ts`(52) + `use-keyboard-shortcuts.ts` | ✅ |
+| 0.9.2 + D3 源切回 OSS | `65d028a` | `package.json`(0.9.2) / `electron-builder.yml` / `.gitignore` | ✅ `release-rt/win-unpacked/resources/app-update.yml` = `https://dl.smindapp.cn/`；`release/` 五个资产时间戳仍 09-20 10:48，setup 实算 SHA512(base64) 与线上 `latest.yml` 那条**逐字一致** → **0.9.1 未被覆盖成立** |
+
+### 7.3 (c) overlay 富文本 —— 已完成 / 未完成（🔶 口径要收紧）
+
+**已完成**（`6c3f078`，15 文件 / +396 −103）
+- **数据层**：`Relationship` / `Boundary` / `Summary` 各加 `titleRich?: RichText`（`shared/model/types.ts`），纯文本 `title` 仍是主字段
+- **`.xmind` 往返**：`serialize.ts` + `parse.ts`；抽出 `buildExtensions` / `splitOurExtensions` **统一"写入 + 剔除"**，主题那条老路径也换过来共用 → **顺带消掉了本报告此前担心的"两条路径各写一份、迟早有一边忘了剔除"**
+- **布局与测量**：`overlayRunLines(rich, title)`、`OverlayLayout.titleRich`、`overlays/build.ts` 三个构造函数透传
+- **画布按 run 分段渲染**：新增 `canvas/overlay-title-runs.tsx`（三处共用一份"行 → tspan"）
+- **编辑入口**：`parseInlineRichText` 支持 `**粗体**` `*斜*` `~~删~~` `==高亮==` `^上标^` `~下标~` `` `等宽` ``；节点面板与画布双击编辑**走同一套解析**
+- 自检 2819 → **2832**
+
+**未完成（不能算在"已完成"里）**
+1. **图形化「选中几个字 → 点按钮加粗」没有做**（提交说明自己列为"下一批"）。`nodePanel/overlay-branch.tsx` 的字体/颜色按钮仍作用于**整块**（`setOverlayStyle(kind, item.id, { bold: !styleText.bold })`），面板提示原文即「…下面的字体与颜色**作用于整块**」。
+2. **"部分变色"做不到**：`parseInlineRichText` **没有颜色简写**，颜色只能整块设。
+
+→ **准确口径**：`部分加粗 / 高亮 / 等宽 / 上下标` 靠**手写标记**可表达；`部分变色` 与 `选中点按钮` **均未支持**。对内排期与对外说明都按这句写，别让它以"已完成"进 0.9.2 说明。
+
+### 7.4 🔴 新发现 D-16 · 上传脚本不产 `rt.yml` → rt.3 永远收不到真 0.9.2（**首跑验收会假通过**）
+
+**级别**：🔴 P0（会让 0.9.2 的"首跑验收"结论失真，且症状静默） ｜ **置信度：高**（读脚本 + 线上实测）
+
+**证据**
+```
+scripts/upload-oss.mjs:59-82   上传清单只有 4 项：
+                               setup.exe / portable.exe / latest.yml / setup.exe.blockmap
+                               —— **没有 rt.yml**
+```
+- rt 预发布构建的 `app-update.yml` 里是 `channel: rt` → electron-updater 的 `GenericProvider.getLatestVersion()` 会取 `getChannelFilename('rt')` = **`rt.yml`**；
+- 线上实测：`https://dl.smindapp.cn/rt.yml` = **404**，`latest.yml` = **200**。
+
+**为什么阶段一没事、阶段二会踩**
+D2 本机回环的服务器目录里放的是 **rt.2 的四个资产（含 `rt.yml`）**，channel 对得上，所以 T2 能通过；而 D4 的 ⑧ 是 `npm run mirror:oss` 上传**真 0.9.2**，产物清单名是 `latest.yml` → **rt.3 请求 `rt.yml` 得 404**。
+
+**影响**
+装 rt.3 的机器永远收不到更新，而"例行检查失败"是**刻意静默**的（`docs/auto-update-and-license-delivery.md` 的设计）→ 现场表现是"什么都没发生"，极易被误判为"更新链路坏了"并白跑一轮验收（**这是本轮最贵的一个坑**）。
+
+**修法（零成本，二选一）**
+1. `upload-oss.mjs` 的 `targets` 增一条 `rt.yml`（内容 = `release/latest.yml` 另存，`contentType` 同 `latest.yml`）；
+2. 或 D4 上传完手工把 `latest.yml` 复制成 `rt.yml` 对象。
+
+**验收判据**：`curl -I https://dl.smindapp.cn/rt.yml` = **200**；rt.3 在 45 秒~数分钟内日志出现 `updater` 检查成功并收到 0.9.2（版本号随之变化）。
+
+### 7.5 其他两条待收口
+
+**7.5.1 测试方案 §3 与 §5 的版本号口径打架**
+`docs/auto-update-test-plan.md` §3 表格写阶段二装 **`0.9.2-alpha.1`**，§5 执行步骤写 **`0.9.2-rt.3`**；同文件「版本号安排（2026-09-21 修订）」已统一为 `rt.1 / rt.2 / rt.3` → **§3 是过时残留**，照它打会打错版本号，并让 §5 的 ⑦⑧ 对不上。
+
+**7.5.2 D-15（代码侧称 T3）至今未修**
+`git log -- src/shared/update-policy.ts src/main/update/index.ts` 最新仍是 `43aadc1`。裁决见 §3b/D-15：**批准修，属 §8 红线的受控例外**（只改 `lastCheckAt === null` 分支 + 给 45 秒定时器加守卫 + 三条断言钉住语义）。
+
+### 7.6 顺带确认：D-01 已修，且**修法正确、无过修**
+
+`cbc1ead`（3 文件 / +99 −9）即本报告 D-01，**采了首选方案**并有三点加分：
+- 用**单调递增 `turnSeq`** 取代"入栈下标"：`aiTurn: { turnSeq, selectionBefore }` + 新增 `aiTurnSeq: number`；`commitAiTurn` 改为 `undoStack.filter((e) => e.turnSeq === turn.turnSeq)`；
+- **合并条目插回本回合第一条的位置**（不是一律追加到末尾）→ 回合内夹着手动改动时撤销次序不会乱；
+- **跨回合不参与 coalesce**（`canMerge` 增加 `last.turnSeq === turnSeq`）→ 防两轮 AI 粘成一步。
+新增 6 条断言，其中两条正是本报告的判据（"栈满后一条覆盖三处"＋"一次 `undo()` 三处全回退"）；提交信息并**如实交底 D-02 / D-03 未做**。
+✅ **复核结论：通过**（判据全部满足，未过修）。
+
+### 7.7 复验当日的门槛状态（实跑）
+
+| 门槛 | 结果 |
+|---|---|
+| `typecheck` | ✅ exit 0 |
+| `lint --max-warnings 0` | ✅ exit 0 |
+| `format:check` | ✅ exit 0 |
+| `selfcheck` | ✅ **2838 项** |
+| `verify` | ✅ 21 `.xmind` + 4 `.emmx` 全部往返一致 |
+
+> 注：本报告 §5 的诊断依然成立——2838 项仍**全部落在纯函数上**，D-07 / D-08 / D-14（CSS × DOM × effect）与 D-16（脚本产物清单）纯函数盖不住，这也是这轮"全绿但仍有假账"的原因。
+
+---
+
+## 8. 第三轮复验（2026-09-21 深夜 · 批 A 与更新链路）
+
+> **复验基线**：`HEAD f66b073`（工作树仅本文件未提交）
+> **复验对象**：代码侧自报「**14 条 → 已修 6 条**」及下一轮清单
+> **一句话结论**：**实际已修 8 条、且逐条取证通过**（不止 6 条 —— **D-15 / D-16 也已修掉**）；**清单口径有三处要纠正**；**新登记 D-17**。
+
+### 8.1 已修 8 条 · 逐条取证
+
+| # | 提交 | 复验结论 |
+|---|---|---|
+| D-01 | `cbc1ead` | ✅ 见 §7.6（`turnSeq` 取代下标，修法与判据一致，无过修） |
+| D-09 | `517fc6b` | ✅ 采**推荐方案**（记原位 → 放回 → 如实返 `false`）。**重点验的一环**：`findParent` 走 `walk`（两类子节点都走）且额外用 `originDetached` 标记落点 → **浮动主题也放得回原位**，这条过得干净 |
+| D-10 | `517fc6b` | ✅ 语义下沉到树层 `attachChild`（`-1`=末尾、`<=-2` 倒数），规划层不再夹取。旧行为里 `-1` 本来就是"追加到末尾"，**只有 `<=-2` 才改变行为** → 影响面可控；并补了「`0` 仍落最前」防改坏正常语义 |
+| D-11 | `517fc6b` | 🔶 **部分完成**：`.finally(endSave)` 已做；报告里的「同时标记为**后台任务**、不要混进 AI 回合耗时归属行」**未做，且提交信息未交底**（属"静默半成品"） |
+| D-12 | `517fc6b` | ✅ `detachRef` + hook 最外层 cleanup effect 兜底，机制正确 |
+| D-03 | `49fccfe` | ✅ `docRevision` + `markSaved(path, revision)`，判据正确（`dirty: docRevision === revision ? false : dirty`）；两个保存调用点都传了代次；顺带暴露并修掉一处旧断言少参数（说明签名变更被类型网兜住） |
+| D-15 | `f66b073` | ✅ 与 §3b 给的修法**逐字一致**（`null → false` + 45s 定时器守卫 + 三条断言 + `auto-update-test-plan.md` §8 措辞同步）。**加分**：主动发现并改掉一条"把错行为钉死"的旧断言，且交底了实测失败数（2851/1）。⚠️ 未做：本机未重跑 T3（需真机构建，随 rt.3/D4 一起验） |
+| D-16 | `03343ab` | ✅ 加 `rt.yml` target，`sourceName: 'latest.yml'` 指回同一份内容、对象名 `rt.yml`、`text/yaml` —— 正是 §7.4 的方案；HEAD/PUT 仍按对象名走，跳过已传逻辑不受影响。**诚实交底**：本机无 AK，未真传，验收待 D4。⚠️ 这条**没有任何回归网**（`.mjs` 无断言，建议补一条静态断言钉住 `targets` 里有 `rt.yml`） |
+
+### 8.2 清单口径三处纠正
+
+1. **总数不是 14，是 17**（原 15 + D-16 + 新 D-17）；**已修 8**、**剩余 9**：D-02、D-04、D-05、D-06、D-07、D-08、D-13、D-14、**D-17**。
+   代码侧把 **D-15 从"剩余"里漏掉了** —— 它其实已经修掉，所以"8 条"这个数字碰巧对上了，但**来源是错的**。这种"清单与仓库不同步"正是 0.9.2 前最该避免的：下一个人会照清单干活。
+2. **下一轮顺序自相矛盾**：正文写「下一轮第一优先就是 D-07/D-08」，而编号清单里它排第 **4**（在 D-06/D-04/D-05 之后）。**以正文为准**，理由见 8.3。
+3. **待推不是 13 条**：`git status -sb` = `main...origin/main [ahead 14]`（差的那条是 `f66b073`）。
+
+### 8.3 下一轮排序建议（与代码侧清单的三处差异）
+
+| 顺序 | 项 | 为什么排这里 |
+|---|---|---|
+| **1** | **D-07 + D-08（+ D-14 探针）** | 用户已复现（4 张截图）；且 **A3 那条"修复"目前是假账**（放开的是 `max-width`，卡住的是 flex `shrink`）。D-08 的"宽度只留一个写入点"同时是 D-14 丙类根因的解 → 三条一起做最省 |
+| **2** | **D-17**（新，待裁决） | 见 8.4：**可能把 B 的内容写进 A 的文件** |
+| 3 | D-02 | 剩余里最大一块（`main/autosave.ts` + IPC + 恢复链），要留足时间，别压在 D4 前 |
+| 4 | D-06 | 改动最小（`docRevision` 已就位，只需接上去重键） |
+| 5 | D-04 | 7 处 + 静态口径断言，性价比高但纯 AI 侧、用户不可见 |
+| 6 | D-05 / D-13 / D-14 | D-14 必须先跑探针取证再动手 |
+
+### 8.4 🟠 新登记 D-17 · 保存期间切标签 → `markSaved` 落到**另一个文档**（可能覆盖别的文件）
+
+**级别**：🟠 P1（**潜在数据丢失**，窗口窄但静默） ｜ **置信度：高（四环读码闭环，未做运行时确认）**
+
+**证据（四环缺一不可）**
+```
+① 发起写盘时抓快照与代次，然后 await
+   src/renderer/src/app/use-document-actions.ts:63-65
+     const state = useEditor.getState(); const revision = state.docRevision
+     await window.api.saveToPath(activeDocId(), state.filePath, state.workbook)
+     useEditor.getState().markSaved(state.filePath, revision)      ← 此刻可能已是**另一个文档**
+② 切标签会**换掉**编辑器里的当前文档（不等在途保存）
+   src/renderer/src/store/tabs.ts:184-187   switchTo: commitEditing() → applyToEditor(target)
+   src/renderer/src/store/tabs.ts:209       closeTab 关掉激活标签时同理
+③ applyToEditor **不动 docRevision**，快照里也根本没捕获它（:80-108）
+   → 代次在切标签后**仍然相等**，「dirty 判据」拦不住
+④ markSaved 的 filePath 是**无条件**写的
+   src/renderer/src/store/slices/document.ts:131-135
+     markSaved: (path, revision) => set((state) => ({ filePath: path,
+                                     dirty: state.docRevision === revision ? false : state.dirty }))
+```
+**触发路径**：大文档（带图片/附件，`serializeXmind` 实测可到数百毫秒）按 Ctrl+S → 写盘未回来时点另一个标签（或关掉当前标签）→ `applyToEditor` 换文档 → 写盘回来执行 `markSaved(A 的 path, A 的代次)` → **B 文档拿到 A 的 `filePath`，且 `dirty: false`**。
+**后果**：此后在 B 上按 Ctrl+S → `saveToPath(activeDocId(), state.filePath /* A 的路径 */, state.workbook /* B 的内容 */)` → **把 B 的内容写进 A 的文件**；而界面全程没有任何异常提示。
+
+**修法建议（与 D-03 同源，把"代次"升级成"身份 + 代次"）**
+- `markSaved(path, docId, revision)`：`docId` 用保存发起时的 `activeDocId()`；返回时若 `docId !== activeDocId()` 则**既不写 `filePath` 也不清 `dirty`**（这笔写盘对当前文档毫无意义）；
+- 或者更彻底：切标签时**作废在途保存**（保存回调只认自己那一份文档快照）。
+- 不要用「切标签时重置 `docRevision`」来治 —— 那会让"保存期间切回来"的判定更乱。
+
+**验收判据**
+- 断言：「保存返回时 `docId` 已变 → `filePath` 不变且仍脏」；
+- 断言（回归网）：「同一文档、代次未变 → 正常清脏」（防改过头）；
+- 手工：打开两个标签，在大文档上 Ctrl+S 后**立刻**点另一个标签，确认两个标签的 `filePath` 都没被串改、标题栏 `●` 状态正确。
+
+### 8.5 门槛与推送（当日实跑）
+
+| 项 | 实况 |
+|---|---|
+| 五道门槛（`HEAD f66b073`） | ✅ `typecheck` / `lint` / `format:check` / `selfcheck` / `verify` **全绿** |
+| 自检断言 | **2852**（2791 → 2832 → 2838 → 2844 → 2849 → 2852，「只增不减」成立） |
+| 待推提交 | **14 条**（`main...origin/main [ahead 14]`）—— 沙箱网络不通，等本机推 |
+| 工作树 | 仅本文件（§7/§8）未提交 |
+
+> **口径提醒（给下一个人）**：D-15 那批**修改了一条既有断言**（把错行为钉死的那条）。这类改法是允许的（被改的断言本身在钉 bug），但**必须逐条交底**——本轮交了 ✓。"只增不减"指的是**净增**，不是"一行都不许动"。
+
+---
+
+## 9. 第四轮复验（2026-09-21 深夜 · 收尾三批 + D-02 放行裁决）
+
+> **复验基线**：`HEAD 7030a3a`（五道门槛实跑全绿，自检 **2852**，待推 **15** 条）
+
+### 9.1 三批取证
+
+| 批 | 提交 | 复核结论 |
+|---|---|---|
+| B1 · D-16 | `03343ab` | ✅ 见 §8.1（`rt.yml` 换对象名上传，方案与 §7.4 一致） |
+| B4 · D-15 | `f66b073` | ✅ 见 §8.1（与 §3b 修法逐字一致 + 交底旧断言改动） |
+| B5 · 文书两处 | `7030a3a` | ✅ `0.9.2-alpha.1` → `0.9.2-rt.3`（§3 表格 + 段说明）；`known-issues.md` 新增「已修 / 未修 + overlay 口径收紧」，**并把 A3 实测无效写进去、明确"不得按已修记账"** —— 这是本轮最该表扬的一处（主动认账 + 写进排期文件，不靠口头）。⚠️ 残留一处：`auto-update-test-plan.md:19` 仍以 `0.9.2-alpha.1` 举例（属**示例文本**非规格，可选统一） |
+
+**未做（如实交底）**：**D-07 / D-08**，自述理由是「验证链（真机 8 音节不折行 + 单一写入点 + Electron 合成 composition 量 `getBoundingClientRect()`）这轮预算做不完，不盲改」——**这个理由我认可**，A3 的教训恰恰就是"改了代码就当修好了"。但它仍是**用户可见项 + 一条假账待平**，必须排下一批第一条。
+
+### 9.2 D-02 的 IPC 契约受控例外 · **批准**（改动面比报告写的大，必须分两步）
+
+**放行的核心安全理由**：本仓库 IPC 契约集中在 `src/shared/ipc.ts` 一处且全程有类型 → **改签名会被 `typecheck` 全量兜住**，风险有界。这比"没人拦得住的样式/时序改动"更可控，所以这条例外可以批。
+
+**但实际改动面不止 `clearAutosave` 一处**（读码清单）
+```
+shared/ipc.ts:251-266        autosave(docId,…) / clearAutosave() / recoveryCheck() / recoveryLoad(docId) / recoveryDiscard()
+main/autosave.ts:18-19       autosaveFile(slot) / autosaveMeta(slot)   ← 按**窗口**命名，docId 根本没进文件名
+main/ipc/document.ts:84-105  autosave 写 state.slot；autosaveClear 删掉**整个 slot**
+main/ipc/recovery.ts:19-77   recoveryCheck / recoveryDiscard 全按 slot；recoveryLoad 读 slot 后再挂到入参 docId 名下
+main/windows.ts:248-257      窗口关闭时删本窗口的 slot 文件
+app/use-window-close.ts:72   关窗时 clearAutosave()
+```
+→ **只给 `clearAutosave` 加参数不够**：`recoveryCheck()` 仍按窗口只认一份，非激活标签的存档**即便写了也没人恢复**。
+
+**分两步（本批别一口吃下）**
+- **第 1 步（本批）**：`autosave` 按 `(slot, docId)` 落文件 + `clearAutosave(docId)` 只清那一份 + `recoveryCheck` 返回**列表**（退一步：先返回"最近一份 + 总数"）+ `recoveryLoad(docId)` 读对应文件；**窗口关闭仍清本窗口全部**（`windows.ts` 与 `use-window-close` 两处都要覆盖，漏了就出"幽灵恢复"）。
+- **第 2 步（单开一批）**：恢复 UI 支持逐份 / 全部恢复（当前是单份对话框）。
+
+**⚠️ 必须防的半修**：若写了 `slot-docId.xmind` 而恢复侧仍读 `slot.xmind`，多标签恢复会从"只恢复一份"退化成"**一份都恢复不了**"。所以第 1 步必须**写读同时改**并带断言；做不完就在 `known-issues.md` 写"未修"，**不许留半截**。
+
+**断言要求**：① 两个 docId → 两个不同文件；② `clearAutosave(A)` 不动 B；③ **不传 `docId` 时不得删任何文件**（fail-safe，防漏改调用点变成"清全窗"）；④ "关窗清全部"这条路径仍成立。
+
+### 9.3 顺带修掉一处仓库自洽问题
+
+`known-issues.md`（`7030a3a` 已提交）引用了报告 **§7 / §7.1**，而报告 §7/§8 当时**尚未提交** → 别人 checkout 会找不到该节（悬空引用）。已在本轮随本文件一并提交。
 
 ---
 
@@ -618,3 +858,6 @@ src/main/update/index.ts:52      let lastCheckAt: number | null = null
 - 线上：`smindapp.cn` 首页/下载页、`dl.smindapp.cn/latest.yml`、setup HEAD，均为当日实测
 - 代码：逐文件读 + 目录级 `detachedChildren` 存在性扫描（`src/shared` 命中 14 文件 / `shared/agent/**` 零命中）
 - 用户复现：中文输入法组词期折行 4 张截图（2026-09-21）
+- **第二轮复验（§7）**：`git show 515aac2 / 4c001f5 / da0f478 / 65d028a / ba91793 / 3daedfe / 6c3f078 / cbc1ead` 逐提交看改动面；
+  `scripts/upload-oss.mjs` 与 `scripts/upload-mirror.mjs` 全文实读；`nodePanel/overlay-branch.tsx` 全文实读；
+  线上 `dl.smindapp.cn/{latest.yml,rt.yml}` HEAD、`release/` 资产时间戳与 SHA512 实算比对；五道门槛实跑（`selfcheck` 2838 项）
