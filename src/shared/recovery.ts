@@ -9,6 +9,21 @@
 import { isRecord } from './guards'
 
 /**
+ * 该清哪些存档（纯函数，主进程与自检共用）。
+ *
+ * - 给了 `docId` → **只删它那一份**：别的标签的存档不能动，那正是 D-02 的成因；
+ * - **没给 `docId` → 一份都不删**（fail-safe）：漏改的调用点绝不能退化成"清全窗"。
+ *   关窗要清全部，走的是另一条显式路径（main/windows.ts 枚举本窗口所有 docId）。
+ */
+export function autosaveKeysToClear(
+  keys: readonly string[],
+  docId: string | undefined | null
+): string[] {
+  if (!docId) return []
+  return keys.filter((key) => key === docId)
+}
+
+/**
  * 自动存档的文件名主干：`<slot>-<docId>`（纯函数；主进程拿它拼路径，自检直接断言）。
  *
  * 为什么必须带 docId：一个窗口可以开多个标签，而自动存档的定时器只送**激活**标签的快照 ——

@@ -7,7 +7,7 @@ import {
   type RefObject,
   type SetStateAction
 } from 'react'
-import { tabTitleOf, useTabs } from '../store/tabs'
+import { activeDocId, tabTitleOf, useTabs } from '../store/tabs'
 import { useEditor } from '../store/editor'
 
 /**
@@ -69,7 +69,8 @@ export function useWindowClose({ commitPending, recoveryPendingRef }: Deps): Api
     }
     void (async () => {
       try {
-        await window.api.clearAutosave()
+        // 清当前这份；同一窗口其它标签的存档由主进程在窗口关闭时统一清（见 main/windows.ts）
+        await window.api.clearAutosave(activeDocId())
       } catch {
         /* 忽略：清不掉也不该阻塞关闭 */
       }

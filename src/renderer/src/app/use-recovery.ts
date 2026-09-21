@@ -31,7 +31,9 @@ export function useRecovery({ recoveryPendingRef, showToast }: Deps): Api {
   useEffect(() => {
     void (async () => {
       try {
-        const info = await window.api.recoveryCheck()
+        // 逐份恢复的 UI 另开一批；本批先按"最近一份"提示（列表按 savedAt 倒序）
+        const list = await window.api.recoveryCheck()
+        const info = list.items[0] ?? null
         if (info) {
           recoveryPendingRef.current = true
           setRecovery(info)
@@ -43,12 +45,14 @@ export function useRecovery({ recoveryPendingRef, showToast }: Deps): Api {
   }, [recoveryPendingRef])
 
   const handleRestore = useCallback(async (): Promise<void> => {
+    // 记住要恢复的是**哪一份**存档（setRecovery(null) 之后就问不到了）
+    const savedDocId = recovery?.docId
     setRecovery(null)
     try {
       // 分步打点：「点恢复就卡死」这类问题必须能看出卡在哪一步
       // （否则只能看到"卡住了"，连是读存档还是画布渲染都不知道）
       setStage('恢复：读取存档')
-      const result = await window.api.recoveryLoad(activeDocId())
+      const result = await window.api.recoveryLoad(activeDocId(), savedDocId)
       if (result) {
         setStage('恢复：载入工作簿')
         useTabs.getState().openWorkbook(result.workbook, result.path || null)
@@ -62,7 +66,7 @@ export function useRecovery({ recoveryPendingRef, showToast }: Deps): Api {
     } finally {
       recoveryPendingRef.current = false
     }
-  }, [showToast, recoveryPendingRef])
+  }, [showToast, recoveryPendingRef, recovery])
 
   const handleDiscardRecovery = useCallback((): void => {
     recoveryPendingRef.current = false

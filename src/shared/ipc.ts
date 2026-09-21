@@ -93,7 +93,15 @@ export interface PickedAttachment {
   mime: string
 }
 
+/** 崩溃恢复候选列表：一个窗口开过几个标签就可能有几份（UI 逐份恢复另开一批） */
+export interface RecoveryList {
+  items: RecoveryInfo[]
+  total: number
+}
+
 export interface RecoveryInfo {
+  /** 这份存档属于哪个文档（逐份恢复要用它定位文件；升级前的旧存档可能没有） */
+  docId?: string
   /** 自动保存时对应的原始文件路径，全新未保存的文件为 null */
   originalPath: string | null
   title: string
@@ -254,16 +262,28 @@ export interface MindApi {
     originalPath: string | null,
     title: string
   ): Promise<void>
-  clearAutosave(): Promise<void>
+  /**
+   * 清掉**这一份**自动存档（必填 docId）。
+   *
+   * 以前它不带参数、直接清掉整个窗口槽位 —— 于是任一标签保存一次就会把同一窗口里别的标签的
+   * 未保存存档一并删掉，多标签下崩溃即不可恢复（报告 D-02）。
+   * **没传 docId 时主进程一份都不删**（fail-safe）：漏改的调用点不会退化成"清全窗"。
+   * 关窗要清全部，由主进程在窗口关闭时显式枚举（main/windows.ts），不经这条通道。
+   */
+  clearAutosave(docId: string): Promise<void>
   /**
    * 释放一个文档的残留资源（标签关闭时调用）：
    * 主进程丢掉这个 docId 的图片/附件资源表。
-   * 自动存档不在这里清——它按窗口槽位存，由 clearAutosave / 正常关窗负责。
+   * 自动存档按「窗口 + 文档」分文件（`slot-N-docId.xmind`），不在这里清：
+   * 标签关闭时由 `clearAutosave(docId)` 清那一份，正常关窗由主进程清本窗口全部（见 D-02）。
    */
   releaseDoc(docId: string): Promise<void>
-  recoveryCheck(): Promise<RecoveryInfo | null>
-  recoveryLoad(docId: string): Promise<OpenResult | null>
-  recoveryDiscard(): Promise<void>
+  /** 崩溃恢复候选：一个窗口开过几个标签就可能有几份（UI 逐份恢复另开一批，本批只把数据备好） */
+  recoveryCheck(): Promise<RecoveryList>
+  /** @param savedDocId 要恢复的**存档**所属文档；缺省时读「最近一份」副本 */
+  recoveryLoad(docId: string, savedDocId?: string): Promise<OpenResult | null>
+  /** @param savedDocId 只丢这一份；缺省时丢掉本窗口**全部**自动存档（"不恢复"与关窗都走这条） */
+  recoveryDiscard(savedDocId?: string): Promise<void>
   confirmClose(): void
   /** 未保存确认框里点了「取消」：告诉主进程放弃这次关闭（并复位退出流程标记） */
   closeCancel(): void

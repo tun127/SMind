@@ -19,8 +19,10 @@ import {
   autosaveFile,
   autosaveMeta,
   latestAutosaveFile,
-  latestAutosaveMeta
+  latestAutosaveMeta,
+  listAutosaveDocIds
 } from '../autosave'
+import { autosaveKeysToClear } from '@shared/recovery'
 import type { MainContext } from '../context'
 import { MINDMAP_EXTENSIONS } from '@shared/openfile'
 
@@ -103,7 +105,7 @@ export function registerDocumentIpc(ctx: MainContext): void {
         title: title || '未命名导图',
         savedAt: Date.now()
       }
-      // 元信息也要原子写：它是"这次自动保存对应哪份原稿"的唯一凭证，
+      // 元信息也要原子写：它是「这次自动保存对应哪份原稿」的唯一凭证，
       // 半截 JSON 会让恢复功能读不出标题与原路径（正文却好端端地在那儿）
       await writeJsonAtomic(autosaveMeta(state.slot, docId), meta)
       // ????????????????recovery.ts ???????????????
@@ -111,21 +113,27 @@ export function registerDocumentIpc(ctx: MainContext): void {
       await writeJsonAtomic(latestAutosaveMeta(state.slot), meta)
     }
   )
-  ipcMain.handle(IPC.autosaveClear, async (e): Promise<void> => {
+  ipcMain.handle(IPC.autosaveClear, async (e, docId?: string): Promise<void> => {
     const state = ctx.stateOf(e.sender)
     if (!state) return
     /**
-     * **??????????????????**?????????
+     * **只清这一份**。
      *
-     * ????? autosaveFile(state.slot)???????**????????**????????
-     * ??????????????? ?? ????? D-02 ????????????????????
+     * 以前这里不带参数、直接删掉整个窗口槽位，于是**任一标签保存一次**就会把同一窗口里
+     * 别的标签的未保存存档一并删掉 —— 那正是报告 D-02 里「非激活标签崩溃不可恢复」的成因。
+     * 现在走 `autosaveKeysToClear`：**没给 docId 就一份都不删**（fail-safe，漏改的调用点
+     * 不会退化成"清全窗"）；关窗要清全部由 `main/windows.ts` 显式枚举每一份。
      */
-    const docId = lastAutosaveDocIds.get(state.slot)
-    if (docId) {
-      await fs.rm(autosaveFile(state.slot, docId), { force: true })
-      await fs.rm(autosaveMeta(state.slot, docId), { force: true })
+    const targets = autosaveKeysToClear(await listAutosaveDocIds(state.slot), docId)
+    if (targets.length === 0) return
+    for (const key of targets) {
+      await fs.rm(autosaveFile(state.slot, key), { force: true })
+      await fs.rm(autosaveMeta(state.slot, key), { force: true })
     }
-    await fs.rm(latestAutosaveFile(state.slot), { force: true })
-    await fs.rm(latestAutosaveMeta(state.slot), { force: true })
+    // 「最近一份」副本只在它确实属于刚清掉的那份时才删（否则会破坏别的标签的恢复）
+    if (lastAutosaveDocIds.get(state.slot) === docId) {
+      await fs.rm(latestAutosaveFile(state.slot), { force: true })
+      await fs.rm(latestAutosaveMeta(state.slot), { force: true })
+    }
   })
 }

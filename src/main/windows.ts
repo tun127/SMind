@@ -11,7 +11,13 @@ import { pickDocumentArg } from '@shared/openfile'
 
 import { autosaveSlotName, sameDocPath } from '@shared/window'
 import { type DocWindow } from './context'
-import { latestAutosaveFile, latestAutosaveMeta } from './autosave'
+import {
+  autosaveFile,
+  autosaveMeta,
+  latestAutosaveFile,
+  latestAutosaveMeta,
+  listAutosaveDocIds
+} from './autosave'
 import { windowOwningPath } from './window-match'
 
 /* ------------------------------------------------------------------ */
@@ -250,8 +256,16 @@ export function createWindow(
     // 正常关闭（含"丢弃未保存改动"）＝不再需要这份自动存档：
     // 留着它，下次启动的窗口认领同一槽位时会弹出一个"幽灵恢复"。
     // 真崩溃时这个事件不会触发，存档照旧留着给恢复用。
-    void fs.rm(latestAutosaveFile(state.slot), { force: true })
-    void fs.rm(latestAutosaveMeta(state.slot), { force: true })
+    // 「窗口关闭 = 清本窗口全部自动存档」这条语义要覆盖**每一份** per-doc 存档：
+    // 只删「最近一份」会留下同窗口其它标签的存档，下次启动认领同一槽位就弹幽灵恢复（D-02）
+    void (async () => {
+      for (const docId of await listAutosaveDocIds(state.slot)) {
+        await fs.rm(autosaveFile(state.slot, docId), { force: true })
+        await fs.rm(autosaveMeta(state.slot, docId), { force: true })
+      }
+      await fs.rm(latestAutosaveFile(state.slot), { force: true })
+      await fs.rm(latestAutosaveMeta(state.slot), { force: true })
+    })()
     // 画布副本的临时文件：窗口关了就没用了
     if (state.copySource) void fs.rm(state.copySource, { force: true })
   })

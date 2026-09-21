@@ -161,7 +161,7 @@ import {
 import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
 import { codeDraftPatch } from '../../../src/renderer/src/components/nodePanel/code-draft'
 import { shouldHandleGlobalShortcut } from '../../../src/renderer/src/app/shortcut-scope'
-import { autosaveKeyOf } from '../../../src/shared/recovery'
+import { autosaveKeyOf, autosaveKeysToClear } from '../../../src/shared/recovery'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1774,6 +1774,19 @@ export function testRichText(): void {
 
   /* ---- D-02：自动存档按「窗口 + 文档」分文件 ---- */
   group('自动存档：按文档分文件（D-02）')
+  const b6Keys = ['doc-a', 'doc-b', 'doc-c']
+  eq('清 A 只返回 A 那一份，B/C 不动', autosaveKeysToClear(b6Keys, 'doc-a'), ['doc-a'])
+  eq(
+    '不传 docId 时一份都不删（fail-safe：漏改的调用点不能退化成清全窗）',
+    autosaveKeysToClear(b6Keys, undefined),
+    []
+  )
+  eq('传空串同样一份都不删', autosaveKeysToClear(b6Keys, ''), [])
+  eq('没有匹配项就返回空（别的窗口的存档不会被误伤）', autosaveKeysToClear(b6Keys, 'doc-z'), [])
+  check(
+    'D-02：关窗路径仍覆盖「清本窗口全部」（源码级：windows.ts 枚举每一份）',
+    readFileSync(`${process.cwd()}/src/main/windows.ts`, `utf8`).includes(`listAutosaveDocIds`)
+  )
   check(
     '两个 docId → 两个不同的存档名',
     autosaveKeyOf('slot-1', 'doc-a') !== autosaveKeyOf('slot-1', 'doc-b')

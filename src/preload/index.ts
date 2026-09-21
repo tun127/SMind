@@ -11,7 +11,7 @@ import {
   type PickedAttachment,
   type AppSettings,
   type PickedImage,
-  type RecoveryInfo,
+  type RecoveryList,
   type SaveResult
 } from '@shared/ipc'
 import type { AiConfigView, AiMessage, AiStreamEvent, ChatHistoryEntry } from '@shared/ai'
@@ -49,16 +49,17 @@ const api: MindApi = {
   autosave: (docId: string, workbook: Workbook, originalPath: string | null, title: string) =>
     ipcRenderer.invoke(IPC.autosave, docId, workbook, originalPath, title) as Promise<void>,
 
-  clearAutosave: () => ipcRenderer.invoke(IPC.autosaveClear) as Promise<void>,
+  clearAutosave: (docId: string) => ipcRenderer.invoke(IPC.autosaveClear, docId) as Promise<void>,
 
   releaseDoc: (docId: string) => ipcRenderer.invoke(IPC.releaseDoc, docId) as Promise<void>,
 
-  recoveryCheck: () => ipcRenderer.invoke(IPC.recoveryCheck) as Promise<RecoveryInfo | null>,
+  recoveryCheck: () => ipcRenderer.invoke(IPC.recoveryCheck) as Promise<RecoveryList>,
 
-  recoveryLoad: (docId: string) =>
-    ipcRenderer.invoke(IPC.recoveryLoad, docId) as Promise<OpenResult | null>,
+  recoveryLoad: (docId: string, savedDocId?: string) =>
+    ipcRenderer.invoke(IPC.recoveryLoad, docId, savedDocId) as Promise<OpenResult | null>,
 
-  recoveryDiscard: () => ipcRenderer.invoke(IPC.recoveryDiscard) as Promise<void>,
+  recoveryDiscard: (savedDocId?: string) =>
+    ipcRenderer.invoke(IPC.recoveryDiscard, savedDocId) as Promise<void>,
 
   confirmClose: () => ipcRenderer.send(IPC.confirmClose),
   closeCancel: () => ipcRenderer.send(IPC.closeCancel),

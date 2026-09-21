@@ -31,9 +31,25 @@ export const autosaveMeta = (slot: string, docId: string): string =>
 export const latestAutosaveFile = (slot: string): string => join(autosaveDir(), `${slot}.xmind`)
 export const latestAutosaveMeta = (slot: string): string => join(autosaveDir(), `${slot}.json`)
 
-export async function readAutosaveMeta(slot: string): Promise<RecoveryMeta | null> {
+/** 列出某窗口槽位下**所有** per-doc 存档的 docId（用于逐份恢复与"关窗清全部"） */
+export async function listAutosaveDocIds(slot: string): Promise<string[]> {
   try {
-    return parseRecoveryMeta(JSON.parse(await fs.readFile(latestAutosaveMeta(slot), 'utf8')))
+    const names = await fs.readdir(autosaveDir())
+    const prefix = `${slot}-`
+    const suffix = '.xmind'
+    return names
+      .filter((name) => name.startsWith(prefix) && name.endsWith(suffix))
+      .map((name) => name.slice(prefix.length, name.length - suffix.length))
+  } catch {
+    return []
+  }
+}
+
+/** 按**份**读 meta：docId 为空串表示读「最近一份」副本（兼容升级前的旧存档） */
+export async function readAutosaveMeta(slot: string, docId = ''): Promise<RecoveryMeta | null> {
+  try {
+    const file = docId ? autosaveMeta(slot, docId) : latestAutosaveMeta(slot)
+    return parseRecoveryMeta(JSON.parse(await fs.readFile(file, 'utf8')))
   } catch {
     return null
   }

@@ -88,7 +88,8 @@ export function useDocumentActions({ showToast, themesRef, applyRenderDefaults }
           useEditor.getState().markSaved(state.filePath, revision)
           showToast('已保存')
         }
-        await window.api.clearAutosave()
+        // 只清**这一份**：别的标签的未保存存档不能被顺手删掉（D-02）
+        await window.api.clearAutosave(docIdAtSave)
         return true
       } catch (err) {
         showToast(`保存失败：${(err as Error).message}`)
