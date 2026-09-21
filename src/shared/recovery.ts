@@ -23,6 +23,18 @@ export function isPerDocAutosaveName(name: string, slot: string): boolean {
 }
 
 /**
+ * 该窗口槽位下、某份存档的**任一产物**（正文 `.xmind` 或元信息 `.json`）。
+ *
+ * 单独一条判据的原因（目录级断言抓出来的）：清理时若只按 `.xmind` 枚举，
+ * 那么"正文已经不在、只剩 `.json`"的那一份就永远清不掉 —— 关窗与"不恢复"两条路径
+ * 都会漏过它，存档目录里留下永久的孤儿文件。枚举时按这条判据取并集。
+ */
+export function isPerDocAutosaveArtifact(name: string, slot: string): boolean {
+  if (!name.startsWith(`${slot}-`)) return false
+  return name.endsWith('.xmind') || name.endsWith('.json')
+}
+
+/**
  * 该清哪些存档（纯函数，主进程与自检共用）。
  *
  * - 给了 `docId` → **只删它那一份**：别的标签的存档不能动，那正是 D-02 的成因；

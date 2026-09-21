@@ -164,6 +164,7 @@ import { shouldHandleGlobalShortcut } from '../../../src/renderer/src/app/shortc
 import {
   autosaveKeyOf,
   autosaveKeysToClear,
+  isPerDocAutosaveArtifact,
   isPerDocAutosaveName
 } from '../../../src/shared/recovery'
 
@@ -1788,6 +1789,63 @@ export function testRichText(): void {
   check(
     '槽位前缀带连字符：slot-1- 不会误吞 slot-10-…',
     isPerDocAutosaveName('slot-10-docA.xmind', 'slot-1') === false
+  )
+
+  /* ---- D-18②：关窗清理的目录级验收（功能等价已做，这里补断言） ---- */
+  group('自动存档：目录级回收（D-18②）')
+  const saveDir = mkdtempSync(`${tmpdir()}/smind-autosave-`)
+  const slotName = 'slot-1'
+  const files = [
+    'slot-1-a.xmind',
+    'slot-1-a.json',
+    'slot-1-b.xmind',
+    'slot-1-b.json',
+    'slot-2-c.xmind',
+    'slot-1.xmind',
+    'slot-1.json'
+  ]
+  for (const name of files) writeFileSync(`${saveDir}/${name}`, 'x')
+  // 关窗清理 = 删掉本 slot 的每一份 per-doc 存档 +「最近一份」（见 main/windows.ts）
+  for (const name of files.filter((name) => isPerDocAutosaveArtifact(name, slotName))) {
+    rmSync(`${saveDir}/${name}`, { force: true })
+  }
+  rmSync(`${saveDir}/${slotName}.xmind`, { force: true })
+  rmSync(`${saveDir}/${slotName}.json`, { force: true })
+  const left = readdirSync(saveDir)
+  eq(
+    '本 slot 的 per-doc 存档清空后无残留',
+    left.filter((name) => name.startsWith(`${slotName}-`)),
+    []
+  )
+  eq(
+    '本 slot 的「最近一份」也已清掉',
+    left.filter((name) => name === `${slotName}.xmind`),
+    []
+  )
+  check('别的窗口槽位不受影响', left.includes('slot-2-c.xmind'))
+  check(
+    '只剩 .json 的那份也会被枚举到（否则它的 meta 会永久残留）',
+    isPerDocAutosaveArtifact('slot-1-lonely.json', slotName) === true &&
+      isPerDocAutosaveArtifact('slot-1-a.xmind', slotName) === true &&
+      isPerDocAutosaveArtifact('slot-1.xmind', slotName) === false
+  )
+  rmSync(saveDir, { recursive: true, force: true })
+
+  /* ---- D-11 后半：后台计时不进 AI 回合的耗时归属行 ---- */
+  check(
+    'D-11：自动存档改用后台计时（源码级）',
+    readFileSync(`${process.cwd()}/src/renderer/src/app/use-autosave.ts`, `utf8`).includes(
+      'beginBackgroundCost'
+    )
+  )
+  check(
+    'D-11：后台计时**不写** costs 表（源码级：该函数体内没有 costs.set）',
+    (() => {
+      const src = readFileSync(`${process.cwd()}/src/renderer/src/dev/stage.ts`, `utf8`)
+      const start = src.indexOf('export function beginBackgroundCost')
+      const end = src.indexOf('export function reportCosts')
+      return start >= 0 && end > start && !src.slice(start, end).includes(`costs.set`)
+    })()
   )
   check(
     'D-19：recoveryCheck 保留了「最近一份」兜底（源码级，主进程逻辑进不了自检）',

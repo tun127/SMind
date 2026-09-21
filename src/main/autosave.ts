@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import {
   autosaveKeyOf,
-  isPerDocAutosaveName,
+  isPerDocAutosaveArtifact,
   parseRecoveryMeta,
   type RecoveryMeta
 } from '@shared/recovery'
@@ -41,12 +41,16 @@ export async function listAutosaveDocIds(slot: string): Promise<string[]> {
   try {
     const names = await fs.readdir(autosaveDir())
     const prefix = `${slot}-`
-    const suffix = '.xmind'
-    // 判据在 shared/recovery（纯函数、自检覆盖）：只认 slot-<docId>.xmind，
+    // 判据在 shared/recovery（纯函数、自检覆盖）：`.xmind` 与 `.json` **都算** ——
+    // 只按 `.xmind` 枚举的话，"正文不在、只剩 meta"的那份会永远清不掉（目录级残留）；
     // 旧格式的 `slot-N.xmind` 由 recoveryCheck 兜底处理（见 D-19）
-    return names
-      .filter((name) => isPerDocAutosaveName(name, slot))
-      .map((name) => name.slice(prefix.length, name.length - suffix.length))
+    const ids = new Set<string>()
+    for (const name of names) {
+      if (!isPerDocAutosaveArtifact(name, slot)) continue
+      const base = name.startsWith(prefix) ? name.slice(prefix.length) : name
+      ids.add(base.replace(/\.(xmind|json)$/, ''))
+    }
+    return [...ids]
   } catch {
     return []
   }

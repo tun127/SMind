@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { defaultDocumentName, fileNameOf } from '@shared/model/naming'
-import { beginCost } from '../dev/stage'
+import { beginBackgroundCost } from '../dev/stage'
 import { snapshotForSave, useEditor } from '../store/editor'
 import { activeDocId } from '../store/tabs'
 
@@ -28,7 +28,8 @@ export function useAutosave({ showToast }: Deps): void {
       // 用快照而不是直接落库：把正在输入但还没提交的文本也写进去，
       // 同时不打断用户的输入（不会退出编辑态）
       // 取证：这一跳每 30 秒一次，正好落在「冻结发生在回合之后」的时间窗里，必须计时
-      const endSave = beginCost('自动存档快照')
+      // 后台计时：这一跳与 AI 回合无关，不能混进回合的耗时归属行（D-11 后半）
+      const endSave = beginBackgroundCost('自动存档快照')
       void window.api
         .autosave(
           activeDocId(),

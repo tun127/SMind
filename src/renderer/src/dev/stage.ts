@@ -86,6 +86,27 @@ export function beginCost(name: string, detail = ''): () => number {
 }
 
 /**
+ * 后台任务计时：**不进 `costs` 表**，因此不会混进 AI 回合的耗时归属行。
+ *
+ * 为什么单开一条（报告 D-11 后半）：自动存档每 30 秒一跳，而且经常正好落在
+ * 「AI 回合刚结束」那个窗口里 —— 把它算进 `costs` 表的话，回合结束那行诊断会多出
+ * 一个与回合本身无关的耗时项，真正要看的「这十几秒花在哪」反而更难读。
+ * 计时本身照做：只在单次超过 `SLOW_MS` 时单独记一行（后台慢也是问题）。
+ */
+export function beginBackgroundCost(name: string, detail = ''): () => number {
+  const startedAt = performance.now()
+  return (): number => {
+    const ms = performance.now() - startedAt
+    if (armed && ms >= SLOW_MS) {
+      console.log(
+        `[stage] 慢(后台) ${name} ${Math.round(ms)}ms${detail.length > 0 ? `（${detail}）` : ''}`
+      )
+    }
+    return ms
+  }
+}
+
+/**
  * 把累计的阶段耗时汇总成**一行**写出去，然后清空。
  *
  * 一个 AI 回合结束时调一次：这一行直接回答「这十几秒花在哪了」——
