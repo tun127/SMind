@@ -133,9 +133,24 @@ import {
   richFromPlain,
   richToTiptap,
   tiptapToRich,
-  type TipTapDoc
+  type TipTapDoc,
+  type TipTapMark
 } from '../../../src/shared/richtext'
 import type { MindPackage, RichText } from '../../../src/shared/model/types'
+import { MD_MONO_FONT, isMonoFontFamily } from '../../../src/shared/mono-font'
+import { inlineRunsToRich, parseInlineMarkdown } from '../../../src/shared/import/markdown'
+import {
+  BOLD_INPUT,
+  BOLD_UNDERSCORE_INPUT,
+  FOOTNOTE_INPUT,
+  HIGHLIGHT_INPUT,
+  ITALIC_INPUT,
+  ITALIC_UNDERSCORE_INPUT,
+  STRIKE_INPUT,
+  SUBSCRIPT_INPUT,
+  SUPERSCRIPT_INPUT
+} from '../../../src/shared/inline-rules'
+import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1428,6 +1443,125 @@ export function testRichText(): void {
     snapTopic?.titleRich?.paragraphs[0].runs[0].color === '#EB5757'
   )
   check('快照同时写入纯文本', snapTopic?.title === '未提交的富文本')
+
+  /* ---- A1：行内代码在提交时被丢（marksToStyle 不认 TipTap 的 code mark） ---- */
+  group('富文本：行内代码（code mark ↔ 等宽 fontFamily）')
+
+  const codeRich = tiptapToRich({
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: '前向传播', marks: [{ type: 'code' }] }]
+      }
+    ]
+  })
+  eq(
+    'code mark 落地为等宽 fontFamily（提交不再丢格式）',
+    codeRich.paragraphs[0].runs[0].fontFamily,
+    MD_MONO_FONT
+  )
+
+  const codeBack = richToTiptap(codeRich)
+  check(
+    '等宽 fontFamily 还原成 code mark（再进编辑态仍是代码格式）',
+    codeBack.content[0].content?.[0].marks?.some((mark) => mark.type === 'code') === true
+  )
+  eq('行内代码往返后文字不变', plainTextOf(tiptapToRich(codeBack)), '前向传播')
+  eq(
+    '行内代码往返后仍是等宽',
+    tiptapToRich(codeBack).paragraphs[0].runs[0].fontFamily,
+    MD_MONO_FONT
+  )
+
+  // 端到端：`` 神经网络`前向传播` `` 是中文紧贴写法里**唯一本来就触发**的一条
+  // （反引号输入规则不要求前导边界），但格式会在提交时丢掉 —— 这就是用户实际走的那条链路。
+  const importedInline = inlineRunsToRich(parseInlineMarkdown('神经网络`前向传播`').runs)
+  eq(
+    '导入：紧贴中文的行内代码写成等宽 fontFamily',
+    importedInline?.paragraphs[0]?.runs[1]?.fontFamily,
+    MD_MONO_FONT
+  )
+  eq(
+    '导入 → 编辑器 → 提交：等宽不丢',
+    importedInline
+      ? tiptapToRich(richToTiptap(importedInline)).paragraphs[0]?.runs[1]?.fontFamily
+      : undefined,
+    MD_MONO_FONT
+  )
+
+  // 反向防呆：普通字体不能被误判成行内代码
+  const serifTiptap = richToTiptap({
+    paragraphs: [{ runs: [{ text: 'x', fontFamily: 'Georgia, serif' }] }]
+  })
+  check(
+    '普通 fontFamily 不会变成 code mark',
+    serifTiptap.content[0].content?.[0].marks?.some((mark) => mark.type === 'code') !== true
+  )
+  eq(
+    '普通 fontFamily 往返保持不变',
+    tiptapToRich(serifTiptap).paragraphs[0].runs[0].fontFamily,
+    'Georgia, serif'
+  )
+  check(
+    '等宽嗅探判据：mono 命中、serif 不命中',
+    isMonoFontFamily(MD_MONO_FONT) && !isMonoFontFamily('Georgia, serif')
+  )
+
+  // marks 的先后顺序由 schema 决定、我们控制不了：code 与 textStyle 同时在场时
+  // 结果必须与顺序无关（以 textStyle 里用户挑的字体为准）。
+  const fontFamilyAfter = (marks: TipTapMark[]): string | undefined =>
+    tiptapToRich({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x', marks }] }]
+    }).paragraphs[0].runs[0].fontFamily
+  eq(
+    'code 在前：仍以 textStyle 里挑的字体为准',
+    fontFamilyAfter([
+      { type: 'code' },
+      { type: 'textStyle', attrs: { fontFamily: 'Fira Code, monospace' } }
+    ]),
+    'Fira Code, monospace'
+  )
+  eq(
+    'code 在后：结果一致（与 marks 顺序无关）',
+    fontFamilyAfter([
+      { type: 'textStyle', attrs: { fontFamily: 'Fira Code, monospace' } },
+      { type: 'code' }
+    ]),
+    'Fira Code, monospace'
+  )
+
+  /* ---- A2：中文紧贴的行内 markdown 不触发（输入规则的前导边界） ---- */
+  group('输入规则：中文紧贴的行内写法')
+  check('中文后面 **粗体** 触发', BOLD_INPUT.test('神经网络**粗体**'))
+  check('行首 **粗体** 触发', BOLD_INPUT.test('**粗体**'))
+  check('空格后 **粗体** 触发', BOLD_INPUT.test('前 **粗体**'))
+  check('字母紧贴仍不触发（`a**b**` 保持原样）', BOLD_INPUT.test('a**b**') === false)
+  check('中文后面 __粗体__ 触发', BOLD_UNDERSCORE_INPUT.test('中文__粗体__'))
+  check('中文后面 *斜体* 触发', ITALIC_INPUT.test('中文*斜体*'))
+  check('算式里的星号不被当成斜体（`2*3*`）', ITALIC_INPUT.test('2*3*') === false)
+  check(
+    '下划线变量名不被当成斜体（`snake_case_`）',
+    ITALIC_UNDERSCORE_INPUT.test('snake_case_') === false
+  )
+  check('中文后面 ~~删除线~~ 触发', STRIKE_INPUT.test('中文~~删除线~~'))
+  check('中文后面 ==高亮== 触发', HIGHLIGHT_INPUT.test('中文==高亮=='))
+  check('a^2^ 紧贴字母也触发上标', SUPERSCRIPT_INPUT.test('a^2^'))
+  check('中文后面 ^上标^ 触发', SUPERSCRIPT_INPUT.test('中文^上标^'))
+  check('a~1~ 紧贴字母也触发下标', SUBSCRIPT_INPUT.test('a~1~'))
+  check('~~删除线~~ 不会被下标规则抢走', SUBSCRIPT_INPUT.test('~~删除线~~') === false)
+  check('删除线敲到一半（`~~删除线~`）也不被下标抢走', SUBSCRIPT_INPUT.test('~~删除线~') === false)
+  check('正文[^1] 紧贴中文也触发脚注', FOOTNOTE_INPUT.test('正文[^1]'))
+
+  /* ---- A3：组词期宽度提示（只钉纯函数部分；真正的组词行为待人眼验收） ---- */
+  group('编辑态：输入法组词期的宽度提示')
+  eq('组词拼音串会临时加宽', compositionBoxWidth(100, 30, 240), 130)
+  eq('没有组词文本时保持原宽', compositionBoxWidth(100, 0, 240), 100)
+  eq('宽度异常（NaN）时保持原宽', compositionBoxWidth(100, Number.NaN, 240), 100)
+  eq('加宽不超过测量上限', compositionBoxWidth(230, 80, 240), 240)
+  eq('已在顶点时不再变大', compositionBoxWidth(240, 40, 240), 240)
+  eq('小数向上取整（与测量口径一致）', compositionBoxWidth(100.2, 10.4, 240), 111)
 }
 
 export function testTheme(): void {

@@ -3,63 +3,19 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
-import { Mark, markInputRule } from '@tiptap/core'
 import { Slice } from '@tiptap/pm/model'
 import { inlineRunsToRich, looksLikeMarkdown, parseInlineMarkdown } from '@shared/import/markdown'
 import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
 import { readFormatState, useFormatStore } from '../editor/formatStore'
+import { compositionBoxWidth, composingTextWidth } from '../editor/composition-width'
+// 三个自定义 mark（高亮 / 上标 / 下标）与中文紧贴的输入规则都拆在 editor/ 下单独成文件
+// （各自的头部写了来龙去脉）：这样它们能被实测脚本原样复用，而不是只活在组件里。
+import { CjkInlineRules } from '../editor/cjk-inline-rules'
+import { Highlight, Subscript, Superscript } from '../editor/rich-marks'
 import { TEXT_MAX, TEXT_MAX_ROOT } from '../render/measure'
 import { takeTypedChar } from '../editor/typedChar'
-
-/**
- * 高亮 / 上标 / 下标三个 mark。
- *
- * 为什么要自己定义：内核富文本里有 `highlight` 与 `script` 两个属性
- * （Markdown 的 `==高亮==`、`^上标^`、`~下标~` 导入后就是它们），
- * TipTap 不认识这几个 mark 时会在编辑过程中**把它们丢掉**——
- * 用户一改标题，高亮和上下标就没了。这里用最小实现补上。
- */
-const Highlight = Mark.create({
-  name: 'highlight',
-  parseHTML: () => [{ tag: 'mark' }],
-  renderHTML: () => ['mark', { class: 'rt-highlight' }, 0],
-  // 打字时即时生效：输入 `==高亮==` 立刻变成高亮（Typora 那样）
-  addInputRules() {
-    return [markInputRule({ find: /(?:^|\s)((?:==)((?:[^=]+))(?:==))$/, type: this.type })]
-  }
-})
-
-const Superscript = Mark.create({
-  name: 'superscript',
-  excludes: 'subscript',
-  // inclusive: false —— 光标停在上下标文字**后面**继续打字时不再继承这个格式，
-  // 否则 a₁ 之后永远打出下标，写不回正常内容（用户实测反馈）
-  inclusive: false,
-  parseHTML: () => [{ tag: 'sup' }],
-  renderHTML: () => ['sup', 0],
-  addInputRules() {
-    return [
-      // `^上标^`，以及脚注引用 `[^1]`（导入时也按上标渲染，这里保持一致）。
-      // 用 lookbehind 而不是吞掉前缀字符：`a^2^` 这种**紧贴在字后面**的写法也要生效
-      markInputRule({ find: /(?<=^|\s)((?:\^)((?:[^\s^]+))(?:\^))$/, type: this.type }),
-      markInputRule({ find: /(?<=^|\s)(\[\^[^\]]+\])$/, type: this.type })
-    ]
-  }
-})
-
-const Subscript = Mark.create({
-  name: 'subscript',
-  excludes: 'superscript',
-  inclusive: false,
-  parseHTML: () => [{ tag: 'sub' }],
-  renderHTML: () => ['sub', 0],
-  addInputRules() {
-    // 同上：`a~1~` 紧贴写法（`~~删除线~~` 不受影响——下标规则匹配不到它）
-    return [markInputRule({ find: /(?<=^|\s)((?:~)((?:[^\s~]+))(?:~))$/, type: this.type })]
-  }
-})
 
 export interface RichTextEditorProps {
   node: NodeLayout
@@ -106,7 +62,9 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
       TextAlign.configure({ types: ['paragraph'] }),
       Highlight,
       Superscript,
-      Subscript
+      Subscript,
+      // 中文紧贴的行内写法（`神经网络**粗体**` / `a^2^` 等，见 CjkInlineRules）
+      CjkInlineRules
     ],
     content: richToTiptap(rich),
     autofocus: true,
@@ -225,14 +183,53 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
    * 所以编辑态与提交后的排版不会"跳一下"。末尾 +1px 是留给小数宽度的余量，
    * 免得最后一个字被挤到下一行去。
    */
+  /**
+   * 当前编辑框的**测量宽度**（下面组词提示的还原基准）。
+   * 组词期会临时改 DOM 宽度，结束时必须精确还原成这个值。
+   */
+  const baseWidthRef = useRef(0)
+
   useEffect(() => {
     if (!editor) return
     const cap = node.depth === 0 ? TEXT_MAX_ROOT : TEXT_MAX
     const textWidth = Math.min(cap, Math.ceil(Math.max(24, node.width - node.paddingX * 2))) + 1
     const dom = editor.view.dom
+    baseWidthRef.current = textWidth
     dom.style.width = `${textWidth}px`
     dom.style.maxWidth = '100%'
   }, [editor, node.width, node.paddingX, node.depth])
+
+  /**
+   * 输入法组词期的宽度提示：让拼音**不折行**（宽度计算见 `../editor/composition-width`）。
+   *
+   * 组词文本只存在于 DOM 里，布局测量看不到它（ProseMirror 到 `compositionend` 才同步），
+   * 所以那几百毫秒里编辑框宽度冻在组词前的节点宽度上。这里只做**纯 DOM 的临时放宽**：
+   * `maxWidth` 也要一起放开——它平时是 `100%`，正好等于测量宽度，会直接把加宽夹掉。
+   * `compositionend` 立即还原；提交后的排版完全交给既有测量链路，一行都不动。
+   */
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    const cap = node.depth === 0 ? TEXT_MAX_ROOT : TEXT_MAX
+    const onCompositionUpdate = (event: Event): void => {
+      const composing = (event as CompositionEvent).data ?? ''
+      if (composing.length === 0) return
+      const extra = composingTextWidth(composing, node.fontSize)
+      dom.style.maxWidth = 'none'
+      dom.style.width = `${compositionBoxWidth(baseWidthRef.current, extra, cap)}px`
+    }
+    const restore = (): void => {
+      dom.style.width = `${baseWidthRef.current}px`
+      dom.style.maxWidth = '100%'
+    }
+    dom.addEventListener('compositionupdate', onCompositionUpdate, true)
+    dom.addEventListener('compositionend', restore, true)
+    return () => {
+      dom.removeEventListener('compositionupdate', onCompositionUpdate, true)
+      dom.removeEventListener('compositionend', restore, true)
+      restore()
+    }
+  }, [editor, node.depth, node.fontSize])
 
   useEffect(() => {
     if (!editor) return

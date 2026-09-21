@@ -10,6 +10,7 @@ import type { RichText, Sheet, Topic, Workbook } from '../model/types'
 import { visibleChildren } from '../model/tree'
 import { escapeMarkdownText } from '../markdown-escape'
 import { escapeXmlAttr } from '../xml-escape'
+import { isMonoFontFamily } from '../mono-font'
 
 export type OutlineFormat = 'txt' | 'md' | 'opml'
 
@@ -128,8 +129,9 @@ function richToInlineMarkdown(rich: RichText): string {
       if (run.text.length === 0) continue
       // 富文本的正文也要转义：里面的 `*` `_` `~` 是**内容**，
       // 不转义的话再导入回来会被当作格式标记，把周围文字吃掉。
-      // 等宽（行内代码）除外：代码里"内部不做任何解析"，转义反而会多出反斜杠
-      const mono = typeof run.fontFamily === 'string' && /mono/i.test(run.fontFamily)
+      // 等宽（行内代码）除外：代码里"内部不做任何解析"，转义反而会多出反斜杠。
+      // 判据统一走 isMonoFontFamily（与 richtext 的 code mark 对齐同一口径）
+      const mono = isMonoFontFamily(run.fontFamily)
       let text = mono ? run.text : escapeMarkdownText(run.text)
       if (mono) text = `\`${text}\``
       if (run.bold) text = `**${text}**`

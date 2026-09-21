@@ -26,8 +26,15 @@ import { matchWholeLineMath } from '../../formula'
 import { MARKDOWN_ESCAPABLE } from '../../markdown-escape'
 import { depthOfIndent, expandTabs } from '../../outline-dialect'
 import type { RichText, RichTextRun } from '../../model/types'
+import { MD_MONO_FONT } from '../../mono-font'
 
-export const MD_MONO_FONT = 'Consolas, "JetBrains Mono", Menlo, monospace'
+/**
+ * 行内代码的等宽字体栈。
+ *
+ * 常量本体已搬到中立模块 `shared/mono-font.ts`（richtext 数据层也要用它，
+ * 反过来 import 导入器会形成反向依赖）；这里**原样再导出**，调用点与既有导出一律不动。
+ */
+export { MD_MONO_FONT }
 
 export interface InlineRun {
   text: string

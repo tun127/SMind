@@ -9,6 +9,7 @@
  * 这里的函数全部是纯函数，不依赖浏览器，可以直接被自检脚本覆盖。
  */
 import type { RichText, RichTextParagraph, RichTextRun } from '../model/types'
+import { MD_MONO_FONT, isMonoFontFamily } from '../mono-font'
 
 /* ------------------------------------------------------------------ */
 /* 基础构造与纯文本互转                                                */
@@ -110,6 +111,9 @@ export function notesHtmlFrom(text: string): string {
  * `<code>` 那条分支**不可能被真实的 `RichTextRun` 触发**，它只服务调用方现造的临时对象
  * （自检就是这么用的）。审计建议删掉这个函数，但**自检里有断言在用它**，故保留；
  * 哪天真要走到 `<code>`，先把类型对齐到 `fontFamily` 口径，别再凭空多一个 `mono`。
+ *
+ * 编辑器那头的 `code` mark 与这里的 `fontFamily` 是**同一件事**的两种表示，
+ * 对齐由下面的 `runToMarks` / `marksToStyle` 负责（见「行内代码」那两条注释）。
  */
 export function runsToHtml(
   runs: Array<{
@@ -202,9 +206,16 @@ function runToMarks(run: RichTextRun): TipTapMark[] {
   if (run.highlight) marks.push({ type: 'highlight' })
   if (run.script === 'super') marks.push({ type: 'superscript' })
   if (run.script === 'sub') marks.push({ type: 'subscript' })
+  /**
+   * 行内代码：模型里是「字体族为等宽」（见 `shared/mono-font.ts`），TipTap 里是 `code` mark。
+   * 不还原成 `code` 的话，再进编辑态就不是代码格式（工具条状态、后续输入的行为都按普通文字走）。
+   */
+  if (isMonoFontFamily(run.fontFamily)) marks.push({ type: 'code' })
   const attrs: Record<string, unknown> = {}
   if (run.color) attrs.color = run.color
   if (run.fontSize) attrs.fontSize = `${run.fontSize}px`
+  // 等宽照旧也写进 textStyle：用户挑的可能就是别的等宽字体（`Fira Code, monospace`），
+  // 内联样式优先于 `code` 自身的样式，字体选择才不会被覆盖掉。
   if (run.fontFamily) attrs.fontFamily = run.fontFamily
   if (Object.keys(attrs).length > 0) marks.push({ type: 'textStyle', attrs })
   return marks
@@ -271,6 +282,14 @@ function marksToStyle(marks: TipTapMark[] | undefined): Partial<RichTextRun> {
     else if (mark.type === 'highlight') style.highlight = true
     else if (mark.type === 'superscript') style.script = 'super'
     else if (mark.type === 'subscript') style.script = 'sub'
+    /**
+     * 行内代码 → 等宽 `fontFamily`（模型里「等宽」的唯一表示，见 `shared/mono-font.ts`）。
+     *
+     * 只在 textStyle 还没给出字体时兜底：marks 的顺序由 schema 决定、我们控制不了，
+     * 这样写才能保证「格式栏里挑的字体」优先，且两种顺序得到的 run 完全一致。
+     * 缺了这条分支，行内代码在提交（`tiptapToRich`）时会被整个丢掉——格式真丢，不只是显示问题。
+     */
+    else if (mark.type === 'code' && style.fontFamily === undefined) style.fontFamily = MD_MONO_FONT
     else if (mark.type === 'textStyle' && mark.attrs) {
       if (typeof mark.attrs.color === 'string') style.color = mark.attrs.color
       if (typeof mark.attrs.fontFamily === 'string') style.fontFamily = mark.attrs.fontFamily
