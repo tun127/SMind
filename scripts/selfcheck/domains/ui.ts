@@ -152,6 +152,7 @@ import {
 } from '../../../src/shared/inline-rules'
 import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
 import { codeDraftPatch } from '../../../src/renderer/src/components/nodePanel/code-draft'
+import { shouldHandleGlobalShortcut } from '../../../src/renderer/src/app/shortcut-scope'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1609,6 +1610,52 @@ export function testRichText(): void {
     '对照：真写了内容仍会落盘（带所选语言）',
     find(codeId)?.code?.language === 'python' && find(codeId)?.code?.text === 'print(1)'
   )
+
+  /* ---- 快捷键：编辑态下应用级组合键不再跟着一起失效 ---- */
+  group('快捷键：焦点在输入处时的接管判据')
+  const shortcutKey = (
+    key: string,
+    ctrl = false
+  ): { key: string; ctrlKey: boolean; metaKey: boolean } => ({ key, ctrlKey: ctrl, metaKey: false })
+  const canvasTarget = { tagName: 'BODY', isContentEditable: false }
+  const editorTarget = { tagName: 'DIV', isContentEditable: true }
+  const notesTarget = { tagName: 'TEXTAREA', isContentEditable: false }
+  const selectTarget = { tagName: 'SELECT', isContentEditable: false }
+
+  check(
+    '画布空白处：照旧全部接管',
+    shouldHandleGlobalShortcut(canvasTarget, shortcutKey('s', true)) === true
+  )
+  check(
+    '标题编辑器里 Ctrl+S 仍归应用层（编辑态保存不再失效）',
+    shouldHandleGlobalShortcut(editorTarget, shortcutKey('s', true)) === true
+  )
+  check(
+    '标题编辑器里 Ctrl+F 仍归应用层（搜索）',
+    shouldHandleGlobalShortcut(editorTarget, shortcutKey('f', true)) === true
+  )
+  check(
+    '标题编辑器里单键不接管（那是用户在输入）',
+    shouldHandleGlobalShortcut(editorTarget, shortcutKey('a')) === false
+  )
+  check(
+    '标题编辑器里 Ctrl+V 交还给编辑器（要粘文字，不能被 store.paste 抢走）',
+    shouldHandleGlobalShortcut(editorTarget, shortcutKey('v', true)) === false
+  )
+  check(
+    '标题编辑器里 Ctrl+Z 交还给编辑器（撤销这一笔输入而不是整图撤销）',
+    shouldHandleGlobalShortcut(editorTarget, shortcutKey('z', true)) === false
+  )
+  check('备注框里单键不接管', shouldHandleGlobalShortcut(notesTarget, shortcutKey('x')) === false)
+  check(
+    '备注框里 Ctrl+S 仍归应用层',
+    shouldHandleGlobalShortcut(notesTarget, shortcutKey('s', true)) === true
+  )
+  check(
+    '下拉框里 Ctrl+A 交还（全选的是下拉项）',
+    shouldHandleGlobalShortcut(selectTarget, shortcutKey('a', true)) === false
+  )
+  check('没有 target 时照旧接管', shouldHandleGlobalShortcut(null, shortcutKey('s', true)) === true)
 }
 
 export function testTheme(): void {

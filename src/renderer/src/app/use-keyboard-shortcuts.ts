@@ -3,6 +3,7 @@ import { inlineRunsToRich, looksLikeMarkdown, parseInlineMarkdown } from '@share
 import { stageTypedChar } from '../editor/typedChar'
 import { useEditor } from '../store/editor'
 import { activeDocId } from '../store/tabs'
+import { shouldHandleGlobalShortcut } from './shortcut-scope'
 
 /**
  * 全局键盘快捷键（自 App.tsx 整块搬出，effect 体逐字未改）。
@@ -31,15 +32,13 @@ export function useKeyboardShortcuts({ showToast, setSidePanel }: Deps): void {
       if (e.isComposing || e.keyCode === 229) return
 
       const target = e.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return
-      }
+      /**
+       * 焦点在输入处时的接管判据（纯函数，见 `./shortcut-scope`）：
+       * 单键不接管、编辑类组合键交还给控件，其余 Ctrl/⌘ 组合照旧归应用层 ——
+       * 所以**在标题编辑器里 Ctrl+S 一样能保存**（2026-09-21 修的缺陷：以前这里
+       * 只要发现焦点在 contenteditable 上就整条 return，编辑态下所有快捷键一起失效）。
+       */
+      if (!shouldHandleGlobalShortcut(target, e)) return
 
       const store = useEditor.getState()
       const selectedId = store.selection[0]
