@@ -1,4 +1,4 @@
-# 一条命令跑完「门槛查不到」的两类验证。
+﻿# 一条命令跑完「门槛查不到」的两类验证。
 # 用法：pwsh scripts/verify/run-all.ps1
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
