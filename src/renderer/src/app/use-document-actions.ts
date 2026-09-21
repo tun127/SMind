@@ -63,16 +63,28 @@ export function useDocumentActions({ showToast, themesRef, applyRenderDefaults }
       const state = useEditor.getState()
       // 发起写盘时的内容代次：写完要拿它跟当前代次比，判断这期间用户有没有又改过（D-03）
       const revision = state.docRevision
+      /**
+       * 发起写盘时**是哪个文档**。
+       *
+       * 为什么必须记：写盘是异步的，这几百毫秒里用户完全可以点另一个标签 —— 回来时
+       * `useEditor.getState()` 已经是**另一个文档**了，若照样 markSaved，B 会拿到 A 的 filePath
+       * 且被清成"已保存"，之后在 B 上按 Ctrl+S 会把 B 的内容写进 A 的文件（报告 D-17）。
+       */
+      const docIdAtSave = activeDocId()
       try {
         if (!state.filePath || forceSaveAs) {
           // 默认文件名用中心主题的名字（空标题才退回「未命名导图」）
           const suggested = state.filePath ?? defaultFileName(state.workbook, 'xmind')
           const result = await window.api.saveAs(activeDocId(), state.workbook, suggested)
           if (!result) return false
+          // 切了标签就不再落账：这次写盘对应的是另一个文档，写进去会串号
+          if (activeDocId() !== docIdAtSave) return false
           useEditor.getState().markSaved(result.path, revision)
           showToast(`已保存到 ${result.path}`)
         } else {
-          await window.api.saveToPath(activeDocId(), state.filePath, state.workbook)
+          // 用发起时的 docId 写盘：标签切走之后 activeDocId() 已经指向别的文档了
+          await window.api.saveToPath(docIdAtSave, state.filePath, state.workbook)
+          if (activeDocId() !== docIdAtSave) return false
           useEditor.getState().markSaved(state.filePath, revision)
           showToast('已保存')
         }
