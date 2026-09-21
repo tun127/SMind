@@ -9,13 +9,16 @@ import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
 import { readFormatState, useFormatStore } from '../editor/formatStore'
-import { composingTextWidth, draftBoxWidth } from '../editor/composition-width'
+import { draftBoxWidth, measureContentWidth } from '../editor/composition-width'
 // 三个自定义 mark（高亮 / 上标 / 下标）与中文紧贴的输入规则都拆在 editor/ 下单独成文件
 // （各自的头部写了来龙去脉）：这样它们能被实测脚本原样复用，而不是只活在组件里。
 import { CjkInlineRules } from '../editor/cjk-inline-rules'
 import { Highlight, Subscript, Superscript } from '../editor/rich-marks'
 import { TEXT_MAX, TEXT_MAX_ROOT } from '../render/measure'
 import { takeTypedChar } from '../editor/typedChar'
+// 注意别名：本文件已经从 `@tiptap/react` 导入了同名的 `useEditor`（编辑器实例），
+// 直接同名导入会把 tiptap 那个遮蔽掉 —— 编辑器建不出来、画布直接空白。
+import { useEditor as useEditorStore } from '../store/editor'
 
 export interface RichTextEditorProps {
   node: NodeLayout
@@ -45,6 +48,7 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
 
   const setEditor = useFormatStore((store) => store.setEditor)
   const setState = useFormatStore((store) => store.setState)
+  const reportDraftText = useEditorStore((store) => store.reportDraftText)
 
   const editor = useEditor({
     extensions: [
@@ -246,13 +250,19 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
       frame = window.requestAnimationFrame(() => {
         frame = 0
         if (editor.isDestroyed) return
+        // 末尾换行不算内容（编辑器里总有个收尾段落），否则会多量出一行空白
+        const draft = (dom.innerText ?? '').replace(/\n+$/, '')
         let widest = 0
-        for (const line of (dom.innerText ?? '').split('\n')) {
+        for (const line of draft.split('\n')) {
           if (line.length === 0) continue
-          const width = composingTextWidth(line, node.fontSize)
+          const width = measureContentWidth(dom, line)
           if (width > widest) widest = width
         }
         setContentWidth((prev) => (Math.abs(prev - widest) < 1 ? prev : widest))
+        // 再报给布局：**节点框**也要跟着这段草稿变宽。
+        // 只把编辑区自身撑开是不够的 —— 框不动，文字就只能在框内折行或溢出框外，
+        // 用户看到的就是"打字时排版是坏的、按 Enter 才恢复正常"（报告 D-07 / §18）。
+        reportDraftText(draft)
       })
     }
     recompute()
@@ -261,8 +271,10 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     return () => {
       if (frame !== 0) window.cancelAnimationFrame(frame)
       for (const type of types) dom.removeEventListener(type, recompute, true)
+      // 编辑区卸载（提交 / 取消 / 切节点）→ 收回草稿，测量回到文档内容
+      reportDraftText('')
     }
-  }, [editor, node.fontSize])
+  }, [editor, node.fontSize, reportDraftText])
 
   useEffect(() => {
     if (!editor) return

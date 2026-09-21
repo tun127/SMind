@@ -27,6 +27,17 @@ export interface SelectionSlice {
   /** 正在编辑的富文本内容 */
   editingRich: RichText | null
   /**
+   * 编辑区**当前 DOM 里的文本**（含输入法组词中、以及组词结束但还没提交进文档的部分）。
+   *
+   * 为什么单独存一份：ProseMirror 到**提交**才把组词文本同步进文档 → `updateEditingRich` 不触发，
+   * 而布局测量读的正是 `editingText` → 编辑期**节点框不跟着变宽**，文字只能折行或溢出框外
+   * （报告 D-07 / §18 的真机实测）。
+   *
+   * 它**只喂给测量**：不进文档、不改 `editingRich` 的格式，`commitEdit` 仍以 `editingText` /
+   * `editingRich` 为准（编辑区一旦卸载就清空）。
+   */
+  editingDraftText: string
+  /**
    * 渲染默认值（默认对齐 / 代码块基准字号）的变更计数。
    *
    * 这些默认值作用于**没有显式样式**的节点，改了会让测量结果变化，所以布局必须依赖它——
@@ -44,6 +55,8 @@ export interface SelectionSlice {
   beginEdit(id: string, insertText?: string): void
   updateEditingText(text: string): void
   updateEditingRich(rich: RichText): void
+  /** 编辑区把实时文本报给布局测量（只影响编辑态的框宽，见 `editingDraftText`） */
+  reportDraftText(text: string): void
   /**
    * 提交当前正在编辑的内容。
    * @param forId 只有当前编辑中的正是这个节点时才提交。
@@ -79,12 +92,14 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
       ? normalizeRich(topic.titleRich)
       : richFromPlain(topic?.title ?? '')
     const rich = insertText ? appendToRich(base, insertText) : base
-    set({ editingId: id, ...editingContent(rich), selection: [id] })
+    set({ editingId: id, ...editingContent(rich), editingDraftText: '', selection: [id] })
   },
 
   updateEditingText: (text) => set(editingContent(richFromPlain(text))),
 
   updateEditingRich: (rich) => set(editingContent(rich)),
+
+  reportDraftText: (text) => set({ editingDraftText: text }),
 
   commitEdit: (forId) => {
     const { editingId, editingText, editingRich, workbook } = get()

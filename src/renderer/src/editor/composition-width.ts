@@ -6,24 +6,22 @@
  * （`use-canvas-layout.ts` 拿 `editingText` 量节点宽）。于是这段时间 `editingText` 没变 →
  * 宽度按旧的（更窄的）文字算 → 拼音折成多行。
  *
- * **两代做法的差别（血泪）**
+ * **三代做法的差别（血泪，报告 D-07 / §18）**
  * - 第一代（`515aac2` / A3）：只放开 `max-width` → 被 flex-shrink 抵消，真机无效。
  * - 第二代（`cb98bd9`）：组词期加 `flex: 0 0 auto` + 按 `compositionupdate.data` 算加宽，
  *   **但 `compositionend` 一到就把宽度归零** → 未提交的草稿立刻被挤回节点内宽。
- *   用户看到的是"没按 Enter 会扁、按了才正常"（报告 §18，真实输入法 80 条事件的实测）。
- * - **第三代（现在）：宽度由"编辑区当前内容需要多宽"决定**（`draftBoxWidth`），
+ *   用户看到的是"没按 Enter 会扁、按了才正常"。
+ * - **第三代（现在）：宽度由"编辑区当前内容需要多宽"决定**（`draftBoxWidth` + `measureContentWidth`），
  *   与组词事件的时序彻底解耦 —— 组词中 / 组词后未提交 / 纯键盘草稿，三种状态一并覆盖。
+ *
+ * **量宽为什么必须用 DOM 探针而不是 canvas**：canvas 只认得 `font` 简写，**拿不到字距等继承样式**。
+ * 实测（2026-09-21）：18 个字符 canvas 量出 223px、真实渲染需要 ~227px → 写进 224px 后仍折成 2 行；
+ * 而"差几个像素"在这个场景里就是"一行"与"两行"的区别。探针 span 插在编辑区里、样式全部继承，
+ * 量出来的就是真实渲染宽度。
  *
  * 仍不做的事：把草稿文本接进 `use-canvas-layout` 的测量（那才会让**节点框**也变宽）。
  * 代价是改测量链路，收益只是"框跟着变宽"，属报告 D-07 的第 2 档治本，留待需要时再做。
  */
-import { FONT_FAMILY, cssFontOf } from '../render/measure/text-metrics'
-
-/** 组词期的宽度上限对齐测量用的上限（中心主题更宽，由调用方传 TEXT_MAX_ROOT / TEXT_MAX） */
-export function compositionBoxWidth(base: number, extra: number, cap: number): number {
-  if (!Number.isFinite(extra) || extra <= 0) return base
-  return Math.min(cap, Math.ceil(base + extra))
-}
 
 /**
  * 编辑框应有的宽度 = max(测得宽度, **当前内容所需宽度**)，并封顶在 `cap`。
@@ -39,19 +37,21 @@ export function draftBoxWidth(textWidth: number, contentWidth: number, cap: numb
   return Math.min(cap, want)
 }
 
-let measureCtx: CanvasRenderingContext2D | null = null
-
 /**
- * 量一段组词文本的宽度。
+ * 量一段文本在**这个编辑区里**渲染出来需要多宽。
  *
- * 与画布测量共用同一份字体串（`cssFontOf` / `FONT_FAMILY`），免得"提示宽度"与
- * 提交后的真实宽度差太多、看起来像跳了一下。字重用 400：组词期显示的是拼音字母，
- * 与正文的字重差异在这个临时提示里可以忽略。拿不到 canvas 时返回 0（退化成不加宽）。
+ * 探针 span 插进 `host`（编辑区）里，因此字体族 / 字号 / 字重 / 字距 / 变体全部继承，
+ * 量的就是真实渲染宽度 —— 这是 canvas 估宽做不到的（见文件头）。
+ * `white-space: pre` 保证不被探针自己的换行影响；`visibility: hidden` + 移出视口，不闪不挡。
  */
-export function composingTextWidth(text: string, fontSize: number, family = FONT_FAMILY): number {
+export function measureContentWidth(host: HTMLElement, text: string): number {
   if (text.length === 0) return 0
-  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d')
-  if (!measureCtx) return 0
-  measureCtx.font = cssFontOf(fontSize, 400, false, family)
-  return measureCtx.measureText(text).width
+  const probe = document.createElement('span')
+  probe.textContent = text
+  probe.style.cssText =
+    'position:absolute;left:-99999px;top:0;visibility:hidden;white-space:pre;padding:0;margin:0;border:0'
+  host.appendChild(probe)
+  const width = probe.getBoundingClientRect().width
+  probe.remove()
+  return width
 }
