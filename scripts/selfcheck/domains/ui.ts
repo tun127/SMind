@@ -161,7 +161,11 @@ import {
 import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
 import { codeDraftPatch } from '../../../src/renderer/src/components/nodePanel/code-draft'
 import { shouldHandleGlobalShortcut } from '../../../src/renderer/src/app/shortcut-scope'
-import { autosaveKeyOf, autosaveKeysToClear } from '../../../src/shared/recovery'
+import {
+  autosaveKeyOf,
+  autosaveKeysToClear,
+  isPerDocAutosaveName
+} from '../../../src/shared/recovery'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1774,6 +1778,21 @@ export function testRichText(): void {
 
   /* ---- D-02：自动存档按「窗口 + 文档」分文件 ---- */
   group('自动存档：按文档分文件（D-02）')
+
+  /* ---- D-19：升级兼容（旧格式存档不能被漏掉） ---- */
+  check(
+    '旧格式 slot-1.xmind 不是 per-doc 存档（所以必须有兜底，否则升级后不再提示恢复）',
+    isPerDocAutosaveName('slot-1.xmind', 'slot-1') === false
+  )
+  check('per-doc 存档被正确认出', isPerDocAutosaveName('slot-1-docA.xmind', 'slot-1') === true)
+  check(
+    '槽位前缀带连字符：slot-1- 不会误吞 slot-10-…',
+    isPerDocAutosaveName('slot-10-docA.xmind', 'slot-1') === false
+  )
+  check(
+    'D-19：recoveryCheck 保留了「最近一份」兜底（源码级，主进程逻辑进不了自检）',
+    readFileSync(`${process.cwd()}/src/main/ipc/recovery.ts`, `utf8`).includes(`latestAutosaveFile`)
+  )
   const b6Keys = ['doc-a', 'doc-b', 'doc-c']
   eq('清 A 只返回 A 那一份，B/C 不动', autosaveKeysToClear(b6Keys, 'doc-a'), ['doc-a'])
   eq(

@@ -2,7 +2,12 @@ import { app } from 'electron'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 
-import { autosaveKeyOf, parseRecoveryMeta, type RecoveryMeta } from '@shared/recovery'
+import {
+  autosaveKeyOf,
+  isPerDocAutosaveName,
+  parseRecoveryMeta,
+  type RecoveryMeta
+} from '@shared/recovery'
 
 /* ------------------------------------------------------------------ */
 /* 自动保存路径                                                        */
@@ -37,8 +42,10 @@ export async function listAutosaveDocIds(slot: string): Promise<string[]> {
     const names = await fs.readdir(autosaveDir())
     const prefix = `${slot}-`
     const suffix = '.xmind'
+    // 判据在 shared/recovery（纯函数、自检覆盖）：只认 slot-<docId>.xmind，
+    // 旧格式的 `slot-N.xmind` 由 recoveryCheck 兜底处理（见 D-19）
     return names
-      .filter((name) => name.startsWith(prefix) && name.endsWith(suffix))
+      .filter((name) => isPerDocAutosaveName(name, slot))
       .map((name) => name.slice(prefix.length, name.length - suffix.length))
   } catch {
     return []

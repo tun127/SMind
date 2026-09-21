@@ -78,13 +78,22 @@ export function useDocumentActions({ showToast, themesRef, applyRenderDefaults }
           const result = await window.api.saveAs(activeDocId(), state.workbook, suggested)
           if (!result) return false
           // 切了标签就不再落账：这次写盘对应的是另一个文档，写进去会串号
-          if (activeDocId() !== docIdAtSave) return false
+          if (activeDocId() !== docIdAtSave) {
+            // 内容**已经写进磁盘**了，只是不该把这个标签的路径/已保存状态落到当前文档上（D-17）。
+            // 以前这里静默 return false：用户看到"脏标记还在"却没有任何解释（报告 D-18④）。
+            showToast(`已保存到 ${result.path}（你已切到别的标签，那边的保存标记没有动）`)
+            return false
+          }
           useEditor.getState().markSaved(result.path, revision)
           showToast(`已保存到 ${result.path}`)
         } else {
           // 用发起时的 docId 写盘：标签切走之后 activeDocId() 已经指向别的文档了
           await window.api.saveToPath(docIdAtSave, state.filePath, state.workbook)
-          if (activeDocId() !== docIdAtSave) return false
+          if (activeDocId() !== docIdAtSave) {
+            // 同上：写盘已经成功，别让这次保存看起来"没反应"（D-18④）
+            showToast(`已保存到 ${state.filePath}（你已切到别的标签，那边的保存标记没有动）`)
+            return false
+          }
           useEditor.getState().markSaved(state.filePath, revision)
           showToast('已保存')
         }

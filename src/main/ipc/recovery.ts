@@ -56,6 +56,34 @@ export function registerRecoveryIpc(ctx: MainContext): void {
         docId
       })
     }
+    /**
+     * **兜底：升级前留下的旧存档**。
+     *
+     * 旧格式只叫 `slot-N.xmind`（就是现在的「最近一份」），它不在上面那轮 per-doc 枚举里 ——
+     * 不做这一步，用户升级后第一次启动会**看不到**上次崩溃留下的未保存内容，
+     * 等于把那份内容静默作废（报告 D-19，本次改动引入的兼容回归）。
+     * 读侧 `recoveryLoad(docId, undefined)` 本来就支持读「最近一份」，缺的只是这一处。
+     */
+    if (items.length === 0) {
+      const legacy = await readAutosaveMeta(state.slot, '')
+      if (legacy && existsSync(latestAutosaveFile(state.slot))) {
+        let legacyMtime: number | null = null
+        if (legacy.originalPath && existsSync(legacy.originalPath)) {
+          try {
+            legacyMtime = (await fs.stat(legacy.originalPath)).mtimeMs
+          } catch {
+            legacyMtime = null
+          }
+        }
+        if (shouldOfferRecovery(legacy, legacyMtime)) {
+          items.push({
+            originalPath: legacy.originalPath,
+            title: legacy.title,
+            savedAt: legacy.savedAt
+          })
+        }
+      }
+    }
     items.sort((a, b) => b.savedAt - a.savedAt)
     return { items, total: items.length }
   })

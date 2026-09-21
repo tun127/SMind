@@ -9,6 +9,20 @@
 import { isRecord } from './guards'
 
 /**
+ * 某个文件名是不是该窗口槽位的 **per-doc** 存档（`slot-N-<docId>.xmind`）。
+ *
+ * 单独抽出来是因为它有一条**容易踩**的边界：升级前留下的旧存档叫 `slot-N.xmind`，
+ * 它既不是 `slot-N-` 开头、也正好就是「最近一份」—— 只按前缀枚举会**漏掉它**，
+ * 于是升级后第一次启动不再提示恢复（报告 D-19）。主进程靠这个判据枚举，
+ * `recoveryCheck` 再对「最近一份」单独兜底。
+ *
+ * 注意 `slot-1-` 不会误吞 `slot-10-…`：前缀里带连字符，比的是完整槽位名。
+ */
+export function isPerDocAutosaveName(name: string, slot: string): boolean {
+  return name.startsWith(`${slot}-`) && name.endsWith('.xmind')
+}
+
+/**
  * 该清哪些存档（纯函数，主进程与自检共用）。
  *
  * - 给了 `docId` → **只删它那一份**：别的标签的存档不能动，那正是 D-02 的成因；
