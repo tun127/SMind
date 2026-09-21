@@ -51,6 +51,7 @@ import {
   isPortableBuild,
   releaseNotesOf,
   shouldRecheck,
+  updateOfferOf,
   UPDATE_RECHECK_INTERVAL_MS
 } from '../../../src/shared/update-policy'
 import { normalizeLicenseState } from '../../../src/main/license/state'
@@ -189,6 +190,39 @@ export async function testSafetyHelpers(): Promise<void> {
   )
   eq('正好到间隔 → 查', shouldRecheck(1_000, 1_000 + UPDATE_RECHECK_INTERVAL_MS), true)
   eq('隔了一整天 → 查', shouldRecheck(1_000, 1_000 + 24 * 60 * 60 * 1000), true)
+
+  /*
+   * 「有没有可用更新」的判据（真 bug 的回归断言）：
+   * `checkForUpdates()` 在**没有更新**时不返回 null，而是 `{ isUpdateAvailable: false, updateInfo }`，
+   * 其中 `updateInfo.version` 是**渠道上的版本号**。曾经用 `version !== current` 判，于是
+   * **渠道版本 ≤ 本机**时会误报「发现新版本 v0.9.0（当前 v0.9.1）」并声称"正在后台下载"（永不下载）。
+   */
+  eq(
+    '没有可用更新 → 不报新版本',
+    updateOfferOf({ isUpdateAvailable: false, updateInfo: { version: '0.9.0' } }),
+    null
+  )
+  eq('返回 null → 不报新版本', updateOfferOf(null), null)
+  eq(
+    '有可用更新 → 报渠道版本号',
+    updateOfferOf({ isUpdateAvailable: true, updateInfo: { version: '0.9.2' } }),
+    '0.9.2'
+  )
+  eq(
+    '说有更新但取不到版本号 → 不报',
+    updateOfferOf({ isUpdateAvailable: true, updateInfo: {} }),
+    null
+  )
+  eq('形状不对 → 不报', updateOfferOf('坏了'), null)
+  eq(
+    '渠道版本低于本机（回滚场景）→ 仍只显示"已是最新"',
+    updateOfferOf({
+      isUpdateAvailable: false,
+      updateInfo: { version: '0.9.0' },
+      versionInfo: { version: '0.9.0' }
+    }),
+    null
+  )
 
   group('主进程：文档资源按 docId 隔离（docOf / pruneForSave）')
 

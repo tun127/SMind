@@ -29,7 +29,13 @@
  */
 import { autoUpdater } from 'electron-updater'
 import { app, dialog, shell, type BrowserWindow } from 'electron'
-import { isPortableBuild, releaseNotesOf, shouldRecheck } from '@shared/update-policy'
+import {
+  isPortableBuild,
+  releaseNotesOf,
+  shouldRecheck,
+  updateOfferOf
+} from '@shared/update-policy'
+import { logMain } from '../log'
 
 /** 免安装版的手动下载页（它没有自动更新，只能让用户自己去下） */
 const PORTABLE_DOWNLOAD_PAGE = 'https://smindapp.cn/download/portable/'
@@ -64,13 +70,17 @@ export function startAutoUpdate(): void {
   if (!app.isPackaged) return
   if (portableNow()) {
     // 装了也不会生效，别白耗网络（原因见文件头第 2 条）
-    console.log('[updater] 免安装版：跳过自动更新检查，升级请手动下载新版')
+    logMain('updater', '免安装版：跳过自动更新检查，升级请手动下载新版')
     return
   }
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.logger = console
+  // **日志必须落到应用日志文件**：打包版没有终端（用户双击启动），updater 默认写 `console`
+  // 等于**没有任何落点**；而例行检查失败又是刻意静默的——两者叠加，真机首跑失败时我们手上
+  // 一条证据都没有。四个方法统一走 `logMain('updater', …)`。
+  const write = (message?: unknown): void => logMain('updater', message ?? '')
+  autoUpdater.logger = { info: write, warn: write, error: write, debug: write }
 
   autoUpdater.on('update-downloaded', (info) => {
     downloadedVersion = info.version ?? null
@@ -78,7 +88,7 @@ export function startAutoUpdate(): void {
 
   // 例行检查的失败（离线、渠道上还没有更新清单）记日志就好，别弹窗打扰用户
   autoUpdater.on('error', (error) => {
-    console.warn('[updater]', (error as Error).message)
+    logMain('updater', `例行检查失败：${(error as Error).message}`)
   })
 
   // 启动 45 秒后再查：别和应用抢启动时的磁盘与网络
@@ -127,10 +137,12 @@ export async function checkForUpdateInteractive(win: BrowserWindow | null): Prom
   try {
     lastCheckAt = Date.now()
     const result = await autoUpdater.checkForUpdates()
-    const version = result?.updateInfo.version ?? null
     const current = app.getVersion()
+    // 「有没有更新」看 `isUpdateAvailable`，**不是**"版本号是否不同"——渠道版本 ≤ 本机时
+    // 后者会误报（见 @shared/update-policy 的 updateOfferOf）
+    const version = updateOfferOf(result)
 
-    if (version !== null && version !== current) {
+    if (version !== null) {
       const ready = downloadedVersion !== null
       // 「这版改了什么」：发版时把 CHANGELOG 段落写进 Release 正文即可（A6）
       const notes = releaseNotesOf(result?.updateInfo.releaseNotes)

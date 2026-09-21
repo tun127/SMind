@@ -57,3 +57,23 @@ export function releaseNotesOf(raw: unknown): string | null {
   if (clean.length === 0) return null
   return clean.length > RELEASE_NOTES_MAX ? `${clean.slice(0, RELEASE_NOTES_MAX)}…` : clean
 }
+
+/**
+ * 「这次检查有没有可用更新」的**纯判定**（自检覆盖）。
+ *
+ * 为什么值得单独一处：`checkForUpdates()` 在**没有更新**时**不返回 `null`**，而是返回
+ * `{ isUpdateAvailable: false, versionInfo, updateInfo }` —— 其中的 `updateInfo.version` 是
+ * **渠道上的版本号**，与"有没有新版"无关。曾经拿 `version !== current` 当判据，于是渠道版本
+ * **≤ 本机**时会误报「发现新版本 v0.9.0（当前 v0.9.1）」并声称"正在后台下载"（而它永不下载）——
+ * **回滚渠道版本、或本机测试版高于渠道时必然触发**。
+ *
+ * 返回：有可用更新 → 渠道版本号；否则 `null`（调用方显示「已经是最新版」）。
+ * 参数收 `unknown`：与 electron-updater 的类型解耦，才能放进自检。
+ */
+export function updateOfferOf(result: unknown): string | null {
+  if (typeof result !== 'object' || result === null) return null
+  const record = result as { isUpdateAvailable?: unknown; updateInfo?: { version?: unknown } }
+  if (record.isUpdateAvailable !== true) return null
+  const version = record.updateInfo?.version
+  return typeof version === 'string' && version.length > 0 ? version : null
+}
