@@ -1146,7 +1146,31 @@ PASS  D-07 复刻：flex: 0 0 auto → 宽度真的生效                     <<
 
 **发版说明口径**：只写"修了什么 + 新增什么"，不写没做的。0.9.2 的定位是「**修掉一批用户可感的 bug**」，不是"完成度里程碑"。
 
-### 14.3 发版之后（别停下）
+### 14.3 发版清单（以下每一项都是今晚实测过的，不是照抄计划）
+
+**前置状态（已核）**
+| 项 | 实况 |
+|---|---|
+| `package.json` version | **0.9.2** ✓（`65d028a`） |
+| `electron-builder.yml` publish | `provider: generic` / `url: https://dl.smindapp.cn/` ✓；targets = `nsis` + `portable` ✓ |
+| `release/` 里的产物 | ⚠️ **仍然只有 0.9.1 的五个资产（09-20 10:48）——0.9.2 从未打包**；0.9.2 只有 `release-rt/` 里的 rt.1/rt.2/rt.3 |
+| OSS 现状 | `latest.yml` 200 / 0.9.1 setup 200 / 0.9.1 portable 200 / **0.9.1 setup 的 blockmap 200**（→ 老用户走差分不会废 ✓）/ **`rt.yml` 404**（`03343ab` 的修复尚未上传） |
+| `release/latest.yml` 基线 | `version: 0.9.1`、`sha512: lNR8+…WUVQ==`、`size: 113429722` —— 与 `release/` 里 setup **实算体积逐字一致** ✓（本地这套就是线上那套） |
+
+**清单（按顺序）**
+1. 🔴 **D-07 真机验收**（20 秒）—— **唯一阻塞项**；折行就不要按"已修"发改版说明。
+2. 🔴 **先把 0.9.1 的两件备份出 `release/`**（`SMind-0.9.1-x64-setup.exe.blockmap` + `latest.yml`）—— 线上 blockmap 虽已 200，但本地这份一旦被覆盖就只能在 GitHub 资产里再取；成本为零，先做。
+3. 🔴 **打包必须带 `--publish never`**：`npm run dist -- --publish never`
+   （`package.json` 的 `dist` 脚本里**没有** `--publish`，而 publish 段已指向 OSS → 不带这个开关，electron-builder 会**自己去试上传**，计划 §5 点过这个坑）
+4. 打完自检：`release/latest.yml` 的 `version` = **0.9.2**；`SMind-0.9.2-x64-setup.exe`、`…-portable.exe`、`…-setup.exe.blockmap` 三件都在。
+5. 上传：`npm run mirror:oss`（需 OSS AK）—— 会**顺带传 `rt.yml`**（`03343ab` 的 `sourceName` 机制）。
+6. **校验**：`curl -I https://dl.smindapp.cn/rt.yml` = **200**；`latest.yml` 里 `version: 0.9.2`；两个 exe 与 blockmap 均 200。
+7. 官网版本号与下载链接切 0.9.2 + 一条短公告。
+8. 删代码后想确认没弄坏东西：`& '.\scripts\verify\run-all.ps1'`（新骨架，一条命令）。
+
+> **自我更正**：我早前提醒过"0.9.1 的 blockmap 也要上传" —— 实测它**已经在 OSS 上（200）**，那条提醒对已发过的版本不成立；真正需要补传的是 **0.9.2 的 blockmap**（`mirror:oss` 会自动带上 ✓）。本地备份那条仍然建议做，理由见第 2 步。
+
+### 14.4 发版之后（别停下）
 
 装 **GoatCounter** + 发 **V2EX「分享创造」**（工作日上午 10–11 点）。现在下载量仍是盲区，W2 那条红线（下载 <100 就换素材）**无从判定**。发版是"把修好的东西送到用户面前"，不是终点。
 
