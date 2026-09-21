@@ -1,3 +1,4 @@
+/* global WebSocket */
 /**
  * 用 CDP 驱动**真实打包版 App** 做验收：组词不折行（D-07）+ 清空不缩回探针（D-14）。
  *
@@ -99,7 +100,7 @@ async function enterEditing(cdp) {
              w: Math.round(r.width), h: Math.round(r.height) }
   })()`)
   if (!box) throw new Error('页面上没有 .topic（文档没打开？）')
-  console.log('  中心主题(静止):', JSON.stringify(box))
+  console.log('  目标主题(静止):', JSON.stringify(box))
   const mouse = (type, clickCount) =>
     cdp.send('Input.dispatchMouseEvent', {
       type,
