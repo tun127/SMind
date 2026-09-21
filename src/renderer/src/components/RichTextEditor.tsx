@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style'
@@ -184,52 +184,64 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
    * 免得最后一个字被挤到下一行去。
    */
   /**
-   * 当前编辑框的**测量宽度**（下面组词提示的还原基准）。
-   * 组词期会临时改 DOM 宽度，结束时必须精确还原成这个值。
+   * 当前编辑框的**测量宽度**（组词加宽的还原基准）。
+   *
+   * 它只由下面那个宽度 effect 写 —— 合并前它被两个 effect 同时改，是 D-08 的另一半。
    */
   const baseWidthRef = useRef(0)
 
+  /** 组词期额外要加的宽度（0 = 不在组词）。只存状态，DOM 宽度由下面**唯一**那处写。 */
+  const [composingWidth, setComposingWidth] = useState(0)
+
+  /**
+   * 编辑框宽度：**唯一写入点**。
+   *
+   * 合并前这里是两个 effect —— 一个按 `node.width` 同步宽度、一个在组词期临时加宽，
+   * 两者抢写同一个 `dom.style.width`，而且前者还会改 `baseWidthRef.current`（组词还原的基准）：
+   * 组词中途只要重排一次，加宽就被覆盖、还原基准也被改掉，表现就是"有时折行、有时不折"（报告 D-08）。
+   * 现在按状态算出唯一宽度，还原基准也归这一处拥有。
+   *
+   * 组词期还要**解除 flex 收缩**（`flex: 0 0 auto`）：`.rich-editor__content` 是
+   * `.topic__editor` 的 flex 子项、自身又 `min-width: 0`，只写 `width` 会被 flex-shrink
+   * 立刻压回节点内宽，再在这个窄宽度上 `overflow-wrap: anywhere` 断行 —— 拼音照样折成多行。
+   * 这是报告 D-07 的根因：`515aac2` 的 A3 当初只放开了 `max-width`，**放错了约束**，实测无效。
+   */
   useEffect(() => {
     if (!editor) return
     const cap = node.depth === 0 ? TEXT_MAX_ROOT : TEXT_MAX
     const textWidth = Math.min(cap, Math.ceil(Math.max(24, node.width - node.paddingX * 2))) + 1
     const dom = editor.view.dom
     baseWidthRef.current = textWidth
-    dom.style.width = `${textWidth}px`
-    dom.style.maxWidth = '100%'
-  }, [editor, node.width, node.paddingX, node.depth])
+    if (composingWidth > 0) {
+      dom.style.flex = '0 0 auto'
+      dom.style.maxWidth = 'none'
+      dom.style.width = `${compositionBoxWidth(textWidth, composingWidth, cap)}px`
+    } else {
+      dom.style.flex = ''
+      dom.style.maxWidth = '100%'
+      dom.style.width = `${textWidth}px`
+    }
+  }, [editor, node.width, node.paddingX, node.depth, composingWidth])
 
   /**
-   * 输入法组词期的宽度提示：让拼音**不折行**（宽度计算见 `../editor/composition-width`）。
-   *
-   * 组词文本只存在于 DOM 里，布局测量看不到它（ProseMirror 到 `compositionend` 才同步），
-   * 所以那几百毫秒里编辑框宽度冻在组词前的节点宽度上。这里只做**纯 DOM 的临时放宽**：
-   * `maxWidth` 也要一起放开——它平时是 `100%`，正好等于测量宽度，会直接把加宽夹掉。
-   * `compositionend` 立即还原；提交后的排版完全交给既有测量链路，一行都不动。
+   * 组词进度 → `composingWidth`。只读 DOM 事件、只改状态，**不碰宽度**：
+   * 宽度是上面那一处的专属职责（D-08），这样两者不可能再抢写。
    */
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
-    const cap = node.depth === 0 ? TEXT_MAX_ROOT : TEXT_MAX
     const onCompositionUpdate = (event: Event): void => {
       const composing = (event as CompositionEvent).data ?? ''
-      if (composing.length === 0) return
-      const extra = composingTextWidth(composing, node.fontSize)
-      dom.style.maxWidth = 'none'
-      dom.style.width = `${compositionBoxWidth(baseWidthRef.current, extra, cap)}px`
+      setComposingWidth(composing.length > 0 ? composingTextWidth(composing, node.fontSize) : 0)
     }
-    const restore = (): void => {
-      dom.style.width = `${baseWidthRef.current}px`
-      dom.style.maxWidth = '100%'
-    }
+    const onCompositionEnd = (): void => setComposingWidth(0)
     dom.addEventListener('compositionupdate', onCompositionUpdate, true)
-    dom.addEventListener('compositionend', restore, true)
+    dom.addEventListener('compositionend', onCompositionEnd, true)
     return () => {
       dom.removeEventListener('compositionupdate', onCompositionUpdate, true)
-      dom.removeEventListener('compositionend', restore, true)
-      restore()
+      dom.removeEventListener('compositionend', onCompositionEnd, true)
     }
-  }, [editor, node.depth, node.fontSize])
+  }, [editor, node.fontSize])
 
   useEffect(() => {
     if (!editor) return
