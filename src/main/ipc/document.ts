@@ -14,7 +14,13 @@ import { type RecoveryMeta } from '@shared/recovery'
 import { showOpenIn, showSaveIn } from '../dialogs'
 import { ensureXmindExt, firstPathOf, readDocumentInto, writeDocument } from '../files'
 import { docOf, pruneForSave } from '../doc-resources'
-import { autosaveDir, autosaveFile, autosaveMeta } from '../autosave'
+import {
+  autosaveDir,
+  autosaveFile,
+  autosaveMeta,
+  latestAutosaveFile,
+  latestAutosaveMeta
+} from '../autosave'
 import type { MainContext } from '../context'
 import { MINDMAP_EXTENSIONS } from '@shared/openfile'
 
@@ -22,6 +28,9 @@ import { MINDMAP_EXTENSIONS } from '@shared/openfile'
  * 这些处理器原来都在 `main/index.ts` 的 `registerIpc()` 里，整块搬来：
  * 函数体、先后顺序、通道名逐字未改（搬迁只做剪切粘贴）。
  */
+/** ?????????????????????? id??clearAutosave ?????????????D-02? */
+const lastAutosaveDocIds = new Map<string, string>()
+
 export function registerDocumentIpc(ctx: MainContext): void {
   ipcMain.handle(IPC.openDialog, async (e, docId: string): Promise<OpenResult | null> => {
     const result = await showOpenIn(ctx.winOf(e.sender), {
@@ -86,7 +95,9 @@ export function registerDocumentIpc(ctx: MainContext): void {
       if (doc) pruneForSave(doc, workbook)
       const bytes = await serializeXmind({ workbook, resources: doc?.resources ?? {} })
       // 存档也走原子写：半截的存档在恢复时会被判为损坏，等于白存一份
-      await writeFileAtomic(autosaveFile(state.slot), bytes)
+      // ? docId ??????????????????????? D-02?
+      await writeFileAtomic(autosaveFile(state.slot, docId), bytes)
+      lastAutosaveDocIds.set(state.slot, docId)
       const meta: RecoveryMeta = {
         originalPath: originalPath ?? null,
         title: title || '未命名导图',
@@ -94,13 +105,27 @@ export function registerDocumentIpc(ctx: MainContext): void {
       }
       // 元信息也要原子写：它是"这次自动保存对应哪份原稿"的唯一凭证，
       // 半截 JSON 会让恢复功能读不出标题与原路径（正文却好端端地在那儿）
-      await writeJsonAtomic(autosaveMeta(state.slot), meta)
+      await writeJsonAtomic(autosaveMeta(state.slot, docId), meta)
+      // ????????????????recovery.ts ???????????????
+      await writeFileAtomic(latestAutosaveFile(state.slot), bytes)
+      await writeJsonAtomic(latestAutosaveMeta(state.slot), meta)
     }
   )
   ipcMain.handle(IPC.autosaveClear, async (e): Promise<void> => {
     const state = ctx.stateOf(e.sender)
     if (!state) return
-    await fs.rm(autosaveFile(state.slot), { force: true })
-    await fs.rm(autosaveMeta(state.slot), { force: true })
+    /**
+     * **??????????????????**?????????
+     *
+     * ????? autosaveFile(state.slot)???????**????????**????????
+     * ??????????????? ?? ????? D-02 ????????????????????
+     */
+    const docId = lastAutosaveDocIds.get(state.slot)
+    if (docId) {
+      await fs.rm(autosaveFile(state.slot, docId), { force: true })
+      await fs.rm(autosaveMeta(state.slot, docId), { force: true })
+    }
+    await fs.rm(latestAutosaveFile(state.slot), { force: true })
+    await fs.rm(latestAutosaveMeta(state.slot), { force: true })
   })
 }

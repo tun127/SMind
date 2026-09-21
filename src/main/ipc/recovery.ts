@@ -7,7 +7,7 @@ import { parseXmind } from '@shared/xmind/parse'
 
 import { shouldOfferRecovery } from '@shared/recovery'
 import { DOC_ID_MAX, docOf } from '../doc-resources'
-import { autosaveFile, autosaveMeta, readAutosaveMeta } from '../autosave'
+import { latestAutosaveFile, latestAutosaveMeta, readAutosaveMeta } from '../autosave'
 import type { MainContext } from '../context'
 
 /**
@@ -21,7 +21,7 @@ export function registerRecoveryIpc(ctx: MainContext): void {
     // 只有本次进程的**第一个窗口**问恢复：否则每开一个窗口都弹一遍上一次的存档
     if (!ctx.isPrimaryWindow(state.id)) return null
     const meta = await readAutosaveMeta(state.slot)
-    if (!meta || !existsSync(autosaveFile(state.slot))) return null
+    if (!meta || !existsSync(latestAutosaveFile(state.slot))) return null
 
     let originalMtime: number | null = null
     if (meta.originalPath && existsSync(meta.originalPath)) {
@@ -37,7 +37,7 @@ export function registerRecoveryIpc(ctx: MainContext): void {
   })
   ipcMain.handle(IPC.recoveryLoad, async (e, docId: string): Promise<OpenResult | null> => {
     const state = ctx.stateOf(e.sender)
-    if (!state || !existsSync(autosaveFile(state.slot))) return null
+    if (!state || !existsSync(latestAutosaveFile(state.slot))) return null
     // docId 会被当 map 键用（docOf）：加个长度上限，脏输入不该让主进程无界长胖
     if (typeof docId === 'string' && docId.length > DOC_ID_MAX) return null
     /**
@@ -48,7 +48,7 @@ export function registerRecoveryIpc(ctx: MainContext): void {
      */
     try {
       const meta = await readAutosaveMeta(state.slot)
-      const buf = await fs.readFile(autosaveFile(state.slot))
+      const buf = await fs.readFile(latestAutosaveFile(state.slot))
       const parsed = await parseXmind(new Uint8Array(buf))
       // 存档里同样带着图片/附件：不还原资源的话，恢复后一保存就全丢了。
       // 资源记到**恢复到的那份文档**名下（多标签之间互不沾染）
@@ -72,7 +72,7 @@ export function registerRecoveryIpc(ctx: MainContext): void {
   ipcMain.handle(IPC.recoveryDiscard, async (e): Promise<void> => {
     const state = ctx.stateOf(e.sender)
     if (!state) return
-    await fs.rm(autosaveFile(state.slot), { force: true })
-    await fs.rm(autosaveMeta(state.slot), { force: true })
+    await fs.rm(latestAutosaveFile(state.slot), { force: true })
+    await fs.rm(latestAutosaveMeta(state.slot), { force: true })
   })
 }

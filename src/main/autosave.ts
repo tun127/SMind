@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 
-import { parseRecoveryMeta, type RecoveryMeta } from '@shared/recovery'
+import { autosaveKeyOf, parseRecoveryMeta, type RecoveryMeta } from '@shared/recovery'
 
 /* ------------------------------------------------------------------ */
 /* 自动保存路径                                                        */
@@ -12,15 +12,28 @@ export const autosaveDir = (): string => join(app.getPath('userData'), 'autosave
 /** 「在新窗口打开画布副本」用的临时文件目录（关窗即删） */
 export const copyDir = (): string => join(app.getPath('userData'), 'copies')
 /**
- * 自动存档按**窗口**分槽位：多窗口时各存各的，互不覆盖。
- * 槽位名按窗口创建顺序（slot-1 / slot-2 …），重启后新会话的窗口按同样顺序认领。
+ * 自动存档按**窗口 + 文档**分文件：`slot-N-docId.xmind`。
+ *
+ * 槽位（slot-N）保证多窗口互不覆盖；docId 保证**同一个窗口里的多个标签**互不覆盖 ——
+ * 只按窗口分时，切标签会把上一个标签的存档盖掉，它崩溃后无从恢复（报告 D-02）。
  */
-export const autosaveFile = (slot: string): string => join(autosaveDir(), `${slot}.xmind`)
-export const autosaveMeta = (slot: string): string => join(autosaveDir(), `${slot}.json`)
+export const autosaveFile = (slot: string, docId: string): string =>
+  join(autosaveDir(), `${autosaveKeyOf(slot, docId)}.xmind`)
+export const autosaveMeta = (slot: string, docId: string): string =>
+  join(autosaveDir(), `${autosaveKeyOf(slot, docId)}.json`)
+
+/**
+ * 「最近一份」存档：恢复链（main/ipc/recovery.ts）读的就是它。
+ *
+ * 它是 per-doc 存档的一份**副本**，只为让"崩溃后提示恢复"保持原样可用 ——
+ * 恢复界面目前仍只提示一份（列出多个标签各自恢复属 UI 改动，未做）。
+ */
+export const latestAutosaveFile = (slot: string): string => join(autosaveDir(), `${slot}.xmind`)
+export const latestAutosaveMeta = (slot: string): string => join(autosaveDir(), `${slot}.json`)
 
 export async function readAutosaveMeta(slot: string): Promise<RecoveryMeta | null> {
   try {
-    return parseRecoveryMeta(JSON.parse(await fs.readFile(autosaveMeta(slot), 'utf8')))
+    return parseRecoveryMeta(JSON.parse(await fs.readFile(latestAutosaveMeta(slot), 'utf8')))
   } catch {
     return null
   }

@@ -161,6 +161,7 @@ import {
 import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
 import { codeDraftPatch } from '../../../src/renderer/src/components/nodePanel/code-draft'
 import { shouldHandleGlobalShortcut } from '../../../src/renderer/src/app/shortcut-scope'
+import { autosaveKeyOf } from '../../../src/shared/recovery'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1770,6 +1771,32 @@ export function testRichText(): void {
 
   /* ---- D-15 / T3：启动 45 秒内不发检查请求 ---- */
   group('更新：复检时机判据（D-15 / T3）')
+
+  /* ---- D-02：自动存档按「窗口 + 文档」分文件 ---- */
+  group('自动存档：按文档分文件（D-02）')
+  check(
+    '两个 docId → 两个不同的存档名',
+    autosaveKeyOf('slot-1', 'doc-a') !== autosaveKeyOf('slot-1', 'doc-b')
+  )
+  check(
+    '同一 (slot, docId) 稳定',
+    autosaveKeyOf('slot-1', 'doc-a') === autosaveKeyOf('slot-1', 'doc-a')
+  )
+  check(
+    '不同窗口的同名文档也不互相覆盖',
+    autosaveKeyOf('slot-1', 'doc-a') !== autosaveKeyOf('slot-2', 'doc-a')
+  )
+  check(
+    'docId 里的路径分隔符被清掉（跑不出存档目录）',
+    !autosaveKeyOf('slot-1', '../../evil').includes('/') &&
+      !autosaveKeyOf('slot-1', '..\\evil').includes('\\')
+  )
+
+  /* ---- D-16：上传清单必须带 rt.yml（这条修复原先零断言） ---- */
+  check(
+    'D-16：上传脚本的 targets 里有 rt.yml（预发布通道否则收不到更新）',
+    readFileSync(`${process.cwd()}/scripts/upload-oss.mjs`, `utf8`).includes(`rt.yml`)
+  )
   const nowD15 = Date.now()
   check(
     '还没查过时，焦点复检不触发（否则启动瞬间就抢跑一次）',

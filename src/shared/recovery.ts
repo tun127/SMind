@@ -8,6 +8,20 @@
 
 import { isRecord } from './guards'
 
+/**
+ * 自动存档的文件名主干：`<slot>-<docId>`（纯函数；主进程拿它拼路径，自检直接断言）。
+ *
+ * 为什么必须带 docId：一个窗口可以开多个标签，而自动存档的定时器只送**激活**标签的快照 ——
+ * 按窗口分槽时，切到 B 标签就会把 A 的存档**覆盖**掉，A 崩溃后再也恢复不出来（报告 D-02）。
+ * docId 参与文件名之后，每个标签各存各的。
+ *
+ * docId 里的路径分隔符等字符统一换成 `_`：它是外部输入，不能让它逃出存档目录。
+ */
+export function autosaveKeyOf(slot: string, docId: string): string {
+  const safe = docId.replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `${slot}-${safe}`
+}
+
 export interface RecoveryMeta {
   /** 自动保存时对应的原始文件路径；全新未保存的文档为 null */
   originalPath: string | null
