@@ -2,6 +2,9 @@ node_modules
 out
 dist
 release
+# 测试构建（-rt.N）的输出目录：只在本机验证用，版本号带 -rt. 且从不上传。
+# 单独列出来是因为它不在上面的 `release` 忽略范围内，忘了会连 113 MB 的包一起提交。
+release-rt
 .DS_Store
 *.log
 .vite

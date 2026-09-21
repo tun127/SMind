@@ -1,31 +1,23 @@
 appId: com.smind.local
 productName: SMind
 # ---- 自动更新（electron-updater）----
-# **更新源 = GitHub Releases 的固定直链（generic provider）**。
+# **更新源 = OSS 镜像 `https://dl.smindapp.cn/`（generic provider）**。
 #
-# 为什么是 GitHub 直链（2026-09-20 决定）：Cloudflare R2 激活**必须绑支付方式**
-# （免费额度内不扣费，但不绑就开不了），当前没有可用信用卡 → R2 暂时搁置。
-# 直链走 generic provider，只是对一个 URL 做 GET，**不走 GitHub API**，
-# 所以没有「匿名额度 60 次/小时按 IP 限流 → 403」那个坑（那才是当初想换掉 github provider
-# 的原因，实测本机出口 IP 已 403）；而 `releases/latest/download/` 是**版本无关的固定 URL**，
-# 发新版不用改配置、也不用重新打包。
+# 沿革：0.9.1 用的是 GitHub Releases 固定直链（`releases/latest/download/`）——那时 R2 要绑
+# 支付方式、Cloudflare 那条路搁置了。镜像就绪后按 `docs/release-mirror.md` 切回 OSS，
+# 并在 2026-09-21 用本机 8099 做过一次完整回环验证（发现新版 / 差分 / 篡改拒绝 / 降级 /
+# 404 / 坏清单六条都跑过，见 `docs/auto-update-test-plan.md` 的 D2 记录）。
 #
-# ⚠️ 三个前提，缺一个更新链路就不通（2026-09-20 实测 v0.9.0 的 Release 只有两个 exe，
-#    `latest.yml` 与 `*.blockmap` 都**不在里面** → 只传 exe 的话渠道是空的）：
-#   1. 发版时必须把 **`latest.yml` 与 `*.blockmap` 和 exe 一起作为 Release 资产上传**（同名）；
-#   2. Release 必须是**正式发布**（draft / prerelease 都不会被 `latest` 指到）；
-#   3. Release 正文写清这版改了什么（`latest.yml` 的 releaseNotes 会显示在「发现新版本」对话框里）。
+# ⚠️ 三个前提，缺一个更新链路就不通：
+#   1. 发版时必须把 **exe、`latest.yml`、`*.blockmap` 一起传到镜像根目录**（同名）；
+#      预发布版本（`0.9.2-rt.1` 这类）生成的是 `rt.yml`，客户端按 channel 去取，别只传 exe；
+#   2. 镜像上的 `latest.yml` 必须指向**最新那一版**（回滚时同步换，客户端不会自动降级）；
+#   3. 换版本时把**上一版的 blockmap 留在根目录**，差分下载才生效（缺了就退全量：慢，但不报错）。
 #
-# 代价：国内拉 GitHub 资产偏慢。查版本用的 `latest.yml` 只有几百字节，影响可忽略；
-# 差分下载的 blockmap（≈100 MB）会明显慢些 —— 这是本方案唯一的短板。
-# 等有了可用支付方式，换回 R2 镜像只需把下面两行改成：
-#   provider: generic
-#   url: https://dl.smindapp.cn/
-# 并**重新打包**（更新地址写在打包生成的 app-update.yml 里，改这里必须重打包才生效）；
-# 镜像侧的完整步骤见 docs/release-mirror.md。
+# 更新地址写在打包产物 `resources/app-update.yml` 里 —— 改这里**必须重新打包**才生效。
 publish:
   provider: generic
-  url: https://github.com/tun127/SMind/releases/latest/download/
+  url: https://dl.smindapp.cn/
 # ---- 代码签名（Azure Trusted Signing，商业化计划选定的方案）----
 # 证书开通后设三个环境变量再打包即可，**不用改这份文件**：
 #   AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
