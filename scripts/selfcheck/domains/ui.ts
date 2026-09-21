@@ -1134,7 +1134,7 @@ export function testTabs(): void {
   group('多文档标签：路径去重 / 排序 / 关闭')
 
   // 路径去重：markSaved 后 findByPath 应能找到（大小写/斜杠归一）
-  store().markSaved('D:/Tmp/DocA.xmind')
+  store().markSaved('D:/Tmp/DocA.xmind', store().docRevision)
   eq('按路径找到标签', useTabs.getState().findByPath('d:/tmp/doca.XMIND'), tab2Id)
   eq('没开过的文件找不到', useTabs.getState().findByPath('D:/Tmp/其他.xmind'), null)
 
@@ -1817,6 +1817,23 @@ export function testRichText(): void {
       '.finally(endSave)'
     )
   )
+
+  /* ---- D-03：写盘期间的新编辑不能被标成「已保存」 ---- */
+  group('保存代次：写盘期间的编辑不会被误标为已保存（D-03）')
+  reset()
+  const revRoot = root().id
+  store().addChild(revRoot)
+  const revisionAtSave = store().docRevision
+  check('改动之后文档是脏的', store().dirty === true)
+  store().markSaved(`${process.cwd()}/tmp.xmind`, revisionAtSave)
+  check('没有新改动时，保存后不再脏', store().dirty === false)
+  // 模拟"写盘那几百毫秒里用户又改了一笔"：代次涨了，但保存用的是旧代次
+  store().addChild(revRoot)
+  check('期间又改了一笔 → 重新变脏', store().dirty === true)
+  store().markSaved(`${process.cwd()}/tmp.xmind`, revisionAtSave)
+  check('用**过期的代次**落盘 → 仍是脏（修复前这里会被清成已保存）', store().dirty === true)
+  store().markSaved(`${process.cwd()}/tmp.xmind`, store().docRevision)
+  check('用当前代次落盘 → 干净', store().dirty === false)
 
   const shortcutKey = (
     key: string,

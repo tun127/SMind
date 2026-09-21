@@ -30,6 +30,12 @@ export interface DocumentSlice {
   workbook: Workbook
   filePath: string | null
   dirty: boolean
+  /**
+   * 内容代次：每次改动自增。保存流程拿它判断「这笔写盘是否覆盖了全部改动」——
+   * 写盘期间用户又改了几笔的话，代次已经涨了，就不能把 dirty 清掉（报告 D-03）。
+   * 与 `docSeq`（新建/打开才涨，用于画布重新居中）是两件事，别合并。
+   */
+  docRevision: number
   /** 文档代次，每次新建/打开自增，用于触发画布重新居中 */
   docSeq: number
 
@@ -42,7 +48,7 @@ export interface DocumentSlice {
    * 并标记为未保存——恢复出来的内容与磁盘上的还不一样。
    */
   restoreDocument(workbook: Workbook): void
-  markSaved(path: string): void
+  markSaved(path: string, revision: number): void
 }
 
 export const createDocumentSlice: StateCreator<EditorState, [], [], DocumentSlice> = (
@@ -52,6 +58,7 @@ export const createDocumentSlice: StateCreator<EditorState, [], [], DocumentSlic
   workbook: createWorkbook(),
   filePath: null,
   dirty: false,
+  docRevision: 0,
   docSeq: 0,
 
   /* ------------------------------------------------------------------ */
@@ -67,6 +74,7 @@ export const createDocumentSlice: StateCreator<EditorState, [], [], DocumentSlic
       }),
       filePath: null,
       dirty: false,
+      docRevision: 0,
       docSeq: state.docSeq + 1,
       selection: [],
       ...NO_EDITING,
@@ -115,5 +123,14 @@ export const createDocumentSlice: StateCreator<EditorState, [], [], DocumentSlic
     }))
   },
 
-  markSaved: (path) => set({ filePath: path, dirty: false })
+  /**
+   * 记下「已保存到 path」。**只有这笔写盘覆盖了全部改动时才清 dirty**：
+   * `revision` 是发起写盘那一刻的代次；若期间用户又改了东西（代次已涨），保持 dirty ——
+   * 否则那几笔没落盘的编辑会被标成"已保存"，之后关窗不再提示、静默丢失（报告 D-03）。
+   */
+  markSaved: (path, revision) =>
+    set((state) => ({
+      filePath: path,
+      dirty: state.docRevision === revision ? false : state.dirty
+    }))
 })

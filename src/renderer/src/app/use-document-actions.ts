@@ -61,17 +61,19 @@ export function useDocumentActions({ showToast, themesRef, applyRenderDefaults }
     async (forceSaveAs = false): Promise<boolean> => {
       commitPending()
       const state = useEditor.getState()
+      // 发起写盘时的内容代次：写完要拿它跟当前代次比，判断这期间用户有没有又改过（D-03）
+      const revision = state.docRevision
       try {
         if (!state.filePath || forceSaveAs) {
           // 默认文件名用中心主题的名字（空标题才退回「未命名导图」）
           const suggested = state.filePath ?? defaultFileName(state.workbook, 'xmind')
           const result = await window.api.saveAs(activeDocId(), state.workbook, suggested)
           if (!result) return false
-          useEditor.getState().markSaved(result.path)
+          useEditor.getState().markSaved(result.path, revision)
           showToast(`已保存到 ${result.path}`)
         } else {
           await window.api.saveToPath(activeDocId(), state.filePath, state.workbook)
-          useEditor.getState().markSaved(state.filePath)
+          useEditor.getState().markSaved(state.filePath, revision)
           showToast('已保存')
         }
         await window.api.clearAutosave()

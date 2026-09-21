@@ -110,6 +110,8 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
       set({
         workbook: next,
         dirty: true,
+        // 合并分支同样要涨代次：内容变了就是变了（保存竞态判据见 markSaved / D-03）
+        docRevision: get().docRevision + 1,
         undoStack: [...undoStack.slice(0, -1), merged],
         redoStack: []
       })
@@ -119,6 +121,8 @@ export const createHistorySlice: StateCreator<EditorState, [], [], HistorySlice>
     set({
       workbook: next,
       dirty: true,
+      // 同上：内容变了，代次就涨（保存竞态判据见 markSaved）
+      docRevision: get().docRevision + 1,
       undoStack: [
         ...undoStack,
         { label, patches, inverse, coalesceKey, time: now, turnSeq, selectionBefore }
