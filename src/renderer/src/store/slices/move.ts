@@ -20,7 +20,8 @@ import {
   findTopic,
   flatten,
   isSelfOrDescendant,
-  moveTopic
+  moveTopic,
+  subtreeIds
 } from '@shared/model/tree'
 
 import { resolveDrop, type DropMode } from '@shared/model/drop'
@@ -319,7 +320,16 @@ export const createMoveSlice: StateCreator<EditorState, [], [], MoveSlice> = (se
   restoreAutoLayout: () => {
     const state = get()
     const root = activeRoot(state.workbook)
-    const floating = flatten(root).filter((topic) => topic.position !== undefined)
+    /**
+     * 独立主题子树不参与自动布局，也不该被「恢复自动布局」清掉 position：
+     * 它们的位置是用户在画布上摆的，不是树里那种"自动位置 + 偏移"。
+     */
+    const detachedIds = new Set(
+      root.detachedChildren.flatMap((topic) => subtreeIds(root, topic.id))
+    )
+    const floating = flatten(root).filter(
+      (topic) => topic.position !== undefined && !detachedIds.has(topic.id)
+    )
     if (floating.length === 0) return 0
 
     /**
@@ -330,7 +340,7 @@ export const createMoveSlice: StateCreator<EditorState, [], [], MoveSlice> = (se
      */
     const selected = state.selection.filter((id) => {
       const topic = findTopic(root, id)
-      return topic !== null && topic.position !== undefined
+      return topic !== null && topic.position !== undefined && !detachedIds.has(id)
     })
     const targets = selected.length > 0 ? selected : floating.map((topic) => topic.id)
     const scope = new Set(targets)

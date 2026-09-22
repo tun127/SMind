@@ -49,6 +49,7 @@ function TopicNodeInner({
   dragged,
   draggable,
   onPointerDown,
+  onContextMenu,
   onDoubleClick,
   onRichChange,
   onCancelEdit,
@@ -210,7 +211,7 @@ function TopicNodeInner({
     selected ? 'topic--selected' : '',
     // 自由摆放（有位置偏移）的主题标出来：它们会被自动布局甩在一边、连线横穿画布，
     // 一眼能认出"这几个是我手动摆过的"，而不是莫名其妙就乱了
-    node.topic.position ? 'topic--floating' : '',
+    node.detached ? 'topic--detached' : node.topic.position ? 'topic--floating' : '',
     !dragged && highlight === 'child' ? 'topic--drop' : '',
     !dragged && highlight === 'sibling' ? 'topic--drop-sibling' : '',
     searchHit ? 'topic--hit' : '',
@@ -232,6 +233,7 @@ function TopicNodeInner({
       style={style}
       data-topic-id={node.id}
       onPointerDown={(event) => onPointerDown(event, node.id)}
+      onContextMenu={(event) => onContextMenu(event, node.id)}
       onDoubleClick={(event) => {
         event.stopPropagation()
         onDoubleClick(node.id)

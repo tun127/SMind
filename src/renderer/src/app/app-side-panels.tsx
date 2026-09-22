@@ -48,7 +48,7 @@ export function AppSidePanels({
     <>
       <div className={showOutline ? 'app__body app__body--with-outline' : 'app__body'}>
         {showOutline && <OutlinePanel onClose={() => setShowOutline(false)} onNotify={showToast} />}
-        <Canvas />
+        <Canvas onNotify={showToast} />
         {sidePanel === 'theme' && (
           <ThemePanel
             onClose={() => setSidePanel('none')}

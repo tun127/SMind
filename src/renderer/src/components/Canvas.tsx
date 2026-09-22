@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement
+} from 'react'
 import type { Topic } from '@shared/model/types'
 import { activeRoot } from '@shared/model/tree'
 import type { DragMove } from '@shared/model/dragmove'
@@ -27,7 +34,7 @@ import { useNodeCallbacks } from './canvas/use-node-callbacks'
 import { CanvasOverlayLayer } from './canvas/canvas-overlay-layer'
 import { CanvasRelationshipHitLayer } from './canvas/canvas-relationship-hit-layer'
 
-export default function Canvas(): ReactElement {
+export default function Canvas({ onNotify }: { onNotify(message: string): void }): ReactElement {
   // 每秒渲染次数：数字爆表就是「重渲染风暴」，是这类卡死最常见的形态
   count('画布渲染')
 
@@ -72,6 +79,8 @@ export default function Canvas(): ReactElement {
     /** 整群被拖时，用来把「点谁拖谁」说明白 */
     group: number
   } | null>(null)
+  /** 节点右键菜单：fixed 定位，id 是右键命中的主题 */
+  const [topicMenu, setTopicMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   /* ---- 供原生事件处理器读取的最新值 ---- */
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
@@ -109,6 +118,18 @@ export default function Canvas(): ReactElement {
     editingRich,
     editingDraftText
   })
+
+  /** 节点右键：选中它并就地弹菜单；引用稳定，不能把 TopicNode 的 memo 架空。 */
+  const handleNodeContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>, id: string): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (id === rootRef.current.id) return
+      useEditor.getState().select(id)
+      setTopicMenu({ x: event.clientX, y: event.clientY, id })
+    },
+    []
+  )
 
   /**
    * 用户「接管视角」的次数（滚轮、拖拽平移、缩放都算）。
@@ -295,7 +316,10 @@ export default function Canvas(): ReactElement {
         backgroundColor: colors.canvas,
         backgroundImage: `radial-gradient(circle, ${colors.grid} 1px, transparent 1px)`
       }}
-      onPointerDown={handleBackgroundPointerDown}
+      onPointerDown={(event) => {
+        setTopicMenu(null)
+        handleBackgroundPointerDown(event)
+      }}
       /* 右键用于拖动平移，屏蔽系统右键菜单 */
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -346,6 +370,7 @@ export default function Canvas(): ReactElement {
           pulsingId={pulsingId}
           filterResult={filterResult}
           handleNodePointerDown={handleNodePointerDown}
+          handleNodeContextMenu={handleNodeContextMenu}
           handleNodeDoubleClick={handleNodeDoubleClick}
           handleNodeRichChange={handleNodeRichChange}
           handleNodeCancelEdit={handleNodeCancelEdit}
@@ -387,6 +412,49 @@ export default function Canvas(): ReactElement {
         dropBlocked={dropBlocked}
         marquee={marquee}
       />
+
+      {topicMenu && (
+        <div
+          className="topic-context-menu"
+          style={{ left: topicMenu.x, top: topicMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+          }}
+        >
+          {rootRef.current.detachedChildren.some((child) => child.id === topicMenu.id) ? (
+            <button
+              type="button"
+              className="topic-context-menu__item"
+              onClick={() => {
+                const ok = useEditor.getState().attachBackFromFloating(topicMenu.id)
+                if (ok) onNotify('已放回结构，位置偏移已清除')
+                setTopicMenu(null)
+              }}
+            >
+              放回结构
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="topic-context-menu__item"
+              onClick={() => {
+                const lay = layoutRef.current
+                const node = lay.nodeMap.get(topicMenu.id)
+                const rootNode = lay.nodeMap.get(rootRef.current.id)
+                const position =
+                  node && rootNode ? { x: node.x - rootNode.x, y: node.y - rootNode.y } : undefined
+                const ok = useEditor.getState().detachToFloating(topicMenu.id, position)
+                if (ok) onNotify('已变为独立主题；拖动可自由摆放，右键「放回结构」可回到树里')
+                setTopicMenu(null)
+              }}
+            >
+              变为独立主题
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -9,6 +9,7 @@ import type { Sheet, Topic } from '../model/types'
 import { getStructureDef } from '../xmind/constants'
 import type { LayoutBuilder } from './core'
 import { addOverlays, overlayReserves, type OverlayReserves } from './overlays'
+import { placeDetachedRoots } from './detached'
 import { layoutBrace, layoutLogic, layoutMindmap, layoutSpreadsheet, layoutTree } from './stack'
 import { layoutOrgChart } from './orgchart'
 import { layoutFishbone, layoutMatrix, layoutRadial } from './graphic'
@@ -27,6 +28,11 @@ export function runLayout(
    * （否则标题带与括号会压住紧邻的分支）。
    */
   if (sheet) builder.applyOverlayReserves(reserves ?? overlayReserves(rootTopic, sheet))
+  /**
+   * 独立主题也必须在 `finish` 归一化之前进入 nodes，否则不会被 bounds / 几何版本 /
+   * 连线避让纳入。各结构布局都会调用 builder.finish，所以这里用钩子统一挂。
+   */
+  builder.onBeforeFinish(() => placeDetachedRoots(builder, rootTopic))
 
   const cls = rootTopic.structureClass
   const family = getStructureDef(cls).family

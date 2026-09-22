@@ -20,6 +20,7 @@ import type { MoveSlice } from './move'
 import type { NodeContentSlice } from './node-content'
 import type { OverlaysSlice } from './overlays'
 import type { ThemeSlice } from './theme'
+import type { FloatingSlice } from './floating'
 
 export interface HistoryEntry {
   label: string
@@ -77,4 +78,5 @@ export type EditorState = ViewSlice &
   MoveSlice &
   NodeContentSlice &
   OverlaysSlice &
-  ThemeSlice
+  ThemeSlice &
+  FloatingSlice

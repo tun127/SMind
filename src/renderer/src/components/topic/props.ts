@@ -4,7 +4,7 @@
  * 单独一份的理由：它是画布与节点之间的**接口**，回调全在这里声明；
  * 入口 TopicNode.tsx 只保留组件实现，改接口时不必在 500 行组件里找。
  */
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import type { LayoutResult, NodeLayout } from '@shared/layout/types'
 import type { RichText, ThemeColors } from '@shared/model/types'
 import type { FoldSide } from '@shared/model/tree'
@@ -55,6 +55,8 @@ export interface TopicNodeProps {
    */
   draggable: boolean
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, id: string) => void
+  /** 节点右键：用于弹出「变为独立主题 / 放回结构」菜单；由画布统一管理菜单状态 */
+  onContextMenu: (event: ReactMouseEvent<HTMLDivElement>, id: string) => void
   onDoubleClick: (id: string) => void
   onRichChange: (id: string, rich: RichText) => void
   onCancelEdit: () => void

@@ -16,7 +16,16 @@
  */
 import { overlayToggleOf } from '../../../src/renderer/src/store/editor'
 
-import { activeRoot, activeSheet, countTopics, subtreeIds } from '../../../src/shared/model/tree'
+import {
+  activeRoot,
+  activeSheet,
+  countTopics,
+  detachToFloating,
+  isRootDetached,
+  findTopic,
+  reattachFloating,
+  subtreeIds
+} from '../../../src/shared/model/tree'
 
 import {
   buildRange,
@@ -679,6 +688,108 @@ export function testLayout(): void {
     '超长标题不会产生 NaN',
     extreme.nodes.every((n) => Number.isFinite(n.width) && n.width > 0)
   )
+
+  group('独立主题：模型语义与布局产出')
+  reset()
+  const floatRootId = root().id
+  const floatBranchA = addChildOf(floatRootId, '甲支')
+  const floatBranchB = addChildOf(floatRootId, '乙支')
+  const floatBranchC = addChildOf(floatRootId, '丙支')
+  const floatParent = addChildOf(floatBranchA, '浮动父')
+  const floatChild = addChildOf(floatParent, '浮动子')
+  const floatGrand = addChildOf(floatChild, '浮动孙')
+  const floatDefault = addChildOf(floatBranchC, '默认浮动')
+  const floatSubtree = subtreeIds(root(), floatParent).sort()
+
+  // 纯函数先在可变副本上验证语义；store 动作在下面验证一步撤销。
+  const pureRoot = structuredClone(root())
+  eq('纯函数：根主题不可脱', detachToFloating(pureRoot, floatRootId, { x: 0, y: 0 }), false)
+  eq(
+    '纯函数：不存在的主题不可脱',
+    detachToFloating(pureRoot, 'missing-topic', { x: 0, y: 0 }),
+    false
+  )
+  eq('纯函数：第一次脱离成功', detachToFloating(pureRoot, floatParent, { x: 260, y: -40 }), true)
+  check(
+    '纯函数：脱离后原父级 children 不再有它',
+    !findTopic(pureRoot, floatBranchA)?.children.some((child) => child.id === floatParent)
+  )
+  check(
+    '纯函数：脱离后进入 root.detachedChildren',
+    pureRoot.detachedChildren.some((child) => child.id === floatParent)
+  )
+  eq(
+    '纯函数：子树整体跟着走',
+    subtreeIds(pureRoot, floatParent).sort().join(','),
+    floatSubtree.join(',')
+  )
+  eq('纯函数：重复脱离是 no-op', detachToFloating(pureRoot, floatParent, { x: 99, y: 99 }), false)
+  eq('纯函数：放回结构成功', reattachFloating(pureRoot, floatParent, floatBranchB, 0), true)
+  check('纯函数：放回后 position 被清空', findTopic(pureRoot, floatParent)?.position === undefined)
+  check(
+    '纯函数：放回后回到目标父级的指定下标',
+    findTopic(pureRoot, floatBranchB)?.children[0]?.id === floatParent
+  )
+
+  eq('store：脱离成功', store().detachToFloating(floatParent, { x: 260, y: -40 }), true)
+  check('store：root.detachedChildren 有它', isRootDetached(root(), floatParent) === true)
+  eq('store：无 position 也能脱离', store().detachToFloating(floatDefault), true)
+
+  const floatLayout = layoutSheet(root(), fakeMeasure)
+  const floatRootNode = floatLayout.nodeMap.get(floatRootId)
+  const floatNode = floatLayout.nodeMap.get(floatParent)
+  const floatDefaultNode = floatLayout.nodeMap.get(floatDefault)
+  check('独立主题进入布局 nodes', Boolean(floatNode))
+  check('无 position 的独立主题也有确定性位置', Boolean(floatDefaultNode))
+  check('独立主题节点的 detached 标记为真', floatNode?.detached === true)
+  check(
+    '子树每个节点都进入布局',
+    [floatParent, floatChild, floatGrand].every((id) => floatLayout.nodeMap.has(id))
+  )
+  check(
+    'position 决定独立主题相对根的位置',
+    Boolean(
+      floatRootNode &&
+      floatNode &&
+      Math.abs(floatNode.x - floatRootNode.x - 260) < 0.5 &&
+      Math.abs(floatNode.y - floatRootNode.y + 40) < 0.5
+    ),
+    floatNode && floatRootNode
+      ? `dx=${(floatNode.x - floatRootNode.x).toFixed(2)} dy=${(floatNode.y - floatRootNode.y).toFixed(2)}`
+      : 'missing node'
+  )
+  check(
+    '所有节点（含独立主题）都在画布范围内',
+    floatLayout.nodes.every(
+      (node) =>
+        Number.isFinite(node.x) &&
+        Number.isFinite(node.y) &&
+        node.x >= 0 &&
+        node.y >= 0 &&
+        node.x + node.width <= floatLayout.bounds.width + 1 &&
+        node.y + node.height <= floatLayout.bounds.height + 1
+    )
+  )
+  check(
+    '独立主题子树连线也产出了',
+    floatLayout.edges.some((edge) => edge.fromId === floatParent) &&
+      floatLayout.edges.some((edge) => edge.fromId === floatChild)
+  )
+  const floatCache = createLayoutCache()
+  layoutSheetCached(root(), fakeMeasure, {}, sheet(), floatCache)
+  store().setTitle(floatChild, '浮动子已改')
+  const floatIncremental = layoutSheetCached(root(), fakeMeasure, {}, sheet(), floatCache)
+  eq('独立主题：尺寸变化走增量', floatCache.pass, 'incremental')
+  eq(
+    '独立主题：增量结果 == 全量结果',
+    layoutDigest(floatIncremental),
+    layoutDigest(layoutSheet(root(), fakeMeasure, {}, sheet()))
+  )
+
+  eq('store：放回结构成功', store().attachBackFromFloating(floatParent, floatBranchB, 0), true)
+  check('store：放回后 position 被清空', find(floatParent)?.position === undefined)
+  check('store：放回后回到目标父级的指定下标', find(floatBranchB)?.children[0]?.id === floatParent)
+  check('store：放回后 root.detachedChildren 不再含它', !isRootDetached(root(), floatParent))
 }
 
 export async function testOverlays(): Promise<void> {

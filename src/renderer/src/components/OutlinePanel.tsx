@@ -19,7 +19,8 @@ import {
   Tag,
   X
 } from 'lucide-react'
-import { activeRoot, activeSheet, findParent, findTopic } from '@shared/model/tree'
+import { activeRoot, activeSheet, findParent, findTopic, isRootDetached } from '@shared/model/tree'
+import { canvasLayoutNode } from './canvas/layout-memory'
 import { OUTLINE_FORMATS, outlineRows, type OutlineFormat } from '@shared/outline'
 import { useEditor } from '../store/editor'
 
@@ -113,7 +114,29 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
       const store = useEditor.getState()
       const root = activeRoot(store.workbook)
       const parent = findParent(root, id)
-      if (!parent || parent.id === root.id) return
+      if (!parent) return
+
+      // 已经是独立主题：Shift+Tab 放回结构（缺省挂回中心主题下）
+      if (isRootDetached(root, id)) {
+        commitInline()
+        if (store.attachBackFromFloating(id)) onNotify('已放回结构，位置偏移已清除')
+        focusRow(id)
+        return
+      }
+
+      // 一级主题：Shift+Tab 脱离成独立主题（位置按画布旧坐标反算，视觉原地）
+      if (parent.id === root.id) {
+        const node = canvasLayoutNode(id)
+        const rootNode = canvasLayoutNode(root.id)
+        const position =
+          node && rootNode ? { x: node.x - rootNode.x, y: node.y - rootNode.y } : undefined
+        commitInline()
+        if (store.detachToFloating(id, position)) {
+          onNotify('已变为独立主题；右键「放回结构」可回到树里')
+        }
+        focusRow(id)
+        return
+      }
       const grand = findParent(root, parent.id)
       if (!grand) return
       const parentIndex = grand.children.findIndex((child) => child.id === parent.id)
@@ -121,7 +144,7 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
       store.moveNode(id, grand.id, parentIndex + 1)
       focusRow(id)
     },
-    [commitInline, focusRow]
+    [commitInline, focusRow, onNotify]
   )
 
   const navigateRow = useCallback(

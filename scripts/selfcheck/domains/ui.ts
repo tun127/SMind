@@ -2061,6 +2061,37 @@ export function testRichText(): void {
     )
     check('D-04 静态：至少扫到 7 处 .children（防空过）', childrenCount >= 7)
   }
+  /* ---- 独立主题：静态消费点防空过 ---- */
+  {
+    const expected = [
+      'src/shared/model/tree.ts',
+      'src/shared/layout/detached.ts',
+      'src/shared/layout/core.ts',
+      'src/shared/layout/incremental.ts',
+      'src/renderer/src/store/slices/floating.ts',
+      'src/renderer/src/components/Canvas.tsx'
+    ]
+    const consumers = expected.filter((rel) => {
+      const source = readFileSync(`${process.cwd()}/${rel}`, 'utf8')
+      return /detachedChildren|detachToFloating|reattachFloating|isRootDetached|\.detached\b/.test(
+        source
+      )
+    })
+    check('独立主题：至少扫到 6 处消费点（防空过）', consumers.length >= 6, consumers.join(','))
+    const layoutSource = readFileSync(`${process.cwd()}/src/shared/layout/core.ts`, 'utf8')
+    const runSource = readFileSync(`${process.cwd()}/src/shared/layout/run.ts`, 'utf8')
+    check(
+      '独立主题：布局接入点仍在归一化之前',
+      layoutSource.includes('beforeFinishHooks') && runSource.includes('onBeforeFinish')
+    )
+    const detachedSource = readFileSync(`${process.cwd()}/src/shared/layout/detached.ts`, 'utf8')
+    check(
+      '独立主题：缺 position 时有确定性兜底布局',
+      detachedSource.includes('stackCenterY') &&
+        detachedSource.includes('rootNode.width + builder.gapX')
+    )
+  }
+
   const nowD15 = Date.now()
   check(
     '还没查过时，焦点复检不触发（否则启动瞬间就抢跑一次）',

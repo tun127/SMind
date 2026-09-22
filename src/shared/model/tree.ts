@@ -207,6 +207,69 @@ export function moveTopic(root: Topic, id: string, newParentId: string, index?: 
   return true
 }
 
+/**
+ * 某主题是不是直接挂在中心主题下的独立主题。
+ *
+ * 只有 `root.detachedChildren` 参与画布布局；非根级 `detachedChildren` 在画布上没有布局语义，
+ * 本批只登记不动。
+ */
+export function isRootDetached(root: Topic, id: string): boolean {
+  return root.detachedChildren.some((child) => child.id === id)
+}
+
+/**
+ * 把主题从原父级摘出来，变成直接挂在中心主题下的独立主题。
+ *
+ * - 根主题不可脱；
+ * - 已经在 root.detachedChildren 里的重复调用是 no-op；
+ * - 非根级 detachedChildren 只登记不动，这里一律 no-op；
+ * - 整棵子树跟着走；`position` 是相对根主题左上角的布局偏移（见 `placeDetached`）。
+ */
+export function detachToFloating(
+  root: Topic,
+  id: string,
+  position?: { x: number; y: number }
+): boolean {
+  if (id === root.id) return false
+  const parent = findParent(root, id)
+  if (!parent) return false
+  if (parent.id === root.id && parent.detachedChildren.some((child) => child.id === id))
+    return false
+  if (parent.detachedChildren.some((child) => child.id === id)) return false
+
+  const removed = detachTopic(root, id)
+  if (!removed) return false
+  removed.position = position ? { ...position } : undefined
+  root.detachedChildren.push(removed)
+  return true
+}
+
+/**
+ * 把 root 下的独立主题放回目标父级的普通 children，并清掉 `position`。
+ *
+ * 下标语义与 `attachChild` 完全一致（含负数）；不传 `parentId` 时挂回中心主题下。
+ * 只处理 `root.detachedChildren` 里的直接成员；深层 detached 不在本批语义内。
+ */
+export function reattachFloating(
+  root: Topic,
+  id: string,
+  parentId: string = root.id,
+  index?: number
+): boolean {
+  if (id === root.id) return false
+  const at = root.detachedChildren.findIndex((child) => child.id === id)
+  if (at < 0) return false
+  const parent = findTopic(root, parentId)
+  if (!parent) return false
+  if (isSelfOrDescendant(root, id, parent.id)) return false
+
+  const [topic] = root.detachedChildren.splice(at, 1)
+  if (!topic) return false
+  topic.position = undefined
+  attachChild(parent, topic, index)
+  return true
+}
+
 /* ------------------------------------------------------------------ */
 /* 折叠（整体折叠 + 平衡思维导图的「左右分别收起」）                     */
 /* ------------------------------------------------------------------ */

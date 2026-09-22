@@ -43,10 +43,16 @@ export function CanvasHints({
           拖到同级之间＝插进那一层
         </span>
         <span className="canvas__drag-legend-sep">·</span>
-        <span className={dragVisual && freeDrop ? 'is-active' : undefined}>按住 Alt＝自由摆放</span>
+        <span className={dragVisual && freeDrop ? 'is-active' : undefined}>
+          按住 Alt＝自由摆放（仍在树里）
+        </span>
       </div>
 
-      {freeDrop ? <div className="canvas__free-hint">自由摆放（按住 Alt 可随时切换）</div> : null}
+      {freeDrop ? (
+        <div className="canvas__free-hint">
+          自由摆放（仍在树里；独立主题请用右键「变为独立主题」）
+        </div>
+      ) : null}
 
       {/* 落点被判为非法的原因：不写出来，用户只会以为"拖到这里没反应"＝坏了 */}
       {dropBlocked ? <div className="canvas__blocked-hint">{dropBlocked}</div> : null}

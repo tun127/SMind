@@ -8,6 +8,7 @@ import { beginCost, count, isDiagArmed, mark, setStage } from '../../dev/stage'
 import { bumpMeasureEpoch, measureTopic } from '../../render/measure'
 import { clearFormulaCache } from '../../render/formula'
 import { branchColorOf } from '../../render/theme'
+import { rememberCanvasLayout } from './layout-memory'
 import { themeColorsOf, useEditor } from '../../store/editor'
 import type { EditorState } from '../../store/editor'
 
@@ -142,6 +143,7 @@ export function useCanvasLayout({
       `${fontEpoch}:${renderEpoch}`,
       editingId ? [editingId] : []
     )
+    rememberCanvasLayout(computed)
     endLayout()
     setStage('画布布局完成')
     /**

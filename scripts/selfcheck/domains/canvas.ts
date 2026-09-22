@@ -1292,6 +1292,54 @@ export function testUndoGranularity(): void {
   eq('取消后 editingId 清空', store().editingId, null)
   eq('取消后 editingText 清空', store().editingText, '')
   eq('取消后 editingRich 清空', store().editingRich, null)
+
+  group('独立主题：store 动作一步撤销与 position 清空')
+  reset()
+  const fRoot = root()
+  const fBranch = addChildOf(fRoot.id, '父分支')
+  const fNode = addChildOf(fBranch, '将变独立')
+  addChildOf(fNode, '跟随子节点')
+
+  const floatBase = store().undoStack.length
+  eq('根主题不可脱', store().detachToFloating(fRoot.id, { x: 0, y: 0 }), false)
+  eq('根主题 no-op 不写历史', store().undoStack.length, floatBase)
+  eq('store 脱离成功', store().detachToFloating(fNode, { x: 10, y: 20 }), true)
+  eq('脱离只记一步撤销', store().undoStack.length, floatBase + 1)
+  eq('重复脱离是 no-op', store().detachToFloating(fNode, { x: 99, y: 99 }), false)
+  eq('重复 no-op 不写历史', store().undoStack.length, floatBase + 1)
+  eq('脱离时 position 写入', find(fNode)?.position, { x: 10, y: 20 })
+  check(
+    '脱离时子树整体进入 detached 子树',
+    root().detachedChildren[0]?.children.some((child) => child.title === '跟随子节点')
+  )
+
+  store().undo()
+  check(
+    '一步撤销后回到原父级',
+    find(fBranch)?.children.some((child) => child.id === fNode) === true
+  )
+  eq(
+    '一步撤销后恢复原下标',
+    find(fBranch)?.children.findIndex((child) => child.id === fNode),
+    0
+  )
+  check('一步撤销后 detachedChildren 清空', root().detachedChildren.length === 0)
+  eq('一步撤销后 position 恢复', find(fNode)?.position, undefined)
+
+  store().detachToFloating(fNode, { x: 33, y: 44 })
+  const restoredCount = store().restoreAutoLayout()
+  eq('恢复自动布局不碰独立主题', restoredCount, 0)
+  eq('恢复自动布局后独立主题 position 仍在', find(fNode)?.position, { x: 33, y: 44 })
+
+  const backBase = store().undoStack.length
+  eq('放回结构成功', store().attachBackFromFloating(fNode, fBranch, 0), true)
+  eq('放回只记一步撤销', store().undoStack.length, backBase + 1)
+  eq('放回后 position 被清空', find(fNode)?.position, undefined)
+  check('放回后回到目标父级', find(fBranch)?.children[0]?.id === fNode)
+  check(
+    '放回后 root.detachedChildren 不再含它',
+    !root().detachedChildren.some((child) => child.id === fNode)
+  )
 }
 
 export function testStructureIsCanvasLevel(): void {

@@ -15,6 +15,7 @@ import { createDocumentSlice } from './slices/document'
 import { createSelectionSlice } from './slices/selection'
 import { createStructureSlice } from './slices/structure'
 import { createMoveSlice } from './slices/move'
+import { createFloatingSlice } from './slices/floating'
 import { createNodeContentSlice } from './slices/node-content'
 import { createOverlaysSlice } from './slices/overlays'
 import { createThemeSlice } from './slices/theme'
@@ -52,6 +53,7 @@ export const useEditor = create<EditorState>()((...a) => ({
   ...createSelectionSlice(...a),
   ...createStructureSlice(...a),
   ...createMoveSlice(...a),
+  ...createFloatingSlice(...a),
   ...createNodeContentSlice(...a),
   ...createOverlaysSlice(...a),
   ...createThemeSlice(...a)

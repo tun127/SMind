@@ -30,7 +30,7 @@
  * 边界/概要/关系线、bounds、分支配色）必须完全一致。
  */
 import type { Sheet, Topic } from '../model/types'
-import { visibleChildren } from '../model/tree'
+import { allChildrenOf, visibleChildren } from '../model/tree'
 import {
   LayoutBuilder,
   LAYOUT_DEFAULTS,
@@ -122,13 +122,24 @@ function visibleIds(topic: Topic): string {
     .join(',')
 }
 
+/** 只有中心主题的直接独立主题参与布局；非根级 detached 不在这里比较。 */
+function detachedIds(topic: Topic): string {
+  return topic.detachedChildren.map((child) => child.id).join(',')
+}
+
 /**
  * 并行比较新旧两棵树。
  *
  * `prev === next` 就是"这棵子树一个字节都没动"，直接剪掉——
  * 这是整套增量之所以能做到 O(脏路径) 的根据。
  */
-function scanTree(prev: Topic | null, next: Topic, depth: number, out: ScanResult): void {
+function scanTree(
+  prev: Topic | null,
+  next: Topic,
+  depth: number,
+  out: ScanResult,
+  includeDetached: boolean
+): void {
   if (prev === next) return
 
   out.touched.add(next.id)
@@ -137,11 +148,15 @@ function scanTree(prev: Topic | null, next: Topic, depth: number, out: ScanResul
   if (!prev) {
     // 新节点：整棵新子树都算脏（它的每个后代都不在上一轮里）
     out.shapeChanged = true
-    for (const child of next.children) scanTree(null, child, depth + 1, out)
+    for (const child of next.children) scanTree(null, child, depth + 1, out, false)
+    if (includeDetached) {
+      for (const child of next.detachedChildren) scanTree(null, child, depth + 1, out, false)
+    }
     return
   }
 
   if (visibleIds(prev) !== visibleIds(next)) out.shapeChanged = true
+  if (includeDetached && detachedIds(prev) !== detachedIds(next)) out.shapeChanged = true
   if (prev.collapsed !== next.collapsed) out.shapeChanged = true
   if (prev.structureClass !== next.structureClass) out.shapeChanged = true
   /**
@@ -152,7 +167,13 @@ function scanTree(prev: Topic | null, next: Topic, depth: number, out: ScanResul
 
   for (const child of next.children) {
     const match = prev.children.find((item) => item.id === child.id) ?? null
-    scanTree(match, child, depth + 1, out)
+    scanTree(match, child, depth + 1, out, false)
+  }
+  if (includeDetached) {
+    for (const child of next.detachedChildren) {
+      const match = prev.detachedChildren.find((item) => item.id === child.id) ?? null
+      scanTree(match, child, depth + 1, out, false)
+    }
   }
 }
 
@@ -167,7 +188,7 @@ function hotPathOf(root: Topic, hot: ReadonlySet<string>): string[] {
   const path: string[] = []
   const visit = (topic: Topic): boolean => {
     let hit = hot.has(topic.id)
-    for (const child of topic.children) {
+    for (const child of allChildrenOf(topic)) {
       if (visit(child)) hit = true
     }
     if (hit) path.push(topic.id)
@@ -251,7 +272,7 @@ export function layoutSheetCached(
   }
 
   const scan: ScanResult = { changed: [], touched: new Set(), shapeChanged: false }
-  scanTree(prev.root, root, 0, scan)
+  scanTree(prev.root, root, 0, scan, true)
   const overlayChanged = !overlaysSame(prev, inputOf(root, sheet, extras))
 
   /**

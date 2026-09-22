@@ -406,6 +406,8 @@ export function connectTree(
     }
   }
   walk(root)
+  // 独立主题没有树内父边；但它们的子树仍需要连线（否则浮出来的只是一堆散框）。
+  for (const floating of root.detachedChildren) walk(floating)
 }
 
 /** 水平方向堆叠时的默认锚点：父的右/左边 -> 子的左/右边 */

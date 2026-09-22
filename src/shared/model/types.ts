@@ -119,7 +119,11 @@ export interface Topic {
   style?: NodeStyle
   /** 是否折叠子节点 */
   collapsed?: boolean
-  /** 自由定位偏移（相对自动布局位置的增量） */
+  /**
+   * 自由定位偏移：
+   * - 树内主题：相对自动布局位置的增量；
+   * - root.detachedChildren 里的独立主题：相对根主题左上角的布局偏移。
+   */
   position?: { x: number; y: number }
   /** 原样保留的 Xmind 扩展字段，避免另存丢信息 */
   extensions?: unknown[]

@@ -55,6 +55,8 @@ export class LayoutBuilder {
 
   private readonly sizes = new Map<string, MeasureResult>()
   private readonly finishHooks: Array<(result: LayoutResult) => void> = []
+  /** 归一化**之前**执行的钩子：独立主题必须这时进入 nodes，才会被 bounds / geometry 纳入。 */
+  private readonly beforeFinishHooks: Array<() => void> = []
 
   constructor(
     private readonly measure: MeasureFn,
@@ -148,6 +150,8 @@ export class LayoutBuilder {
       )
     }
     walk(root, 0)
+    // 独立主题的子树也要测量。只跟 children：非根级 detachedChildren 不参与布局。
+    for (const floating of root.detachedChildren) walk(floating, 1)
   }
 
   /** 直接塞进已经算好的测量结果（增量层在变更检测阶段已经量过一遍了） */
@@ -375,6 +379,11 @@ export class LayoutBuilder {
     return this.reserveTop(topic) + this.reserveBottom(topic)
   }
 
+  /** 注册一个「坐标归一化之前」执行的钩子：独立主题必须在这个时点进入 nodes。 */
+  onBeforeFinish(hook: () => void): void {
+    this.beforeFinishHooks.push(hook)
+  }
+
   /** 注册一个「坐标归一化之后」执行的钩子：嵌套结构的装饰与连线要在最终坐标上补画 */
   onFinish(hook: (result: LayoutResult) => void): void {
     this.finishHooks.push(hook)
@@ -466,6 +475,9 @@ export class LayoutBuilder {
 
   /** 归一化坐标、计算边界与分支配色索引 */
   finish(root: Topic): LayoutResult {
+    // 先放独立主题：它们必须在 minX/minY 统计之前进入 nodes。
+    for (const hook of this.beforeFinishHooks) hook()
+
     let minX = Number.POSITIVE_INFINITY
     let minY = Number.POSITIVE_INFINITY
     let maxX = Number.NEGATIVE_INFINITY

@@ -44,7 +44,8 @@ export function CanvasNodesLayer({
   handleNodeCommitAndAddSibling,
   handleNodeNavigateEdit,
   handleNodeToggleCollapse,
-  handleNodeToggleFoldSide
+  handleNodeToggleFoldSide,
+  handleNodeContextMenu
 }: {
   layout: LayoutResult
   colors: ThemeColors
@@ -65,6 +66,7 @@ export function CanvasNodesLayer({
   pulsingId: string | null
   filterResult: ReturnType<typeof useCanvasDisplay>['filterResult']
   handleNodePointerDown: TopicNodeProps['onPointerDown']
+  handleNodeContextMenu: TopicNodeProps['onContextMenu']
   handleNodeDoubleClick: TopicNodeProps['onDoubleClick']
   handleNodeRichChange: TopicNodeProps['onRichChange']
   handleNodeCancelEdit: TopicNodeProps['onCancelEdit']
@@ -114,6 +116,7 @@ export function CanvasNodesLayer({
           }
           dragPrimary={Boolean(dragVisual && dragVisual.anchorId === node.id)}
           onPointerDown={handleNodePointerDown}
+          onContextMenu={handleNodeContextMenu}
           onDoubleClick={handleNodeDoubleClick}
           onRichChange={handleNodeRichChange}
           onCancelEdit={handleNodeCancelEdit}

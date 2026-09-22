@@ -111,6 +111,8 @@ export interface NodeLayout {
   height: number
   depth: number
   side: Side
+  /** 中心主题的直接独立主题：仅用于视觉区分；坐标仍由 `position` / 兜底布局决定 */
+  detached?: boolean
   /** 以下字段来自测量结果，供渲染层直接使用 */
   lines: MeasuredLine[]
   fontSize: number
