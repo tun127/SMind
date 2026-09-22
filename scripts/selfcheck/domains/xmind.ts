@@ -380,6 +380,21 @@ export async function testMediaElements(): Promise<void> {
     formulaSource.includes("el.style.display = 'flex'") &&
       formulaSource.includes("el.style.alignItems = 'flex-start'")
   )
+  const canvasLayoutSource = readFileSync(
+    `${process.cwd()}/src/renderer/src/components/canvas/use-canvas-layout.ts`,
+    'utf8'
+  )
+  check(
+    '公式实测值变化会通知画布（避免堆叠继续用旧高度）',
+    formulaSource.includes('scheduleMeasureVersionBump') &&
+      formulaSource.includes('formulaMeasureVersion') &&
+      canvasLayoutSource.includes('useSyncExternalStore') &&
+      canvasLayoutSource.includes('formulaEpoch')
+  )
+  check(
+    '公式实测版本已并入布局 extras（变化时走全量缓存失效）',
+    canvasLayoutSource.includes('${formulaEpoch}')
+  )
 
   group('代码块：尺寸规则')
 

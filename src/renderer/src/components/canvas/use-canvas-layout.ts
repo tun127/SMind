@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { createLayoutCache, layoutSheetCached } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import { activeRoot, activeSheet, countTopics } from '@shared/model/tree'
@@ -6,7 +6,11 @@ import { plainTextOf } from '@shared/richtext'
 import type { Topic, Workbook } from '@shared/model/types'
 import { beginCost, count, isDiagArmed, mark, setStage } from '../../dev/stage'
 import { bumpMeasureEpoch, measureTopic } from '../../render/measure'
-import { clearFormulaCache } from '../../render/formula'
+import {
+  clearFormulaCache,
+  formulaMeasureVersion,
+  subscribeFormulaMeasure
+} from '../../render/formula'
 import { branchColorOf } from '../../render/theme'
 import { rememberCanvasLayout } from './layout-memory'
 import { themeColorsOf, useEditor } from '../../store/editor'
@@ -62,6 +66,12 @@ export function useCanvasLayout({
    * 但公式缓存/测量缓存可能已经被上一份文档的估算值污染，必须在新文档这里清一次。
    */
   const docSeq = useEditor((s) => s.docSeq)
+  /**
+   * 公式实测尺寸版本。`formulaSize` 从估算切到实测（或字体就绪后实测值变化）时
+   * 会在这里触发一次重渲染；下面把它并进布局 extras，让缓存走「排版环境变了」
+   * 的全量重排，而不是继续复用旧高度。
+   */
+  const formulaEpoch = useSyncExternalStore(subscribeFormulaMeasure, formulaMeasureVersion)
 
   useEffect(() => {
     let cancelled = false
@@ -147,7 +157,7 @@ export function useCanvasLayout({
       {},
       sheet,
       layoutCacheRef.current,
-      `${fontEpoch}:${renderEpoch}`,
+      `${fontEpoch}:${renderEpoch}:${formulaEpoch}`,
       editingId ? [editingId] : []
     )
     rememberCanvasLayout(root.id, computed)
@@ -167,7 +177,8 @@ export function useCanvasLayout({
     editingText,
     editingRich,
     fontEpoch,
-    renderEpoch
+    renderEpoch,
+    formulaEpoch
   ])
 
   /**
