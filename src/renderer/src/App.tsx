@@ -134,7 +134,14 @@ export default function App(): ReactElement {
 
   useAutosave({ showToast })
 
-  const { recovery, handleRestore, handleDiscardRecovery } = useRecovery({
+  const {
+    recovery,
+    handleRestore,
+    handleRestoreLatest,
+    handleRestoreAll,
+    handleDiscardRecovery,
+    handleDiscardAll
+  } = useRecovery({
     recoveryPendingRef,
     showToast
   })
@@ -212,6 +219,9 @@ export default function App(): ReactElement {
         recovery={recovery}
         handleRestore={handleRestore}
         handleDiscardRecovery={handleDiscardRecovery}
+        handleRestoreLatest={handleRestoreLatest}
+        handleRestoreAll={handleRestoreAll}
+        handleDiscardAll={handleDiscardAll}
         pending={pending}
         setPending={setPending}
         displayName={displayName}

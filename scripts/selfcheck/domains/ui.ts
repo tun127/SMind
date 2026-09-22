@@ -169,7 +169,12 @@ import {
   isPerDocAutosaveName
 } from '../../../src/shared/recovery'
 import { manifestVersionOf, shouldSkipUpload } from '../../../scripts/lib/upload-skip.mjs'
-
+import {
+  recoveryCountText,
+  recoveryStateFromList,
+  removeRecoveryItem
+} from '../../../src/renderer/src/app/recovery-list'
+import type { RecoveryInfo } from '../../../src/shared/ipc'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1827,6 +1832,38 @@ export function testRichText(): void {
     )
   )
   group('自动存档：按文档分文件（D-02）')
+  const recoveryA: RecoveryInfo = {
+    docId: 'doc-a',
+    originalPath: null,
+    title: '未保存的 A',
+    savedAt: 1000
+  }
+  const recoveryB: RecoveryInfo = {
+    docId: 'doc-b',
+    originalPath: 'D:/b.xmind',
+    title: '未保存的 B',
+    savedAt: 2000
+  }
+  const recoveryUi = recoveryStateFromList({ items: [recoveryA, recoveryB] })
+  eq('D-02 UI：两标签两份候选都会出现在列表里', recoveryUi.items.length, 2)
+  eq('D-02 UI：最近一份排在最前，快速路径能拿到它', recoveryUi.items[0]?.docId, 'doc-b')
+  check('D-02 UI：文案说清候选有几份', recoveryCountText(recoveryUi.items.length).includes('2 份'))
+  const afterDrop = removeRecoveryItem(recoveryUi, recoveryA)
+  eq('D-02 UI：单独忽略只移除那一份', afterDrop.items.length, 1)
+  eq('D-02 UI：剩下的是另一份候选', afterDrop.items[0]?.docId, 'doc-b')
+  check(
+    'D-02 UI：恢复对话框逐份渲染，而不是只显示一份',
+    readFileSync(
+      `${process.cwd()}/src/renderer/src/components/RecoveryDialog.tsx`,
+      'utf8'
+    ).includes('items.map')
+  )
+  check(
+    'D-02 UI：AppDialogs 把整个候选列表交给恢复对话框',
+    readFileSync(`${process.cwd()}/src/renderer/src/app/app-dialogs.tsx`, 'utf8').includes(
+      'items={recovery.items}'
+    )
+  )
 
   /* ---- D-19：升级兼容（旧格式存档不能被漏掉） ---- */
   check(
@@ -1936,7 +1973,10 @@ export function testRichText(): void {
     readFileSync(`${process.cwd()}/scripts/upload-oss.mjs`, `utf8`).includes(`rt.yml`)
   )
   /* ---- D-20：清单永不按体积跳过 + 发版后校验线上清单版本 ---- */
-  check('D-20：latest.yml 即使远端大小一致也不跳过', shouldSkipUpload('latest.yml', 347, 347) === false)
+  check(
+    'D-20：latest.yml 即使远端大小一致也不跳过',
+    shouldSkipUpload('latest.yml', 347, 347) === false
+  )
   check('D-20：rt.yml 即使远端大小一致也不跳过', shouldSkipUpload('rt.yml', 347, 347) === false)
   check(
     'D-20：exe 仍然按体积跳过（两个 108 MB 的补传收益保留）',

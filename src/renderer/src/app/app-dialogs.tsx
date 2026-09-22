@@ -2,7 +2,8 @@ import { type Dispatch, type ReactElement, type SetStateAction, type useState } 
 import type { ExtractedDocument } from '@shared/document'
 import AiSettingsDialog from '../components/AiSettingsDialog'
 import DocumentToMapDialog from '../components/DocumentToMapDialog'
-import { RecoveryDialog, ShortcutsDialog, UnsavedDialog } from '../components/Dialogs'
+import { ShortcutsDialog, UnsavedDialog } from '../components/Dialogs'
+import { RecoveryDialog } from '../components/RecoveryDialog'
 import ExportDialog from '../components/ExportDialog'
 import HistoryDialog from '../components/HistoryDialog'
 import type { useDocumentActions } from './use-document-actions'
@@ -34,6 +35,9 @@ interface Props {
   recovery: Recovery['recovery']
   handleRestore: Recovery['handleRestore']
   handleDiscardRecovery: Recovery['handleDiscardRecovery']
+  handleRestoreLatest: Recovery['handleRestoreLatest']
+  handleRestoreAll: Recovery['handleRestoreAll']
+  handleDiscardAll: Recovery['handleDiscardAll']
   pending: WindowClose['pending']
   setPending: WindowClose['setPending']
   displayName: string
@@ -60,6 +64,9 @@ export function AppDialogs({
   recovery,
   handleRestore,
   handleDiscardRecovery,
+  handleRestoreLatest,
+  handleRestoreAll,
+  handleDiscardAll,
   pending,
   setPending,
   displayName,
@@ -85,9 +92,12 @@ export function AppDialogs({
     <>
       {recovery && (
         <RecoveryDialog
-          info={recovery}
-          onRestore={() => void handleRestore()}
+          items={recovery.items}
+          onRestore={(item) => void handleRestore(item)}
+          onRestoreLatest={() => void handleRestoreLatest()}
+          onRestoreAll={() => void handleRestoreAll()}
           onDiscard={handleDiscardRecovery}
+          onDiscardAll={handleDiscardAll}
         />
       )}
 

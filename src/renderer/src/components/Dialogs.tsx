@@ -1,6 +1,5 @@
 import { useRef, type ReactElement, type ReactNode } from 'react'
-import { AlertTriangle, HardDriveDownload } from 'lucide-react'
-import type { RecoveryInfo } from '@shared/ipc'
+import { AlertTriangle } from 'lucide-react'
 
 interface ModalProps {
   title: string
@@ -40,46 +39,6 @@ export function Modal({ title, icon, children, footer, onMaskClick }: ModalProps
         <div className="modal__footer">{footer}</div>
       </div>
     </div>
-  )
-}
-
-interface RecoveryDialogProps {
-  info: RecoveryInfo
-  onRestore(): void
-  onDiscard(): void
-}
-
-export function RecoveryDialog({ info, onRestore, onDiscard }: RecoveryDialogProps): ReactElement {
-  /**
-   * 时间戳缺失时**不再现取当前时间**（原文是 `new Date(info.savedAt || Date.now())`）。
-   *
-   * 渲染期调用 `Date.now()` 是不纯的：每次重渲染都可能算出不同的时间
-   * （React Compiler 的 `purity` 规则会报它）。而且存档信息不完整时，
-   * 照实说「时间未知」比伪装成「刚刚」更有用——用户据此判断要不要恢复。
-   */
-  const time = info.savedAt
-    ? new Date(info.savedAt).toLocaleString('zh-CN')
-    : '时间未知（存档信息不完整）'
-  return (
-    <Modal
-      title="发现未保存的内容"
-      icon={<HardDriveDownload size={18} />}
-      footer={
-        <>
-          <button type="button" className="btn" onClick={onDiscard}>
-            忽略并删除
-          </button>
-          <button type="button" className="btn btn--primary" onClick={onRestore}>
-            恢复
-          </button>
-        </>
-      }
-    >
-      <p>
-        上次退出时《{info.title}》还有未保存的修改（{time}）。
-      </p>
-      <p className="modal__dim">是否恢复到编辑器中？</p>
-    </Modal>
   )
 }
 
