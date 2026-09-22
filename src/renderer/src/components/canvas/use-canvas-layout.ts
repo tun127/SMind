@@ -101,7 +101,9 @@ export function useCanvasLayout({
           measureTopic(
             // 实时草稿优先：组词/输入中的文本只在 DOM 里，用它参与测量，框才跟着内容长（第 2 步）。
             // titleRich 不变 —— 格式仍以提交时的 editingRich 为准。
-            { ...topic, title: editingDraftText || editingText, titleRich: editingRich },
+            // ?? ?26 ?????measure.ts ? `titleRich ?? richFromPlain(title)` ??
+            // titleRich ??? title ???????????????????? override ??
+            { ...topic, title: editingDraftText || editingText, titleRich: undefined }, // measure ?? titleRich??26????????? title
             depth
           ))
         : ((diag.editingMisses += 1), measureTopic(topic, depth))

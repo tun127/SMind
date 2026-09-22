@@ -1809,6 +1809,21 @@ export function testRichText(): void {
       '!geometryChanged && hot.size === 0'
     )
   )
+
+  /* ---- 报告 §26：编辑期测量读不到文本的终局根因 ---- */
+  check(
+    'override 的 titleRich 必须置空（否则 measure 只认旧的 titleRich）',
+    readFileSync(
+      `${process.cwd()}/src/renderer/src/components/canvas/use-canvas-layout.ts`,
+      `utf8`
+    ).includes('titleRich: undefined },')
+  )
+  check(
+    'measure 仍优先 titleRich（§26 只要求两者自洽，没改它的口径）',
+    readFileSync(`${process.cwd()}/src/renderer/src/render/measure.ts`, `utf8`).includes(
+      'topic.titleRich ?? richFromPlain(topic.title)'
+    )
+  )
   group('自动存档：按文档分文件（D-02）')
 
   /* ---- D-19：升级兼容（旧格式存档不能被漏掉） ---- */
