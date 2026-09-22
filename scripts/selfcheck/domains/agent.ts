@@ -1161,7 +1161,11 @@ export function testWriteToolsAndTurn(): void {
    * 它掉链子的方式是**静默**的：清单漏一种 → 那种操作不问就执行；
    * 标签漏一种 → 确认框里显示 "undefined"；脏数据没清 → 确认框被永久关掉。
    */
-  eq('破坏性种类共三种（删主题 / 删元素 / 合并同名）', DESTRUCTIVE_WRITE_KINDS.length, 3)
+  eq(
+    '破坏性种类共六种（三种无条件 + 清空/删减备注、代码、公式）',
+    DESTRUCTIVE_WRITE_KINDS.length,
+    6
+  )
   check(
     '每种破坏性操作都有中文名（确认框与设置里要用）',
     DESTRUCTIVE_WRITE_KINDS.every((kind) => DESTRUCTIVE_WRITE_LABELS[kind].trim().length > 0)
@@ -1175,6 +1179,41 @@ export function testWriteToolsAndTurn(): void {
   )
   eq('不是数组时当空清单处理', normalizeConfirmSkip('delete').length, 0)
   eq('默认配置不跳过任何确认（第一次必须问）', DEFAULT_APP_SETTINGS.aiConfirmSkip.length, 0)
+  eq('notes 在清单里（设置面板自动多出三项）', isDestructiveWriteKind('notes'), true)
+  eq('code 在清单里', isDestructiveWriteKind('code'), true)
+  eq('formula 在清单里', isDestructiveWriteKind('formula'), true)
+  eq(
+    '不再询问清单能收下这三项，脏数据仍被清掉',
+    normalizeConfirmSkip(['notes', 'code', 'formula', 'bad']).join(','),
+    'notes,code,formula'
+  )
+
+  group('Agent：D-13 清空型写操作按内容变少确认')
+  {
+    cost.notes = '原文备注有二十个字符，不能静默丢掉。'
+    const shrinkNotes = plan('setNotes', { address: '成本', text: '变短' })
+    check('备注覆盖后变短 → 标成破坏性', shrinkNotes.ok && shrinkNotes.destructive === true)
+    const emptyNotes = plan('setNotes', { address: '成本', text: '  ' })
+    check('备注传空 → 标成破坏性', emptyNotes.ok && emptyNotes.destructive === true)
+    const freshNotes = plan('setNotes', { address: '物料', text: '这是全新写入的备注内容' })
+    check('原本没有备注时正常写新内容 → 不确认', freshNotes.ok && freshNotes.destructive === false)
+
+    cost.code = { language: 'ts', text: 'const answer = 42\n// 一段必须保留的代码' }
+    const removeCode = plan('setCode', { address: '成本', text: '' })
+    check('移除已有代码块 → 标成破坏性', removeCode.ok && removeCode.destructive === true)
+    const freshCode = plan('setCode', { address: '物料', text: 'const x = 1' })
+    check('原本没有代码块时写新代码 → 不确认', freshCode.ok && freshCode.destructive === false)
+
+    cost.formula = 'E = mc^2'
+    const removeFormula = plan('setFormula', { address: '成本', formula: '' })
+    check('移除已有公式 → 标成破坏性', removeFormula.ok && removeFormula.destructive === true)
+    const freshFormula = plan('setFormula', { address: '物料', formula: 'a^2+b^2=c^2' })
+    check('原本没有公式时写新公式 → 不确认', freshFormula.ok && freshFormula.destructive === false)
+
+    cost.notes = undefined
+    cost.code = undefined
+    cost.formula = undefined
+  }
 
   const move = plan('moveTopic', { address: '成本/物料', toAddress: '中心主题' })
   eq('移动规划成功', move.ok, true)

@@ -79,7 +79,21 @@ export { FOLD_SIDE_LABELS }
  * 三处各写一份的话，将来新加一个破坏性工具时总有一处会漏——漏掉的那一处
  * 就是「AI 悄悄删了东西而用户没被问过」。
  */
-export const DESTRUCTIVE_WRITE_KINDS = ['delete', 'attachmentRemove', 'dedupe'] as const
+const UNCONDITIONAL_DESTRUCTIVE_WRITE_KINDS = ['delete', 'attachmentRemove', 'dedupe'] as const
+
+/**
+ * 需要先确认的破坏性种类。
+ *
+ * `notes` / `code` / `formula` 是**条件破坏性**：只有这次调用会让内容变少才该问；
+ * 规划层按参数给 `destructive`，不要用 `destructiveOf(kind)` 一律判真。
+ * 它们仍放进清单，是为了「不再询问」和设置面板的清单能自动多出三项。
+ */
+export const DESTRUCTIVE_WRITE_KINDS = [
+  ...UNCONDITIONAL_DESTRUCTIVE_WRITE_KINDS,
+  'notes',
+  'code',
+  'formula'
+] as const
 
 export type DestructiveWriteKind = (typeof DESTRUCTIVE_WRITE_KINDS)[number]
 
@@ -87,16 +101,19 @@ export type DestructiveWriteKind = (typeof DESTRUCTIVE_WRITE_KINDS)[number]
 export const DESTRUCTIVE_WRITE_LABELS: Record<DestructiveWriteKind, string> = {
   delete: '删除主题（含整个分支）',
   attachmentRemove: '删除关系线 / 边界 / 概要',
-  dedupe: '合并同名主题（会删掉多余的那些）'
+  dedupe: '合并同名主题（会删掉多余的那些）',
+  notes: '清空或删减备注（内容变少）',
+  code: '清空或删减代码块（内容变少）',
+  formula: '清空或删减公式（内容变少）'
 }
 
 export function isDestructiveWriteKind(kind: string): kind is DestructiveWriteKind {
   return (DESTRUCTIVE_WRITE_KINDS as readonly string[]).includes(kind)
 }
 
-/** 这次操作要不要先问用户：清单见 `DESTRUCTIVE_WRITE_KINDS` */
+/** 这次操作是不是**无条件**破坏性；条件破坏性的三类由规划层按参数给。 */
 export function destructiveOf(kind: WriteIntent['kind']): boolean {
-  return isDestructiveWriteKind(kind)
+  return (UNCONDITIONAL_DESTRUCTIVE_WRITE_KINDS as readonly string[]).includes(kind)
 }
 
 /**

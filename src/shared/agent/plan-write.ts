@@ -22,6 +22,19 @@ import {
 } from './write-intents'
 
 /**
+ * D-13 第一步：只有内容**变少**时才把覆盖型写操作标成破坏性。
+ *
+ * 备注 / 代码 / 公式都是整体覆盖语义，没有单独的「追加」动作；模型把参数写空或写短
+ * 时用户会丢内容。正常写新内容（之前为空）不能弹窗——否则确认疲劳会把真正的删除确认
+ * 一起关掉。这里按修剪后的长度判断：只要比原文短就问。
+ */
+function isShrinkingText(previous: string | undefined, next: string): boolean {
+  const before = (previous ?? '').trim()
+  const after = next.trim()
+  return before.length > 0 && after.length < before.length
+}
+
+/**
  * 把写工具的调用解析成一条「操作意图」。
  *
  * 失败也返回文本（`error`）而不是抛错：这段文字会原样回喂给模型，
@@ -323,7 +336,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
         text.trim().length === 0
           ? `清空「${target.topic.title}」的备注`
           : `给「${target.topic.title}」写备注（${text.trim().length} 字）`,
-      destructive: false
+      destructive: isShrinkingText(target.topic.notes, text)
     }
   }
 
@@ -337,7 +350,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
         ok: true,
         intent: { kind: 'code', id: target.topic.id, code: null },
         summary: `移除「${target.topic.title}」的代码块`,
-        destructive: false
+        destructive: isShrinkingText(target.topic.code?.text, text)
       }
     }
     const language = stringArg(args, 'language')
@@ -349,7 +362,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
         code: { language: language.length > 0 ? language : 'text', text }
       },
       summary: `给「${target.topic.title}」写代码块（${language.length > 0 ? language : 'text'}）`,
-      destructive: false
+      destructive: isShrinkingText(target.topic.code?.text, text)
     }
   }
 
@@ -370,7 +383,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
         formula.length === 0
           ? `移除「${target.topic.title}」的公式`
           : `给「${target.topic.title}」写公式`,
-      destructive: false
+      destructive: isShrinkingText(target.topic.formula, formula)
     }
   }
 
