@@ -36,6 +36,7 @@ import {
   KATEX_INLINED_FONTS
 } from '../../../src/renderer/src/export/katex-assets'
 import { measureTopic } from '../../../src/renderer/src/render/measure'
+import { formulaMinNodeSize } from '../../../src/shared/layout/accessory'
 import { buildImagePdf } from '../../../src/shared/export/pdf'
 import {
   IMAGE_EXPORT_FORMATS,
@@ -1347,6 +1348,19 @@ export function testMeasureStyles(): void {
       '节点宽度给文本留 2px 余量（防末尾空格被折行）',
       widthMeasured.width >= Math.ceil(maxLineWidth) + 2 + widthMeasured.paddingX * 2,
       `width=${widthMeasured.width} line=${maxLineWidth} padding=${widthMeasured.paddingX}`
+    )
+    const emptyFormula = createTopic('')
+    emptyFormula.formula = '\\begin{cases}\na \\\\ b\n\\end{cases}'
+    const emptyFormulaMeasured = measureTopic(emptyFormula, 1)
+    const emptyFormulaMin = formulaMinNodeSize(
+      emptyFormulaMeasured.formulaBox!,
+      { x: emptyFormulaMeasured.paddingX, y: emptyFormulaMeasured.paddingY },
+      emptyFormulaMeasured.lineHeight
+    )
+    check(
+      '空标题公式节点的测量高度吃进 formulaMinNodeSize 下限',
+      emptyFormulaMeasured.height >= emptyFormulaMin.height,
+      `height=${emptyFormulaMeasured.height} min=${emptyFormulaMin.height}`
     )
   } finally {
     if (saved === undefined) delete (globalThis as { document?: unknown }).document
