@@ -168,6 +168,8 @@ import {
   isPerDocAutosaveArtifact,
   isPerDocAutosaveName
 } from '../../../src/shared/recovery'
+import { manifestVersionOf, shouldSkipUpload } from '../../../scripts/lib/upload-skip.mjs'
+
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -1933,6 +1935,28 @@ export function testRichText(): void {
     'D-16：上传脚本的 targets 里有 rt.yml（预发布通道否则收不到更新）',
     readFileSync(`${process.cwd()}/scripts/upload-oss.mjs`, `utf8`).includes(`rt.yml`)
   )
+  /* ---- D-20：清单永不按体积跳过 + 发版后校验线上清单版本 ---- */
+  check('D-20：latest.yml 即使远端大小一致也不跳过', shouldSkipUpload('latest.yml', 347, 347) === false)
+  check('D-20：rt.yml 即使远端大小一致也不跳过', shouldSkipUpload('rt.yml', 347, 347) === false)
+  check(
+    'D-20：exe 仍然按体积跳过（两个 108 MB 的补传收益保留）',
+    shouldSkipUpload('SMind-0.9.2-x64-setup.exe', 108, 108) === true
+  )
+  check(
+    'D-20：exe 体积不同则重传',
+    shouldSkipUpload('SMind-0.9.2-x64-setup.exe', 108, 109) === false
+  )
+  eq('D-20：清单 version 解析正确', manifestVersionOf('version: 0.9.3\nfiles: []'), '0.9.3')
+  eq('D-20：读不到 version 时返回 null', manifestVersionOf('files: []'), null)
+  {
+    const uploadSource = readFileSync(`${process.cwd()}/scripts/upload-oss.mjs`, 'utf8')
+    check(
+      'D-20：上传脚本读回线上清单并用 package version 严格比对',
+      uploadSource.includes('manifestVersionOf(await res.text())') &&
+        uploadSource.includes('served !== version')
+    )
+  }
+
   const nowD15 = Date.now()
   check(
     '还没查过时，焦点复检不触发（否则启动瞬间就抢跑一次）',

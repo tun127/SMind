@@ -38,6 +38,7 @@
 import { createHmac } from 'node:crypto'
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { manifestVersionOf, shouldSkipUpload } from './lib/upload-skip.mjs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const version = pkg.version
@@ -72,6 +73,7 @@ const targets = [
   },
   {
     name: 'latest.yml',
+    neverSkip: true,
     contentType: 'text/yaml; charset=utf-8',
     required: false,
     note: '自动更新渠道'
@@ -84,6 +86,7 @@ const targets = [
   },
   {
     name: 'rt.yml',
+    neverSkip: true,
     /**
      * 内容与 `latest.yml` **完全同一份**，只是换个对象名（所以用 sourceName 指回它）。
      *
@@ -189,14 +192,16 @@ for (const target of targets) {
   const size = statSync(local).size
   const mb = (size / 1024 / 1024).toFixed(1)
 
-  // 已存在且大小一致就跳过：补传时不必把 108 MB 白传一遍
+  // 已存在且大小一致就跳过：补传时不必把 108 MB 白传一遍。
+  // latest.yml / rt.yml 例外：两个正式版的清单天然都是 347 字节，按体积比会静默跳过，
+  // 用户永远收不到新版（D-20）。清单必须每次发版都 PUT。
   let remote = null
   try {
     remote = await head(target.name)
   } catch (error) {
     console.warn(`  （HEAD 探测失败，将直接上传：${describe(error)}）`)
   }
-  if (remote === size) {
+  if (shouldSkipUpload(target.name, remote, size, target.neverSkip === true)) {
     console.log(`= ${target.name}（${mb} MB）远端已存在且大小一致 → 跳过`)
     uploaded.push(target.name)
     continue
@@ -229,6 +234,27 @@ if (uploaded.length > 0) {
     }
   }
 }
+
+// 发版后的最后一道验收：线上正在服务的清单必须是本版本，而不是"上传成功"。
+// latest.yml / rt.yml 都读；读不到或版本不一致一律以非 0 退出。
+console.log('校验线上清单版本…')
+for (const name of ['latest.yml', 'rt.yml']) {
+  try {
+    const res = await fetch(`${publicBase}/${name}`, { method: 'GET' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const served = manifestVersionOf(await res.text())
+    if (served !== version) {
+      console.error(`✗ 线上 ${name} 的 version=${served ?? '（读不到）'}，期望 ${version}`)
+      failed = true
+    } else {
+      console.log(`✓ 线上 ${name} 的 version=${served} 与 package.json 一致`)
+    }
+  } catch (error) {
+    console.error(`✗ 校验线上 ${name} 失败：${describe(error)}`)
+    failed = true
+  }
+}
+
 
 if (missingOptional) {
   console.warn(
