@@ -7,6 +7,7 @@
 import { isRecord } from '../guards'
 import { countHiddenNodes, visibleChildren } from '../model/tree'
 import type { Topic } from '../model/types'
+import type { AiMessage } from './stream'
 
 /** 统计一棵主题树的节点总数（含根） */
 /**
@@ -254,6 +255,42 @@ export function compressHistory(
   }
   if (digest.length > maxDigest) digest = `${digest.slice(0, maxDigest)}…`
   return { digest, recent, collapsed: older.length }
+}
+
+/** 最近窗口里 assistant 的工具附注最长保留多少字符（D-05：不丢，但也不撑爆上下文）。 */
+export const WIRE_TOOL_NOTES_MAX = 240
+
+/**
+ * 把 `recent` 窗口转成真正的 wire 消息。
+ *
+ * D-05：压缩时只有 `older` 会进 digest；`recent` 原样保留 toolNotes，但拼 wire 时
+ * 以前只取 role/content，于是最近 6 条里除最后一条（system 单独注入 previousTurnNotes）
+ * 之外，AI 在第 2、3 轮干过什么都谁都看不到。这里把 assistant 的 toolNotes 追加成
+ * 一行附注，并对总长度做截断；user 消息不改。
+ */
+export function toWireRecentMessages(
+  recent: readonly CompressibleMessage[],
+  maxNoteChars = WIRE_TOOL_NOTES_MAX
+): AiMessage[] {
+  const out: AiMessage[] = []
+  for (const message of recent) {
+    if (message.content.trim().length === 0) continue
+    if (message.role !== 'assistant') {
+      out.push({ role: message.role, content: message.content })
+      continue
+    }
+    const notes = (message.toolNotes ?? [])
+      .map((note) => note.trim())
+      .filter((note) => note.length > 0)
+    if (notes.length === 0) {
+      out.push({ role: 'assistant', content: message.content })
+      continue
+    }
+    const body = notes.join('；')
+    const clipped = body.length > maxNoteChars ? `${body.slice(0, maxNoteChars)}…` : body
+    out.push({ role: 'assistant', content: `${message.content}\n（本轮执行：${clipped}）` })
+  }
+  return out
 }
 
 /** 把摘要包装成一条可以塞进消息线的内容（带一句"别凭记忆改"的提醒） */

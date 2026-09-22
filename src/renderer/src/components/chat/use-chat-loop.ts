@@ -31,6 +31,7 @@ import {
   countTopicTree,
   digestPreamble,
   readableIpcError,
+  toWireRecentMessages,
   type AiMessage,
   type AiStreamEvent,
   type QualityTier,
@@ -748,9 +749,7 @@ export function useChatLoop({
         ...(compressed.digest.length > 0
           ? [{ role: 'user' as const, content: digestPreamble(compressed.digest) }]
           : []),
-        ...compressed.recent
-          .filter((msg) => msg.content.trim().length > 0)
-          .map((msg): AiMessage => ({ role: msg.role, content: msg.content })),
+        ...toWireRecentMessages(compressed.recent),
         { role: 'user', content: text }
       ]
 

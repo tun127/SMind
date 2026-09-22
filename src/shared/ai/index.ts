@@ -54,7 +54,8 @@ export {
   compressHistory,
   countTopicTree,
   digestPreamble,
-  normalizeChatHistory
+  normalizeChatHistory,
+  toWireRecentMessages
 } from './context'
 export type {
   ChatHistoryEntry,

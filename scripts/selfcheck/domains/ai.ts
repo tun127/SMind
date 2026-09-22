@@ -35,6 +35,8 @@ import {
   formatTokenCount,
   HISTORY_DIGEST_MAX,
   HISTORY_KEEP_RECENT,
+  toWireRecentMessages,
+  type CompressibleMessage,
   normalizeChatHistory
 } from '../../../src/shared/ai'
 import {
@@ -379,6 +381,31 @@ export function testAiChatHelpers(): void {
   check('保留窗口内的消息不会混进摘要', !cappedDigest.digest.includes('编号 39'))
 
   check('摘要包装带一句「别凭记忆改」的提醒', digestPreamble('abc').includes('不要凭这份摘要'))
+
+  group('AI 聊天：D-05 最近窗口的 toolNotes 必须进 wire')
+  const fourRounds: CompressibleMessage[] = [
+    { role: 'user', content: '第 1 轮问题' },
+    { role: 'assistant', content: '第 1 轮回复', toolNotes: ['summary-第1轮'] },
+    { role: 'user', content: '第 2 轮问题' },
+    { role: 'assistant', content: '第 2 轮回复', toolNotes: ['summary-第2轮'] },
+    { role: 'user', content: '第 3 轮问题' },
+    { role: 'assistant', content: '第 3 轮回复', toolNotes: ['summary-第3轮'] },
+    { role: 'user', content: '第 4 轮问题' },
+    { role: 'assistant', content: '第 4 轮回复', toolNotes: ['summary-第4轮'] }
+  ]
+  const compressedFour = compressHistory(fourRounds)
+  const wireFour = toWireRecentMessages(compressedFour.recent)
+  check('第 2 轮的 summary 出现在最终 wire 里', JSON.stringify(wireFour).includes('summary-第2轮'))
+  check('第 3 轮的 summary 也没有被丢', JSON.stringify(wireFour).includes('summary-第3轮'))
+  eq('user 消息不被附注污染', wireFour[0]?.content, '第 2 轮问题')
+  const clippedNotes = toWireRecentMessages(
+    [{ role: 'assistant', content: '回复', toolNotes: ['x'.repeat(500)] }],
+    20
+  )
+  check(
+    '附注超长会截断，不会把上下文撑爆',
+    clippedNotes[0]?.content.includes('…') === true && clippedNotes[0].content.length < 80
+  )
 
   check(
     '未选中时明确写出来',
