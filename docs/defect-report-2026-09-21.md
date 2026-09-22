@@ -1801,6 +1801,70 @@ W3 提交后（同一节点）       框 inline width = 76px   （空标题，76
 
 ---
 
+## 26. 🔴 D-07 真正根因（终局 · 2026-09-22）：测量**只认 `titleRich`**，override 的 `title` 被忽略
+
+> **数据来源**：QA 用 CDP + `82fc870` 新加的 `window.__layoutDiag` 在同一节点上跑的对照实验（全部可复现）。
+
+### 26.1 判据链（把断点一路排除到最后一格）
+
+| 旋钮 | 读数 | 排除掉的可能 |
+|---|---|---|
+| `memoRuns` 47 → 67 | **在涨** | ❌「useMemo 没重跑」 |
+| `pass` | `incremental`（编辑期不再是 `refresh`） | ❌「走了 `withMeasure`」——`82fc870` 的守卫生效了 ✓ |
+| `editingHits / Misses` | **1 / 0** | ❌「没进 hot」「measure 的门没命中」 |
+| 打字 20 字符后框宽 | **76px 不变** | —— |
+| **C2：同一个 20 字符提交后** | **228px**（= 文本应有宽度） | ❌「store 里没文本」（提交路径读的就是 store） |
+
+### 26.2 根因（读码确认，一行）
+
+```ts
+src/renderer/src/render/measure.ts:232
+  const rich: RichText = topic.titleRich ?? richFromPlain(topic.title)
+```
+
+**`titleRich` 非空时，测量完全忽略 `topic.title`。**
+
+而编辑期的 override 是（`use-canvas-layout.ts:90-98`）：
+
+```ts
+measureTopic({ ...topic, title: editingDraftText || editingText, titleRich: editingRich }, depth)
+```
+
+编辑期 `editingRich` **必然非空**（`beginEdit` 用 `editingContent(rich)` 写入，`editingContent` 原样透传 rich）⇒
+**override 的 `title` 从来没被读过** ⇒ 测量永远跟着旧的 `titleRich` ⇒ **框不长**；
+**Enter 提交** ⇒ 工作簿 `title` 变成文本、`titleRich` 也带上文本 ⇒ 测量才正确 ⇒ **"按 Enter 就恢复正常"**。
+
+⇒ 这一步同时说明：**第 2 步（`editingDraftText` 草稿通道）自诞生起就是死的**（它只喂 `title`）；
+`21bdc5b`（两处缓存修补）与 `82fc870`（refresh 守卫）**都是正确但与本 bug 无关的改动**。
+
+### 26.3 我上一轮的判断要更正（QA 自省）
+
+§22 我把主因判成"增量缓存丢弃编辑期测量" —— **错了**：缓存那几处确实有真缺陷（`withMeasure` 不改宽高、`isClean` 早退绕开 seed），
+修掉它们是对的方向，但**不是本症状的瓶颈**。真正的瓶颈是"**给的文本根本没被测量读到**"。
+教训：**"缓存/时序"听起来更像"偶发"，而这类恒定的"永不变"往往是最朴素的那一环被绕过了。**
+
+### 26.4 参考修法（**仅建议**，怎么修由代码侧判断）
+
+在 override 处，**必须让人读到的文本一起被换掉**，三种写法任选：
+1. `titleRich: undefined`（退回按 `title` 纯文本测量）——最省，代价是丢掉逐 run 的字号/加粗对宽度的影响；
+2. 用实时文本重建 rich（如 `richFromPlain(live)`）——语义清楚；若想保留原 run 样式，则需要把 run 结构按新文本重建；
+3. 改 `measure.ts:232` 让 `title` 优先（**不建议**：那是全仓共用的测量入口，影响面远大于本条）。
+
+无论哪条，**判据只有一个**：编辑期测量用到的文本 === 编辑区里的实时文本。
+
+### 26.5 验收（用 `__layoutDiag` + 四组读数，叶子节点）
+
+```
+① 打字让框变宽：W1 > W0 + 60      ← 现在 76 → 76 FAIL
+② 清空能缩回：  W2 ≈ W0（覆盖 D-14）
+③ 提交不跳：    W3 ≈ W2
+④ 诊断口径：   编辑期 pass 应为 incremental/refresh 之一、editingHits ≥ 1，
+              且**框宽随文本变**；若 hits=1 而宽度不变，就是本条（文本没被读到）
+```
+测法要点见 §24（Range 选中 + 真 Backspace / `data-topic-id` / 叶子节点）。
+
+---
+
 ## 附：本报告的证据来源（全部为当日实测/实读）
 
 - 五道门槛：2026-09-21 实跑，全绿（`selfcheck` 2791 项）
