@@ -20,6 +20,14 @@ export const IMAGE_MIN: Size = { width: 28, height: 20 }
 /** 公式块的宽度上限与最小宽度 */
 export const FORMULA_MAX_WIDTH = 260
 export const FORMULA_MIN_WIDTH = 36
+/**
+ * 公式的**防呆**上限（不是排版上限）：只用来挡住病态输入把画布撑到不可用。
+ *
+ * 与 `FORMULA_MAX_WIDTH`（260）的区别要记牢：那个是"估算时的排版上限"，
+ * 而公式在真机上能到 870px 甚至更宽 —— 用它截断会把公式裁掉、溢出框外（报告 §23）。
+ * 实测路径（render/formula.ts）与估算路径统一用这一个量级。
+ */
+export const FORMULA_HARD_MAX_WIDTH = 4000
 
 /** 图片/公式块与上下内容之间的间距 */
 export const BLOCK_GAP = 6
@@ -70,8 +78,10 @@ export function imageBoxSize(image: TopicImage | undefined, bounds?: Size): Size
 export function pureFormulaSize(source: string | undefined, fontSize: number): Size {
   const text = (source ?? '').replace(/\\[a-zA-Z]+/g, 'xx').replace(/[{}$&]/g, '')
   const units = Math.max(1, [...text].length)
+  // 与实测路径同一个量级：原来这里用 FORMULA_MAX_WIDTH（260）截断，
+  // 而实测路径的上限是它的两倍，两条路径差一个数量级（报告 §23）
   const width = Math.min(
-    FORMULA_MAX_WIDTH,
+    FORMULA_HARD_MAX_WIDTH,
     Math.max(FORMULA_MIN_WIDTH, Math.round(units * fontSize * 0.5))
   )
   const height = Math.round(fontSize * 2.4)

@@ -161,6 +161,7 @@ import {
 import { compositionBoxWidth } from '../../../src/renderer/src/editor/composition-width'
 import { codeDraftPatch } from '../../../src/renderer/src/components/nodePanel/code-draft'
 import { shouldHandleGlobalShortcut } from '../../../src/renderer/src/app/shortcut-scope'
+import { pureFormulaSize } from '../../../src/shared/layout/accessory'
 import {
   autosaveKeyOf,
   autosaveKeysToClear,
@@ -1792,6 +1793,14 @@ export function testRichText(): void {
       'const target = current ?? (before ? { topic: before.topic, depth: before.depth } : null)'
     )
   )
+
+  /* ---- 报告 §23：公式是原子内容，框要跟着它长 ---- */
+  group('公式：宽度不再被排版上限截断（D-23）')
+  const longFormula =
+    '\\sum_{i=1}^{n} \\frac{x_i^2 + y_i^2}{z_i^2 + w_i^2} + \\int_0^{\\infty} e^{-t^2} dt + \\sqrt{a^2+b^2+c^2+d^2}'
+  const wide = pureFormulaSize(longFormula, 14).width
+  check('长公式的估算宽度不再被 260px 截断（报告 §23）', wide > 260, String(wide))
+  check('仍然有防呆上限（不会无界增长）', pureFormulaSize(longFormula.repeat(40), 20).width <= 4000)
   group('自动存档：按文档分文件（D-02）')
 
   /* ---- D-19：升级兼容（旧格式存档不能被漏掉） ---- */

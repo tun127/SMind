@@ -9,7 +9,7 @@
  * 因此「布局算出来的框」与「实际画出来的内容」不会打架。
  */
 import katex from 'katex'
-import { pureFormulaSize, FORMULA_MAX_WIDTH, type Size } from '@shared/layout/accessory'
+import { pureFormulaSize, FORMULA_HARD_MAX_WIDTH, type Size } from '@shared/layout/accessory'
 import { escapeHtml } from '@shared/richtext'
 import { evictOldest } from '@shared/cache'
 
@@ -83,7 +83,11 @@ export function formulaSize(source: string, fontSize: number): Size {
       const height = rect.height
       if (width > 0 && height > 0) {
         size = {
-          width: Math.max(1, Math.min(Math.ceil(width) + 2, FORMULA_MAX_WIDTH * 2)),
+          // 公式是**原子内容**：它多宽，节点框就该多宽（报告 §23 —— 原来这里截到
+          // FORMULA_HARD_MAX_WIDTH * 2 = 520px，实测 870px 的公式于是左右各溢出 161px，
+          // 块级公式还被 .topic__formula 的 overflow:hidden 直接裁掉）。
+          // 只保留一个"防呆"上限，避免病态输入把画布撑到不可用。
+          width: Math.max(1, Math.min(Math.ceil(width) + 2, FORMULA_HARD_MAX_WIDTH)),
           height: Math.max(1, Math.ceil(height) + 2)
         }
       }
