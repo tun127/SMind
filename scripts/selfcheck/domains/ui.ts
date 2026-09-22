@@ -1715,6 +1715,23 @@ export function testRichText(): void {
     '下划线变量名不被当成斜体（`snake_case_`）',
     ITALIC_UNDERSCORE_INPUT.test('snake_case_') === false
   )
+  check(
+    '单下划线斜体输入规则已停用（`_ab_` 不触发）',
+    ITALIC_UNDERSCORE_INPUT.test('_ab_') === false
+  )
+  check('双下划线粗体不受影响', BOLD_UNDERSCORE_INPUT.test('__ab__'))
+  eq('解析器不再吞掉单个下划线（`_ab__ `）', parseInlineMarkdown('_ab__ ').text, '_ab__')
+  eq('解析器不再吞掉字母旁的下划线（`a_ab_ `）', parseInlineMarkdown('a_ab_ ').text, 'a_ab_')
+  eq(
+    '解析器不再吞掉中文旁的下划线（`中文_ab_ `）',
+    parseInlineMarkdown('中文_ab_ ').text,
+    '中文_ab_'
+  )
+  check(
+    '双下划线粗体解析不受影响',
+    parseInlineRichText('__ab__')?.paragraphs[0]?.runs.some((run) => run.bold) === true
+  )
+
   check('中文后面 ~~删除线~~ 触发', STRIKE_INPUT.test('中文~~删除线~~'))
   check('中文后面 ==高亮== 触发', HIGHLIGHT_INPUT.test('中文==高亮=='))
   check('a^2^ 紧贴字母也触发上标', SUPERSCRIPT_INPUT.test('a^2^'))
