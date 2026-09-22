@@ -277,17 +277,36 @@ export function layoutSheetCached(
       geometryChanged = true
     }
   }
+  /**
+   * hot 节点可能**不在** `cache.memo.nodes` 里（例如刚新建就进编辑态的节点）。
+   * 以前那个分支只置 `geometryChanged = true` 就 `continue` —— 既不量、也不把结果放进 `fresh`，
+   * 下游只能回落到旧 memo（空标题量出来的 124px）。这里先按 id 建一份「当前树」索引，
+   * 保证 hot 节点**一定拿到本轮的新测量**。
+   */
+  const byId = new Map<string, { topic: Topic; depth: number }>()
+  if (hot.size > 0) {
+    const collect = (topic: Topic, depth: number): void => {
+      byId.set(topic.id, { topic, depth })
+      for (const child of topic.children) collect(child, depth + 1)
+      for (const child of topic.detachedChildren) collect(child, depth + 1)
+    }
+    collect(root, 0)
+  }
   for (const id of hot) {
     if (fresh.has(id)) continue
     const before = cache.memo.nodes.get(id)
-    if (!before) {
+    const current = byId.get(id)
+    const target = current ?? (before ? { topic: before.topic, depth: before.depth } : null)
+    if (!target) {
       geometryChanged = true
       continue
     }
-    const size = measure(before.topic, before.depth)
+    const size = measure(target.topic, target.depth)
     fresh.set(id, size)
-    freshTopics.set(id, before.topic)
-    if (before.width !== size.width || before.height !== size.height) geometryChanged = true
+    freshTopics.set(id, target.topic)
+    if (!before || before.width !== size.width || before.height !== size.height) {
+      geometryChanged = true
+    }
   }
 
   /**

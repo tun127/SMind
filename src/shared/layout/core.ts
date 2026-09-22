@@ -96,12 +96,19 @@ export class LayoutBuilder {
    */
   measureAll(root: Topic): void {
     const walk = (topic: Topic, depth: number): void => {
-      // 整棵子树没动：尺寸与戳都还是上一轮的，直接返回
-      if (this.isClean(topic)) {
+      const seeded = this.sizes.get(topic.id)
+      /**
+       * 早退的条件是「这一棵**干净**」**且**「这一轮没有新测量要塞进来」。
+       *
+       * 只判 clean 是不够的：编辑期工作簿本身没变，`touched` 是空的，于是连**正在编辑的节点**
+       * 都会被判成干净、在这里直接 return —— 增量层刚刚塞进 `sizes` 的 fresh 测量永远读不到，
+       * `size(id)` 就回落到 `memo.measures` 的旧值。实测表现就是编辑态节点宽度恒为 124px
+       *（连已提交进文档的文字都不让框变宽），见报告 §22。
+       */
+      if (this.isClean(topic) && !seeded) {
         this.stats.measuresReused += 1
         return
       }
-      const seeded = this.sizes.get(topic.id)
       if (seeded) {
         // 增量层已经量过它了：顺手把测量缓存也刷新，下一轮还能命中
         this.memo?.measures.set(topic.id, { topic, depth, value: seeded })

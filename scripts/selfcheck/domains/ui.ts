@@ -1778,6 +1778,20 @@ export function testRichText(): void {
   group('更新：复检时机判据（D-15 / T3）')
 
   /* ---- D-02：自动存档按「窗口 + 文档」分文件 ---- */
+
+  /* ---- 报告 §22：编辑期测量必须真的进布局（两处口径） ---- */
+  check(
+    '布局：早退条件是「干净且这一轮没有新测量」（否则编辑节点吃不到 seed）',
+    readFileSync(`${process.cwd()}/src/shared/layout/core.ts`, `utf8`).includes(
+      'this.isClean(topic) && !seeded'
+    )
+  )
+  check(
+    '布局：hot 节点一定拿到本轮新测量（!before 时按当前树重量，不再空手 continue）',
+    readFileSync(`${process.cwd()}/src/shared/layout/incremental.ts`, `utf8`).includes(
+      'const target = current ?? (before ? { topic: before.topic, depth: before.depth } : null)'
+    )
+  )
   group('自动存档：按文档分文件（D-02）')
 
   /* ---- D-19：升级兼容（旧格式存档不能被漏掉） ---- */
