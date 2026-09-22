@@ -71,12 +71,28 @@ export function imageBoxSize(image: TopicImage | undefined, bounds?: Size): Size
 }
 
 /**
- * 公式块的兜底尺寸：按源码长度粗估。
+ * 公式源码大概占几行。
+ *
+ * 数两件事：
+ * - 显式换行 `\\`（两个反斜杠）— 每来一个就多一行；
+ * - `\begin{cases|aligned|matrix|array}` 这类多行环境 — 即使没写显式换行，也按至少两行算。
+ *
+ * 这是纯估算，故意宁可高一点，也不要在拿不到 DOM 时把多行公式裁掉。
+ */
+function formulaRowCount(source: string): number {
+  const explicitBreaks = (source.match(/\\\\/g) ?? []).length
+  const multilineEnv = /\\begin\{(?:cases|aligned|matrix|array)\*?\}/.test(source)
+  return Math.max(1, explicitBreaks + 1, multilineEnv ? 2 : 1)
+}
+
+/**
+ * 公式块的兜底尺寸：按源码长度与行数粗估。
  * 真实尺寸由渲染层用 KaTeX 的排版结果量出来（见 render/formula.ts），
  * 这个估算只在拿不到 DOM 时使用（例如自检环境）。
  */
 export function pureFormulaSize(source: string | undefined, fontSize: number): Size {
-  const text = (source ?? '').replace(/\\[a-zA-Z]+/g, 'xx').replace(/[{}$&]/g, '')
+  const raw = source ?? ''
+  const text = raw.replace(/\\[a-zA-Z]+/g, 'xx').replace(/[{}$&]/g, '')
   const units = Math.max(1, [...text].length)
   // 与实测路径同一个量级：原来这里用 FORMULA_MAX_WIDTH（260）截断，
   // 而实测路径的上限是它的两倍，两条路径差一个数量级（报告 §23）
@@ -84,7 +100,10 @@ export function pureFormulaSize(source: string | undefined, fontSize: number): S
     FORMULA_HARD_MAX_WIDTH,
     Math.max(FORMULA_MIN_WIDTH, Math.round(units * fontSize * 0.5))
   )
-  const height = Math.round(fontSize * 2.4)
+  // 单行 34px（14px 字号）是既有外观基线；多出来的每一行按 1.5 倍行高追加。
+  const singleLineHeight = Math.round(fontSize * 2.4)
+  const lineHeight = Math.round(fontSize * 1.5)
+  const height = singleLineHeight + (formulaRowCount(raw) - 1) * lineHeight
   return { width, height }
 }
 

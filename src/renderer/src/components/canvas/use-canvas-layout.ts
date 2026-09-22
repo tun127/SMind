@@ -55,6 +55,13 @@ export function useCanvasLayout({
    * 这里用它触发一次重新测量与布局，避免首次打开时公式框尺寸偏小。
    */
   const [fontEpoch, setFontEpoch] = useState(0)
+  /**
+   * 每次「新建 / 打开文档」也重跑一次字体就绪重算。
+   *
+   * 公式尺寸在字体未就绪时只能拿估算值；打开第二份文档时字体虽然早就好了，
+   * 但公式缓存/测量缓存可能已经被上一份文档的估算值污染，必须在新文档这里清一次。
+   */
+  const docSeq = useEditor((s) => s.docSeq)
 
   useEffect(() => {
     let cancelled = false
@@ -71,7 +78,7 @@ export function useCanvasLayout({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [docSeq])
 
   const renderEpoch = useEditor((s) => s.renderEpoch)
 

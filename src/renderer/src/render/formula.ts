@@ -69,6 +69,7 @@ export function formulaSize(source: string, fontSize: number): Size {
   if (cached) return cached
 
   let size = pureFormulaSize(source, fontSize)
+  let measured = false
   const el = hasDom() ? host() : null
   if (el) {
     try {
@@ -90,6 +91,7 @@ export function formulaSize(source: string, fontSize: number): Size {
           width: Math.max(1, Math.min(Math.ceil(width) + 2, FORMULA_HARD_MAX_WIDTH)),
           height: Math.max(1, Math.ceil(height) + 2)
         }
+        measured = true
       }
     } catch {
       // 量不出来就用估算值，不影响其它功能
@@ -98,8 +100,17 @@ export function formulaSize(source: string, fontSize: number): Size {
     }
   }
 
-  evictOldest(sizeCache, CACHE_LIMIT)
-  sizeCache.set(key, size)
+  /**
+   * 只缓存 **DOM 实测值**。
+   *
+   * 以前无论有没有走通 DOM 都把 `size` 写进缓存；字体未就绪、量到 0 或 Node 环境时
+   * 写进去的是估算值，之后字体就绪也不会再变（多行公式因此被 overflow:hidden 裁掉）。
+   * 估算值轻量、可重复计算，不缓存反而保证下一帧 / 字体就绪后能重新量。
+   */
+  if (measured) {
+    evictOldest(sizeCache, CACHE_LIMIT)
+    sizeCache.set(key, size)
+  }
   return size
 }
 
