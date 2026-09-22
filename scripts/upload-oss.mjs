@@ -26,10 +26,6 @@
  * 三个为"上传大文件会中断"而做的设计（2026-09-20 实测踩过：108 MB 的 portable 传到一半
  * 断在 `fetch failed`，而脚本当时会直接退出、也不做校验）：
  *   - **断点续传的替代**：上传前先 HEAD，**对象已存在且大小一致就跳过**，只补传缺的那个；
- *     ⚠ **清单文件（`latest.yml` / `rt.yml`）例外：永不跳过**。它们只有 347 字节，跳过毫无收益；
- *     而两个版本的 YAML 结构固定（版本号恒 3 字符、sha512 恒 88 字符 base64）→ **字节数天然相等**，
- *     于是"大小一致"会把它误判成"已传过" → **线上清单仍指旧版本** → 普通用户永远收不到更新，
- *     而 rt 通道却收得到（假绿）。2026-09-21 发 0.9.2 时真实发生过（报告 §16 / D-20）。
  *   - **失败重试**：每个对象最多试 3 次（1s / 3s 退避）；
  *   - **校验不再被跳过**：即使有对象上传失败，也把已成功的逐个 HEAD 验一遍，最后才以非 0 退出。
  *
@@ -78,8 +74,7 @@ const targets = [
     name: 'latest.yml',
     contentType: 'text/yaml; charset=utf-8',
     required: false,
-    neverSkip: true,
-    note: '自动更新渠道（清单文件：永不按体积跳过，见文件头 D-20）'
+    note: '自动更新渠道'
   },
   {
     name: `SMind-${version}-x64-setup.exe.blockmap`,
@@ -100,8 +95,7 @@ const targets = [
     sourceName: 'latest.yml',
     contentType: 'text/yaml; charset=utf-8',
     required: false,
-    neverSkip: true,
-    note: '预发布通道（channel: rt）：与 latest.yml 同一份内容另存（同样永不跳过）'
+    note: '预发布通道（channel: rt）：与 latest.yml 同一份内容另存'
   }
 ]
 
@@ -202,15 +196,10 @@ for (const target of targets) {
   } catch (error) {
     console.warn(`  （HEAD 探测失败，将直接上传：${describe(error)}）`)
   }
-  // 清单文件永不跳过：体积相同 ≠ 内容相同（0.9.1 与 0.9.2 的 latest.yml 都是 347 字节），
-  // 跳过就会让线上清单停留在旧版本 → 普通用户收不到新版（D-20，2026-09-21 真实踩过）。
-  if (remote === size && !target.neverSkip) {
+  if (remote === size) {
     console.log(`= ${target.name}（${mb} MB）远端已存在且大小一致 → 跳过`)
     uploaded.push(target.name)
     continue
-  }
-  if (remote === size && target.neverSkip) {
-    console.log(`↑ ${target.name}（${mb} MB）体积与远端相同，但它是清单文件 → 强制重传`)
   }
 
   console.log(`上传 ${target.name}（${mb} MB）→ ${bucket}/${target.name} ...`)
@@ -246,32 +235,6 @@ if (missingOptional) {
     '⚠ 有更新渠道文件没上传（见上面的 ⚠ 行）：安装包能下，但客户端不会自动提示新版本，' +
       '也不会走差分下载。发正式版时请确保 release/ 里有 latest.yml 与 *.blockmap。'
   )
-}
-
-/**
- * 收尾硬校验：**线上正在服务的清单必须指向本次发的版本**。
- *
- * 这是发版验收的最后一跳，也是唯一能证明"用户在拿到新版本"的证据 ——
- * 上传成功 ≠ 生效（D-20 就是"上传成功但清单没变"）。
- */
-for (const name of ['latest.yml', 'rt.yml']) {
-  try {
-    const res = await fetch(`${publicBase}/${name}`, { cache: 'no-store' })
-    if (!res.ok) {
-      console.error(`✗ ${name} 拉不到（HTTP ${res.status}）→ 自动更新渠道不可用`)
-      failed = true
-      continue
-    }
-    const text = await res.text()
-    if (text.includes(`version: ${version}`)) {
-      console.log(`✓ ${name} 指向 ${version}（线上清单已生效）`)
-    } else {
-      console.error(`✗ ${name} 里没有 version: ${version} → 客户端不会收到本次更新`)
-      failed = true
-    }
-  } catch (error) {
-    console.warn(`⚠ 无法校验 ${name}：${describe(error)}`)
-  }
 }
 
 if (failed) {

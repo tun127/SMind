@@ -54,12 +54,7 @@ export interface SearchState {
  * 编辑态＝ editingId + 纯文本 + 富文本三项，而纯文本与富文本本质上是
  * **同一份内容的两种表示**——以前这里有十几处各自手写这三行，漏一处就会漂移。
  */
-export const NO_EDITING = {
-  editingId: null,
-  editingText: '',
-  editingRich: null,
-  editingDraftText: ''
-}
+export const NO_EDITING = { editingId: null, editingText: '', editingRich: null }
 
 /**
  * 空标题是**有意允许**的（自检里有两条断言钉着：清空标题能提交、空标题提交不写历史）。

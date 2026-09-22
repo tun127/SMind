@@ -9,16 +9,13 @@ import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
 import { readFormatState, useFormatStore } from '../editor/formatStore'
-import { draftBoxWidth, measureContentWidth } from '../editor/composition-width'
+import { compositionBoxWidth, composingTextWidth } from '../editor/composition-width'
 // 三个自定义 mark（高亮 / 上标 / 下标）与中文紧贴的输入规则都拆在 editor/ 下单独成文件
 // （各自的头部写了来龙去脉）：这样它们能被实测脚本原样复用，而不是只活在组件里。
 import { CjkInlineRules } from '../editor/cjk-inline-rules'
 import { Highlight, Subscript, Superscript } from '../editor/rich-marks'
 import { TEXT_MAX, TEXT_MAX_ROOT } from '../render/measure'
 import { takeTypedChar } from '../editor/typedChar'
-// 注意别名：本文件已经从 `@tiptap/react` 导入了同名的 `useEditor`（编辑器实例），
-// 直接同名导入会把 tiptap 那个遮蔽掉 —— 编辑器建不出来、画布直接空白。
-import { useEditor as useEditorStore } from '../store/editor'
 
 export interface RichTextEditorProps {
   node: NodeLayout
@@ -48,7 +45,6 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
 
   const setEditor = useFormatStore((store) => store.setEditor)
   const setState = useFormatStore((store) => store.setState)
-  const reportDraftText = useEditorStore((store) => store.reportDraftText)
 
   const editor = useEditor({
     extensions: [
@@ -194,20 +190,18 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
    */
   const baseWidthRef = useRef(0)
 
-  /** 编辑区**当前内容**所需的宽度（0 = 按测得宽度即可）。只存状态，DOM 宽度由下面**唯一**那处写。 */
-  const [contentWidth, setContentWidth] = useState(0)
+  /** 组词期额外要加的宽度（0 = 不在组词）。只存状态，DOM 宽度由下面**唯一**那处写。 */
+  const [composingWidth, setComposingWidth] = useState(0)
 
   /**
    * 编辑框宽度：**唯一写入点**。
    *
-   * 宽度取 `draftBoxWidth(测得宽度, 内容所需宽度, 上限)` —— 内容更宽就放宽、否则保持测得宽度。
+   * 合并前这里是两个 effect —— 一个按 `node.width` 同步宽度、一个在组词期临时加宽，
+   * 两者抢写同一个 `dom.style.width`，而且前者还会改 `baseWidthRef.current`（组词还原的基准）：
+   * 组词中途只要重排一次，加宽就被覆盖、还原基准也被改掉，表现就是"有时折行、有时不折"（报告 D-08）。
+   * 现在按状态算出唯一宽度，还原基准也归这一处拥有。
    *
-   * 为什么不再按"是否在组词"来判（第二代做法的漏洞，报告 §18 实测）：
-   * `compositionend` 一到就把加宽归零，而此时文本**还在编辑区里、没提交进文档、测量也没跟上**，
-   * 于是编辑框缩回节点内宽（实测 49px），未提交的拼音被挤成 7 行；按 Enter 提交后测量才跟上、
-   * 看起来"又正常了"。→ 用户看到的是"没按 Enter 会扁"。改成按内容算之后，这个中间态自动被覆盖。
-   *
-   * 内容更宽时还要**解除 flex 收缩**（`flex: 0 0 auto`）：`.rich-editor__content` 是
+   * 组词期还要**解除 flex 收缩**（`flex: 0 0 auto`）：`.rich-editor__content` 是
    * `.topic__editor` 的 flex 子项、自身又 `min-width: 0`，只写 `width` 会被 flex-shrink
    * 立刻压回节点内宽，再在这个窄宽度上 `overflow-wrap: anywhere` 断行 —— 拼音照样折成多行。
    * 这是报告 D-07 的根因：`515aac2` 的 A3 当初只放开了 `max-width`，**放错了约束**，实测无效。
@@ -218,63 +212,36 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     const textWidth = Math.min(cap, Math.ceil(Math.max(24, node.width - node.paddingX * 2))) + 1
     const dom = editor.view.dom
     baseWidthRef.current = textWidth
-    const target = draftBoxWidth(textWidth, contentWidth, cap)
-    if (target > textWidth) {
+    if (composingWidth > 0) {
       dom.style.flex = '0 0 auto'
       dom.style.maxWidth = 'none'
-      dom.style.width = `${target}px`
+      dom.style.width = `${compositionBoxWidth(textWidth, composingWidth, cap)}px`
     } else {
       dom.style.flex = ''
       dom.style.maxWidth = '100%'
       dom.style.width = `${textWidth}px`
     }
-  }, [editor, node.width, node.paddingX, node.depth, contentWidth])
+  }, [editor, node.width, node.paddingX, node.depth, composingWidth])
 
   /**
-   * 编辑区**当前内容**需要多宽 → `contentWidth`。只读 DOM、只改状态，**不碰宽度**：
+   * 组词进度 → `composingWidth`。只读 DOM 事件、只改状态，**不碰宽度**：
    * 宽度是上面那一处的专属职责（D-08），这样两者不可能再抢写。
-   *
-   * 为什么读 DOM 内容而不是 `compositionupdate.data`：事件的时序不等于内容的存在。
-   * 组词结束后文本仍在编辑区里，读内容才对得上；且这样才能覆盖"纯键盘草稿"。
-   *
-   * 量宽用 canvas（`composingTextWidth`，与画布测量共用同一份字体串），逐行取最长那行。
-   * 用 rAF 合并同一帧里的多次事件（组词时每个音节都会触发一次）；变化不足 1px 不写状态，
-   * 免得和宽度 effect 之间形成无谓的重渲染。
    */
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
-    let frame = 0
-    const recompute = (): void => {
-      if (frame !== 0) return
-      frame = window.requestAnimationFrame(() => {
-        frame = 0
-        if (editor.isDestroyed) return
-        // 末尾换行不算内容（编辑器里总有个收尾段落），否则会多量出一行空白
-        const draft = (dom.innerText ?? '').replace(/\n+$/, '')
-        let widest = 0
-        for (const line of draft.split('\n')) {
-          if (line.length === 0) continue
-          const width = measureContentWidth(dom, line)
-          if (width > widest) widest = width
-        }
-        setContentWidth((prev) => (Math.abs(prev - widest) < 1 ? prev : widest))
-        // 再报给布局：**节点框**也要跟着这段草稿变宽。
-        // 只把编辑区自身撑开是不够的 —— 框不动，文字就只能在框内折行或溢出框外，
-        // 用户看到的就是"打字时排版是坏的、按 Enter 才恢复正常"（报告 D-07 / §18）。
-        reportDraftText(draft)
-      })
+    const onCompositionUpdate = (event: Event): void => {
+      const composing = (event as CompositionEvent).data ?? ''
+      setComposingWidth(composing.length > 0 ? composingTextWidth(composing, node.fontSize) : 0)
     }
-    recompute()
-    const types = ['compositionstart', 'compositionupdate', 'compositionend', 'input']
-    for (const type of types) dom.addEventListener(type, recompute, true)
+    const onCompositionEnd = (): void => setComposingWidth(0)
+    dom.addEventListener('compositionupdate', onCompositionUpdate, true)
+    dom.addEventListener('compositionend', onCompositionEnd, true)
     return () => {
-      if (frame !== 0) window.cancelAnimationFrame(frame)
-      for (const type of types) dom.removeEventListener(type, recompute, true)
-      // 编辑区卸载（提交 / 取消 / 切节点）→ 收回草稿，测量回到文档内容
-      reportDraftText('')
+      dom.removeEventListener('compositionupdate', onCompositionUpdate, true)
+      dom.removeEventListener('compositionend', onCompositionEnd, true)
     }
-  }, [editor, node.fontSize, reportDraftText])
+  }, [editor, node.fontSize])
 
   useEffect(() => {
     if (!editor) return

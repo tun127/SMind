@@ -33,8 +33,7 @@ export function useCanvasLayout({
   layoutWorkbook,
   editingId,
   editingText,
-  editingRich,
-  editingDraftText
+  editingRich
 }: {
   containerRef: RefObject<HTMLDivElement | null>
   /** 实时工作簿：主题配色读它（颜色要即时生效，不跟布局一起节流） */
@@ -44,8 +43,6 @@ export function useCanvasLayout({
   editingId: EditorState['editingId']
   editingText: EditorState['editingText']
   editingRich: EditorState['editingRich']
-  /** 编辑区 DOM 里的实时文本（含未提交的组词）——有它，**框**才会跟着变宽 */
-  editingDraftText: EditorState['editingDraftText']
 }) {
   const [size, setSize] = useState({ width: 0, height: 0 })
 
@@ -87,14 +84,10 @@ export function useCanvasLayout({
     // 注意用 layoutWorkbook（节流后）：AI 一挥而就的几十次写入不必次次整图重排
     const root = activeRoot(layoutWorkbook)
     const sheet = activeSheet(layoutWorkbook)
-    // 正在编辑的节点用「未提交的内容」参与测量，做到边打字边自适应尺寸。
-    // 文本优先取编辑区 DOM 里的实时草稿：输入法组词/组词结束后未提交的那一段只存在于 DOM 里，
-    // ProseMirror 到提交才同步进文档；只认 `editingText` 的话这段期间框不会变宽，
-    // 文字只能折行或溢出框外（报告 D-07 / §18）。
-    const liveTitle = editingDraftText !== '' ? editingDraftText : editingText
+    // 正在编辑的节点用「未提交的内容」参与测量，做到边打字边自适应尺寸
     const measure = (topic: Topic, depth: number): ReturnType<typeof measureTopic> =>
       topic.id === editingId && editingRich
-        ? measureTopic({ ...topic, title: liveTitle, titleRich: editingRich }, depth)
+        ? measureTopic({ ...topic, title: editingText, titleRich: editingRich }, depth)
         : measureTopic(topic, depth)
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
     count('画布布局')
@@ -118,15 +111,7 @@ export function useCanvasLayout({
     endLayout()
     setStage('画布布局完成')
     return computed
-  }, [
-    layoutWorkbook,
-    editingId,
-    editingText,
-    editingRich,
-    editingDraftText,
-    fontEpoch,
-    renderEpoch
-  ])
+  }, [layoutWorkbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
 
   /**
    * 渲染提交（DOM 落定）后的界标，与「进入 画布布局」配对。

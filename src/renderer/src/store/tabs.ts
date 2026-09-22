@@ -105,7 +105,6 @@ function applyToEditor(tab: DocTab): void {
     editingId: null,
     editingText: '',
     editingRich: null,
-    editingDraftText: '',
     zoom: tab.zoom,
     pan: tab.pan,
     viewLock: tab.viewLock,
