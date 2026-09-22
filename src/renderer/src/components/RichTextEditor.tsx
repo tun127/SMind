@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useRef, type ReactElement } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style'
@@ -9,7 +9,6 @@ import type { NodeLayout } from '@shared/layout/types'
 import type { RichText } from '@shared/model/types'
 import { richToTiptap, tiptapToRich, type TipTapDoc } from '@shared/richtext'
 import { readFormatState, useFormatStore } from '../editor/formatStore'
-import { compositionBoxWidth, composingTextWidth } from '../editor/composition-width'
 // 三个自定义 mark（高亮 / 上标 / 下标）与中文紧贴的输入规则都拆在 editor/ 下单独成文件
 // （各自的头部写了来龙去脉）：这样它们能被实测脚本原样复用，而不是只活在组件里。
 import { CjkInlineRules } from '../editor/cjk-inline-rules'
@@ -190,21 +189,17 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
    */
   const baseWidthRef = useRef(0)
 
-  /** 组词期额外要加的宽度（0 = 不在组词）。只存状态，DOM 宽度由下面**唯一**那处写。 */
-  const [composingWidth, setComposingWidth] = useState(0)
-
   /**
    * 编辑框宽度：**唯一写入点**。
    *
-   * 合并前这里是两个 effect —— 一个按 `node.width` 同步宽度、一个在组词期临时加宽，
-   * 两者抢写同一个 `dom.style.width`，而且前者还会改 `baseWidthRef.current`（组词还原的基准）：
-   * 组词中途只要重排一次，加宽就被覆盖、还原基准也被改掉，表现就是"有时折行、有时不折"（报告 D-08）。
-   * 现在按状态算出唯一宽度，还原基准也归这一处拥有。
+   * 宽度只取「测量出来的文字宽度」，`maxWidth` **只允许 `100%`**。
    *
-   * 组词期还要**解除 flex 收缩**（`flex: 0 0 auto`）：`.rich-editor__content` 是
-   * `.topic__editor` 的 flex 子项、自身又 `min-width: 0`，只写 `width` 会被 flex-shrink
-   * 立刻压回节点内宽，再在这个窄宽度上 `overflow-wrap: anywhere` 断行 —— 拼音照样折成多行。
-   * 这是报告 D-07 的根因：`515aac2` 的 A3 当初只放开了 `max-width`，**放错了约束**，实测无效。
+   * 曾经为了"组词不折行"在这里写过 `flex: 0 0 auto` + `maxWidth: none` —— 那是拿**溢出节点框**换不折行：
+   * 实测组词期节点框 124px、编辑区 201px（报告 §15.2）。那不是修好，是把一个问题换成了另一个。
+   * 现在改成让**框自己跟着内容长**（第 2 步：store 的 `editingDraftText` 喂给布局测量），
+   * 编辑区永远待在框里。
+   *
+   * `flex` 必须**无条件**清空：上一次渲染可能已经把 inline `flex` 写进 DOM，只删赋值会留下顽固的逃逸。
    */
   useEffect(() => {
     if (!editor) return
@@ -212,36 +207,10 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     const textWidth = Math.min(cap, Math.ceil(Math.max(24, node.width - node.paddingX * 2))) + 1
     const dom = editor.view.dom
     baseWidthRef.current = textWidth
-    if (composingWidth > 0) {
-      dom.style.flex = '0 0 auto'
-      dom.style.maxWidth = 'none'
-      dom.style.width = `${compositionBoxWidth(textWidth, composingWidth, cap)}px`
-    } else {
-      dom.style.flex = ''
-      dom.style.maxWidth = '100%'
-      dom.style.width = `${textWidth}px`
-    }
-  }, [editor, node.width, node.paddingX, node.depth, composingWidth])
-
-  /**
-   * 组词进度 → `composingWidth`。只读 DOM 事件、只改状态，**不碰宽度**：
-   * 宽度是上面那一处的专属职责（D-08），这样两者不可能再抢写。
-   */
-  useEffect(() => {
-    if (!editor) return
-    const dom = editor.view.dom
-    const onCompositionUpdate = (event: Event): void => {
-      const composing = (event as CompositionEvent).data ?? ''
-      setComposingWidth(composing.length > 0 ? composingTextWidth(composing, node.fontSize) : 0)
-    }
-    const onCompositionEnd = (): void => setComposingWidth(0)
-    dom.addEventListener('compositionupdate', onCompositionUpdate, true)
-    dom.addEventListener('compositionend', onCompositionEnd, true)
-    return () => {
-      dom.removeEventListener('compositionupdate', onCompositionUpdate, true)
-      dom.removeEventListener('compositionend', onCompositionEnd, true)
-    }
-  }, [editor, node.fontSize])
+    dom.style.flex = ''
+    dom.style.maxWidth = '100%'
+    dom.style.width = `${textWidth}px`
+  }, [editor, node.width, node.paddingX, node.depth])
 
   useEffect(() => {
     if (!editor) return
