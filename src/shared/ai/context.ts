@@ -263,20 +263,29 @@ export const WIRE_TOOL_NOTES_MAX = 240
 /**
  * 把 `recent` 窗口转成真正的 wire 消息。
  *
- * D-05：压缩时只有 `older` 会进 digest；`recent` 原样保留 toolNotes，但拼 wire 时
- * 以前只取 role/content，于是最近 6 条里除最后一条（system 单独注入 previousTurnNotes）
- * 之外，AI 在第 2、3 轮干过什么都谁都看不到。这里把 assistant 的 toolNotes 追加成
- * 一行附注，并对总长度做截断；user 消息不改。
+ * D-05 第一步：`older` 进 digest，`recent` 原样保留 toolNotes；拼 wire 时以前只取
+ * role/content，于是第 2、3 轮 AI 干过什么都看不到。这里把 assistant 的 toolNotes
+ * 追加成一行附注。
+ *
+ * D-05 第二步（本批）：最后一条 assistant 已经由 system prompt 的 `previousTurnNotes`
+ * 注入；若它同时也是最后一条消息，wire 就跳过它的附注，避免同一信息出现两次。
+ * 若最后一条是 user（此时 system 没注入任何 notes），仍保留前一条 assistant 的附注。
  */
 export function toWireRecentMessages(
   recent: readonly CompressibleMessage[],
-  maxNoteChars = WIRE_TOOL_NOTES_MAX
+  options: { maxNoteChars?: number; skipLastAssistantNotes?: boolean } = {}
 ): AiMessage[] {
+  const maxNoteChars = options.maxNoteChars ?? WIRE_TOOL_NOTES_MAX
+  const skipLastAssistantNotes = options.skipLastAssistantNotes ?? true
   const out: AiMessage[] = []
-  for (const message of recent) {
+  for (const [index, message] of recent.entries()) {
     if (message.content.trim().length === 0) continue
     if (message.role !== 'assistant') {
       out.push({ role: message.role, content: message.content })
+      continue
+    }
+    if (skipLastAssistantNotes && index === recent.length - 1) {
+      out.push({ role: 'assistant', content: message.content })
       continue
     }
     const notes = (message.toolNotes ?? [])
@@ -292,7 +301,6 @@ export function toWireRecentMessages(
   }
   return out
 }
-
 /** 把摘要包装成一条可以塞进消息线的内容（带一句"别凭记忆改"的提醒） */
 export function digestPreamble(digest: string): string {
   return (

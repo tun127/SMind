@@ -398,14 +398,27 @@ export function testAiChatHelpers(): void {
   const wireFour = toWireRecentMessages(compressedFour.recent)
   check('第 2 轮的 summary 出现在最终 wire 里', JSON.stringify(wireFour).includes('summary-第2轮'))
   check('第 3 轮的 summary 也没有被丢', JSON.stringify(wireFour).includes('summary-第3轮'))
+  check(
+    '最后一条 assistant 已由 system 注入，wire 不重复',
+    !JSON.stringify(wireFour).includes('summary-第4轮')
+  )
+
   eq('user 消息不被附注污染', wireFour[0]?.content, '第 2 轮问题')
   const clippedNotes = toWireRecentMessages(
     [{ role: 'assistant', content: '回复', toolNotes: ['x'.repeat(500)] }],
-    20
+    { maxNoteChars: 20, skipLastAssistantNotes: false }
   )
   check(
     '附注超长会截断，不会把上下文撑爆',
     clippedNotes[0]?.content.includes('…') === true && clippedNotes[0].content.length < 80
+  )
+  const trailingUser = toWireRecentMessages([
+    { role: 'assistant', content: '回复', toolNotes: ['保留-说明'] },
+    { role: 'user', content: '追问' }
+  ])
+  check(
+    '最后一条是 user 时，前一条 assistant 的附注仍保留',
+    JSON.stringify(trailingUser).includes('保留-说明')
   )
 
   group('AI 聊天：D-06 去重键带文档修订号')
