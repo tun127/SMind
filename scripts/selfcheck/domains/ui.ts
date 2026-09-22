@@ -1996,24 +1996,71 @@ export function testRichText(): void {
         uploadSource.includes('served !== version')
     )
   }
-  /* ---- D-04：shared/agent 里的子节点遍历统一口径（静态防漏） ---- */
+  /* ---- D-04：shared/agent 里的 .children 全量口径（静态防漏） ---- */
   {
     const agentDir = `${process.cwd()}/src/shared/agent`
-    let traversalCount = 0
+    /**
+     * 白名单：每项必须带理由。
+     * 除 `allChildrenOf` 之外，任何 `.children` 用法都要在这里说明为什么不是漏改。
+     */
+    const allowedChildrenUses = [
+      {
+        file: 'plan-write.ts',
+        snippet: 'parsed.root.children',
+        reason: 'parseOutline 返回 OutlineNode，不是文档 Topic'
+      },
+      {
+        file: 'plan-write.ts',
+        snippet: 'node.children',
+        reason: 'insertSubtree 的 OutlineNode 树，不是文档主题树'
+      },
+      {
+        file: 'plan-write.ts',
+        snippet: 'topic.children',
+        reason: '注释里的历史说明，不是运行时代码'
+      },
+      {
+        file: 'plan-write.ts',
+        snippet: 'parent.children',
+        reason: 'sortSiblings 只排树内兄弟；浮动主题没有树内顺序'
+      },
+      {
+        file: 'run-read.ts',
+        snippet: 'root.children.length',
+        reason: '一级分支数按树结构口径；浮动主题另计，与 buildSkeletonDigest 一致'
+      }
+    ]
+
+    let childrenCount = 0
+    const uncovered: string[] = []
     for (const name of readdirSync(agentDir).filter((item) => item.endsWith('.ts'))) {
       const lines = readFileSync(`${agentDir}/${name}`, 'utf8').split(/\r?\n/)
-      for (const line of lines) {
-        if (!/for\s*\([^)]*\bof\s+[^)]*\.children\b/.test(line)) continue
-        traversalCount += 1
-        check(
-          `D-04 静态：${name} 的 .children 遍历必须同行走 allChildrenOf / walk`,
-          /allChildrenOf|walk/.test(line)
+      lines.forEach((line, index) => {
+        if (!/\.children\b/.test(line)) return
+        childrenCount += 1
+        const allowed = allowedChildrenUses.some(
+          (entry) => entry.file === name && line.includes(entry.snippet)
         )
-      }
+        if (!/allChildrenOf/.test(line) && !allowed) {
+          uncovered.push(`${name}:${index + 1}: ${line.trim()}`)
+        }
+      })
     }
-    check('D-04 静态：至少扫到 1 处 .children 遍历（防扫描正则写空）', traversalCount >= 1)
+    check(
+      'D-04 静态：shared/agent 的 .children 都走 allChildrenOf 或有白名单理由',
+      uncovered.length === 0,
+      uncovered.join('\n')
+    )
+    check(
+      'D-04 静态：白名单每项都带理由且没有过期',
+      allowedChildrenUses.every(
+        (entry) =>
+          entry.reason.trim().length > 0 &&
+          readFileSync(`${agentDir}/${entry.file}`, 'utf8').includes(entry.snippet)
+      )
+    )
+    check('D-04 静态：至少扫到 7 处 .children（防空过）', childrenCount >= 7)
   }
-
   const nowD15 = Date.now()
   check(
     '还没查过时，焦点复检不触发（否则启动瞬间就抢跑一次）',

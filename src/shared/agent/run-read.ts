@@ -115,6 +115,11 @@ function countsOf(root: Topic): {
   visit(root, 1)
   // 上面数的是**文档里的全部内容**；`countHiddenNodes` 另算「画布上当前看不到的」，
   // 两件事分开报，模型才不会把"收起来的节点"当成"不存在"
+  /**
+   * 一级分支数按**树结构**口径：与 buildSkeletonDigest 一致。
+   * `detachedChildren` 是浮在画布上的主题，不是自动布局的一级分支，所以不计入。
+   */
+
   return { total, branches: root.children.length, maxLevel, notes, codes, formulas }
 }
 
@@ -221,7 +226,8 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     }
     const lines = [
       `当前选中：${path.join(' → ')}`,
-      `- 子节点数：${topic.children.length}`,
+      // 与 getSubtree/searchNodes 同口径：浮动主题也是子节点，不能这里数 0、下面却列出它
+      `- 子节点数：${allChildrenOf(topic).length}`,
       `- 备注：${topic.notes && topic.notes.trim().length > 0 ? `有（${topic.notes.trim().length} 字）` : '无'}`,
       `- 代码块：${topic.code ? `有（${topic.code.language}）` : '无'}`,
       `- 公式：${topic.formula && topic.formula.trim().length > 0 ? '有' : '无'}`
@@ -557,12 +563,14 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
     const hits: Array<{ topic: Topic; path: string[] }> = []
     let total = 0
     walk(base, (topic) => {
+      // `missing: 'children'` 问的是有没有子主题；浮动子主题也算，和上面的 walk 口径一致
+
       total += 1
       const lacks =
         missing === 'notes'
           ? !(topic.notes && topic.notes.trim().length > 0)
           : missing === 'children'
-            ? topic.children.length === 0
+            ? allChildrenOf(topic).length === 0
             : !topic.code
       if (lacks) hits.push({ topic, path: pathOf(topic.id) })
     })

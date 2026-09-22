@@ -593,6 +593,9 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       if (!resolved.ok) return fail(resolved.error)
       parent = resolved.resolved.topic
     }
+    // 只排树上的兄弟：detachedChildren 是自由摆放、没有树内顺序；
+    // 把它们混进来排序会打乱用户自己摆的位置。
+
     if (parent.children.length < 2) {
       return fail(`「${parent.title}」下面只有 ${parent.children.length} 个子主题，不需要排序。`)
     }

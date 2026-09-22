@@ -432,6 +432,25 @@ export function testAgentTools(): void {
       stats.content.includes(`节点总数：${countTopics(detachedRoot)}`),
       true
     )
+    const selectedRoot = runReadTool('getSelection', '{}', {
+      ...detachedContext,
+      selectedId: detachedRoot.id
+    })
+    check(
+      '读取选中的子节点数也把浮动主题算进去',
+      selectedRoot.content.includes('- 子节点数：2'),
+      selectedRoot.content
+    )
+    const leafCheck = runReadTool(
+      'findIncompleteNodes',
+      JSON.stringify({ missing: 'children' }),
+      detachedContext
+    )
+    check(
+      '浮动主题的子主题也算子节点，不算叶子',
+      leafCheck.content.includes('命中 2 个'),
+      leafCheck.content
+    )
   }
 
   group('Agent：只读工具')
