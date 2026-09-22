@@ -1801,6 +1801,14 @@ export function testRichText(): void {
   const wide = pureFormulaSize(longFormula, 14).width
   check('长公式的估算宽度不再被 260px 截断（报告 §23）', wide > 260, String(wide))
   check('仍然有防呆上限（不会无界增长）', pureFormulaSize(longFormula.repeat(40), 20).width <= 4000)
+
+  /* ---- 报告 §24：编辑期不得走 refresh（withMeasure 不改 width/height） ---- */
+  check(
+    '布局：refresh 分支带编辑期守卫（hot 非空时必须落到增量重排）',
+    readFileSync(`${process.cwd()}/src/shared/layout/incremental.ts`, `utf8`).includes(
+      '!geometryChanged && hot.size === 0'
+    )
+  )
   group('自动存档：按文档分文件（D-02）')
 
   /* ---- D-19：升级兼容（旧格式存档不能被漏掉） ---- */

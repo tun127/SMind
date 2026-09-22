@@ -87,15 +87,24 @@ export function useCanvasLayout({
     const root = activeRoot(layoutWorkbook)
     const sheet = activeSheet(layoutWorkbook)
     // 正在编辑的节点用「未提交的内容」参与测量，做到边打字边自适应尺寸
+    const diag = {
+      memoRuns:
+        ((window as unknown as { __layoutDiag?: { memoRuns: number } }).__layoutDiag?.memoRuns ??
+          0) + 1,
+      pass: '',
+      editingHits: 0,
+      editingMisses: 0
+    }
     const measure = (topic: Topic, depth: number): ReturnType<typeof measureTopic> =>
       topic.id === editingId && editingRich
-        ? measureTopic(
+        ? ((diag.editingHits += 1),
+          measureTopic(
             // 实时草稿优先：组词/输入中的文本只在 DOM 里，用它参与测量，框才跟着内容长（第 2 步）。
             // titleRich 不变 —— 格式仍以提交时的 editingRich 为准。
             { ...topic, title: editingDraftText || editingText, titleRich: editingRich },
             depth
-          )
-        : measureTopic(topic, depth)
+          ))
+        : ((diag.editingMisses += 1), measureTopic(topic, depth))
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
     count('画布布局')
     setStage('画布布局')
@@ -117,6 +126,12 @@ export function useCanvasLayout({
     )
     endLayout()
     setStage('画布布局完成')
+    /**
+     * 诊断出口（报告 §24 要求的可观测性）：这一轮走了哪条 pass、编辑节点被量了几次、
+     * useMemo 重跑了几次 —— 有它就不必再靠猜"是缓存、是测量、还是没重跑"。
+     */
+    diag.pass = layoutCacheRef.current.pass
+    ;(window as unknown as { __layoutDiag?: unknown }).__layoutDiag = diag
     return computed
   }, [
     layoutWorkbook,

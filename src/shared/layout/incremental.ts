@@ -312,8 +312,14 @@ export function layoutSheetCached(
   /**
    * ⑤ 只有文字变了、尺寸一点没动（还在同一行里改字）：连摆放都不用跑，
    * 把变了的那几个节点换上新对象、其余数组整块复用。
+   *
+   * ⚠️ **编辑期不允许走这一支**：它用 `withMeasure()` 构建新节点，而那个函数**只换 topic 引用、
+   * 不动 width/height**（见它的注释）。编辑期一旦落进来，`cache.pass` 就是 `refresh`、
+   * 节点宽度永远不变 —— 表现正是"打满 20 个字符框还是 76px、提交后才正常"（报告 §24）。
+   * 所以这里加一道守卫：有 hot 节点时一律落到 ⑥ 的增量重排（真跑布局 + `seedMeasures(fresh)`）。
+   * 这不是关掉增量：⑥ 仍只走脏路径，非编辑期的 ⑤ 也照旧。
    */
-  if (!geometryChanged) {
+  if (!geometryChanged && hot.size === 0) {
     const result = cache.result
     if (result && fresh.size > 0) {
       const patched = result.nodes.map((node) => {
