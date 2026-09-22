@@ -23,3 +23,18 @@ export function exportFormatOf(argumentsText: string): OutlineFormat {
 
 /** 快捷提问：只跟 AI 聊，不动画布 */
 export const QUICK_PROMPTS = ['总结这页导图的主要内容', '指出这个导图结构上薄弱的地方']
+
+/**
+ * 同回合工具调用的去重键。
+ *
+ * D-06：读工具按参数判重时还缺「文档没变」这个前提；文档修订号变了就必须允许重读。
+ * 写工具保持严格去重（同一参数重复写确实没意义），所以不带修订号。
+ */
+export function toolCallDedupeKey(
+  name: string,
+  argumentsText: string,
+  docRevision: number,
+  readOnly: boolean
+): string {
+  return readOnly ? `${docRevision}|${name}|${argumentsText}` : `write|${name}|${argumentsText}`
+}

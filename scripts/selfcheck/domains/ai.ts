@@ -47,6 +47,7 @@ import {
   planAvailableTools,
   segmentTitleMentions
 } from '../../../src/shared/agent'
+import { toolCallDedupeKey } from '../../../src/renderer/src/components/chat/format'
 import {
   batchSerialOf,
   bytesToBase64Url,
@@ -405,6 +406,22 @@ export function testAiChatHelpers(): void {
   check(
     '附注超长会截断，不会把上下文撑爆',
     clippedNotes[0]?.content.includes('…') === true && clippedNotes[0].content.length < 80
+  )
+
+  group('AI 聊天：D-06 去重键带文档修订号')
+  const readCallArgs = '{"query":"X"}'
+  const readKeyAt7 = toolCallDedupeKey('searchNodes', readCallArgs, 7, true)
+  const readKeyAt8 = toolCallDedupeKey('searchNodes', readCallArgs, 8, true)
+  eq(
+    '同一读调用、修订号未变 → 键相同，仍判重',
+    readKeyAt7,
+    toolCallDedupeKey('searchNodes', readCallArgs, 7, true)
+  )
+  check('文档修订号变化 → 读调用不再判重，允许重读', readKeyAt7 !== readKeyAt8)
+  eq(
+    '写工具保持严格去重，不随修订号变化',
+    toolCallDedupeKey('renameTopic', '{"address":"X","title":"Y"}', 7, false),
+    toolCallDedupeKey('renameTopic', '{"address":"X","title":"Y"}', 8, false)
   )
 
   check(

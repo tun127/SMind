@@ -27,7 +27,7 @@ import {
 import { activeRoot, activeSheet } from '@shared/model/tree'
 import { beginCost, setStage } from '../../dev/stage'
 import { useEditor } from '../../store/editor'
-import { exportFormatOf } from './format'
+import { exportFormatOf, toolCallDedupeKey } from './format'
 import type { ChatDoc, ChatMsg, ChatPlan } from './types'
 
 /** 本模块需要的全部外部依赖（显式传进来，函数体内用解构还原原局部名） */
@@ -108,9 +108,21 @@ export function createToolQueue(deps: ToolQueueDeps): { processQueue(): void } {
       }
       setStage(`执行工具 ${call.name}`)
 
-      // 同一回合里重复问同一件事：不重复执行（白烧配额，模型还会原地打转），
-      // 直接把「问过了」告诉它，逼它换个策略
-      const callKey = `${call.name}|${call.argumentsText}`
+      /**
+       * 同一回合里重复问同一件事：不重复执行（白烧配额，模型还会原地打转），
+       * 直接把「问过了」告诉它，逼它换个策略。
+       *
+       * D-06：读工具只有在**文档修订号也没变**时才算重复；中间发生过写操作，
+       * 同一个查询必须允许重读，否则回喂的是改动前的旧结果。
+       * 写工具保持严格去重（同一参数重复写确实没意义）。
+       */
+      const readOnly = isReadToolName(call.name)
+      const callKey = toolCallDedupeKey(
+        call.name,
+        call.argumentsText,
+        useEditor.getState().docRevision,
+        readOnly
+      )
       if (seenCallsRef.current.has(callKey)) {
         pushToolResult(
           call,
@@ -123,7 +135,7 @@ export function createToolQueue(deps: ToolQueueDeps): { processQueue(): void } {
       }
       seenCallsRef.current.add(callKey)
 
-      if (isReadToolName(call.name)) {
+      if (readOnly) {
         const state = useEditor.getState()
         const context: ToolContext = {
           root: activeRoot(state.workbook),
