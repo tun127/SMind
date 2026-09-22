@@ -459,3 +459,30 @@ font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; f
   字体/颜色按钮仍作用于**整块**）；**部分变色**（`parseInlineRichText` 没有颜色简写，颜色只能整块设）。
 
 **对外口径**：这两条**不要**写进 0.9.2 的发布说明；要补齐图形化编辑器请单开一批。
+
+---
+
+## 待处理（2026-09-22 实测登记：命令行传相对路径必弹「文件路径无效」）
+
+### P3 命令行文件参数与 IPC 对"路径"的口径不一致（只影响从终端带相对路径启动）
+
+**现象**：从终端用**相对路径**带文件启动（`electron . .tmp-check\x.xmind`、或打包版 `SMind.exe test.xmind`）时，
+窗口弹出 `打开失败：Error invoking remote method 'file:open-path': Error: 文件路径无效，无法打开`
+（2026-09-22 调试期间实测撞到，用户截图确认看到该提示）。
+
+**证据（两处源码，均在本仓）**：
+
+- `src/shared/openfile.ts` 的 `pickDocumentArg()`：从 `argv` **从后往前**挑「后缀像脑图 + `existsSync` 通过」的参数
+  —— `existsSync` 按 cwd 解析，**接受相对路径**；
+- `src/main/ipc/document.ts:54`：`if (!isPlausibleFilePath(path)) throw new Error('文件路径无效，无法打开')`，
+  而 `src/shared/ipc-args.ts` 的 `isPlausibleFilePath()` **要求绝对路径**（`^[a-zA-Z]:[\\/]` / UNC / `/`）。
+
+→ 两边口径不一致：**能被挑出来的相对路径，必然在打开那一步被拒**。
+注意：拦截本身**是正确的**（写路径的通道更该拦），提示也够明确 —— 问题只在"挑参数"这一步没做路径规范化。
+
+**影响面**：只影响「从终端/脚本带相对路径启动」这一种用法。**双击 `.xmind`（资源管理器给的是绝对路径）
+与拖拽进窗口都不触发** → 不阻塞 0.9.4（已冻结、暂不发布）。
+
+**建议修法（3 行 + 1 条断言，随 0.9.5 月度版走）**：在主进程两个调用点（`src/main/index.ts` 的启动入参、
+`src/main/lifecycle.ts` 的 `second-instance`）把 `pickDocumentArg()` 的结果先 `path.resolve()` 成绝对路径再交下去；
+自检补一条断言钉住"相对路径会被规范化"，否则以后有人收紧 `isPlausibleFilePath` 还会再撞一次。
