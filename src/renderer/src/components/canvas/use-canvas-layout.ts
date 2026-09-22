@@ -33,7 +33,8 @@ export function useCanvasLayout({
   layoutWorkbook,
   editingId,
   editingText,
-  editingRich
+  editingRich,
+  editingDraftText
 }: {
   containerRef: RefObject<HTMLDivElement | null>
   /** 实时工作簿：主题配色读它（颜色要即时生效，不跟布局一起节流） */
@@ -43,6 +44,7 @@ export function useCanvasLayout({
   editingId: EditorState['editingId']
   editingText: EditorState['editingText']
   editingRich: EditorState['editingRich']
+  editingDraftText: EditorState['editingDraftText']
 }) {
   const [size, setSize] = useState({ width: 0, height: 0 })
 
@@ -87,7 +89,12 @@ export function useCanvasLayout({
     // 正在编辑的节点用「未提交的内容」参与测量，做到边打字边自适应尺寸
     const measure = (topic: Topic, depth: number): ReturnType<typeof measureTopic> =>
       topic.id === editingId && editingRich
-        ? measureTopic({ ...topic, title: editingText, titleRich: editingRich }, depth)
+        ? measureTopic(
+            // 实时草稿优先：组词/输入中的文本只在 DOM 里，用它参与测量，框才跟着内容长（第 2 步）。
+            // titleRich 不变 —— 格式仍以提交时的 editingRich 为准。
+            { ...topic, title: editingDraftText || editingText, titleRich: editingRich },
+            depth
+          )
         : measureTopic(topic, depth)
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
     count('画布布局')
@@ -111,7 +118,15 @@ export function useCanvasLayout({
     endLayout()
     setStage('画布布局完成')
     return computed
-  }, [layoutWorkbook, editingId, editingText, editingRich, fontEpoch, renderEpoch])
+  }, [
+    layoutWorkbook,
+    editingId,
+    editingDraftText,
+    editingText,
+    editingRich,
+    fontEpoch,
+    renderEpoch
+  ])
 
   /**
    * 渲染提交（DOM 落定）后的界标，与「进入 画布布局」配对。

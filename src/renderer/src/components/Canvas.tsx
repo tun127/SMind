@@ -57,6 +57,7 @@ export default function Canvas(): ReactElement {
   const editingId = useEditor((s) => s.editingId)
   const editingText = useEditor((s) => s.editingText)
   const editingRich = useEditor((s) => s.editingRich)
+  const editingDraftText = useEditor((s) => s.editingDraftText)
   const setPan = useEditor((s) => s.setPan)
   const setZoom = useEditor((s) => s.setZoom)
   const search = useEditor((s) => s.search)
@@ -105,7 +106,8 @@ export default function Canvas(): ReactElement {
     layoutWorkbook,
     editingId,
     editingText,
-    editingRich
+    editingRich,
+    editingDraftText
   })
 
   /**

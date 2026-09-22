@@ -27,6 +27,14 @@ export interface SelectionSlice {
   /** 正在编辑的富文本内容 */
   editingRich: RichText | null
   /**
+   * **只喂测量**的实时草稿：编辑区里还没提交进文档的文本（组词 / 输入中的那一串）。
+   *
+   * 它不参与提交：`commitEdit` 仍以 `editingText` / `editingRich` 为准，草稿只让布局
+   * 在"文本还没进文档"时也能把框量对（否则框不长，拼音只能在窄框里折行）。
+   * 随 `NO_EDITING` 一起清空，所以提交/取消/切标签都会自动收回。
+   */
+  editingDraftText: string
+  /**
    * 渲染默认值（默认对齐 / 代码块基准字号）的变更计数。
    *
    * 这些默认值作用于**没有显式样式**的节点，改了会让测量结果变化，所以布局必须依赖它——
@@ -44,6 +52,8 @@ export interface SelectionSlice {
   beginEdit(id: string, insertText?: string): void
   updateEditingText(text: string): void
   updateEditingRich(rich: RichText): void
+  /** 上报/收回实时草稿（只喂测量，见 editingDraftText 的说明） */
+  setEditingDraftText(text: string): void
   /**
    * 提交当前正在编辑的内容。
    * @param forId 只有当前编辑中的正是这个节点时才提交。
@@ -85,6 +95,9 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
   updateEditingText: (text) => set(editingContent(richFromPlain(text))),
 
   updateEditingRich: (rich) => set(editingContent(rich)),
+
+  // 只写草稿字段：不碰 editingText / editingRich / workbook，所以提交语义与 undo 都不受影响
+  setEditingDraftText: (text) => set({ editingDraftText: text }),
 
   commitEdit: (forId) => {
     const { editingId, editingText, editingRich, workbook } = get()

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactElement } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { useEditor as useEditorStore } from '../store/editor'
 import StarterKit from '@tiptap/starter-kit'
 import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
@@ -211,6 +212,45 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
     dom.style.maxWidth = '100%'
     dom.style.width = `${textWidth}px`
   }, [editor, node.width, node.paddingX, node.depth])
+
+  /**
+   * 把编辑区里**还没提交进文档**的实时文本上报给 store，只喂布局测量用（D-07/D-08 第 2 步）。
+   *
+   * 为什么需要：组词/输入中的文本只存在于 DOM（ProseMirror 到提交才同步），布局看不到它 ——
+   * 框不会长，拼音只能在窄框里折行。有了这条通道，框会跟着内容长，编辑区就不必（也不许）逃出框。
+   *
+   * 三条约束：① 只写 `editingDraftText`，**不进文档、不动 editingRich**（提交仍以它们为准）；
+   * ② 同一帧的多次事件用 rAF 合并（组词期事件很密）；③ 卸载时**报空**收回，
+   * 别把这一份草稿留给下一个编辑框。另外去掉末尾换行 —— 编辑器总有一个收尾段落，
+   * 不trim 的话每次都会多量出一行空白。
+   */
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    const setDraft = useEditorStore.getState().setEditingDraftText
+    let frame = 0
+    const report = (): void => {
+      frame = 0
+      setDraft((dom.textContent ?? '').replace(/\n+$/, ''))
+    }
+    const schedule = (): void => {
+      if (frame !== 0) return
+      frame = requestAnimationFrame(report)
+    }
+    dom.addEventListener('compositionstart', schedule, true)
+    dom.addEventListener('compositionupdate', schedule, true)
+    dom.addEventListener('compositionend', schedule, true)
+    dom.addEventListener('input', schedule, true)
+    report()
+    return () => {
+      if (frame !== 0) cancelAnimationFrame(frame)
+      dom.removeEventListener('compositionstart', schedule, true)
+      dom.removeEventListener('compositionupdate', schedule, true)
+      dom.removeEventListener('compositionend', schedule, true)
+      dom.removeEventListener('input', schedule, true)
+      setDraft('')
+    }
+  }, [editor])
 
   useEffect(() => {
     if (!editor) return
