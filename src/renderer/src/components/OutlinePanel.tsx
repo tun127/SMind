@@ -126,8 +126,8 @@ export default function OutlinePanel({ onClose, onNotify }: Props): ReactElement
 
       // 一级主题：Shift+Tab 脱离成独立主题（位置按画布旧坐标反算，视觉原地）
       if (parent.id === root.id) {
-        const node = canvasLayoutNode(id)
-        const rootNode = canvasLayoutNode(root.id)
+        const node = canvasLayoutNode(root.id, id)
+        const rootNode = canvasLayoutNode(root.id, root.id)
         const position =
           node && rootNode ? { x: node.x - rootNode.x, y: node.y - rootNode.y } : undefined
         commitInline()

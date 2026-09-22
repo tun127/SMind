@@ -30,7 +30,7 @@
  * 边界/概要/关系线、bounds、分支配色）必须完全一致。
  */
 import type { Sheet, Topic } from '../model/types'
-import { allChildrenOf, visibleChildren } from '../model/tree'
+import { visibleChildren } from '../model/tree'
 import {
   LayoutBuilder,
   LAYOUT_DEFAULTS,
@@ -188,7 +188,12 @@ function hotPathOf(root: Topic, hot: ReadonlySet<string>): string[] {
   const path: string[] = []
   const visit = (topic: Topic): boolean => {
     let hit = hot.has(topic.id)
-    for (const child of allChildrenOf(topic)) {
+    // 与**摆放**口径对称：只有中心主题的直接独立主题参与布局（见 `layout/detached.ts`），
+    // 所以只有根这一层连 `detachedChildren` 一起走。非根级 detached 不产出图元，走它们只会
+    // 拼出没有对应节点的"祖先路径"，并把「增量逐字段等于全量」的保证面拉虚。
+    const kids =
+      topic.id === root.id ? [...topic.children, ...topic.detachedChildren] : topic.children
+    for (const child of kids) {
       if (visit(child)) hit = true
     }
     if (hit) path.push(topic.id)

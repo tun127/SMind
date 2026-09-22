@@ -19,6 +19,10 @@ import { useTabs } from '../../../src/renderer/src/store/tabs'
 import { withAlpha } from '../../../src/renderer/src/render/theme'
 import { pickDocumentArg } from '../../../src/shared/openfile'
 import {
+  canvasLayoutNode,
+  rememberCanvasLayout
+} from '../../../src/renderer/src/components/canvas/layout-memory'
+import {
   clearTypedChar,
   stageTypedChar,
   takeTypedChar
@@ -1845,6 +1849,18 @@ export function testRichText(): void {
     savedAt: 2000
   }
   const recoveryUi = recoveryStateFromList({ items: [recoveryA, recoveryB] })
+  group('独立主题：布局快照按文档记账（换文档不能读到旧坐标）')
+  const snapshotLike = {
+    nodeMap: new Map([
+      ['root', { x: 0, y: 0 }],
+      ['t1', { x: 120, y: 40 }]
+    ])
+  } as unknown as Parameters<typeof rememberCanvasLayout>[1]
+  rememberCanvasLayout('doc-a', snapshotLike)
+  eq('同文档能读到坐标', canvasLayoutNode('doc-a', 't1')?.x, 120)
+  eq('换文档后读不到（不同文档的 id 可能撞）', canvasLayoutNode('doc-b', 't1'), null)
+  eq('主题不在快照里返回 null', canvasLayoutNode('doc-a', '不存在'), null)
+
   eq('D-02 UI：两标签两份候选都会出现在列表里', recoveryUi.items.length, 2)
   eq('D-02 UI：最近一份排在最前，快速路径能拿到它', recoveryUi.items[0]?.docId, 'doc-b')
   check('D-02 UI：文案说清候选有几份', recoveryCountText(recoveryUi.items.length).includes('2 份'))

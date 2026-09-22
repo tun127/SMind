@@ -143,7 +143,7 @@ export function useCanvasLayout({
       `${fontEpoch}:${renderEpoch}`,
       editingId ? [editingId] : []
     )
-    rememberCanvasLayout(computed)
+    rememberCanvasLayout(root.id, computed)
     endLayout()
     setStage('画布布局完成')
     /**
