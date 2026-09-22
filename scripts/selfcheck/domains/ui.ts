@@ -172,7 +172,11 @@ import {
   isPerDocAutosaveArtifact,
   isPerDocAutosaveName
 } from '../../../src/shared/recovery'
-import { manifestVersionOf, shouldSkipUpload } from '../../../scripts/lib/upload-skip.mjs'
+import {
+  manifestVersionOf,
+  releaseHoldBlocksUpload,
+  shouldSkipUpload
+} from '../../../scripts/lib/upload-skip.mjs'
 import {
   recoveryCountText,
   recoveryStateFromList,
@@ -2012,6 +2016,29 @@ export function testRichText(): void {
         uploadSource.includes('served !== version')
     )
   }
+  /* ---- 0.9.4：递延发版持有闸门（防误发） ---- */
+  check(
+    '持有闸门：标记版本与当前版本相同 → 拦住上传',
+    releaseHoldBlocksUpload('{"version":"0.9.4"}', '0.9.4') === true
+  )
+  check(
+    '持有闸门：标记版本与当前版本不同 → 放行（不误伤别的版本）',
+    releaseHoldBlocksUpload('{"version":"0.9.4"}', '0.9.5') === false
+  )
+  check('持有闸门：没有标记文件 → 放行', releaseHoldBlocksUpload(null, '0.9.4') === false)
+  check(
+    '持有闸门：标记读不懂 → 拦住（失败即拦，宁可不发）',
+    releaseHoldBlocksUpload('{坏掉的', '0.9.4') === true
+  )
+  {
+    const uploadSource = readFileSync(`${process.cwd()}/scripts/upload-oss.mjs`, 'utf8')
+    check(
+      '持有闸门：上传脚本真的接上了（否则闸门等于没有）',
+      uploadSource.includes('releaseHoldBlocksUpload(holdText, version)') &&
+        uploadSource.includes('.release-hold')
+    )
+  }
+
   /* ---- D-04：shared/agent 里的 .children 全量口径（静态防漏） ---- */
   {
     const agentDir = `${process.cwd()}/src/shared/agent`

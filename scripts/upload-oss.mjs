@@ -14,6 +14,7 @@
  * 可选：
  *   OSS_PUBLIC_BASE        对外访问前缀，默认 https://{bucket}.{endpoint}
  *                          绑了自定义域名就填 https://dl.smindapp.cn
+ *   SMIND_RELEASE_FORCE=1  应急：忽略「递延发版」持有闸门强制上传（正常发布请删 .release-hold 而不是用它）
  *
  * 上传清单（与 R2 那套完全一致，一个都不能少）：
  *   1. `SMind-<版本>-x64-setup.exe`            必需（安装版）
@@ -38,7 +39,11 @@
 import { createHmac } from 'node:crypto'
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { manifestVersionOf, shouldSkipUpload } from './lib/upload-skip.mjs'
+import {
+  manifestVersionOf,
+  releaseHoldBlocksUpload,
+  shouldSkipUpload
+} from './lib/upload-skip.mjs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const version = pkg.version
@@ -57,6 +62,19 @@ if (!bucket || !endpoint || !keyId || !keySecret) {
     '缺少环境变量：OSS_BUCKET / OSS_ENDPOINT / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET'
   )
   console.error('创建方式见 docs/release-oss.md（RAM 子账号 + 只授该桶的读写权限）。')
+  process.exit(1)
+}
+
+// 「递延发版」持有闸门：持有中的版本一律不许上传（用户 2026-09-22 拍板：
+// 0.9.4 冻结但先不发，等 0.9.5 冻结之后再发 0.9.4）。package.json 此刻已是 0.9.4，
+// 没有这道闸门，任何一次误跑都会把持有版直接推给用户。
+const holdFile = new URL('../.release-hold', import.meta.url)
+const holdText = existsSync(holdFile) ? readFileSync(holdFile, 'utf8') : null
+if (releaseHoldBlocksUpload(holdText, version) && process.env.SMIND_RELEASE_FORCE !== '1') {
+  console.error(`✗ ${version} 正处在「递延发版」持有期（仓库根存在 .release-hold），拒绝上传。`)
+  console.error('  这是有意为之：0.9.4 已冻结，待 0.9.5 冻结之后再发。')
+  console.error('  要发布本版：删掉 .release-hold 后重跑本命令。')
+  console.error('  确实要强制上传（应急）：设 SMIND_RELEASE_FORCE=1。')
   process.exit(1)
 }
 

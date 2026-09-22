@@ -18,6 +18,27 @@ export function shouldSkipUpload(name, remoteSize, localSize, neverSkip = false)
   return typeof remoteSize === 'number' && remoteSize === localSize
 }
 
+/**
+ * 「递延发版」持有闸门：仓库根 `.release-hold` 存在、且其 `version` 等于当前版本时，拒绝上传。
+ *
+ * 为什么需要：2026-09-22 用户拍板「0.9.4 冻结但先不发，等 0.9.5 冻结后再发 0.9.4」。
+ * 而 `package.json` 此刻已经是 0.9.4、线上服务的是 0.9.3 —— 谁手一抖跑一次
+ * `npm run mirror:oss`，就会把持有版直接发给用户。
+ *
+ * 判据刻意**失败即拦**：标记文件存在但内容读不懂时同样拦住。宁可多问一句，
+ * 也不要在一个「本来就不该发」的时刻静默发出去。
+ * 释放：正常发布时删掉 `.release-hold`；应急用 `SMIND_RELEASE_FORCE=1`。
+ */
+export function releaseHoldBlocksUpload(holdText, version) {
+  if (typeof holdText !== 'string' || holdText.trim() === '') return false
+  try {
+    const hold = JSON.parse(holdText)
+    return hold?.version === version
+  } catch {
+    return true
+  }
+}
+
 /** 从 electron-updater 的 YAML 清单里读 `version:` 行；读不到返回 null。 */
 export function manifestVersionOf(text) {
   const match = /^version:\s*['"]?([^'"\s]+)['"]?\s*$/m.exec(text)
