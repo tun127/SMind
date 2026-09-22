@@ -21,6 +21,7 @@ import {
   LABEL_MAX_WIDTH,
   LABEL_PADDING_X,
   codeBlockMetrics,
+  formulaMinNodeSize,
   imageBoxSize,
   markerStripSize,
   type Size
@@ -340,6 +341,23 @@ function compute(topic: Topic, depth: number): MeasureResult {
   if (override) {
     width = Math.max(override.width, base.paddingX * 2 + 40)
     height = Math.max(override.height, height)
+  }
+
+  /**
+   * 与渲染层 `TopicNode` 的 `formulaMinNodeSize` 对齐。
+   *
+   * 渲染层对公式节点有 `minHeight = 公式框 + 一行文字 + BLOCK_GAP + 内边距` 的硬下限；
+   * `contentOnly`（标题为空、只有公式）走测量时曾经不把这一行算进去，于是
+   * layout 的 `node.height` 比 DOM 实际盒矮一行，兄弟堆叠按矮的算 ⇒ 压上去。
+   * 这里补上同一份下限，保证测量高度、渲染高度、槽位高度三者同源。
+   */
+  if (formulaBox.height > 0) {
+    const formulaMin = formulaMinNodeSize(
+      formulaBox,
+      { x: base.paddingX, y: base.paddingY },
+      Math.round(base.fontSize * LINE_HEIGHT_RATIO)
+    )
+    height = Math.max(height, formulaMin.height)
   }
 
   return {
