@@ -115,17 +115,26 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
       nextRich && firstNaming ? stampRichDefaults(nextRich, get().appSettings) : nextRich
     const keepRich = stampedRich && hasFormatting(stampedRich) ? stampedRich : null
 
+    // 顺序要紧：**先写工作簿、再清编辑态**。反过来（先清后写）会多出「编辑态已清、
+    // 工作簿仍是旧标题」的一帧——这一帧的测量退回工作簿里的旧标题，量到的是**旧尺寸**；
+    // 而提交本身要走整本 `produceWithPatches` + 全树重扫（几十毫秒级），于是用户看到
+    // 「按 Enter 先缩回旧尺寸、顿一下再长回来」。
+    // 编辑态先留着没有副作用：这一帧的测量走编辑期 override，取的草稿（`editingDraftText ||
+    // editingText`）就是要落库的同一串文字，量出来与提交后完全一致；渲染层也没有任何
+    // `store.subscribe` 依赖这个顺序。
+    // 两个早退分支的语义不变：不该写的仍不写工作簿，`set(NO_EDITING)` 一律执行。
+    const unchanged =
+      topic !== null && topic.title === nextTitle && sameRich(topic.titleRich, keepRich)
+    if (topic !== null && !unchanged) {
+      get().mutate((draft) => {
+        const target = findTopic(activeRoot(draft), editingId)
+        if (!target) return
+        target.title = nextTitle
+        // 只有真正带格式时才写 titleRich，保持 .xmind 干净且与 Xmind 兼容
+        target.titleRich = keepRich ?? undefined
+      }, '修改文本')
+    }
     set(NO_EDITING)
-    if (!topic) return
-    if (topic.title === nextTitle && sameRich(topic.titleRich, keepRich)) return
-
-    get().mutate((draft) => {
-      const target = findTopic(activeRoot(draft), editingId)
-      if (!target) return
-      target.title = nextTitle
-      // 只有真正带格式时才写 titleRich，保持 .xmind 干净且与 Xmind 兼容
-      target.titleRich = keepRich ?? undefined
-    }, '修改文本')
   },
 
   cancelEdit: () => set(NO_EDITING),

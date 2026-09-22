@@ -5,6 +5,12 @@ release
 # 测试构建（-rt.N）的输出目录：只在本机验证用，版本号带 -rt. 且从不上传。
 # 单独列出来是因为它不在上面的 `release` 忽略范围内，忘了会连 113 MB 的包一起提交。
 release-rt
+# 真机验收用的两个大体积目录，都不进版本库：
+#   SMind/          = 实际安装目录（D2 真机验收时把 0.9.2 装在这里，含 SMind.exe 与卸载器，约 376 MB）
+#   release-verify/ = 复验用的独立打包输出目录（约 592 MB）
+# 忘了忽略的话，谁一个 git add . 就会把近 1 GB 的产物提交进去。
+/SMind/
+/release-verify/
 .DS_Store
 *.log
 .vite
