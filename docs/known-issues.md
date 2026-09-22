@@ -486,3 +486,65 @@ font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; f
 **建议修法（3 行 + 1 条断言，随 0.9.5 月度版走）**：在主进程两个调用点（`src/main/index.ts` 的启动入参、
 `src/main/lifecycle.ts` 的 `second-instance`）把 `pickDocumentArg()` 的结果先 `path.resolve()` 成绝对路径再交下去；
 自检补一条断言钉住"相对路径会被规范化"，否则以后有人收紧 `isPlausibleFilePath` 还会再撞一次。
+
+---
+
+## 待处理（2026-09-22 深夜实测：公式被裁 + 下划线吞字）
+
+### P1 多行公式被裁（高度对行数盲）—— **已定位 + 已离线实测**
+
+**现象**：含 `\begin{cases}` 等多行公式的节点，框只装得下第一行、下面几行被 `overflow: hidden` 裁掉；
+右侧面板的公式**预览**却是完整的（用户截图：`smooth_{L_1}(x)` 那条）。
+**单行公式正常** ⇒ 此前"新建节点没问题"的对照结论是错的（那次对照用的是**单行**公式）。
+
+**证据（离线实测 `.tmp-check/formula-rootcause-test.ts`，用仓库自己的 esbuild runner 跑真实函数）**：
+
+| 样本           | `pureFormulaSize` 宽×高 | `formulaSize()`（无 DOM） | 实际需要         |
+| -------------- | ----------------------- | ------------------------- | ---------------- |
+| 多行 `cases`   | **567×34**              | 567×34（= 估算值）        | 预览 3 行 ≈70–80px |
+| 单行分式       | 126×34                  | 126×34                    | ≈34 ✓             |
+
+- **高度恒为 34，与行数无关** ⇒ 估算函数对 `\\` / `\begin{cases}` 是"行数盲"；
+- `src/renderer/src/render/formula.ts:71` 先取该估算值，**DOM 实测生效才覆盖**；
+  拿不到 DOM、量到 0、或字体未就绪时，**估算值就是终值并被写进 `sizeCache`**（`:101-103`）；
+- 该值直接决定节点高度（`render/measure.ts:314` 的 `formulaBlock`、`:332` 的高度累加）与公式块高度
+  （`components/topic/formula-block.tsx:27`），而 `.topic__formula` 是 `overflow: hidden`
+  （`styles/08-section.css:165`）⇒ 裁掉多余行。
+
+**影响面**：所有含多行公式的节点（`cases` / `matrix` / 显式 `\\`）—— 数学笔记类用户高频，直接砸"格式保真"。
+**不阻塞 0.9.4**（已冻结），建议排 **0.9.5 第一批**。
+
+**建议修法**（按性价比排序）：
+
+1. `pureFormulaSize` 按行数放大高度（识别 `\begin{cases|matrix|aligned}` 与 `\\`，按 `height × 行数`）；
+2. `formulaSize()` 区分"DOM 实测值"与"估算值"—— **估算值不写 `sizeCache`**（或标 provisional，字体就绪后强制重算）；
+3. `use-canvas-layout.ts:59-70` 的"字体就绪后重算"从"画布挂载一次"扩到"每次打开文档后"；
+4. 不要用"渲染侧 scrollHeight 反推"（会引发布局抖动）。
+
+### P2 单下划线被当斜体标记吞掉（用户输入被改）
+
+**现象**：节点里写 `__ab__`、删掉一个 `_` 再按空格 → 文字被改变（`_ab__ ` 提交后变 `ab_ `、`__ab_ ` 变 `_ab`），
+视觉上像"多了一行 / 跳行"。
+
+**证据（离线实测 `.tmp-check/underscore-rules-test.ts`，跑真实正则 + 真实解析器）**：
+
+- **10 个候选串全部 `解析后有换行 = false`、`段落数 = 1`** ⇒ **不是真换行**，是文字被改后重新折行；
+- 带空格的候选**一条输入规则都不触发** ⇒ 即时输入规则不是主犯；
+- 主犯是**提交时的 `parseInlineRichText`**（`shared/import/markdown/inline.ts:435`）：把任意 `_x_` 当斜体，
+  于是残留的单个 `_` 被当语法吃掉；
+- 附带：`a_ab_ `（`_` 紧贴字母）也被当斜体 ⇒ **变量名 / 文件名里的 `_` 会被吞**。
+
+**影响面**：中文技术写作（变量名、路径、文件名）高频；**修改用户输入**但不丢内容 ⇒ P2。
+**建议修法**（二选一）：
+
+1. **去掉单下划线斜体（推荐）**：同时停用 `ITALIC_UNDERSCORE_INPUT`（`shared/inline-rules.ts:66`）
+   与解析器里的 `_x_` 分支 —— **只改一处无效**；
+2. 收紧为"`_` 两侧必须是行首 / 行尾 / 空白 / CJK"（可救 `a_ab_`，但 `中文_ab_` 仍会被吞，中文紧贴是既定行为）。
+
+### 判定为非 bug 的两条（同日结案）
+
+- **手打 `==高亮==` 不生效**：根因是**输入法全角 `＝`**（非半角）；代码侧 `HIGHLIGHT_INPUT`、`Highlight` mark
+  与编辑器注册齐全，且 0.9.2 起就有 ⇒ **不是代码问题**。
+- **拖拽图例"不在底部"**：`styles/08-section.css:150-155` 是 `position: absolute; left: 50%; bottom: 8px`，
+  且 `CanvasHints` 在 `canvas__world` **之外**（`Canvas.tsx:405` 闭合、`:408` 渲染）⇒ 设计即在画布底部；0.9.3 同构。
+  用户复看后确认"恢复正常"。
