@@ -219,35 +219,38 @@ export default function RichTextEditor(props: RichTextEditorProps): ReactElement
    * 为什么需要：组词/输入中的文本只存在于 DOM（ProseMirror 到提交才同步），布局看不到它 ——
    * 框不会长，拼音只能在窄框里折行。有了这条通道，框会跟着内容长，编辑区就不必（也不许）逃出框。
    *
-   * 三条约束：① 只写 `editingDraftText`，**不进文档、不动 editingRich**（提交仍以它们为准）；
-   * ② 同一帧的多次事件用 rAF 合并（组词期事件很密）；③ 卸载时**报空**收回，
-   * 别把这一份草稿留给下一个编辑框。另外去掉末尾换行 —— 编辑器总有一个收尾段落，
-   * 不trim 的话每次都会多量出一行空白。
+   * **四条约束**：
+   * ① 只写 `editingDraftText`，**不进文档、不动 editingRich**（提交仍以它们为准）；
+   * ② **同步上报 + 按值去重**（不挂在 rAF 上）：override 读的是 `editingDraftText || editingText`，
+   *   草稿只要落后一次就会**永久盖住真值** —— 实测「删掉文字后框不缩回」正是这么来的（报告 §30）：
+   *   清空那一帧的 rAF 没跑到，草稿停在旧文本，于是"框永远按旧文本量"。
+   *   去重（值没变就不写 store）保证同步上报不会带来多余重排；
+   * ③ 卸载时**报空**收回，别把这一份草稿留给下一个编辑框；
+   * ④ 去掉末尾换行 —— 编辑器总有一个收尾段落，不 trim 的话每次都会多量出一行空白。
    */
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
     const setDraft = useEditorStore.getState().setEditingDraftText
-    let frame = 0
+    let last = ''
     const report = (): void => {
-      frame = 0
-      setDraft((dom.textContent ?? '').replace(/\n+$/, ''))
+      const text = (dom.textContent ?? '').replace(/\n+$/, '')
+      if (text === last) return
+      last = text
+      setDraft(text)
     }
-    const schedule = (): void => {
-      if (frame !== 0) return
-      frame = requestAnimationFrame(report)
-    }
-    dom.addEventListener('compositionstart', schedule, true)
-    dom.addEventListener('compositionupdate', schedule, true)
-    dom.addEventListener('compositionend', schedule, true)
-    dom.addEventListener('input', schedule, true)
+    const types = [
+      'compositionstart',
+      'compositionupdate',
+      'compositionend',
+      'input',
+      'beforeinput',
+      'keyup'
+    ]
+    for (const type of types) dom.addEventListener(type, report, true)
     report()
     return () => {
-      if (frame !== 0) cancelAnimationFrame(frame)
-      dom.removeEventListener('compositionstart', schedule, true)
-      dom.removeEventListener('compositionupdate', schedule, true)
-      dom.removeEventListener('compositionend', schedule, true)
-      dom.removeEventListener('input', schedule, true)
+      for (const type of types) dom.removeEventListener(type, report, true)
       setDraft('')
     }
   }, [editor])
