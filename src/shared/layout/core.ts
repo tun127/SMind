@@ -503,8 +503,21 @@ export class LayoutBuilder {
       const movedX = round(node.x + dx)
       const movedY = round(node.y + dy)
       const previous = this.memo?.nodes.get(node.id)
+      /**
+       * 复用还要看**尺寸是否相同**，以及**这个节点是不是"热"的**（编辑期 / 本轮脏路径）。
+       *
+       * 为什么光比 `topic` 不够：编辑期工作簿**没变**，`topic` 引用与坐标都没变，
+       * 但测量源在 topic 之外（实时草稿 / `editingText`）→ 宽度会变。
+       * 只比 `topic` 就会把这个节点整块换回上一轮的对象（含旧 `width`），
+       * 新测量算出来的宽度被静默丢掉 —— 表现就是"打字时框不长、按 Enter 才正常"（报告 §28）。
+       */
+      const sizeSame =
+        previous !== undefined && previous.width === node.width && previous.height === node.height
+      const isHot = this.touched?.has(node.id) ?? false
       if (
         previous &&
+        !isHot &&
+        sizeSame &&
         previous.topic === node.topic &&
         previous.x === movedX &&
         previous.y === movedY &&

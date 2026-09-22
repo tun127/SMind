@@ -36,6 +36,7 @@ import { parseXmind } from '../../../src/shared/xmind/parse'
 import { serializeXmind } from '../../../src/shared/xmind/serialize'
 
 import type { MindPackage } from '../../../src/shared/model/types'
+import type { MeasureFn } from '../../../src/shared/layout/types'
 
 /* ---- D1 拆分：断言原语搬进 ./selfcheck/harness.ts，按域拆分的其它文件共用它 ---- */
 import { check, eq, firstDiff, group, normalize } from '../harness'
@@ -297,6 +298,40 @@ export function testIncrementalLayout(): void {
     layoutDigest(grown),
     layoutDigest(layoutSheet(root(), fixedSizeMeasure, {}, sheet()))
   )
+
+  /* ---- 报告 §28：编辑期"测量变了、主题对象没变" —— 宽度必须跟着变 ---- */
+  group('增量布局：测量变了但主题对象没变时，宽度必须跟着变（编辑期）')
+
+  reset()
+  const editLeaf = addChildOf(root().id, 'aaaa')
+  const editCache = createLayoutCache()
+  /**
+   * 模拟编辑期：**主题对象一个字节都没变**，但测量源在 topic 之外
+   * （实时草稿 / `editingText`），所以同一棵树的宽度会变。
+   *
+   * 旧实现在"平移 + 归一化"那一步只比 `topic` 引用与坐标就整块复用上一轮的节点对象，
+   * 于是新测量被静默丢掉 → 表现就是"打字时框不长、按 Enter 才正常"。
+   */
+  let liveWidth = 120
+  const liveMeasure: MeasureFn = (topic, depth) => {
+    const base = fakeMeasure(topic, depth)
+    return topic.id === editLeaf ? { ...base, width: liveWidth } : base
+  }
+
+  const live1 = layoutSheetCached(root(), liveMeasure, {}, sheet(), editCache, '', [editLeaf])
+  eq('编辑节点第一次用新测量', live1.nodeMap.get(editLeaf)?.width, 120)
+
+  liveWidth = 320
+  const live2 = layoutSheetCached(root(), liveMeasure, {}, sheet(), editCache, '', [editLeaf])
+  eq(
+    '同一 topic、新测量 → 宽度必须跟着变（不许整块复用旧对象）',
+    live2.nodeMap.get(editLeaf)?.width,
+    320
+  )
+
+  liveWidth = 90
+  const live3 = layoutSheetCached(root(), liveMeasure, {}, sheet(), editCache, '', [editLeaf])
+  eq('还能缩回去（覆盖 D-14 的方向）', live3.nodeMap.get(editLeaf)?.width, 90)
 
   group('增量布局：大文档下只碰脏路径')
 

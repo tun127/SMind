@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { createLayoutCache, layoutSheetCached } from '@shared/layout'
 import type { LayoutResult } from '@shared/layout/types'
 import { activeRoot, activeSheet, countTopics } from '@shared/model/tree'
+import { plainTextOf } from '@shared/richtext'
 import type { Topic, Workbook } from '@shared/model/types'
 import { beginCost, count, isDiagArmed, mark, setStage } from '../../dev/stage'
 import { bumpMeasureEpoch, measureTopic } from '../../render/measure'
@@ -93,20 +94,35 @@ export function useCanvasLayout({
           0) + 1,
       pass: '',
       editingHits: 0,
-      editingMisses: 0
+      editingMisses: 0,
+      /**
+       * 报告 §27/§28 要求的五个**实际取值**：只有它们能区分
+       * "title 空 / 通道空 / 测量对但没写进节点" —— 光看 `pass` 与 `hits` 定不了死。
+       */
+      titleLen: -1,
+      draftLen: editingDraftText.length,
+      editLen: editingText.length,
+      richLen: editingRich ? plainTextOf(editingRich).length : -1,
+      editingWidth: -1
     }
-    const measure = (topic: Topic, depth: number): ReturnType<typeof measureTopic> =>
-      topic.id === editingId && editingRich
-        ? ((diag.editingHits += 1),
-          measureTopic(
-            // 实时草稿优先：组词/输入中的文本只在 DOM 里，用它参与测量，框才跟着内容长（第 2 步）。
-            // titleRich 不变 —— 格式仍以提交时的 editingRich 为准。
-            // ?? ?26 ?????measure.ts ? `titleRich ?? richFromPlain(title)` ??
-            // titleRich ??? title ???????????????????? override ??
-            { ...topic, title: editingDraftText || editingText, titleRich: undefined }, // measure ?? titleRich??26????????? title
-            depth
-          ))
-        : ((diag.editingMisses += 1), measureTopic(topic, depth))
+    /** 编辑期实时文本：草稿优先（组词/输入中的文本只存在于 DOM 里） */
+    const liveTitle = editingDraftText || editingText
+    const measure = (topic: Topic, depth: number): ReturnType<typeof measureTopic> => {
+      if (topic.id === editingId && editingRich) {
+        diag.editingHits += 1
+        diag.titleLen = liveTitle.length
+        /**
+         * 编辑期必须**连文本一起换掉**：`measure.ts` 的口径是
+         * `topic.titleRich ?? richFromPlain(topic.title)` —— `titleRich` 非空时 `title` 会被忽略，
+         * 只覆盖 title 等于没覆盖（报告 §26）。
+         */
+        const size = measureTopic({ ...topic, title: liveTitle, titleRich: undefined }, depth)
+        diag.editingWidth = size.width
+        return size
+      }
+      diag.editingMisses += 1
+      return measureTopic(topic, depth)
+    }
     // 关系线/边界/概要在结构布局之后按最终坐标计算，所以要把画布数据一起传进去
     count('画布布局')
     setStage('画布布局')
