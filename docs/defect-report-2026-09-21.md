@@ -1720,6 +1720,57 @@ const walk = (topic, depth) => {
 
 ---
 
+## 24. D-07 叶子节点验收实测（2026-09-22）—— `21bdc5b` 修的两处**都对，但症状仍在**
+
+> **谁的数**：QA 侧自己跑的（代码侧的 `scripts/verify/d07-accept.cjs` 两版都没跑通）。
+> **测法要点**（可信性来自这三条）：① `Tab` 建**叶子**节点（不在根节点上测）；② 清空用
+> **Range 选中 + 真 Backspace**（`Ctrl+A` 会把编辑态整个关掉）；③ 全程用 `data-topic-id`
+> 确认量的是**同一个节点**（用中心点匹配会因布局移动而找错节点）。
+
+### 24.1 四组读数（实测）
+
+```
+W0 空叶子（编辑态）        框 inline width = 76px
+打字轨迹（每 5 字符采一次） 5字→76px   10字→76px   15字→76px   20字→76px
+W1 打满 20 字符（编辑态）   框 inline width = 76px   （DOM 里文本确实是 20 个字符）
+W2 清空（编辑态）           框 inline width = 76px
+W3 提交后（同一节点）       框 inline width = 76px   （空标题，76 是正确值）
+```
+
+⇒ **①打字让框变宽：FAIL**（76 → 76）。**布局给编辑节点的 width 从头到尾没变。**
+
+> `.topic` 的 inline `width` 是 React 从布局结果的 `node.width` 写的 ⇒ 这是**布局侧的事实**，
+> 不是渲染没跟上。另跑一次"双击**已有**节点"的同样流程，结果一致（102px → 102px）。
+
+### 24.2 静态复核 `21bdc5b`（两处修法都对）
+
+| 改动 | 评价 |
+|---|---|
+| `core.ts`：把 `const seeded = this.sizes.get(topic.id)` 提到早退之前，早退条件改为 `isClean(topic) && !seeded` | ✅ 正确：seed 优先于"干净"判断，正是 §22.3-② 那条 |
+| `incremental.ts`：hot 循环先按 id 建"当前树"索引（含 `detachedChildren`）重量一次，`!before` 不再空手 `continue` | ✅ 正确且更彻底，正是 §22.3-① 那条 |
+| 两条"源码级断言"（`readFileSync(...).includes(...)`） | ⚠️ **是防回退的文本网，不是行为断言**：能防"有人把修复删掉"，但**证明不了框会变宽**，且会被格式化/换行误伤。建议补一条**真行为断言**（例如：构造一棵小树 + 假 measure，调 `layoutSheetCached` 并传 hot id，断言返回节点的宽度等于 seed 的值） |
+
+### 24.3 已排除 / 仍未定死
+
+**本次实测排除**：
+- `editingId` **正确**指向被编辑节点（读渲染层 props：`editingId === 该节点 id` ✓）；
+- 该节点确实在编辑态（`editing` prop = true ✓）、DOM 里文本确实存在（20 字符 ✓）；
+- 不是"渲染没跟上"（布局给的 `node.width` 自己就是旧值 ✗）。
+
+**仍未定死的一环**（四个候选，各附判别实验；建议按序做，别猜）：
+1. **store 的 `editingText` / `editingRich` 打字时真的更新了吗** —— 反证：**提交后节点文本是对的**（实测：长公式提交后节点完整保留）⇒ 提交路径读的是 store，说明 store **有过**文本 ⇒ 嫌疑下降，但仍需一次性计数确认（`updateEditingRich` 调了几次）；
+2. **`use-canvas-layout` 的 `useMemo` 有没有重跑**（deps 里有 `editingText`；加临时计数即可判定）；
+3. **`layoutSheetCached` 这一轮走的哪条路径**（`cache.pass` = `fit` / `refresh` / `incremental` / `full`）—— 把它暴露到 `window` 或 dev 面板，一眼就能看出"是不是根本没走 hot 路径"；
+4. **`measure` 的门 `topic.id === editingId && editingRich` 有没有命中**（在闭包里加计数）。
+
+> 建议先做 3：**它一次性区分"没进 hot 路径 / 走了 refresh（`withMeasure` 故意不改 width·height） / 走了 incremental"** 三种截然不同的原因。`withMeasure`（`incremental.ts:184-201`）**设计上就不改 `width/height`** —— 若第 3 问的答案是 `refresh`，那就是它在背这个锅。
+
+### 24.4 结论口径
+
+**D-07 仍记「机制改了两处、症状未消」**，不得记成已修。`21bdc5b` 的两处修复对本问题是**必要但非充分**。
+
+---
+
 ## 附：本报告的证据来源（全部为当日实测/实读）
 
 - 五道门槛：2026-09-21 实跑，全绿（`selfcheck` 2791 项）
