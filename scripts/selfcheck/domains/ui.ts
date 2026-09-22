@@ -1996,6 +1996,23 @@ export function testRichText(): void {
         uploadSource.includes('served !== version')
     )
   }
+  /* ---- D-04：shared/agent 里的子节点遍历统一口径（静态防漏） ---- */
+  {
+    const agentDir = `${process.cwd()}/src/shared/agent`
+    let traversalCount = 0
+    for (const name of readdirSync(agentDir).filter((item) => item.endsWith('.ts'))) {
+      const lines = readFileSync(`${agentDir}/${name}`, 'utf8').split(/\r?\n/)
+      for (const line of lines) {
+        if (!/for\s*\([^)]*\bof\s+[^)]*\.children\b/.test(line)) continue
+        traversalCount += 1
+        check(
+          `D-04 静态：${name} 的 .children 遍历必须同行走 allChildrenOf / walk`,
+          /allChildrenOf|walk/.test(line)
+        )
+      }
+    }
+    check('D-04 静态：至少扫到 1 处 .children 遍历（防扫描正则写空）', traversalCount >= 1)
+  }
 
   const nowD15 = Date.now()
   check(

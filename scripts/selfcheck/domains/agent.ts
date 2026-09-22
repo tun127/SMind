@@ -15,7 +15,7 @@
  * 运行：npm run selfcheck
  */
 
-import { withFoldedSides } from '../../../src/shared/model/tree'
+import { countTopics, withFoldedSides } from '../../../src/shared/model/tree'
 import { createTopic } from '../../../src/shared/model/factory'
 import {
   buildChatSystemPrompt,
@@ -38,6 +38,7 @@ import {
   AGENT_MAX_TOOL_CALLS,
   AGENT_WRITE_TOOLS,
   canContinueAgentLoop,
+  buildTitleIndex,
   DESTRUCTIVE_WRITE_KINDS,
   DESTRUCTIVE_WRITE_LABELS,
   isDestructiveWriteKind,
@@ -49,6 +50,7 @@ import {
   resolveTopicAddress,
   runReadTool,
   shortHandleOf,
+  segmentTitleMentions,
   type ToolContext
 } from '../../../src/shared/agent'
 import { DEFAULT_APP_SETTINGS } from '../../../src/shared/ipc'
@@ -378,6 +380,59 @@ export function testAgentTools(): void {
   check('找不到时给出可读原因（提示去搜）', !missing.ok && missing.error.includes('searchNodes'))
   eq('路径走到断点时报错', resolveTopicAddress(root, '中心主题/不存在').ok, false)
   eq('空 address 报错', resolveTopicAddress(root, '   ').ok, false)
+  group('Agent：D-04 浮动主题与普通子主题同口径')
+  {
+    const detachedRoot = createTopic('中心主题')
+    const normal = createTopic('普通分支')
+    const floating = createTopic('浮动主题')
+    const floatingChild = createTopic('浮动子节点')
+    floating.children.push(floatingChild)
+    detachedRoot.children.push(normal)
+    detachedRoot.detachedChildren.push(floating)
+
+    const byHandle = resolveTopicAddress(detachedRoot, `#${shortHandleOf(floating.id)}`)
+    check('句柄寻址命中浮动主题', byHandle.ok && byHandle.resolved.topic.id === floating.id)
+    const byTitle = resolveTopicAddress(detachedRoot, '浮动主题')
+    check('唯一标题命中浮动主题', byTitle.ok && byTitle.resolved.topic.id === floating.id)
+    const hint = resolveTopicAddress(detachedRoot, '浮动')
+    check('纠错建议里也列出浮动主题', !hint.ok && hint.error.includes('浮动主题'))
+
+    const titleIndex = buildTitleIndex(detachedRoot)
+    check(
+      '标题索引把浮动主题切成带 topicId 的片段',
+      segmentTitleMentions('请处理浮动主题', titleIndex).some(
+        (segment) => segment.topicId === floating.id
+      )
+    )
+
+    const detachedContext: ToolContext = {
+      root: detachedRoot,
+      selectedId: floating.id,
+      sheetCount: 1,
+      sheet: {
+        id: 'sheet-detached',
+        title: '画布 1',
+        rootTopic: detachedRoot,
+        relationships: [],
+        boundaries: [],
+        summaries: []
+      }
+    }
+    const search = runReadTool('searchNodes', '{"query":"浮动"}', detachedContext)
+    check('searchNodes 命中浮动主题', search.ok && search.content.includes('浮动主题'))
+    const subtree = runReadTool(
+      'getSubtree',
+      JSON.stringify({ address: '浮动主题', depth: 1 }),
+      detachedContext
+    )
+    check('getSubtree 能看到浮动子节点', subtree.ok && subtree.content.includes('浮动子节点'))
+    const stats = runReadTool('getDocStats', '{}', detachedContext)
+    eq(
+      'getDocStats 节点总数与界面 countTopics 一致',
+      stats.content.includes(`节点总数：${countTopics(detachedRoot)}`),
+      true
+    )
+  }
 
   group('Agent：只读工具')
 

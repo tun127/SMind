@@ -5,7 +5,14 @@
  * schema 声明见 tools-read.ts。结果文本有长度上限，防止把上下文撑爆。
  */
 import type { Sheet, Topic } from '../model/types'
-import { countHiddenNodes, findTopic, foldedSidesOf, titlePathOf, walk } from '../model/tree'
+import {
+  allChildrenOf,
+  countHiddenNodes,
+  findTopic,
+  foldedSidesOf,
+  titlePathOf,
+  walk
+} from '../model/tree'
 import { parseRange } from '../layout'
 import { MARKER_LABELS } from '../xmind/constants'
 import { parseToolArguments } from './args'
@@ -68,16 +75,17 @@ function outlineOf(
       : folded.length > 0
         ? `，已收起${folded.map((item) => FOLD_SIDE_LABELS[item]).join('/')}侧`
         : ''
-    const suffix = node.children.length > 0 ? `（${node.children.length} 个子节点${foldNote}）` : ''
+    const children = allChildrenOf(node)
+    const suffix = children.length > 0 ? `（${children.length} 个子节点${foldNote}）` : ''
     // 每行带上短句柄：模型可以直接用它当 address（重名、超长、带斜杠的标题都因此变得可寻址）
     lines.push(`${'  '.repeat(level)}- [#${shortHandleOf(node.id)}] ${title}${suffix}`)
     if (level >= depth) {
-      if (node.children.length > 0) {
-        lines.push(`${'  '.repeat(level + 1)}…（${node.children.length} 个子节点未展开）`)
+      if (children.length > 0) {
+        lines.push(`${'  '.repeat(level + 1)}…（${children.length} 个子节点未展开）`)
       }
       return
     }
-    for (const child of node.children) visit(child, level + 1)
+    for (const child of children) visit(child, level + 1)
   }
   visit(topic, 0)
   return { text: lines.join('\n'), truncated }
@@ -102,7 +110,7 @@ function countsOf(root: Topic): {
     if (topic.notes && topic.notes.trim().length > 0) notes += 1
     if (topic.code) codes += 1
     if (topic.formula && topic.formula.trim().length > 0) formulas += 1
-    for (const child of topic.children) visit(child, level + 1)
+    for (const child of allChildrenOf(topic)) visit(child, level + 1)
   }
   visit(root, 1)
   // 上面数的是**文档里的全部内容**；`countHiddenNodes` 另算「画布上当前看不到的」，
@@ -240,7 +248,7 @@ function executeReadTool(name: string, argumentsText: string, context: ToolConte
           handle: shortHandleOf(topic.id)
         })
       }
-      for (const child of topic.children) visit(child)
+      for (const child of allChildrenOf(topic)) visit(child)
     }
     visit(context.root)
 

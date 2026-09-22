@@ -6,7 +6,13 @@
  * 拒绝的话术要写成模型能自行纠正的样子。
  */
 import type { Topic } from '../model/types'
-import { ancestorsOf, findTopic, isSelfOrDescendant, splitFoldSidesOf } from '../model/tree'
+import {
+  allChildrenOf,
+  ancestorsOf,
+  findTopic,
+  isSelfOrDescendant,
+  splitFoldSidesOf
+} from '../model/tree'
 import { isRecord } from '../guards'
 import { countTopicTree, parseOutline, type OutlineNode } from '../ai'
 import { MARKER_LABELS, STRUCTURES, markerGroupOf } from '../xmind/constants'
@@ -112,7 +118,7 @@ export function planWriteTool(name: string, argumentsText: string, root: Topic):
       const existing = new Set<string>()
       const collect = (topic: Topic): void => {
         if (topic.title.length > 0) existing.add(topic.title)
-        for (const child of topic.children) collect(child)
+        for (const child of allChildrenOf(topic)) collect(child)
       }
       collect(root)
       let totalNodes = 0

@@ -60,7 +60,7 @@ function suggestTitles(root: Topic, query: string, limit = 5): string[] {
     if (out.length >= limit) return
     if (topic.title.length > 0 && topic.title !== query && topic.title.includes(query))
       out.push(topic.title)
-    for (const child of topic.children) visit(child)
+    for (const child of allChildrenOf(topic)) visit(child)
   }
   visit(root)
   return out
@@ -90,7 +90,7 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
     const matched: Topic[] = []
     const scan = (topic: Topic): void => {
       if (shortHandleOf(topic.id) === bare) matched.push(topic)
-      for (const child of topic.children) scan(child)
+      for (const child of allChildrenOf(topic)) scan(child)
     }
     scan(root)
     const only = matched[0]
@@ -154,7 +154,7 @@ export function resolveTopicAddress(root: Topic, address: string): AddressResult
   const matches: Topic[] = []
   const collect = (topic: Topic): void => {
     if (topic.title === raw) matches.push(topic)
-    for (const child of topic.children) collect(child)
+    for (const child of allChildrenOf(topic)) collect(child)
   }
   collect(root)
 

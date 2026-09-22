@@ -5,6 +5,7 @@
  * 不碰工具、不碰寻址，可独立验证。
  */
 import type { Topic } from '../model/types'
+import { allChildrenOf } from '../model/tree'
 
 /* ------------------------------------------------------------------ */
 /* 节点标题的识别与切分                                                */
@@ -42,7 +43,7 @@ export function buildTitleIndex(root: Topic, minLength = 2): Map<string, TitleIn
       if (bucket) bucket.push({ title, id: topic.id })
       else index.set(first, [{ title, id: topic.id }])
     }
-    for (const child of topic.children) walk(child)
+    for (const child of allChildrenOf(topic)) walk(child)
   }
   walk(root)
 
