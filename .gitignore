@@ -43,3 +43,4 @@ license-private.pem
 .dev.log
 # V8 采样产物（SMIND_PROFILE=1 排查卡死时会在项目根目录留下）
 isolate-*.log
+/release-frozen-0.9.3/
