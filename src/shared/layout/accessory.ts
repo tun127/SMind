@@ -79,7 +79,7 @@ export function imageBoxSize(image: TopicImage | undefined, bounds?: Size): Size
  *
  * 这是纯估算，故意宁可高一点，也不要在拿不到 DOM 时把多行公式裁掉。
  */
-function formulaRowCount(source: string): number {
+export function formulaRowCount(source: string): number {
   const explicitBreaks = (source.match(/\\\\/g) ?? []).length
   const multilineEnv = /\\begin\{(?:cases|aligned|matrix|array)\*?\}/.test(source)
   return Math.max(1, explicitBreaks + 1, multilineEnv ? 2 : 1)

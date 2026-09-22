@@ -17,6 +17,9 @@
   `formulaSize()` 区分 DOM 实测值与估算值，**估算值不再写 sizeCache**；字体就绪重算扩展到每次打开文档。
 - **P2 单下划线吞字**：停用单下划线斜体输入规则（`ITALIC_UNDERSCORE_INPUT`）与解析器的 `_x_` 分支；
   变量名 / 文件名里的 `_` 不再被当语法吞掉。`__粗体__` 与 `*斜体*` 保持有效。
+- **P1 测量层收口**：公式隐藏测量宿主复制 `.topic__formula` 的 flex 上下文，并用 `scrollWidth/scrollHeight` 兜底；
+
+
 
 ### 已知变化（兼容性）
 

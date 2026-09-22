@@ -9,7 +9,12 @@
  * 因此「布局算出来的框」与「实际画出来的内容」不会打架。
  */
 import katex from 'katex'
-import { pureFormulaSize, FORMULA_HARD_MAX_WIDTH, type Size } from '@shared/layout/accessory'
+import {
+  formulaRowCount,
+  pureFormulaSize,
+  FORMULA_HARD_MAX_WIDTH,
+  type Size
+} from '@shared/layout/accessory'
 import { escapeHtml } from '@shared/richtext'
 import { evictOldest } from '@shared/cache'
 
@@ -53,6 +58,14 @@ function host(): HTMLDivElement | null {
   if (!document.body) return null
   const el = document.createElement('div')
   el.className = 'formula-measure'
+  /**
+   * 必须复制 `.topic__formula` 的 flex 布局上下文：否则 `.katex` 在测量宿主里
+   * 是 inline 元素，`getBoundingClientRect`/`scrollHeight` 都量不到真实块高
+   *（实测盒高 21、scrollHeight 0；同一节点在 `.topic__formula` 里实际 54）。
+   */
+  el.style.display = 'flex'
+  el.style.alignItems = 'flex-start'
+  el.style.lineHeight = '1'
   el.setAttribute('aria-hidden', 'true')
   document.body.appendChild(el)
   measureHost = el
@@ -76,12 +89,19 @@ export function formulaSize(source: string, fontSize: number): Size {
       el.style.fontSize = `${fontSize}px`
       el.innerHTML = formulaHtml(source)
       const child = el.firstElementChild
-      // 用 getBoundingClientRect 拿**亚像素**尺寸，再向上取整 + 2px 余量：
-      // offsetWidth 是取整值，渲染又是亚像素的，差值会恰好把右/下边缘切掉一点点
-      const rect =
-        child instanceof HTMLElement ? child.getBoundingClientRect() : el.getBoundingClientRect()
-      const width = rect.width
-      const height = rect.height
+      /**
+       * 不能只信 `getBoundingClientRect()`：实测 .katex 的盒高 25px，
+       * 而内容实际 29px（scrollHeight），盒子比内容矮 4px；
+       * 外层 `.topic__formula` 还是 overflow:hidden + 居中，于是上下各切一截，
+       * 多行 cases 会把差距放大到整行被切。
+       *
+       * 宽度同理取 scrollWidth 兜底——盒宽可能比真实排版窄 1px，
+       * 和 Bug 2 的 `.topic__text` 是同一类问题。
+       */
+      const childEl = child instanceof HTMLElement ? child : null
+      const rect = childEl ? childEl.getBoundingClientRect() : el.getBoundingClientRect()
+      const width = Math.max(rect.width, childEl?.scrollWidth ?? 0)
+      const height = Math.max(rect.height, childEl?.scrollHeight ?? 0)
       if (width > 0 && height > 0) {
         size = {
           // 公式是**原子内容**：它多宽，节点框就该多宽（报告 §23 —— 原来这里截到
@@ -89,7 +109,8 @@ export function formulaSize(source: string, fontSize: number): Size {
           // 块级公式还被 .topic__formula 的 overflow:hidden 直接裁掉）。
           // 只保留一个"防呆"上限，避免病态输入把画布撑到不可用。
           width: Math.max(1, Math.min(Math.ceil(width) + 2, FORMULA_HARD_MAX_WIDTH)),
-          height: Math.max(1, Math.ceil(height) + 2)
+          // 多行时 +2 的余量不够：每多一行再补 2px（与估算路径的 formulaRowCount 同一口径）。
+          height: Math.max(1, Math.ceil(height) + 2 + (formulaRowCount(source) - 1) * 2)
         }
         measured = true
       }

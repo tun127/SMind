@@ -367,7 +367,19 @@ export async function testMediaElements(): Promise<void> {
     formulaEstimateSource.includes('formulaRowCount') &&
       formulaEstimateSource.includes('singleLineHeight +')
   )
-
+  check(
+    '公式实测同时使用 box 与 scroll 尺寸',
+    formulaSource.includes('scrollWidth') && formulaSource.includes('scrollHeight')
+  )
+  check(
+    '公式多行高度余量复用了 formulaRowCount',
+    formulaSource.includes('formulaRowCount(source) - 1')
+  )
+  check(
+    '公式测量宿主复制了 .topic__formula 的 flex 布局上下文',
+    formulaSource.includes("el.style.display = 'flex'") &&
+      formulaSource.includes("el.style.alignItems = 'flex-start'")
+  )
 
   group('代码块：尺寸规则')
 
