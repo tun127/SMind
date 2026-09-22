@@ -21,7 +21,6 @@ import {
   FOOTNOTE_INPUT,
   HIGHLIGHT_INPUT,
   ITALIC_INPUT,
-  ITALIC_UNDERSCORE_INPUT,
   STRIKE_INPUT,
   SUBSCRIPT_INPUT,
   SUPERSCRIPT_INPUT
@@ -40,7 +39,6 @@ export const CjkInlineRules = Extension.create({
     add(BOLD_INPUT, marks.bold)
     add(BOLD_UNDERSCORE_INPUT, marks.bold)
     add(ITALIC_INPUT, marks.italic)
-    add(ITALIC_UNDERSCORE_INPUT, marks.italic)
     add(STRIKE_INPUT, marks.strike)
     add(HIGHLIGHT_INPUT, marks.highlight)
     add(SUPERSCRIPT_INPUT, marks.superscript)

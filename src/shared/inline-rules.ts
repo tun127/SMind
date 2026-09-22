@@ -62,10 +62,14 @@ export const BOLD_UNDERSCORE_INPUT = new RegExp(
 /** `*斜体*` */
 export const ITALIC_INPUT = new RegExp(`${EMPHASIS_LEAD}(\\*(?!\\s+\\*)((?:[^*]+))\\*(?!\\s+\\*))$`)
 
-/** `_斜体_` */
-export const ITALIC_UNDERSCORE_INPUT = new RegExp(
-  `${EMPHASIS_LEAD}(_(?!\\s+_)((?:[^_]+))_(?!\\s+_))$`
-)
+/**
+ * 单下划线斜体已**停用**（2026-09-22 深夜 P2：`_ab_` / `a_ab_` 这类变量名、
+ * 文件名里的下划线会被当语法吞掉）。
+ *
+ * 保留这个导出符号只为旧调用点与离线实测脚本不因删符号而报错；正则恒不匹配。
+ * 需要强调：解析器里的 `_x_` 分支也必须同时去掉，只改这一处无效。
+ */
+export const ITALIC_UNDERSCORE_INPUT = /$a/
 
 /** `~~删除线~~` */
 export const STRIKE_INPUT = new RegExp(`${EMPHASIS_LEAD}(~~(?!\\s+~~)((?:[^~]+))~~(?!\\s+~~))$`)

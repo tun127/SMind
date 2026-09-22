@@ -385,7 +385,6 @@ export function matchEmphasis(source: string, index: number): EmphasisMatch | nu
     tryMatch('~~', { strike: true }) ??
     tryMatch('==', { highlight: true }) ??
     tryMatch('*', { italic: true }) ??
-    tryMatch('_', { italic: true }) ??
     tryMatch('^', { script: 'super' }) ??
     tryMatch('~', { script: 'sub' })
   )
