@@ -326,7 +326,9 @@ function compute(topic: Topic, depth: number): MeasureResult {
     formulaBox.width,
     codeBox.width
   )
-  let width = Math.max(Math.ceil(contentWidth) + base.paddingX * 2, base.minWidth)
+  // 文本内容宽留 2px 余量：浏览器实际排版宽度可能比测量值多 1px，
+  // 不留余量时最后一个字/空格会被折到下一行（真机复现：style 宽 104、scrollWidth 105）。
+  let width = Math.max(Math.ceil(contentWidth) + 2 + base.paddingX * 2, base.minWidth)
 
   let height =
     base.paddingY * 2 + accessory.height + imageBlock + formulaBlock + codeBlock + labelRow.height
