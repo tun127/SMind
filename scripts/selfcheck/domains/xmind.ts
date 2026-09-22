@@ -336,6 +336,38 @@ export async function testMediaElements(): Promise<void> {
   check('公式估算高度与字号相关', pureFormulaSize('x', 28).height > pureFormulaSize('x', 14).height)
   check('长公式不超过宽度上限', longFormula.width <= 260, JSON.stringify(longFormula))
   eq('空公式按最小宽度处理', pureFormulaSize('', 14).width, 36)
+  const multilineFormula = '\\begin{cases}\n' + 'a \\\\\n' + 'b\n' + '\\end{cases}'
+  const multilineEstimate = pureFormulaSize(multilineFormula, 14)
+  check(
+    '公式估算：显式换行按行数放大高度',
+    pureFormulaSize('a\\\\b', 14).height > smallFormula.height,
+    JSON.stringify(pureFormulaSize('a\\\\b', 14))
+  )
+  check(
+    '公式估算：cases 多行环境按多行放大高度',
+    multilineEstimate.height > smallFormula.height,
+    JSON.stringify(multilineEstimate)
+  )
+  eq(
+    '无 DOM 时 formulaSize 返回同一份多行估算值',
+    formulaSize(multilineFormula, 14).height,
+    multilineEstimate.height
+  )
+  const formulaSource = readFileSync(`${process.cwd()}/src/renderer/src/render/formula.ts`, 'utf8')
+  check(
+    'formulaSize 只在 DOM 实测后写 sizeCache（估算值不固化）',
+    formulaSource.includes('if (measured) {') && formulaSource.includes('sizeCache.set(key, size)')
+  )
+  const formulaEstimateSource = readFileSync(
+    `${process.cwd()}/src/shared/layout/accessory.ts`,
+    'utf8'
+  )
+  check(
+    'pureFormulaSize 已按公式行数放大高度',
+    formulaEstimateSource.includes('formulaRowCount') &&
+      formulaEstimateSource.includes('singleLineHeight +')
+  )
+
 
   group('代码块：尺寸规则')
 
