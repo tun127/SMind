@@ -1340,6 +1340,14 @@ export function testMeasureStyles(): void {
     eq('字号一并带进 segments', styledSegments[0]?.fontSize, 22)
     eq('字体一并带进 segments', styledSegments[0]?.fontFamily, 'serif')
     eq('颜色一并带进 segments', styledSegments[0]?.color, '#00ff00')
+    const widthTopic = createTopic('abcdeabcde')
+    const widthMeasured = measureTopic(widthTopic, 1)
+    const maxLineWidth = Math.max(...widthMeasured.lines.map((line) => line.width))
+    check(
+      '节点宽度给文本留 2px 余量（防末尾空格被折行）',
+      widthMeasured.width >= Math.ceil(maxLineWidth) + 2 + widthMeasured.paddingX * 2,
+      `width=${widthMeasured.width} line=${maxLineWidth} padding=${widthMeasured.paddingX}`
+    )
   } finally {
     if (saved === undefined) delete (globalThis as { document?: unknown }).document
     else (globalThis as { document?: unknown }).document = saved
