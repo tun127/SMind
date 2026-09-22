@@ -22,6 +22,42 @@ const htmlCache = new Map<string, string>()
 const sizeCache = new Map<string, Size>()
 const CACHE_LIMIT = 2000
 
+/**
+ * 公式实测尺寸版本。
+ *
+ * 布局缓存会在主题对象没变时沿用旧测量/旧子树占用；但 `formulaSize` 的真实尺寸
+ * 依赖 DOM 与字体，可能在两次布局之间从估算切到实测。拿到新的实测值后把版本号 +1，
+ * 画布把它并入布局的 extras，让 `layoutSheetCached` 走「排版环境变了」的分支
+ *（resetLayoutMemo + 全量重排），而不是留在增量 pass 里继续读旧高度。
+ */
+let measureVersion = 0
+let bumpScheduled = false
+const measureListeners = new Set<() => void>()
+const measuredSizes = new Map<string, Size>()
+
+function scheduleMeasureVersionBump(): void {
+  if (bumpScheduled) return
+  bumpScheduled = true
+  queueMicrotask(() => {
+    bumpScheduled = false
+    measureVersion += 1
+    for (const listener of measureListeners) listener()
+  })
+}
+
+/** 当前公式实测尺寸版本，供 useSyncExternalStore / 布局 extras 使用 */
+export function formulaMeasureVersion(): number {
+  return measureVersion
+}
+
+/** 订阅公式实测尺寸变化；返回值取消订阅 */
+export function subscribeFormulaMeasure(listener: () => void): () => void {
+  measureListeners.add(listener)
+  return () => {
+    measureListeners.delete(listener)
+  }
+}
+
 let measureHost: HTMLDivElement | null = null
 
 function hasDom(): boolean {
@@ -129,8 +165,14 @@ export function formulaSize(source: string, fontSize: number): Size {
    * 估算值轻量、可重复计算，不缓存反而保证下一帧 / 字体就绪后能重新量。
    */
   if (measured) {
+    const previous = measuredSizes.get(key)
+    measuredSizes.set(key, size)
     evictOldest(sizeCache, CACHE_LIMIT)
+    evictOldest(measuredSizes, CACHE_LIMIT)
     sizeCache.set(key, size)
+    if (!previous || previous.width !== size.width || previous.height !== size.height) {
+      scheduleMeasureVersionBump()
+    }
   }
   return size
 }
@@ -142,4 +184,7 @@ export function formulaSize(source: string, fontSize: number): Size {
 export function clearFormulaCache(): void {
   sizeCache.clear()
   htmlCache.clear()
+  measuredSizes.clear()
+  // 字体等外部条件变了：即使布局 extras 没变，也要让画布重新走一次全量布局。
+  scheduleMeasureVersionBump()
 }
