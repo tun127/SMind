@@ -1572,6 +1572,105 @@ CSS、宽度 effect、测量输入三项逐字一致。**行为变化全部来�
 
 ---
 
+## 22. 🔴 真正的根因（2026-09-22 · CDP 实测）：编辑期测量被**增量布局缓存**丢弃
+
+> **触发**：用户真机复现"打字时框不长、按 Enter 才正常"；QA 用 CDP（合成输入 + 只读探针）在
+> `26d3743` + `4ca0e06`（两步修复）之后实测，**结论与"草稿通道"无关**。
+
+### 22.1 实测数据（可复现）
+
+| 时点 | `.topic` inline width（= 布局给的 `node.width`） | 行数 |
+|---|---|---|
+| 空标题（编辑态） | **124px** | 1 |
+| **ASCII 打满 20 个字符**（ProseMirror 已提交进文档） | **124px**（**没变**） | 4 |
+| 输入法组词中（合成） | **124px**（**没变**） | 4 |
+| 输入法组词结束未提交 | **124px**（**没变**） | 4 |
+
+`.topic` 的 `height` 从 59 → 144 是 **CSS `height: auto`** 撑的（`TopicNode` 编辑态显式 `auto`），**不是布局**。
+
+**⇒ 连"已经提交进文档的文字"都没让框变宽** ⇒ 这不是第 2 步（草稿通道）的问题，
+而是**编辑期 override 本身失效**——即 `use-canvas-layout.ts:90-98` 里那段
+"正在编辑的节点用 `editingText` / `editingRich` 参与测量"从未生效。
+
+### 22.2 回归窗口：`v0.9.0` 用无缓存入口，现在走增量缓存
+
+| 版本 | 布局入口 |
+|---|---|
+| `v0.9.0`（**用户说没这个问题**） | `layoutSheet(root, measure, {}, sheet)` —— **无缓存、全量重算** |
+| 现在 HEAD | `layoutSheetCached(root, measure, {}, sheet, cache, extras, [editingId])` —— **增量缓存** |
+
+→ **行为差异就出在这里**：全量重算时 override 一定生效；走缓存时，编辑节点的"新测量"被丢弃。
+
+### 22.3 两处可疑代码（二者都能单独解释现象，需逐条验）
+
+**① `src/shared/layout/incremental.ts:280-291`（hot 循环）**
+```ts
+for (const id of hot) {
+  if (fresh.has(id)) continue
+  const before = cache.memo.nodes.get(id)
+  if (!before) {
+    geometryChanged = true
+    continue                      // ← ★ 只把"几何变了"置真，**却没有把新测量放进 fresh**
+  }                               //    下游于是回落到 memo 里的旧测量（空标题 → 124）
+  const size = measure(before.topic, before.depth)
+  ...
+}
+```
+→ 一旦 `memo.nodes` 里没有这个 id，**hot 节点这一轮就没有任何 fresh 测量**，
+后面 `builder.seedMeasures(fresh)` 里自然也没有它 ⇒ 宽度只能取旧值。
+
+**② `src/shared/layout/core.ts:97-119`（`measureAll` 的早退）**
+```ts
+const walk = (topic, depth) => {
+  if (this.isClean(topic)) {
+    this.stats.measuresReused += 1
+    return                        // ← ★ 在**看 this.sizes（seedMeasures 塞进来的新测量）之前**就返回了
+  }
+  const seeded = this.sizes.get(topic.id)
+  ...
+}
+```
+→ 被判"干净"的节点**永远接收不到 seed 进来的新测量**；而 `size(id)`（:151-155）
+又会回落到 `memo.measures`，即**上一轮的旧值** ⇒ 编辑节点的宽度被钉死。
+
+### 22.4 影响面（一条根因，三个症状）
+
+| 症状 | 是否同一根因 |
+|---|---|
+| 打字时框不长（用户当前报的） | ✅ |
+| **D-14「清空后框不缩回」** | ✅ 同一个"编辑节点宽度取旧值" |
+| D-07 组词期折行 | ✅ 框不长 → 编辑区只能按旧宽度折行（**第 1 步修好的"溢出"是另一回事**） |
+
+**⇒ 这也解释了用户"0.9.0 没问题"：`v0.9.0` 走全量布局，override 一直生效。**
+
+### 22.5 修法方向（给代码侧，三选一，按稳妥度排）
+
+1. **最小且对症**：`incremental.ts` 的 hot 循环，`!before` 时**改为用当前 workbook 里的 topic 现量一次**并放进 `fresh`
+   （而不是只 `geometryChanged = true; continue`）；同时保证 `measureAll` 对 **hot id 不看 `isClean`**
+   （或让 `size(id)` 优先取 `sizes` 里的 seed —— 它已经优先了，问题出在早退把 seed 绕过去了）。
+2. **最稳（推荐先做，可立刻恢复用户可用）**：**编辑期（`hot.size > 0`）不走增量**，直接
+   `runAndStore(..., undefined)` 全量重算 —— 这正是 `v0.9.0` 的行为，**已被证明可用**；
+   代价是编辑期每次输入整图重排（与 0.9.0 相同，可接受；要优化再走第 1 条）。
+3. **兜底可观测**：给 `layoutSheetCached` 的 `stats` 加一条"hot 节点是否真的重测/生效"，
+   让"经测量被丢弃"这类问题在自检/诊断里可见（本问题能连过五道门槛就是这个盲区所致）。
+
+**⚠️ 必须防的半修**：只改第 2 步（草稿通道）永远修不好这个 —— 因为**丢的是"编辑期测量"，不是"草稿"**。
+按 §22.1 的两行读数（编辑态 `.topic` inline width 在打字前后是否变化）即可判定有没有真修好，
+**不需要**中文输入法、不需要人眼。
+
+### 22.6 判据（脚本即可回归，不必人工）
+
+```
+① 进编辑态 → 读 .topic 的 inline width  → W0
+② ASCII 打 20 个字符 → 再读 → W1
+③ 断言 W1 > W0 + 60px（文本宽了，框必须跟着长）
+④ 清空 → 读 W2；断言 W2 ≈ W0（能缩回 —— 顺带覆盖 D-14）
+⑤ 提交（Enter）→ 读 W3；断言 W3 ≈ 提交前（不跳）
+```
+（QA 的实测脚本在 `.tmp-check/probe-box.cjs`、`.tmp-check/probe-draft.cjs`，未入库。）
+
+---
+
 ## 附：本报告的证据来源（全部为当日实测/实读）
 
 - 五道门槛：2026-09-21 实跑，全绿（`selfcheck` 2791 项）
